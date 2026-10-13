@@ -13,18 +13,30 @@ import java.util.regex.Pattern;
 /** Immutable rules for one screen/playback session; callers keep the same request interface. */
 final class SiteProfile {
     private final JSONObject rules;
-    final String origin;
+    final String[] origins;      // 主源 + 备用源（互相兜底），顺序即优先级
     final String fingerprint;
+    private int sourceIndex = 0;
 
     SiteProfile(Context context, JSONObject overrides) throws Exception {
         JSONObject defaults = new JSONObject(new String(HotUpdateManager.read(
                 context.getAssets().open("site-default.json"), 128 * 1024), StandardCharsets.UTF_8));
         rules = merge(defaults, overrides == null ? new JSONObject() : overrides);
-        origin = rules.getString("origin").replaceAll("/+$", "");
-        URI uri = new URI(origin);
-        if (!"https".equals(uri.getScheme()) || uri.getHost() == null || uri.getUserInfo() != null
-                || uri.getQuery() != null || uri.getFragment() != null || !uri.getPath().isEmpty())
-            throw new IllegalArgumentException("站点必须是 HTTPS 域名");
+        // 源列表解析：热更新/内置若显式给了 "origin"，作为首选源；再接 "origins" 数组；去重保序
+        java.util.LinkedHashSet<String> sourceSet = new java.util.LinkedHashSet<>();
+        if (overrides != null && overrides.has("origin") && !overrides.getString("origin").trim().isEmpty())
+            sourceSet.add(overrides.getString("origin").trim());
+        JSONArray originList = rules.optJSONArray("origins");
+        for (int i = 0; originList != null && i < originList.length(); i++)
+            sourceSet.add(originList.optString(i));
+        if (sourceSet.isEmpty()) sourceSet.add(rules.getString("origin"));
+        origins = sourceSet.toArray(new String[0]);
+        for (int i = 0; i < origins.length; i++) {
+            origins[i] = origins[i].replaceAll("/+$", "");
+            URI uri = new URI(origins[i]);
+            if (!"https".equals(uri.getScheme()) || uri.getHost() == null || uri.getUserInfo() != null
+                    || uri.getQuery() != null || uri.getFragment() != null || !uri.getPath().isEmpty())
+                throw new IllegalArgumentException("站点必须是 HTTPS 域名");
+        }
         for (Iterator<String> keys = object("routes").keys(); keys.hasNext();) {
             String path = object("routes").getString(keys.next());
             if (!path.startsWith("/") || path.startsWith("//") || path.contains(".."))
@@ -63,6 +75,16 @@ final class SiteProfile {
         return out;
     }
 
+    /** 当前生效的源（主源或兜底切换后的备用源）。 */
+    String origin() { return origins[sourceIndex]; }
+    /** 切换到下一个备用源；无更多源时返回 false。 */
+    boolean switchSource() {
+        if (sourceIndex + 1 >= origins.length) return false;
+        sourceIndex++;
+        return true;
+    }
+    int sourceCount() { return origins.length; }
+
     JSONObject object(String key) { return rules.optJSONObject(key); }
     String selector(String key) { return object("selectors").optString(key); }
     String attribute(String key) { return object("attributes").optString(key); }
@@ -76,8 +98,8 @@ final class SiteProfile {
     }
     String relative(String link) {
         try {
-            URI resolved = new URI(origin + "/").resolve(link);
-            if (!new URI(origin).getHost().equalsIgnoreCase(resolved.getHost())) return "";
+            URI resolved = new URI(origin() + "/").resolve(link);
+            if (!new URI(origin()).getHost().equalsIgnoreCase(resolved.getHost())) return "";
             return resolved.getRawPath();
         } catch (Exception error) { return ""; }
     }

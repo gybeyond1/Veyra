@@ -38,10 +38,12 @@ final class SiteRepository {
     private final File coverDir;
     private final Context appContext;
     private final String proxyAddress;   // 黄果代理 "host:port"，未设置为空串
-    private volatile boolean proxyOk = false;
-    private volatile long lastProbeAt = 0;
-    private static final long PROBE_TTL_MS = 60_000;   // 代理探测结果缓存 60s
-    private static final int PROBE_TIMEOUT_MS = 2_500; // 探测超时 2.5s
+    // 通道状态：直连（系统网络栈，VPN/全局代理自然生效）→ 配置代理 → 后端转发
+    private volatile long lastDirectFailAt = 0;   // 直连/代理通道最近失败时间
+    private static final long DIRECT_FAIL_TTL_MS = 60_000; // 直连失败缓存 60s：期间直接走后端，不再重复等判定
+    private static final int CHANNEL_TIMEOUT_MS = 4_000;   // 直连/代理通道判定超时（3~5s 窗口）
+    private static final int BACKEND_READ_TIMEOUT_MS = 12_000;
+    private final okhttp3.OkHttpClient backendClient;
 
     SiteRepository(Context context) { this(context, HotUpdateManager.get(context).currentSite()); }
 
@@ -51,30 +53,18 @@ final class SiteRepository {
         coverDir = new File(context.getCacheDir(), "covers");
         if (!coverDir.exists()) coverDir.mkdirs();
         proxyAddress = ProxySettings.address(appContext);
+        backendClient = new okhttp3.OkHttpClient.Builder()
+                .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(BACKEND_READ_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+                .callTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                .build();
     }
 
-    /** 黄果网络策略：配置了代理且代理可用 → 走代理；否则 → 后端转发绕行。红果不走此通道。 */
-    private synchronized boolean proxyReady() {
-        if (proxyAddress.isEmpty()) return false;
-        long now = System.currentTimeMillis();
-        if (now - lastProbeAt < PROBE_TTL_MS) return proxyOk;
-        lastProbeAt = now;
-        boolean ok = false;
-        try {
-            URL parsed = new URL(profile.origin);
-            HttpURLConnection connection = (HttpURLConnection) parsed.openConnection(proxy(proxyAddress));
-            connection.setConnectTimeout(PROBE_TIMEOUT_MS);
-            connection.setReadTimeout(PROBE_TIMEOUT_MS);
-            connection.setRequestMethod("GET");
-            int status = connection.getResponseCode();
-            ok = status >= 200 && status < 300;
-            connection.disconnect();
-        } catch (IOException ignored) {
-            ok = false;
-        }
-        proxyOk = ok;
-        return ok;
+    /** 直连/代理通道最近失败过（60s 内）→ 直接走后端转发。 */
+    private synchronized boolean directBlocked() {
+        return System.currentTimeMillis() - lastDirectFailAt < DIRECT_FAIL_TTL_MS;
     }
+    private synchronized void markDirectFailed() { lastDirectFailAt = System.currentTimeMillis(); }
 
     private static Proxy proxy(String address) {
         String[] parts = address.split(":");
@@ -84,44 +74,41 @@ final class SiteRepository {
         return new Proxy(Proxy.Type.HTTP, new InetSocketAddress(host, port));
     }
 
-    /** 后端转发：抓取黄果页面后原样回传（服务端限定黄果域名白名单）。 */
-    private byte[] fetchViaBackend(String url) throws Exception {
-        String endpoint = ServerConfig.get(appContext) + "api/huangguo-proxy?url=" + URLEncoder.encode(url, "UTF-8");
-        URL parsed = new URL(endpoint);
-        HttpURLConnection connection = (HttpURLConnection) parsed.openConnection();
-        connection.setConnectTimeout(20_000);
-        connection.setReadTimeout(25_000);
-        connection.setUseCaches(false);
+    /**
+     * 通道抓取（仅黄果源；红果不走此通道）：
+     * 直连（系统网络栈，VPN/全局代理自然生效）→ 配置代理 → 后端转发。
+     * 直连失败缓存 60s，期间直接走后端（不再每次等 4s 判定）。
+     */
+    private byte[] fetch(String url) throws Exception {
+        if (directBlocked()) {
+            if (!proxyAddress.isEmpty()) {
+                try { return fetchViaProxy(url); } catch (Exception ignored) { }
+            }
+            return fetchViaBackend(url);
+        }
         try {
-            int status = connection.getResponseCode();
-            if (status < 200 || status >= 300) {
-                String message = "后端转发失败（HTTP " + status + "）";
-                try (InputStream stream = connection.getErrorStream()) {
-                    if (stream != null) {
-                        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-                        byte[] buffer = new byte[1024];
-                        int count;
-                        while ((count = stream.read(buffer)) != -1) bytes.write(buffer, 0, count);
-                        String text = new String(bytes.toByteArray(), StandardCharsets.UTF_8).trim();
-                        if (!text.isEmpty()) message = text;
-                    }
-                } catch (IOException ignored) { }
-                throw new IllegalStateException(message);
+            return fetchDirect(url);
+        } catch (Exception directError) {
+            markDirectFailed();
+            if (!proxyAddress.isEmpty()) {
+                try { return fetchViaProxy(url); } catch (Exception ignored) { }
             }
-            try (InputStream stream = connection.getInputStream(); ByteArrayOutputStream bytes = new ByteArrayOutputStream()) {
-                byte[] buffer = new byte[8192];
-                int count;
-                while ((count = stream.read(buffer)) != -1) bytes.write(buffer, 0, count);
-                return bytes.toByteArray();
-            }
-        } catch (IOException error) {
-            throw new IOException("后端转发连接失败", error);
-        } finally {
-            connection.disconnect();
+            return fetchViaBackend(url);
         }
     }
 
-    private byte[] fetch(String url) throws Exception {
+    /** 直连通道：系统默认网络栈（VPN/全局代理自然生效），4s 判定超时。 */
+    private byte[] fetchDirect(String url) throws Exception {
+        return openAndRead(url, null, CHANNEL_TIMEOUT_MS);
+    }
+
+    /** 代理通道：走设置里配置的代理地址。 */
+    private byte[] fetchViaProxy(String url) throws Exception {
+        if (proxyAddress.isEmpty()) throw new IOException("未配置代理地址");
+        return openAndRead(url, proxy(proxyAddress), CHANNEL_TIMEOUT_MS);
+    }
+
+    private byte[] openAndRead(String url, Proxy proxy, int timeout) throws Exception {
         URL parsed;
         try {
             parsed = new URL(url);
@@ -129,18 +116,15 @@ final class SiteRepository {
             throw new IOException("站点地址配置无效（" + url + "）：请检查站点配置或稍后重试", error);
         }
         if (!"https".equals(parsed.getProtocol())) throw new IllegalArgumentException("仅支持 HTTPS");
-        final HttpURLConnection connection;
-        if (proxyReady()) {
-            connection = (HttpURLConnection) parsed.openConnection(proxy(proxyAddress));
-        } else {
-            return fetchViaBackend(url);
-        }
-        connection.setConnectTimeout(15_000);
-        connection.setReadTimeout(25_000);
+        final HttpURLConnection connection = proxy == null
+                ? (HttpURLConnection) parsed.openConnection()
+                : (HttpURLConnection) parsed.openConnection(proxy);
+        connection.setConnectTimeout(timeout);
+        connection.setReadTimeout(timeout);
         JSONObject headers = profile.object("headers");
         for (java.util.Iterator<String> keys = headers.keys(); keys.hasNext();) {
             String key = keys.next();
-            connection.setRequestProperty(key, headers.getString(key).replace("{origin}", profile.origin));
+            connection.setRequestProperty(key, headers.getString(key).replace("{origin}", profile.origin()));
         }
         connection.setUseCaches(false);
         try {
@@ -159,11 +143,63 @@ final class SiteRepository {
         }
     }
 
+    /** 后端通道：经自建后端 /api/huangguo-proxy 转发（后端侧可配代理；白名单限黄果域名；m3u8 分片自动重写）。 */
+    private byte[] fetchViaBackend(String url) throws Exception {
+        String base = ServerConfig.get(appContext);
+        if (base.isEmpty()) throw new IOException("未配置后端地址，无法走后端转发");
+        String endpoint = base + "api/huangguo-proxy?url=" + java.net.URLEncoder.encode(url, "UTF-8");
+        okhttp3.Request request = new okhttp3.Request.Builder().url(endpoint).build();
+        try (okhttp3.Response response = backendClient.newCall(request).execute()) {
+            if (!response.isSuccessful() || response.body() == null)
+                throw new IOException("后端转发失败（HTTP " + response.code() + "）");
+            return response.body().bytes();
+        } catch (IOException error) {
+            throw new IOException("后端转发连接失败", error);
+        }
+    }
+
+    /** 播放/选集 URL 通道化：直连不通时改写为后端代理地址（m3u8 及其分片由后端重写兜底）。 */
+    private String channelizedUrl(String raw) throws Exception {
+        if (directBlocked()) {
+            String base = ServerConfig.get(appContext);
+            if (!base.isEmpty()) return base + "api/huangguo-proxy?url=" + java.net.URLEncoder.encode(raw, "UTF-8");
+        }
+        return raw;
+    }
+
+    /**
+     * 抓取页面；直连（4s 判定）→ 配置代理 → 后端通道+备用源循环（互相兜底）。
+     * 红果不走此方法。
+     */
     private Document page(String path) throws Exception {
         if (!path.startsWith("/") || path.startsWith("//")) throw new IllegalArgumentException("无效路径");
-        byte[] body = fetch(profile.origin + path);
-        if (body.length < 1000) throw new IllegalStateException("站点暂时返回空页面");
-        return Jsoup.parse(new String(body, StandardCharsets.UTF_8), profile.origin);
+        if (!directBlocked()) {
+            try {
+                byte[] body = fetchDirect(profile.origin() + path);
+                if (body.length < 1000) throw new IllegalStateException("站点暂时返回空页面");
+                return Jsoup.parse(new String(body, StandardCharsets.UTF_8), profile.origin());
+            } catch (Exception directError) {
+                markDirectFailed();
+                if (!proxyAddress.isEmpty()) {
+                    try {
+                        byte[] body = fetchViaProxy(profile.origin() + path);
+                        if (body.length < 1000) throw new IllegalStateException("站点暂时返回空页面");
+                        return Jsoup.parse(new String(body, StandardCharsets.UTF_8), profile.origin());
+                    } catch (Exception ignored) { }
+                }
+            }
+        }
+        for (int attempt = 0; attempt < profile.sourceCount(); attempt++) {
+            try {
+                byte[] body = fetchViaBackend(profile.origin() + path);
+                if (body.length < 1000) throw new IllegalStateException("站点暂时返回空页面");
+                return Jsoup.parse(new String(body, StandardCharsets.UTF_8), profile.origin());
+            } catch (Exception error) {
+                if (attempt + 1 < profile.sourceCount() && profile.switchSource()) continue; // 换备用源
+                throw error;
+            }
+        }
+        throw new IllegalStateException("所有通道与站点源均不可用");
     }
 
     private static String text(Element element) {
@@ -293,7 +329,7 @@ final class SiteRepository {
         }
         JSONArray items = new JSONArray();
         try {
-            String xml = new String(fetch(profile.origin + profile.route("tagSitemap")), StandardCharsets.UTF_8);
+            String xml = new String(fetch(profile.origin() + profile.route("tagSitemap")), StandardCharsets.UTF_8);
             Document sitemap = Jsoup.parse(xml, "", Parser.xmlParser());
             Set<String> current = new LinkedHashSet<>();
             for (Element loc : sitemap.select("loc")) {
@@ -367,7 +403,7 @@ final class SiteRepository {
             if (!match.matches()) continue;
             int number = match.group(1) == null ? 1 : Integer.parseInt(match.group(1));
             if (!seenEpisodes.add(number)) continue;
-            episodes.put(new JSONObject().put("number", number).put("url", profile.origin + href));
+            episodes.put(new JSONObject().put("number", number).put("url", channelizedUrl(profile.origin() + href)));
         }
         if (episodes.length() == 0) throw new IllegalStateException("未找到选集列表");
         result.put("episodeLabel", "共 " + episodes.length() + " 集");
@@ -382,15 +418,18 @@ final class SiteRepository {
         Element node = document.selectFirst(profile.selector("content"));
         if (node == null) throw new IllegalStateException("未取得播放信息");
         JSONObject data = profile.mapJson(new JSONObject(node.data().isEmpty() ? node.text() : node.data()), "content");
-        if (!id.equals(String.valueOf(data.opt("id"))) || !data.optString("videoSrc").startsWith("https://")) {
+        String videoSrc = channelizedUrl(data.optString("videoSrc"));
+        String base = ServerConfig.get(appContext);
+        boolean viaBackend = !base.isEmpty() && videoSrc.startsWith(base + "api/huangguo-proxy?");
+        if (!id.equals(String.valueOf(data.opt("id"))) || !(videoSrc.startsWith("https://") || viaBackend)) {
             throw new IllegalStateException("未取得有效播放地址");
         }
         JSONObject result = new JSONObject();
         result.put("id", id);
         result.put("episode", number);
         result.put("title", data.optString("title", "剧集 " + id));
-        result.put("source", data.optString("videoSrc"));
-        result.put("cover", data.optString("coverSrc", data.optString("posterSrc")));
+        result.put("source", videoSrc);
+        result.put("cover", channelizedUrl(data.optString("coverSrc", data.optString("posterSrc"))));
         result.put("nextUrl", attr(document.selectFirst(profile.selector("next")), "href"));
         return result;
     }

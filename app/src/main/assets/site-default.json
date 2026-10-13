@@ -1,5 +1,6 @@
 {
  "origin": "https://thu.pqhybuxo.cc",
+ "origins": ["https://thu.pqhybuxo.cc", "https://www.pqhybuxo.cc", "https://m.pqhybuxo.cc"],
  "headers": {
   "User-Agent": "Mozilla/5.0 (Linux; Android) AppleWebKit/537.36 Chrome/130 Mobile Safari/537.36",
   "Referer": "{origin}/"
@@ -122,9 +123,7 @@
  },
  "cover": {
   "allowedHosts": [
-   "pic.fisawck.cn",
-   "pic.tkzdds.cn",
-   "pic.wirqed.cn"
+   "pic.drleao.cn"
   ],
   "hostRewrites": {},
   "mode": "aes-cbc",

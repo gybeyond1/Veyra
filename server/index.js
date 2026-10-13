@@ -38,14 +38,17 @@ const USERNAME_RE = /^[A-Za-z0-9_]{3,24}$/;
 // 开放注册开关：首次启动用环境变量 REGISTER_OPEN 初始化（默认开放），
 // 之后在 WebUI 管理台实时开关（持久化到 DATA_DIR/settings.json，无需重启/重建）
 let registerOpen = process.env.REGISTER_OPEN !== 'false' && process.env.REGISTER_OPEN !== '0';
+// 后端代理（黄果转发用）：WebUI 管理台配置，留空 = 后端直连抓取
+let backendProxy = '';
 try {
   const savedSettings = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'settings.json'), 'utf8'));
   if (typeof savedSettings.registerOpen === 'boolean') registerOpen = savedSettings.registerOpen;
+  if (typeof savedSettings.backendProxy === 'string') backendProxy = savedSettings.backendProxy;
 } catch { /* 首次运行，用环境变量默认值 */ }
 function saveSettings() {
   const settingsFile = path.join(DATA_DIR, 'settings.json');
   const tmp = settingsFile + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify({ registerOpen }, null, 2));
+  fs.writeFileSync(tmp, JSON.stringify({ registerOpen, backendProxy }, null, 2));
   fs.renameSync(tmp, settingsFile);
 }
 // WebUI 管理员密码（环境变量 ADMIN_PASSWORD 配置，未配置则管理功能不可用）
@@ -54,8 +57,9 @@ const ADMIN_SESSION_TTL_MS = 8 * 3600 * 1000; // 管理员会话 8 小时
 const adminSessions = new Map(); // adminToken -> expiry ms
 
 // 黄果站点域名白名单（后端转发接口只允许抓这些域名，避免变成开放代理）
-// 主站为 *.pqhybuxo.cc 系，另含官方备用域名与封面 CDN
-const HUANGGUO_HOST_RE = /(^|\.)(pqhybuxo\.cc|im41z53s\.cc|huangguoju\.com|huangguoai\.com|huang-guo\.pages\.dev|huangguoai\.pages\.dev|wirqed\.cn|fisawck\.cn|tkzdds\.cn)$/i;
+// 主站为 *.pqhybuxo.cc 系；封面 CDN pic.drleao.cn / 详情图 expose.eisees.com；视频播放 yd-hls.hzjvlo.cn
+const HUANGGUO_HOST_RE = /(^|\.)(pqhybuxo\.cc|im41z53s\.cc|huangguoju\.com|drleao\.cn|eisees\.com|hzjvlo\.cn)$/i;
+const proxyFetch = require('./proxy-fetch');
 
 // ---- TOTP 动态码（RFC 6238，30 秒窗口，6 位）----
 const OTP_WINDOW = 30; // 秒
@@ -262,6 +266,16 @@ a{color:var(--acc)}
 </div>
 <p style="color:var(--mut);font-size:12px;margin-top:8px">开关实时生效并持久化，无需重启容器。</p>
 </div>
+<h2>后端代理（黄果转发用）</h2>
+<div class="card">
+<div class="row" style="gap:12px;flex-wrap:wrap">
+<input id="backend-proxy" style="flex:1;min-width:240px" placeholder="代理地址，如 http://192.168.1.2:7890 或 socks5://192.168.1.2:1080；留空 = 后端直连">
+<button onclick="saveProxy()">保存</button>
+<button class="ghost" onclick="testProxy()">测试连通</button>
+</div>
+<p id="proxy-status" style="font-size:12px;margin-top:8px"></p>
+<p style="color:var(--mut);font-size:12px;margin-top:6px">后端服务器（NAS）出口访问黄果源被限时，在此配置代理；保存后 /api/huangguo-proxy 转发自动走该代理。只影响黄果转发，不影响下载与红果。</p>
+</div>
 <h2>私密模式动态码（OTP）</h2>
 <div class="card">
 <div class="row">
@@ -347,6 +361,26 @@ async function saveRegisterOpen(){
   }catch(e){ document.getElementById('reg-saved').textContent='网络错误'; }
 }
 async function logout(){ try{ await fetch('/api/admin/logout',{method:'POST',headers:AUTH()}); }catch(e){} adminToken=''; localStorage.removeItem('veyraAdmin'); showLogin(); }
+async function saveProxy(){
+  const v=document.getElementById('backend-proxy').value.trim();
+  try{
+    const r=await fetch('/api/admin/settings',{method:'PUT',headers:Object.assign({'Content-Type':'application/json'},AUTH()),body:JSON.stringify({backendProxy:v})}).then(x=>x.json());
+    const el=document.getElementById('proxy-status');
+    el.textContent=r.ok?('已保存：'+(r.backendProxy||'后端直连（无代理）')):(r.error||'保存失败');
+    el.style.color=r.ok?'var(--ok)':'var(--err)';
+  }catch(e){ document.getElementById('proxy-status').textContent='网络错误'; }
+}
+async function testProxy(){
+  const el=document.getElementById('proxy-status');
+  const proxy=document.getElementById('backend-proxy').value.trim();
+  el.textContent='测试中…'; el.style.color='var(--mut)';
+  try{
+    const r=await fetch('/api/admin/proxy-test',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},AUTH()),body:JSON.stringify({proxy})}).then(x=>x.json());
+    if(r.ok) el.textContent='✅ 通：'+r.target+' → HTTP '+r.code+'（'+r.ms+'ms'+(proxy?'，经代理':'，直连')+'）';
+    else el.textContent='❌ 失败：'+(r.error||'未知错误');
+    el.style.color=r.ok?'var(--ok)':'var(--err)';
+  }catch(e){ el.textContent='❌ 请求失败：'+e.message; el.style.color='var(--err)'; }
+}
 let otpTimer=null;
 async function loadAll(){
   try{
@@ -363,6 +397,10 @@ async function loadAll(){
     document.getElementById('s-datadir').textContent=st.dataDir;
     document.getElementById('otp-code').textContent=otp.code;
     document.getElementById('otp-remain').textContent=otp.expiresIn;
+    fetch('/api/admin/settings',{headers:AUTH()}).then(r=>r.json()).then(s=>{
+      const input=document.getElementById('backend-proxy');
+      if(input && !document.activeElement || (input && document.activeElement!==input)) input.value=s.backendProxy||'';
+    }).catch(()=>{});
     out.textContent='已加载';
   }catch(e){ out.textContent='加载失败（登录可能已过期）'; }
   loadUsers();
@@ -513,15 +551,43 @@ app.get('/api/stats', requireAdmin, (_req, res) => {
   res.json({ service: 'veyra-backend', status: 'ok', users: Object.keys(users).length, dataDir: DATA_DIR, registerOpen });
 });
 
-// 管理台设置：开放注册开关（实时生效，持久化到 settings.json，无需重启）
+// 管理台设置：开放注册开关 + 后端代理（实时生效，持久化到 settings.json，无需重启）
 app.get('/api/admin/settings', requireAdmin, (_req, res) => {
-  res.json({ registerOpen });
+  res.json({ registerOpen, backendProxy });
 });
 app.put('/api/admin/settings', requireAdmin, (req, res) => {
-  const value = req.body && req.body.registerOpen;
-  registerOpen = value === true || value === 'true' || value === 1 || value === '1';
+  const body = req.body || {};
+  if (body.registerOpen !== undefined) {
+    const value = body.registerOpen;
+    registerOpen = value === true || value === 'true' || value === 1 || value === '1';
+  }
+  if (body.backendProxy !== undefined) {
+    const proxy = String(body.backendProxy).trim();
+    if (proxy !== '') {
+      let parsed;
+      try { parsed = new URL(proxy); } catch { return res.status(400).json({ error: '代理地址格式无效' }); }
+      if (!/^(http|socks5):$/.test(parsed.protocol) || !parsed.hostname)
+        return res.status(400).json({ error: '代理仅支持 http:// 或 socks5://' });
+    }
+    backendProxy = proxy;
+  }
   saveSettings();
-  res.json({ ok: true, registerOpen });
+  res.json({ ok: true, registerOpen, backendProxy });
+});
+// 测试后端代理连通性：按给定代理（未给则用已保存配置）抓黄果主页
+app.post('/api/admin/proxy-test', requireAdmin, (req, res) => {
+  const proxy = String((req.body && req.body.proxy) || '').trim();
+  const target = 'https://thu.pqhybuxo.cc/';
+  const started = Date.now();
+  proxyFetch.requestThroughProxy(target, proxy || backendProxy, {
+    headers: { 'User-Agent': 'Mozilla/5.0 (Linux; Android) AppleWebKit/537.36 Chrome/130 Mobile Safari/537.36' },
+    timeout: 15_000, maxBytes: 1024 * 1024, redirects: 5,
+  }, (err, result) => {
+    if (err) return res.json({ ok: false, error: err.message || '连接失败' });
+    if (result.status < 200 || result.status >= 300)
+      return res.json({ ok: false, error: '上游返回 HTTP ' + result.status, code: result.status });
+    res.json({ ok: true, target, code: result.status, ms: Date.now() - started });
+  });
 });
 
 // 当前动态码（状态页展示；30 秒轮换一次，需管理员）
@@ -558,7 +624,33 @@ app.post('/api/otp/verify', auth, (req, res) => {
   res.json({ ok: true, unlocked: true });
 });
 
-// 黄果转发接口：APK 本地代理不通时绕行（只放行黄果站点/封面域名）
+// ---- 黄果转发接口：APK 直连不通时绕行（只放行黄果站点/封面/视频域名）----
+// 支持后端代理（WebUI 配置 backendProxy）：抓取时按配置走代理或直连；
+// m3u8 列表返回前重写分片 URL 为后端代理地址，保证手机端分片请求也走后端。
+const proxyCache = new Map(); // target -> { body, type, expires }
+const MAX_CACHE_ENTRIES = 200;
+const CACHE_TTL = { m3u8: 30_000, html: 60_000, image: 24 * 3600_000, video: 0, other: 0 };
+const MAX_BYTES = { m3u8: 1024 * 1024, html: 1024 * 1024, image: 5 * 1024 * 1024, video: 50 * 1024 * 1024, other: 5 * 1024 * 1024 };
+function cacheGet(key) {
+  const hit = proxyCache.get(key);
+  if (hit && hit.expires > Date.now()) return hit;
+  if (hit) proxyCache.delete(key);
+  return null;
+}
+function cachePut(key, body, type, ttlMs) {
+  if (ttlMs <= 0) return;
+  if (proxyCache.size >= MAX_CACHE_ENTRIES) { const first = proxyCache.keys().next().value; proxyCache.delete(first); }
+  proxyCache.set(key, { body, type, expires: Date.now() + ttlMs });
+}
+function kindOf(type, body) {
+  const t = String(type || '').toLowerCase();
+  if (t.includes('mpegurl') || t.includes('m3u8')) return 'm3u8';
+  if (body.length > 6 && body.slice(0, 7).toString('utf8') === '#EXTM3U') return 'm3u8';
+  if (t.startsWith('text/') || t.includes('html') || t.includes('xml') || t.includes('json')) return 'html';
+  if (t.startsWith('image/')) return 'image';
+  if (t.includes('mp2t') || t.includes('mp4') || t.includes('m4s') || t.includes('octet-stream')) return 'video';
+  return 'other';
+}
 app.get('/api/huangguo-proxy', (req, res) => {
   const target = String(req.query.url || '');
   let parsed;
@@ -567,26 +659,57 @@ app.get('/api/huangguo-proxy', (req, res) => {
     return res.status(400).json({ error: '仅支持 http/https' });
   if (!HUANGGUO_HOST_RE.test(parsed.hostname))
     return res.status(403).json({ error: '仅允许黄果站点域名' });
-  const client = parsed.protocol === 'https:' ? https : http;
-  const upstream = client.get(parsed, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36',
-      'Accept': '*/*'
-    },
-    timeout: 25_000
-  }, (up) => {
-    if (up.statusCode < 200 || up.statusCode >= 300) {
-      up.resume();
-      return res.status(502).json({ error: '上游站点返回 ' + up.statusCode });
-    }
-    res.status(200);
-    const upstreamType = up.headers['content-type'] || 'text/html; charset=utf-8';
-    res.setHeader('Content-Type', upstreamType);
+  const cached = cacheGet(target);
+  if (cached) {
+    res.setHeader('Content-Type', cached.type);
     res.setHeader('Cache-Control', 'no-store');
-    up.pipe(res);
+    res.setHeader('X-Proxy-Cache', 'hit');
+    return res.end(cached.body);
+  }
+  const headers = {
+    'User-Agent': 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36',
+    'Accept': '*/*',
+  };
+  headers['Referer'] = `${parsed.protocol}//${parsed.hostname}/`;
+  proxyFetch.requestThroughProxy(target, backendProxy, {
+    headers, timeout: 25_000, maxBytes: 50 * 1024 * 1024, redirects: 5,
+  }, (err, result) => {
+    if (err) {
+      if (!res.headersSent) return res.status(502).json({ error: '上游站点连接失败: ' + (err.message || '') });
+      return res.end();
+    }
+    if (result.status < 200 || result.status >= 300)
+      return res.status(502).json({ error: '上游站点返回 ' + result.status });
+    let type = String(result.headers['content-type'] || 'text/html; charset=utf-8');
+    let body = result.body;
+    let kind = kindOf(type, body);
+    if (body.length > MAX_BYTES[kind]) {
+      return res.status(502).json({ error: '响应超过大小限制（' + MAX_BYTES[kind] + ' 字节）' });
+    }
+    if (kind === 'm3u8') {
+      type = 'application/vnd.apple.mpegurl; charset=utf-8';
+      // 重写 m3u8：普通 URI 行 + #EXT-X-KEY/#EXT-X-MAP 的 URI="..." 全部包一层后端代理
+      const base = `${req.protocol}://${req.headers.host}/api/huangguo-proxy?url=`;
+      let text = body.toString('utf8');
+      text = text.replace(/(URI=")([^"]+)(")/g, (_m, a, u, c) => {
+        try { return a + base + encodeURIComponent(new URL(u, target).toString()) + c; }
+        catch { return _m; }
+      });
+      text = text.replace(/^(?!#)(.+)$/gm, (line) => {
+        const uri = line.trim();
+        if (!uri) return line;
+        try { return base + encodeURIComponent(new URL(uri, target).toString()); }
+        catch { return line; }
+      });
+      body = Buffer.from(text, 'utf8');
+    }
+    if (kind === 'm3u8' || kind === 'html' || kind === 'image') cachePut(target, body, type, CACHE_TTL[kind]);
+    res.status(200);
+    res.setHeader('Content-Type', type);
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Proxy-Cache', 'miss');
+    res.end(body);
   });
-  upstream.on('timeout', () => { upstream.destroy(); res.status(504).json({ error: '上游站点超时' }); });
-  upstream.on('error', () => { if (!res.headersSent) res.status(502).json({ error: '上游站点连接失败' }); });
 });
 
 // 健康检查
