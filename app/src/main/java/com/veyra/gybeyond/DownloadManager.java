@@ -390,6 +390,10 @@ final class DownloadManager {
         String safe = found.title == null || found.title.isEmpty() ? "download"
                 : found.title.replaceAll("[\\\\/:*?\"<>|]", "_");
         File dir = episodeDir(found.title);
+        // 读取前先正名一次：个别 ROM 导出后 MediaScanner 异步撞名去重会把「第03集.mp4」改成
+        // 「第03集_1793285687971.mp4」，正名窗口可能没追上 —— 播放器读目录前再兜一次，
+        // 保证用户点播放时名字已经是干净的（用户实测：第三集带时间戳 → 只识别出 2 集）。
+        normalizeEpisodeNames(dir);
         JSONObject out = new JSONObject();
         JSONArray episodes = new JSONArray();
         String merged = "";
@@ -401,7 +405,8 @@ final class DownloadManager {
                 java.util.List<File> parts = new java.util.ArrayList<>();
                 for (File f : children) {
                     String n = f.getName();
-                    if (f.length() > 0 && n.matches("第\\d+集\\.mp4")) parts.add(f);
+                    // 兼容正名失败残留的时间戳名「第03集_1793285687971.mp4」——同样算第 3 集
+                    if (f.length() > 0 && n.matches("第\\d+集(?:_\\d+)?\\.mp4")) parts.add(f);
                 }
                 java.util.Collections.sort(parts, (a, b) -> episodeNo(a.getName()) - episodeNo(b.getName()));
                 for (File f : parts) {
@@ -415,7 +420,7 @@ final class DownloadManager {
     }
 
     private static int episodeNo(String name) {
-        try { return Integer.parseInt(name.replaceAll("^第(\\d+)集\\.mp4$", "$1")); }
+        try { return Integer.parseInt(name.replaceAll("^第(\\d+)集(?:_\\d+)?\\.mp4$", "$1")); }
         catch (Exception e) { return 0; }
     }
 
