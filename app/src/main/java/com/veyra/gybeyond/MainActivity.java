@@ -665,7 +665,9 @@ public final class MainActivity extends Activity {
             case "nas-download-start": {
                 JSONObject body = new JSONObject()
                         .put("source", args.optString("source")).put("title", args.optString("title"))
-                        .put("seriesId", args.optString("seriesId")).put("episodes", args.optJSONArray("episodes"));
+                        .put("seriesId", args.optString("seriesId")).put("episodes", args.optJSONArray("episodes"))
+                        // 封面带给后端落库：下载列表 NAS 行直接出图（此前 NAS 行永远灰块）
+                        .put("cover", args.optString("cover"));
                 // 红果源：手机端直接解析官方 vid 推给 NAS（NAS 端 video_detail/searchSeries 常被风控导致
                 // "未注入 App vid" 而走网页源 403）；NAS 拿到 vids 后直接用 vid 签名取流
                 if ("hongguo".equals(args.optString("source"))) {
@@ -683,6 +685,34 @@ public final class MainActivity extends Activity {
                 return account.postJson("api/download/tasks", body);
             }
             case "nas-download-list": return account.getJson("api/download/tasks");
+            case "open-nas-player": {
+                // NAS 任务点封面直接播 NAS 上的成品：合并产物（files/{id}/0）优先，
+                // 未合并则逐集播（files/{id}/1..N）。服务器 sendFile 支持 Range，拖动进度没问题。
+                if (!account.isLoggedIn()) throw new IllegalStateException("请先登录");
+                String nasId = args.optString("id");
+                JSONObject task = account.getJson("api/download/tasks/" + nasId).optJSONObject("task");
+                if (task == null) throw new IllegalStateException("NAS 任务不存在或已被清理");
+                if (!"done".equals(task.optString("status")) && !"ready".equals(task.optString("status")))
+                    throw new IllegalStateException("NAS 任务尚未完成（" + task.optString("status") + "）");
+                int count = task.optInt("episodeCount", 0);
+                String title = task.optString("title", "NAS 下载");
+                JSONArray eps = new JSONArray();
+                for (int i = 1; i <= count; i++) {
+                    eps.put(new JSONObject().put("index", i)
+                            .put("url", account.baseUrl() + "/api/download/files/" + nasId + "/" + i));
+                }
+                String mergedUrl = account.baseUrl() + "/api/download/files/" + nasId + "/0";
+                String token = account.authToken();
+                Intent intent = new Intent(this, LocalPlayerActivity.class);
+                intent.putExtra("title", title);
+                intent.putExtra("merged", true);          // 先探测合并产物：404 则回退逐集
+                intent.putExtra("nasMode", true);
+                intent.putExtra("auth", token);
+                intent.putExtra("episodes", eps.toString());
+                intent.putExtra("path", mergedUrl);
+                runOnUiThread(() -> startActivity(intent));
+                return true;
+            }
             case "nas-download-episodes": return account.getJson("api/download/tasks/" + args.optString("id") + "/episodes");
             case "nas-download-cancel": account.deleteJson("api/download/tasks/" + args.optString("id")); return new JSONObject().put("ok", true);
             case "nas-download-merge": return account.postJson("api/download/merge", new JSONObject().put("id", args.optString("id")));

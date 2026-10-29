@@ -901,7 +901,7 @@ function retryFailedEpisodes(id, owner, isAdmin) {
 }
 
 // ---- 对外 API ----
-function createTask({ source, title, seriesId, episodes, owner }) {
+function createTask({ source, title, seriesId, episodes, owner, cover }) {
   if (!Array.isArray(episodes) || episodes.length === 0) throw new Error('没有可下载的分集');
   const norm = [];
   for (let i = 0; i < episodes.length; i++) {
@@ -918,6 +918,7 @@ function createTask({ source, title, seriesId, episodes, owner }) {
   const task = {
     id, source: source === 'huangguo' ? 'huangguo' : 'hongguo',
     title: sanitizeName(title), seriesId: String(seriesId || ''),
+    cover: String(cover || ''),   // 详情页封面：手机下载列表 NAS 行直接显示，不用再灰块
     episodes: norm,
     status: 'queued', owner: String(owner || ''), output: '', failedEpisodes: [],
     progress: { phase: 'queued', episode: 0, total: norm.length, percent: 0, detail: '排队中' },
@@ -937,6 +938,7 @@ function publicTask(t) {
   const failedEpisodes = (t.failedEpisodes || []).filter(f => f && f.index);
   return {
     id: t.id, source: t.source, title: t.title, seriesId: t.seriesId, status: t.status,
+    cover: t.cover || '',   // 详情页封面（手机端下载列表 NAS 行显示）
     output: t.output, progress: t.progress, error: t.error,
     failedEpisodes: failedEpisodes.map(f => ({ index: f.index, error: f.error || '' })),
     createdAt: t.createdAt, updatedAt: t.updatedAt,

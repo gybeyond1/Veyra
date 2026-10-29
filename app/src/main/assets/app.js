@@ -1027,6 +1027,15 @@ function renderDownloadList(tasks) {
   return `<div class="downloads-list">${rows}</div>`;
 }
 
+// title→cover 会话内缓存：NAS 老任务后端没存封面，用用户浏览过的详情页封面兜底
+const titleCovers = new Map();
+function rememberTitleCover(title, cover) {
+  if (title && cover && !titleCovers.has(title)) titleCovers.set(String(title), String(cover));
+}
+function coverForTask(task) {
+  return task.cover || titleCovers.get(String(task.title || '')) || '';
+}
+
 function downloadTaskRow(task, kind) {
   const running = task.status === 'running';
   const statusText = downloadStatusText(task, kind);
@@ -1055,9 +1064,11 @@ function downloadTaskRow(task, kind) {
   const errBlock = errLog
     ? `<span class="dl-error" data-dl-copy="${esc(task.id)}" data-dl-log="${esc(errLog.replace(/\n/g, '\\n'))}" title="点击复制全部日志">${task.error ? esc(task.error.split('\n').slice(0, 4).join('<br>')) : '<span class="dl-log-link">复制合并日志</span>'}</span>` : '';
   const detailHint = task.detail && (/片/.test(task.detail) || task.detail.includes('合并中')) ? ` · <span class="dl-detail-hint">${esc(task.detail)}</span>` : '';
-  const playTile = `<button type="button" class="download-cover" data-dl-play="${esc(task.id)}" aria-label="本地播放《${esc(task.title || '未知剧集')}》">
-    <span class="poster loading"><span class="poster-letter">${esc(String(task.title || '影').slice(0, 1))}</span><img data-cover="${esc(task.cover || '')}" alt=""></span>
-    <span class="download-cover-hint">本地播放</span></button>`;
+  const playAttr = kind === 'nas' ? 'data-dl-play-nas' : 'data-dl-play';
+  const playHint = kind === 'nas' ? '播放 NAS 成品' : '本地播放';
+  const playTile = `<button type="button" class="download-cover" ${playAttr}="${esc(task.id)}" aria-label="${playHint}《${esc(task.title || '未知剧集')}》">
+    <span class="poster loading"><span class="poster-letter">${esc(String(task.title || '影').slice(0, 1))}</span><img data-cover="${esc(coverForTask(task))}" alt=""></span>
+    <span class="download-cover-hint">${playHint}</span></button>`;
   return `<div class="download-card">${playTile}<div class="download-task">
     <div class="download-task-head"><strong>${esc(task.title || '未知剧集')}</strong>${sourceBadge}<span class="dl-status ${running ? 'is-running' : ''}">${statusText}</span></div>
     <div class="download-task-meta">${task.doneCount}/${task.totalCount} 集 · ${task.doneCount === task.totalCount && task.status !== 'running' ? '已下载全部集' : (failedList.length ? `失败 ${failedList.length} 集` : '')}${srcNote ? ` · <b class="dl-src-note">${esc(srcNote)}</b>` : ''}${detailHint}</div>
@@ -2153,7 +2164,7 @@ async function goDetail(id, trigger) {
     // Retry in place; preserve the original source card and return destination.
     state.detailLoading = true; renderDetail();
     const token = ++routeToken;
-    try { const fresh = await api('detail', { id }); if (token === routeToken) { state.detail = fresh; state.detailLoading = false; renderDetail(); } }
+    try { const fresh = await api('detail', { id }); if (token === routeToken) { state.detail = fresh; state.detailLoading = false; if (state.detail && state.detail.title) rememberTitleCover(state.detail.title, state.detail.cover || ''); renderDetail(); } }
     catch (error) { if (token === routeToken) { state.detailLoading = false; renderError(error, 'detail'); } }
     return;
   }
@@ -2176,6 +2187,8 @@ async function goDetail(id, trigger) {
     [...asArray(state.home?.recommend?.items), ...asArray(state.home?.newest?.items)];
   state.sourceQueue = aiGroup ? candidates.filter(item => item.category === state.sourceGroup) : [];
   setRoute('detail'); state.detail = { ...state.sourceItem }; state.detailLoading = true; state.bookmarked = false;
+  // title→cover 记录：NAS 老任务后端没存封面，下载列表渲染时按剧名兜底
+  if (state.detail && state.detail.title) rememberTitleCover(state.detail.title, state.detail.cover || '');
   scroll.scrollTop = 0;
   updateCompact();
   renderDetail();
@@ -2479,6 +2492,17 @@ async function swipePrefetch(keyOrFn, prepare, render) {
       // node === savedNode 说明 render 没真的产出新页面，绝不能把当前页当成目标页缓存
       if (node && node !== savedNode && swipeAdoptable(node)) {
         clone = node.cloneNode(true);
+        // 预解码：真机首显大图要同步解码，滑动落位瞬间才解码就会掉帧（「卡一下」）。
+        // 这里对克隆里的图提前触发 decode()，浏览器缓存解码结果，落位时直接上屏。
+        setTimeout(() => {
+          if (!clone || swiping || swipeTrack) return;
+          for (const img of clone.querySelectorAll('img[src]')) {
+            if (img.complete) continue;
+            const probe = new Image();
+            probe.src = img.src;
+            if (probe.decode) probe.decode().catch(() => { });
+          }
+        }, 0);
       }
     } finally {
       routeToken++;
@@ -3090,6 +3114,13 @@ document.addEventListener('click', async event => {
   if (event.target.closest('[data-dl-play]')) {
     const id = event.target.closest('[data-dl-play]').dataset.dlPlay;
     api('open-local-player', { id }).then(() => toast('正在播放本地成品')).catch(error => toast(error.message || '本地文件不可播放', true));
+    return;
+  }
+  if (event.target.closest('[data-dl-play-nas]')) {
+    // NAS 任务点封面：流式播 NAS 上的成品（合并产物优先，未合并逐集）。
+    // 之前误走 open-local-player，手机本地根本没有这个任务 → 永远报「任务不存在」。
+    const id = event.target.closest('[data-dl-play-nas]').dataset.dlPlayNas;
+    api('open-nas-player', { id }).then(() => toast('正在播放 NAS 成品')).catch(error => toast(error.message || 'NAS 成品不可播放', true));
     return;
   }
   if (event.target.closest('[data-dl-cancel]')) {

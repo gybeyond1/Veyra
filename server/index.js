@@ -904,7 +904,7 @@ app.post('/api/download/tasks', requireAdminOrAccountAdmin, (req, res) => {
   try {
     const task = downloader.createTask({
       source: req.body.source, title: req.body.title, seriesId: req.body.seriesId,
-      episodes: req.body.episodes, owner: ADMIN_OWNER,
+      episodes: req.body.episodes, owner: ADMIN_OWNER, cover: req.body.cover,
     });
     res.json({ task });
   } catch (e) { res.status(400).json({ error: e.message }); }

@@ -42,6 +42,12 @@ final class AccountService {
     private final AppStore store;
     private final OkHttpClient client;
     private String baseUrl;   // 后端地址：登录/注册时可改（存 ServerConfig，通用部署）
+
+    /** 当前后端地址（NAS 成品流式播放拼文件 URL 用）；未登录返回空串。 */
+    public String baseUrl() { return baseUrl == null ? "" : baseUrl; }
+
+    /** 当前登录 token（NAS 成品流式播放带 Bearer 鉴权用）。 */
+    public String authToken() { return prefs.getString("token", ""); }
     private final SharedPreferences prefs;
     private volatile long lastProfileRefresh;
     private final AtomicBoolean refreshingProfile = new AtomicBoolean();

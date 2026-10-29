@@ -81,8 +81,12 @@ final class DownloadManager {
                 .connectTimeout(10, TimeUnit.SECONDS)
                 .readTimeout(60, TimeUnit.SECONDS)
                 .build();
-        loadPersisted();
+        persistLoaded = loadPersisted();
+        sweepOrphans();
     }
+
+    /** loadPersisted 是否成功恢复（false = 记录文件损坏，孤儿清理被跳过） */
+    private boolean persistLoaded;
 
     static final class Task {
         final String id;
@@ -139,16 +143,31 @@ final class DownloadManager {
                             .put("createdAt", t.createdAt));
                 }
             }
-            try (FileOutputStream fos = context.openFileOutput("downloads.json", Context.MODE_PRIVATE)) {
+            // 原子写：先写临时文件再 rename。此前直接覆盖 downloads.json，
+            // 写到一半进程被杀（用户退出/系统回收）会留下半截 JSON，下次启动
+            // loadPersisted 解析失败 → 任务记录全部丢失 → 孤儿清理把已下载的文件当
+            // 无主目录连锅端 —— 就是「退出重开，下载的文件自动没了」的根因。
+            File tmp = new File(context.getFilesDir(), "downloads.json.tmp");
+            File dst = new File(context.getFilesDir(), "downloads.json");
+            try (FileOutputStream fos = new FileOutputStream(tmp)) {
                 fos.write(arr.toString().getBytes("UTF-8"));
+                fos.getFD().sync();
+            }
+            if (!tmp.renameTo(dst)) {
+                // 个别文件系统 rename 失败，退回直接覆盖（聊胜于无）
+                try (FileOutputStream fos = new FileOutputStream(dst)) {
+                    fos.write(arr.toString().getBytes("UTF-8"));
+                }
+                tmp.delete();
             }
         } catch (Exception ignored) { }
     }
 
-    private void loadPersisted() {
+    /** @return true = 成功恢复（或本就没有持久化文件）；false = 文件存在但解析失败（已备份，绝不能做孤儿清理） */
+    private boolean loadPersisted() {
+        File f = new File(context.getFilesDir(), "downloads.json");
+        if (!f.exists()) return true;
         try {
-            File f = new File(context.getFilesDir(), "downloads.json");
-            if (!f.exists()) return;
             String s = new String(java.nio.file.Files.readAllBytes(f.toPath()), "UTF-8");
             JSONArray arr = new JSONArray(s);
             for (int i = 0; i < arr.length(); i++) {
@@ -173,10 +192,24 @@ final class DownloadManager {
                 }
                 tasks.add(t);
             }
-        } catch (Exception ignored) { }
-        // 孤儿目录清理：downloads/ 与公共 Download/Veyra 下已无任务记录的历史目录
-        // （旧版 delete 只删产物不删分集，遗留大量 ep*.mp4 密文分集 + seg_v6 规范化缓存 + merged.mp4，
-        //  导致存储膨胀）一次性删除。
+            return true;
+        } catch (Exception e) {
+            // 记录文件损坏：备份现场，绝不能往下走孤儿清理（否则上面所有已下载文件会被当成无主目录全删）
+            try {
+                java.nio.file.Files.copy(f.toPath(),
+                        new File(context.getFilesDir(), "downloads.json.corrupt").toPath(),
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            } catch (Exception ignored) { }
+            return false;
+        }
+    }
+    /** 孤儿目录清理：downloads/ 与公共 Download/Veyra 下已无任务记录的历史目录
+     *  （旧版 delete 只删产物不删分集，遗留大量 ep*.mp4 密文分集 + seg_v6 规范化缓存 + merged.mp4，
+     *  导致存储膨胀）一次性删除。
+     *  安全阀：仅当任务记录恢复成功且列表非空时才执行 —— 记录为空多半意味着 downloads.json
+     *  丢失/损坏，此时目录里的文件是用户仅存的下载成果，一删就是「重开后下载全没了」。 */
+    private void sweepOrphans() {
+        if (!persistLoaded || tasks.isEmpty()) return;
         try {
             File base = new File(context.getFilesDir(), "downloads");
             File basePub = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Veyra");
