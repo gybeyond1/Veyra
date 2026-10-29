@@ -2685,11 +2685,13 @@ function swipeSaveCurrent() {
   if (swipeSaveGuard) return;
   const node = content.firstElementChild;
   if (!node || node.classList.contains('skeleton-home') || node.classList.contains('swipe-skel')) return;
-  const clone = node.cloneNode(true);
-  // 兜底净化：拖动期间页头被钉住时打过 visibility:hidden，绝不能跟着进缓存
-  swipeCleanCloneImages(clone);
-  clone.querySelectorAll('*').forEach(el => { if (el.style && el.style.visibility === 'hidden') el.style.visibility = ''; });
-  swipePageCache.set(swipeCacheKey(), clone);
+  // 本体式：不再 cloneNode。克隆出的新 <img> 必须整批重新加载，而这一步既不等待也不预热，
+  // 快速来回切时取出的就是“还没解码完”的克隆 → 又灰一帧。
+  // 直接存本体：img 已加载状态随节点保留；这个节点随后会被 replaceChildren 替换掉，
+  // 但缓存仍持有引用，不会丢失、也无需重新加载图片。
+  swipeCleanCloneImages(node);
+  node.querySelectorAll('*').forEach(el => { if (el.style && el.style.visibility === 'hidden') el.style.visibility = ''; });
+  swipePageCache.set(swipeCacheKey(), node);
   if (swipePageCache.size > 12) swipePageCache.delete(swipePageCache.keys().next().value);
 }
 
