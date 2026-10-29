@@ -55,7 +55,8 @@ public final class LocalPlayerActivity extends Activity {
     private FrameLayout mediaLayer;
     private FrameLayout incoming;
     private TextView incomingLabel;
-    private View topBar, bottomBar, progressLine;
+    private FrameLayout topBar;
+    private View bottomBar, progressLine;
     private TextView titleView;
     private ImageButton playPauseBtn, prevBtn, nextBtn;
     private TextView timeView, speedBtn, episodesBtn;
@@ -100,10 +101,14 @@ public final class LocalPlayerActivity extends Activity {
         try { if (raw != null && !raw.isEmpty()) episodes = new JSONArray(raw); } catch (Exception ignored) { }
 
         boolean isLocal = !nasMode;
-        if (isLocal && (path == null || path.isEmpty() || !new File(path).canRead())) {
-            Toast.makeText(this, "本地文件不存在或不可读，可能已被删除", Toast.LENGTH_LONG).show();
-            finish();
-            return;
+        if (isLocal) {
+            String resolved = resolveLocalPath(path);
+            if (resolved == null) {
+                Toast.makeText(this, "本地文件不存在或不可读，可能已被删除", Toast.LENGTH_LONG).show();
+                finish();
+                return;
+            }
+            path = resolved;
         }
         if (nasMode && (path == null || path.isEmpty())) {
             Toast.makeText(this, "NAS 播放地址无效", Toast.LENGTH_LONG).show();
@@ -431,11 +436,38 @@ public final class LocalPlayerActivity extends Activity {
         revealControls();
     }
 
+    /** 本地分集路径解析：精确文件不可读时，按「第NN集」前缀在同目录模糊匹配
+     *  （兼容 ROM 的 MediaStore 给文件名加时间戳尾巴导致的漂移，避免漏集）。 */
+    private String resolveLocalPath(String expected) {
+        if (expected == null || expected.isEmpty()) return null;
+        File f = new File(expected);
+        if (f.canRead()) return expected;
+        File dir = f.getParentFile();
+        if (dir == null || !dir.isDirectory()) return null;
+        String name = f.getName();
+        java.util.regex.Matcher pm = java.util.regex.Pattern.compile("^(第\\d+集)").matcher(name);
+        String prefix = pm.find() ? pm.group(1) : null;
+        File best = null;
+        long bestTime = -1;
+        File[] kids = dir.listFiles();
+        if (kids == null) return null;
+        for (File c : kids) {
+            if (!c.isFile() || !c.canRead()) continue;
+            if (c.getName().equals(name)) { best = c; bestTime = c.lastModified(); break; }
+            if (prefix != null && c.getName().startsWith(prefix) && c.getName().endsWith(".mp4")) {
+                long t = c.lastModified();
+                if (best == null || t > bestTime) { best = c; bestTime = t; }
+            }
+        }
+        return best != null ? best.getAbsolutePath() : null;
+    }
+
     private String epSource(int i) {
         JSONObject ep = episodes.optJSONObject(i);
         String s = ep == null ? "" : ep.optString(nasMode ? "url" : "path", "");
-        if (s.isEmpty() || (!nasMode && !new File(s).canRead())) return null;
-        return s;
+        if (nasMode) return s.isEmpty() ? null : s;
+        if (s.isEmpty()) return null;
+        return resolveLocalPath(s);
     }
 
     // ---- 控制栏显隐 ----

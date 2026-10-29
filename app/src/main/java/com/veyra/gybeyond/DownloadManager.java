@@ -153,12 +153,15 @@ final class DownloadManager {
                 fos.write(arr.toString().getBytes("UTF-8"));
                 fos.getFD().sync();
             }
-            if (!tmp.renameTo(dst)) {
-                // 个别文件系统 rename 失败，退回直接覆盖（聊胜于无）
-                try (FileOutputStream fos = new FileOutputStream(dst)) {
-                    fos.write(arr.toString().getBytes("UTF-8"));
-                }
-                tmp.delete();
+            try {
+                java.nio.file.Files.move(tmp.toPath(), dst.toPath(),
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                        java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            } catch (Exception atomicFailure) {
+                // 同一 filesDir 内的普通 move 仍由系统替换目录项；绝不直接截断旧 JSON。
+                // 两次都失败时保留完整 tmp 与旧 dst，下次启动可恢复，而不是留下半截文件。
+                java.nio.file.Files.move(tmp.toPath(), dst.toPath(),
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             }
         } catch (Exception ignored) { }
     }
@@ -219,11 +222,22 @@ final class DownloadManager {
                 if (dirs == null) continue;
                 HashSet<String> alive = new HashSet<>();
                 synchronized (tasks) { for (Task t : tasks) alive.add(t.id); }
+                boolean isPublic = base2.equals(basePub);
                 for (File d : dirs) {
                     if (!d.isDirectory()) continue;
                     String name = d.getName();
-                    // 公共目录任务目录带 dl_ 前缀，私有目录直接用任务 id
-                    String id2 = name.startsWith("dl_") ? name.substring(3) : name;
+                    String id2;
+                    if (isPublic) {
+                        // 公共目录里只有 dl_<id> 这种「任务工作目录」参与孤儿判定。
+                        // 以剧名命名的目录（Download/Veyra/<剧名>/）是用户最终的成品下载，
+                        // 里面装着转码分集与合并整集，名字不等于任务 id —— 绝不能当孤儿删，
+                        // 否则「退出重开，连已合并的整集一起没了」。
+                        if (!name.startsWith("dl_")) continue;
+                        id2 = name.substring(3);
+                    } else {
+                        // 私有 downloads/<id> 直接用任务 id 命名
+                        id2 = name;
+                    }
                     if (!alive.contains(id2)) deleteRecursive(d);
                 }
             }
