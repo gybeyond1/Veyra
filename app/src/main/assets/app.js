@@ -2701,12 +2701,13 @@ function swipeAdoptable(node) {
 function swipeBuildCached(key) {
   const cached = swipePageCache.get(key);
   if (!cached) return null;
-  const clone = cached.cloneNode(true);
-  // 关键：缓存克隆里可能残留 data-loading=1（预取时图还没下载完就被缓存）。
-  // 若不清理，落位后 hydrateImages 见 data-loading=1 一律跳过，这些海报永远灰块/闪一下。
-  // 清掉标记后：已加载的图（naturalWidth>0）直接上屏，未加载的重新走 loadCoverInto。
-  swipeCleanCloneImages(clone);
-  return clone;
+  // 取出本体、绝不再克隆：cloneNode 出来的新 <img> 必须整批重新走加载管线，
+  // 落位那一帧全灰、再逐张回填（真机录屏已证实：连 spotlight 大图一起灰掉一帧）。
+  // 移动节点（appendChild 已有节点）则 img 的加载/解码状态随节点保留，落位零闪。
+  // 消耗掉的缓存由落位 1.5s 后的 swipePrefetchAll 自动补回。
+  swipePageCache.delete(key);
+  swipeCleanCloneImages(cached);
+  return cached;
 }
 
 // 骨架按目标页真实布局生成（里面 + 列表 / 我的 + 子标签 + 卡片），不再是通用一张皮。
@@ -2757,6 +2758,7 @@ function swipeResolve(delta) {
     const key = state.route === 'library' ? 'library:' + next : 'category:' + state.tab + ':' + next;
     return {
       mode: 'inline',   // 页内子项：tab 栏与标题钉住，仅内容区平移
+      key,              // 取消滑动时把预览节点（缓存本体）放回缓存用
       step: [pos, pos + delta],   // 高亮要跟着手从 pos 滑到 pos+delta
       // adopted：目标页 DOM 已由滑动的手放下（真内容），别再整体重渲染，否则会闪一下
       go: () => {
@@ -2793,6 +2795,7 @@ function swipeResolve(delta) {
     : next === 'home' ? 'home' : 'category:' + next + ':' + (state.sub[next] || 0);
   return {
     mode: 'page',       // 底栏页之间：整页平移
+    key,
     go: () => navigateDock(next),
     build: () => swipeBuildCached(key) || swipeBuildSkeleton(key),
   };
@@ -2989,6 +2992,11 @@ function swipeCloseTrack(commit) {
       swipeClearTabs(t);
       const node = t.inner.firstElementChild;
       if (node) node.style.marginTop = '';   // 缓存/复用的克隆不带对齐补偿
+      // 预览用的是缓存本体（取出式），取消要把节点放回缓存，否则这份真内容缓存被白白消耗
+      if (node && t.resolve.key && swipeAdoptable(node)) {
+        swipeCleanCloneImages(node);
+        swipePageCache.set(t.resolve.key, node);
+      }
       scroll.style.transition = '';
       scroll.style.transform = '';
       t.panel.remove();
