@@ -902,6 +902,30 @@ function commitDownloadList(list, phone, nas, opts = {}) {
   const nasTasks = nas.filter(t => !forwardNas.has(String(t.id)) && (!t.source || t.source === contentSource)).map(t => Object.assign({}, t, { kind: 'nas' }));
   list.innerHTML = renderDownloadList([...phoneTasks, ...nasTasks]);
   hydrateImages();   // 下载封面是 data-cover，必须补 src 才出图（之前缺这步 → 灰块）
+  backfillNasCovers(nasTasks);   // 老 NAS 任务后端没存封面：用 seriesId 现拉详情页封面兜底（尽力而为）
+}
+
+// NAS 老任务 cover 为空时，用 seriesId 向详情页接口要一次封面，持久化并补到对应行。
+// 失败静默（剧集可能下架/风控），不影响列表渲染；已持久化到 localStorage，下次启动直接命中。
+const nasCoverBackfill = new Set();
+function backfillNasCovers(nasTasks) {
+  for (const t of nasTasks) {
+    if (t.cover || !t.seriesId) continue;
+    const key = String(t.seriesId);
+    if (nasCoverBackfill.has(key)) continue;
+    nasCoverBackfill.add(key);
+    api('detail', { id: key }).then(detail => {
+      nasCoverBackfill.delete(key);
+      if (!detail || !detail.cover) return;
+      rememberTitleCover(t.title, detail.cover);
+      const img = content.querySelector(`[data-dl-play-nas="${t.id}"] img[data-cover]`);
+      if (img && !img.naturalWidth) {
+        img.dataset.cover = detail.cover;
+        delete img.dataset.loading;
+        loadCoverInto(img);
+      }
+    }).catch(() => { nasCoverBackfill.delete(key); });
+  }
 }
 
 // 仅当任务状态真正变化时才重建列表，避免滑动落位后无谓重绘（那一闪）。
@@ -1027,13 +1051,28 @@ function renderDownloadList(tasks) {
   return `<div class="downloads-list">${rows}</div>`;
 }
 
-// title→cover 会话内缓存：NAS 老任务后端没存封面，用用户浏览过的详情页封面兜底
-const titleCovers = new Map();
+// title→cover 兜底缓存：NAS 老任务后端没存封面，用用户浏览过的详情页封面兜底。
+// 之前是会话内 Map，App 一重启就清空，老 NAS 任务重启后必灰块；现持久化到 localStorage，
+// 下载/浏览过详情页的剧，重启后 NAS 行仍能按剧名找回封面。
+const TITLE_COVERS_KEY = 'veyra-title-covers';
+let titleCovers = null;
+function loadTitleCovers() {
+  if (titleCovers) return titleCovers;
+  try { titleCovers = new Map(Object.entries(JSON.parse(localStorage.getItem(TITLE_COVERS_KEY) || '{}'))); }
+  catch { titleCovers = new Map(); }
+  return titleCovers;
+}
 function rememberTitleCover(title, cover) {
-  if (title && cover && !titleCovers.has(title)) titleCovers.set(String(title), String(cover));
+  if (!title || !cover) return;
+  const map = loadTitleCovers();
+  const key = String(title);
+  if (map.has(key)) return;
+  map.set(key, String(cover));
+  if (map.size > 400) map.delete(map.keys().next().value);   // 限容量，防 localStorage 超限
+  try { localStorage.setItem(TITLE_COVERS_KEY, JSON.stringify(Object.fromEntries(map))); } catch (ignore) { }
 }
 function coverForTask(task) {
-  return task.cover || titleCovers.get(String(task.title || '')) || '';
+  return task.cover || loadTitleCovers().get(String(task.title || '')) || '';
 }
 
 function downloadTaskRow(task, kind) {
@@ -2050,6 +2089,9 @@ async function goCategory(tab, sub = state.sub[tab], keepCompact = false) {
   try {
     const fresh = await refreshing;
     if (token !== routeToken) return;
+    // 覆盖前先记住旧值：否则下方 firstLoad/changed 判断会拿到“已被 fresh 覆盖”的 state.category，
+    // 恒为 false，导致无缓存时骨架一直残留、内容永远不渲染（就是那一闪/卡住）。
+    const previousCategory = state.category;
     state.category = { ...fresh, refreshing: false, loading: false, error: false };
     state.categoryItems = asArray(fresh.items);
     if (adopted) {
@@ -2057,8 +2099,8 @@ async function goCategory(tab, sub = state.sub[tab], keepCompact = false) {
       try { refreshMissingImages(asArray(fresh.items)); } catch (ignore) { }
       updateCategoryFooter();
     } else {
-      const changed = state.category && listSignature(state.category) !== listSignature(fresh);
-      const firstLoad = !state.category;
+      const changed = previousCategory && listSignature(previousCategory) !== listSignature(fresh);
+      const firstLoad = !previousCategory;
       const previousScroll = scroll.scrollTop;
       if (firstLoad || changed) {
         renderCategory(keepCompact || state.compactHeld);
@@ -2648,7 +2690,13 @@ function swipeAdoptable(node) {
 
 function swipeBuildCached(key) {
   const cached = swipePageCache.get(key);
-  return cached ? cached.cloneNode(true) : null;
+  if (!cached) return null;
+  const clone = cached.cloneNode(true);
+  // 关键：缓存克隆里可能残留 data-loading=1（预取时图还没下载完就被缓存）。
+  // 若不清理，落位后 hydrateImages 见 data-loading=1 一律跳过，这些海报永远灰块/闪一下。
+  // 清掉标记后：已加载的图（naturalWidth>0）直接上屏，未加载的重新走 loadCoverInto。
+  swipeCleanCloneImages(clone);
+  return clone;
 }
 
 // 骨架按目标页真实布局生成（里面 + 列表 / 我的 + 子标签 + 卡片），不再是通用一张皮。
