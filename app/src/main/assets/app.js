@@ -457,6 +457,10 @@ function getCover(url) {
 async function loadCoverInto(image) {
   const url = image.dataset.cover;
   if (image.dataset.loading === '1') return;
+  // 已有真实 src：这是从预取缓存克隆带上来的图，src 已在（离屏预热设过）。
+  // 重复 getCover + 设 src 会让海报被强制重载一次 —— 就是「抬手落位后推荐内容闪一下」。
+  // 直接放行，让浏览器用缓存自然解码；加载失败由 retryFailedImages 兜底重试。
+  if (image.getAttribute('src')) return;
   if (!url) {
     image.closest('.poster')?.classList.remove('loading');
     image.closest('.poster')?.classList.add('fallback');
@@ -547,9 +551,15 @@ function swipeCleanCloneImages(clone) {
   });
 }
 // 离屏预热：clone 已挂到离屏容器上（isConnected 为真），补图才会真正落地到 clone 自己身上。
-function swipePrimeImages(clone) {
+// 改 await：把前 N 张图的 src 真正设好并解码完，缓存里才是「已加载」的图；
+// 否则缓存里只有 data-cover 空壳，落位后才首次设 src 再解码，海报就会闪一下。
+async function swipePrimeImages(clone) {
   swipeCleanCloneImages(clone);
-  hydrateImages(clone, 24);
+  const imgs = [...clone.querySelectorAll('img[data-cover]')].slice(0, 24);
+  await Promise.race([
+    Promise.all(imgs.map(img => loadCoverInto(img).catch(() => {}))),
+    new Promise(resolve => setTimeout(resolve, 3000)),   // 最多等 3 秒，别拖垮整轮预取
+  ]);
 }
 
 function activeCampaigns() {
@@ -2561,7 +2571,7 @@ async function swipePrefetch(keyOrFn, prepare, render) {
     }
     if (clone) {
       swipeOffstage.appendChild(clone);
-      swipePrimeImages(clone);        // 先抹掉失效的加载标记，再离屏补图
+      await swipePrimeImages(clone);  // 等离屏补图真正完成再入缓存：缓存里才有「已加载」的海报
       swipePageCache.set(key, clone);
       while (swipePageCache.size > 12) swipePageCache.delete(swipePageCache.keys().next().value);
     }

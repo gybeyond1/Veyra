@@ -97,9 +97,10 @@
       const A = rects[from], B = rects[to];
       // 注意：这里不要写 inline transition —— 收尾动画要靠 swipeCloseTrack 设的行内过渡生效，
       // 一写 none 就变成瞬跳。跟手期间的无过渡由 .dragging 类负责。
+      // 与 paint()/follow() 严格同源：y 恒 0（透镜靠 CSS top 定位）、不写 height（靠 CSS calc）。
+      // 若这里多写 y=A.t / height=mix()，落位那一帧透镜会在垂直/高度上跳一下 —— 就是「松手闪一下」。
       h.blob.style.width = `${mix(A.w, B.w) - PAD * 2}px`;
-      h.blob.style.height = `${mix(A.h, B.h)}px`;
-      h.blob.style.transform = `translate3d(${mix(A.l, B.l) + PAD}px, ${(A.t + 0)}px, 0)`;
+      h.blob.style.transform = `translate3d(${mix(A.l, B.l) + PAD}px, 0px, 0)`;
       h.widthPx = mix(A.w, B.w) - PAD * 2;
       items.forEach((el, i) => el.classList.toggle('dim', i !== to && i !== from));
       items[to].classList.toggle('drag-over', q > 0.5);
@@ -130,10 +131,14 @@
     };
 
     h.setDragging = on => bar.classList.toggle('dragging', !!on);
+    // 横滑切页跟手专用态：只关弹簧过渡、不放大透镜本体（放大是手指按住「拿起」才有的效果，
+    // 若横滑跟手也放大，落位那一刻透镜会从放大态缩回正常态，又闪一下）。
+    h.setFollow = on => bar.classList.toggle('seg-follow', !!on);
 
     /** 交还静止态：撤掉过渡强关、按 .selected 归位 */
     h.release = () => {
       h.setDragging(false);
+      h.setFollow(false);
       h.clearHover();
       h.blob.style.transition = '';
       h.blob.style.height = '';
