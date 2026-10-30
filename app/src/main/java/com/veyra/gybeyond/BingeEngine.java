@@ -93,6 +93,7 @@ public class BingeEngine {
     private boolean destroyed;
     private boolean animating;
     private boolean landscapeVideo;   // 当前视频是横屏：海报要一直垫底，不能撤
+    private boolean frameReady;       // 首帧已经画出来：完整海报到此为止，不许再冒出来盖视频
     private boolean active;
     // 刷剧形态被「挂起」（切到别的 tab / 进详情 / 看全集）。挂起期间不恢复播放、不抢沉浸态，
     // 播放器与进度原样保留，resume() 回来就能接着播 —— 不用重新 loadShow，也就不会闪传统首页。
@@ -125,22 +126,27 @@ public class BingeEngine {
     }
 
     private void buildVideoLayer() {
-        // 图层顺序（下 → 上）：播放器 → 海报 → 拖拽用的下一部 → 错误提示。
-        // 海报必须【盖在播放器上面】：原来海报垫在下面、切剧时把播放器 GONE 掉再让 alpha 从 0 淡入，
-        // TextureView 一藏一显会重建 SurfaceTexture，表现就是「有声音、画面全白，手滑一下才出来」。
-        // 现在播放器一直挂着，用海报把它盖住，首帧来了再撤海报 —— 不重建、不白屏、也有海报。
-        playerView = (PlayerView) activity().getLayoutInflater()
-                .inflate(R.layout.episode_player, videoLayer, false);
-        playerView.setLayoutParams(new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        videoLayer.addView(playerView);
+        /* 图层顺序（下 → 上）：海报底图 → 播放器 → 完整海报 → 拖拽用的下一部 → 错误提示。
+           海报必须在播放器【下面】：它是「垫底」，不是「盖住」。盖在上面时，封面一到位就把
+           已经在播的视频整块糊住（用户原话：海报怎么还叠到视频上面去了）。
+           垫在下面的好处：横屏视频上下两条黑边由它填满，竖屏则被画面完全遮住，互不影响。
 
+           播放器一直挂着、从不 GONE / INVISIBLE —— TextureView 一藏一显会重建 SurfaceTexture，
+           表现就是「有声音、画面全白」。首帧没来之前由 posterFit 盖住那块黑。 */
         poster = new ImageView(activity());
         poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
         poster.setVisibility(View.GONE);
         poster.setLayoutParams(new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         videoLayer.addView(poster);
+
+        playerView = (PlayerView) activity().getLayoutInflater()
+                .inflate(R.layout.episode_player, videoLayer, false);
+        playerView.setLayoutParams(new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        // 快门默认可能是黑的，那样垫在下面的海报一点都透不出来
+        try { playerView.setShutterBackgroundColor(Color.TRANSPARENT); } catch (Throwable ignored) { }
+        videoLayer.addView(playerView);
 
         posterFit = new ImageView(activity());
         posterFit.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -239,7 +245,10 @@ public class BingeEngine {
         if (!active) { videoLayer.setVisibility(View.GONE); return; }
         suspended = false;
         videoLayer.setVisibility(View.VISIBLE);
+        // 先 cancel 再归零：残留的位移动画会用最后一帧把视频层推回屏幕外
+        videoLayer.animate().cancel();
         videoLayer.setTranslationY(0f);
+        if (neighbor != null) { neighbor.animate().cancel(); neighbor.setVisibility(View.GONE); }
         // TextureView 被藏起来过，回来时补一次重绘，否则画面要等下一次布局才刷新
         if (texture != null) videoLayer.post(() -> texture.invalidate());
         hideBars();
@@ -306,6 +315,7 @@ public class BingeEngine {
         currentEpisode = 1;
         episodeCount = 0;
         landscapeVideo = false;
+        frameReady = false;
         detail = null;
         currentSource = null;
         message.setVisibility(View.GONE);
@@ -401,10 +411,10 @@ public class BingeEngine {
 
                 @Override public void onRenderedFirstFrame() {
                     if (destroyed || !active) return;
+                    frameReady = true;
                     // TextureView 拿到首帧后不保证自己排一次重绘，表现就是「声音有了、画面还是黑的，
                     // 手指一动才刷出来」。这里显式催一次。
-                    if (texture != null) texture.invalidate();
-                    videoLayer.invalidate();
+                    forceRepaint();
                     scheduleHidePoster();
                 }
 
@@ -448,9 +458,15 @@ public class BingeEngine {
             for (long delay : new long[]{300, 900, 1800}) {
                 handler.postDelayed(() -> {
                     if (destroyed || !active || token2 != loadToken) return;
-                    // 只催重绘，绝不撤海报：视频还没画出来就把海报撤掉，
-                    // 中间那段时间就是一片空白（用户截图：切剧后纯白，动一下才出来）。
                     forceRepaint();
+                    // 首帧回调在某些机型上不来，这里按「真的在播了」补判定：
+                    // READY + 播放位置已经往前走了 = 画面肯定出过，可以撤掉盖在上面的海报。
+                    if (!frameReady && player != null
+                            && player.getPlaybackState() == Player.STATE_READY
+                            && player.getCurrentPosition() > 0) {
+                        frameReady = true;
+                        hidePoster();
+                    }
                 }, delay);
             }
         } catch (Throwable error) {
@@ -568,9 +584,15 @@ public class BingeEngine {
             if (player != null) player.setPlayWhenReady(false);
             index = target;
             loadShow();
-            // 新一页就位：视频层立刻归零，把上一页的位移抹掉（此刻屏幕上是新剧的海报）
+            // 新一页就位：视频层立刻归零。
+            // 必须先 cancel 掉「滑出」那个动画再手设位移 —— 不加 cancel 的话，滑出动画的
+            // 最后一帧可能晚于这行执行，把视频层又推回 ±屏高之外：画面整个跑到屏幕外，
+            // 声音照常播，手指一动（dragStart 里 cancel + setTranslationY(0)）才拉回来。
+            // 用户说的「声音都出来了、手稍微动一下画面才出来」就是这个。
+            videoLayer.animate().cancel();
             videoLayer.setTranslationY(0f);
             if (neighbor != null) {
+                neighbor.animate().cancel();
                 neighbor.setVisibility(View.GONE);
                 neighbor.setTranslationY(0f);
             }
@@ -674,9 +696,8 @@ public class BingeEngine {
 
     /** 撤掉盖在播放器上的海报，露出真正的画面。 */
     private void hidePoster() {
-        // 横屏时 poster 是垫在视频底下的模糊背景，撤了上下就是两条黑边 —— 留着。
-        // 只撤中间那张完整海报（posterFit）。
-        if (!landscapeVideo) poster.setVisibility(View.GONE);
+        // poster 现在是垫底的背景（在播放器下面），永远留着：横屏填黑边、竖屏被画面盖住。
+        // 只撤压在播放器上面那张完整海报 posterFit。
         posterFit.setVisibility(View.GONE);
     }
 
@@ -719,11 +740,16 @@ public class BingeEngine {
         if (blur) {
             poster.setImageBitmap(gaussianBlur(bitmap, 12));
             poster.setAlpha(0.72f);
-            if (showFit) { posterFit.setImageBitmap(bitmap); posterFit.setVisibility(View.VISIBLE); }
-            else posterFit.setVisibility(View.GONE);
         } else {
             poster.setImageBitmap(bitmap);
             poster.setAlpha(1f);
+        }
+        // 关键：封面是异步到的，可能比首帧还晚。原来它一到就把 posterFit 重新点亮，
+        // 于是「视频早就在播了，海报却盖在上面」—— 首帧之后一律不许再显示完整海报。
+        if (showFit && !frameReady) {
+            posterFit.setImageBitmap(bitmap);
+            posterFit.setVisibility(View.VISIBLE);
+        } else {
             posterFit.setVisibility(View.GONE);
         }
     }
