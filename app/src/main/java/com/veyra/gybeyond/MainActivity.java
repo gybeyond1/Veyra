@@ -941,6 +941,16 @@ public final class MainActivity extends Activity {
                 runOnUiThread(() -> { if (bingeEngine != null) bingeEngine.exit(); });
                 return true;
             }
+            case "binge-pause": {
+                // 刷剧形态挂起：切 tab / 进详情 / 看全集时只暂停，播放器和当前剧原样保留
+                runOnUiThread(() -> { if (bingeEngine != null) bingeEngine.pause(); });
+                return true;
+            }
+            case "binge-resume": {
+                // 回到首页直接接着播，不重新 loadShow（不会先走一遍传统首页）
+                runOnUiThread(() -> { if (bingeEngine != null) bingeEngine.resume(); });
+                return true;
+            }
             case "binge-next": {
                 runOnUiThread(() -> { if (bingeEngine != null) bingeEngine.next(); });
                 return true;
@@ -954,7 +964,7 @@ public final class MainActivity extends Activity {
                 final int index = args.optInt("index", 0);
                 final String id = args.optString("id");
                 runOnUiThread(() -> {
-                    if (bingeEngine != null) bingeEngine.exit();
+                    if (bingeEngine != null) bingeEngine.pause();
                     if (webView != null && !id.isEmpty()) {
                         webView.evaluateJavascript("window.hgBingeAction && window.hgBingeAction('detail',"
                                 + JSONObject.quote(id) + "," + index + ")", null);

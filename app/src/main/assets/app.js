@@ -1757,7 +1757,6 @@ function updateBackEnabled() {
 
 function setRoute(route) {
   stopBannerAuto();
-  resumeBingeIfReturned(route);   // 详情返回首页 → 自动回到刷剧模式同一部剧（须在 state.route 更新前判断）
   if (route !== 'downloads') stopDownloadsTimer();
   if (state.route === 'detail' && route !== 'detail') { detailCard?.dispose(); detailCard = null; }
   const libraryArea = ['library', 'settings', 'account-management'].includes(route);
@@ -1769,7 +1768,8 @@ function setRoute(route) {
   document.getElementById('app').classList.toggle('route-detail', route === 'detail');
   window.AndroidHost?.setDetailMode?.(route === 'detail');
   headerSettings.hidden = route !== 'library';
-  window.__bingeUpdateChrome && window.__bingeUpdateChrome();
+  // 刷剧形态的可见性跟着 route 走：回首页 → resume，离开首页 → pause（不销毁播放器）
+  window.__bingeSync && window.__bingeSync();
   searchInput.placeholder = libraryArea ? '搜索观看历史和收藏' : privateMode() ? '搜索剧名或 #标签' : '搜索剧名';
   searchInput.setAttribute('aria-label', libraryArea ? '搜索观看历史和收藏' : '搜索剧名或标签');
   if (route === 'library') searchInput.value = state.libraryQuery;
@@ -1915,7 +1915,7 @@ window.hgPredictiveBackCommit = () => {
 };
 
 function setNav(tab) {
-  if (state.binge) exitBingeMode();   // 刷剧态点底栏任意栏 → 先退出刷剧（底栏本身是首页全局的，不动）
+  // 刷剧形态是首页自己的记忆，切 tab 不再退出：离开首页由 syncBinge 暂停，回到首页自动 resume
   listingObserver?.disconnect();
   categoryObserver?.disconnect();
   document.querySelectorAll('#dock [data-nav]').forEach(button => button.classList.toggle('active', button.dataset.nav === tab));
@@ -2303,6 +2303,7 @@ window.hgBack = () => {
   if (!authOverlay.hidden) { if (state.account.loggedIn) hideAuth(); return true; }
   if (!confirmOverlay.hidden) { closeConfirmation(false); return true; }
   if (!updateOverlay.hidden) { updateOverlay.hidden = true; updateBackEnabled(); if (updateDownloading) toast('已转入后台下载，完成后会自动弹出安装', true); return true; }
+  if (state.binge && state.route === 'home') { exitBingeMode(); return true; }
   if (isRootColumn()) return false;
   if (state.route === 'campaign') { restoreScreen(state.campaignReturn); return true; }
   if (state.route === 'account-management') { restoreScreen(state.accountReturn); return true; }
@@ -2322,6 +2323,7 @@ window.hgResume = () => {
   if (state.route === 'library') goLibrary(state.libraryTab);
   if (state.route === 'home') refreshHomeHistory();
   if (state.route === 'detail' && state.detail) api('bookmark-state', { id: state.detail.id }).then(value => { state.bookmarked = value; renderDetail(); });
+  window.__bingeSync && window.__bingeSync();
 };
 
 async function openPlayer(episode = 1) {
@@ -3497,7 +3499,13 @@ api('app-version').then(version => {
   setAvailableUpdate(updateAvailable);
 }).catch(() => {});
 api('cached-update').then(result => { if (result.status === 'available') setAvailableUpdate(result); }).catch(() => {});
-function startHome() { goHome(); setTimeout(() => checkUpdate(false), 3000); }
+// 冷启动：首页数据回来后再判断是否恢复刷剧形态（route 已经是 home，池子/剧单都就绪）
+function startHome() {
+  goHome().then(() => {
+    window.__bingeRestore && window.__bingeRestore();
+  }).catch(() => { });
+  setTimeout(() => checkUpdate(false), 3000);
+}
 // 崩溃日志提示：上次运行发生未捕获异常（含闪退）时，启动后提示并支持复制，便于把日志发给开发者排查
 api('crash-log').then(result => {
   const log = (result && result.log || '').trim();
@@ -3616,14 +3624,23 @@ document.getElementById('unlock-form').addEventListener('submit', async event =>
   finally { button.disabled = false; }
 });
 
-/* ================= 刷剧模式（首页的两种形态之一，底栏/悬浮按钮一字不动） =================
+/* ================= 刷剧模式（首页的第二形态，与首页平级、可记忆） =================
    刷剧不是独立页面，而是首页 WebView 的一种形态：原生视频层垫在透明 WebView 之后，
-   真底栏 #dock 与真玻璃卡片都在首页里。点 #binge-fab 进入/退出；上下滑换剧由 WebView 触发原生引擎。 */
+   真底栏 #dock 与真玻璃卡片都在首页里。上下滑换剧由 WebView 触发原生引擎。
+
+   状态模型（两层，别再混在一起）：
+     state.binge      —— 用户「想要的形态」。持久化到 localStorage：切 tab、进详情、退出软件
+                         重进都保留；只有点悬浮按钮才真正退出。
+     bingeOnScreen    —— 这一刻浮层是否真的在屏幕上（只有 route==='home' 才算）。
+   原生侧只认三件事：binge-start（建播放器）/ binge-pause（暂停保位）/ binge-exit（释放）。
+   切 tab、进详情、看全集都只 pause，不再 exit —— 回来时直接 resume，不会先闪一下传统首页。 */
 const bingeFab = document.getElementById('binge-fab');
-let bingePayload = null;     // 最近一次进入刷剧的剧单（返回恢复用）
-let bingeReturnIndex = null; // 从刷剧进详情后要恢复的位置
-let bingeCurrentId = null;   // 当前剧 id（卡片按钮用）
-let bingeCurrentIndex = 0;   // 当前剧在池中的下标（返回恢复用）
+const BINGE_STORE_KEY = 'veyra.binge.v2';
+let bingePayload = null;      // 当前剧单 { items: [...] }
+let bingeCurrentId = null;    // 当前剧 id（卡片按钮用）
+let bingeCurrentIndex = 0;    // 当前剧在剧单里的下标
+let bingeEngineLive = false;  // 原生引擎是否已经建好播放器（决定用 start 还是 resume）
+let bingeStarting = false;    // binge-start 正在途中（防止 setRoute 抖动时重复建播放器）
 
 function bingePoolItems() {
   const data = state.home || {};
@@ -3636,12 +3653,34 @@ function bingePoolItems() {
     && !seen.has(String(item.id)) && seen.add(String(item.id)));
 }
 
+// ---- 记忆：刷剧形态 + 剧单 + 停在第几部，一并落盘 ----
+function saveBingePref() {
+  try {
+    if (!state.binge || !bingePayload || !bingePayload.items || !bingePayload.items.length) {
+      localStorage.removeItem(BINGE_STORE_KEY);
+      return;
+    }
+    localStorage.setItem(BINGE_STORE_KEY, JSON.stringify({
+      on: true, source: contentSource, items: bingePayload.items, index: bingeCurrentIndex,
+    }));
+  } catch (error) { }
+}
+function readBingePref() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(BINGE_STORE_KEY) || 'null');
+    if (!raw || !raw.on || !Array.isArray(raw.items) || !raw.items.length) return null;
+    if (raw.source && raw.source !== contentSource) return null;   // 内容源换了就别恢复
+    return raw;
+  } catch (error) { return null; }
+}
+
 function updateBingeChrome() {
   if (!bingeFab) return;
-  const show = state.route === 'home' && !privateMode() && bingePoolItems().length > 0;
+  // 刷剧态无条件显示（否则退出按钮会跟着剧单一起消失）；传统态仍按首页池子决定
+  const show = !privateMode() && state.route === 'home'
+    && (state.binge || bingePoolItems().length > 0);
   bingeFab.hidden = !show;
-  // 始终是首页那一个按钮、那一个图标：进刷剧只切「按下态」(.active)，不再把图标换成「回首页」，
-  // 否则同一个控件在刷剧页看起来像换成了另一个按钮。
+  // 始终是首页那一个按钮、那一个图标：进刷剧只切「按下态」，不换图标、不换底色。
   const play = bingeFab.querySelector('.binge-fab-play');
   const home = bingeFab.querySelector('.binge-fab-home');
   if (play) play.hidden = false;
@@ -3651,51 +3690,94 @@ function updateBingeChrome() {
 }
 window.__bingeUpdateChrome = updateBingeChrome;
 
-// 进入/退出刷剧（首页形态切换：真底栏 #dock 与 #binge-fab 本身是同一套，一字不动）
-function startBingeMode() {
-  state.binge = true;
-  document.getElementById('app')?.classList.add('binge');
-  document.body.classList.add('binge');
+// 唯一的状态同步出口：形态 → 浮层可见性 → 原生引擎的 start/pause/resume
+function syncBinge() {
+  const app = document.getElementById('app');
   const binge = document.getElementById('binge');
-  if (binge) binge.hidden = false;
+  const hasItems = !!(bingePayload && bingePayload.items && bingePayload.items.length);
+  // 没有剧单就别进刷剧形态：否则会把首页藏起来、只留一块黑屏
+  const want = !!state.binge && hasItems && !privateMode();
+  const visible = want && state.route === 'home';
+  app?.classList.toggle('binge', visible);
+  document.body.classList.toggle('binge', visible);
+  if (binge) binge.hidden = !visible;
   updateBingeChrome();
+  if (visible) {
+    if (!bingeEngineLive) startBingeEngine();
+    else if (window.api) api('binge-resume').catch(() => { });
+  } else if (bingeEngineLive && window.api) {
+    // 只是暂停：保留播放器与位置，回来 resume 就能接着播，不用重新 loadShow
+    api('binge-pause').catch(() => { });
+  }
 }
-function exitBingeMode() {
-  state.binge = false;
-  document.getElementById('app')?.classList.remove('binge');
-  document.body.classList.remove('binge');
-  const binge = document.getElementById('binge');
-  if (binge) binge.hidden = true;
-  if (window.api) api('binge-exit').catch(() => {});
-  updateBingeChrome();
+window.__bingeSync = syncBinge;
+
+function startBingeEngine() {
+  const items = (bingePayload && bingePayload.items) || [];
+  if (!items.length) return;
+  const index = Math.max(0, Math.min(bingeCurrentIndex, items.length - 1));
+  if (!window.api || bingeStarting) return;
+  bingeStarting = true;
+  api('binge-start', { items: items, index: index, source: contentSource }).then(() => {
+    bingeStarting = false;
+    bingeEngineLive = true;
+  }).catch(error => {
+    bingeStarting = false;
+    // 原生引擎没起来（起播失败/异常）：退回传统首页，别把人卡在一个没有画面的刷剧页里
+    bingeEngineLive = false;
+    state.binge = false;
+    saveBingePref();
+    syncBinge();
+    toast(error.message || '进入刷剧模式失败', true);
+  });
 }
 
 function enterBingeFresh() {
   if (privateMode() || state.route !== 'home') return;
   const items = bingePoolItems();
   if (!items.length) { toast('首页还没有推荐内容，稍后再试', true); return; }
-  // 洗牌后取一批：每次进入刷的是不同的随机剧
-  for (let i = items.length - 1; i > 0; i--) {
+  // 洗牌后取一批：每次主动进入刷的是不同的随机剧（从记忆恢复时不动剧单）
+  const shuffled = items.slice();
+  for (let i = shuffled.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-    [items[i], items[j]] = [items[j], items[i]];
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
   }
-  const payload = items.slice(0, 40).map(item => ({
+  bingePayload = { items: shuffled.slice(0, 40).map(item => ({
     id: String(item.id), title: item.title || '',
     cover: item.cover || '', description: item.description || item.episodeLabel || '',
-  }));
-  bingePayload = { items: payload };
-  startBingeMode();
-  api('binge-start', { items: payload, index: 0, source: contentSource }).catch(error => {
-    // 原生引擎没起来（起播失败/异常）：退回普通首页，别把人卡在一个没有画面的刷剧页里
-    if (state.binge) exitBingeMode();
-    toast(error.message || '进入刷剧模式失败', true);
-  });
+  })) };
+  bingeCurrentIndex = 0;
+  bingeCurrentId = null;
+  state.binge = true;
+  saveBingePref();
+  syncBinge();
 }
 
+function exitBingeMode() {
+  state.binge = false;
+  bingeEngineLive = false;
+  saveBingePref();
+  syncBinge();
+  if (window.api) api('binge-exit').catch(() => { });
+}
+
+// 冷启动恢复：上次停在刷剧页，这次进来还是刷剧页（同一批剧、同一部）
+function restoreBingeFromStore() {
+  if (state.binge || privateMode() || state.route !== 'home') return;
+  const saved = readBingePref();
+  if (!saved) return;
+  bingePayload = { items: saved.items };
+  bingeCurrentIndex = Math.max(0, Math.min(saved.index || 0, saved.items.length - 1));
+  bingeCurrentId = saved.items[bingeCurrentIndex] ? saved.items[bingeCurrentIndex].id : null;
+  state.binge = true;
+  syncBinge();
+}
+window.__bingeRestore = restoreBingeFromStore;
+
 bingeFab?.addEventListener('click', () => {
-  if (privateMode() || state.route !== 'home') return;
+  if (privateMode()) return;
   if (state.binge) exitBingeMode();
-  else enterBingeFresh();
+  else if (state.route === 'home') enterBingeFresh();
 });
 
 // 原生引擎回写卡片（标题/简介/封面 + 当前剧 id/下标）
@@ -3708,9 +3790,10 @@ window.hgBingeUpdate = (info) => {
   if (descEl) descEl.textContent = info.description || '';
   if (msgEl) msgEl.hidden = true;
   bingeCurrentId = info.id || null;
-  bingeCurrentIndex = typeof info.index === 'number' ? info.index : bingeCurrentIndex;
+  if (typeof info.index === 'number') bingeCurrentIndex = info.index;
   const card = document.getElementById('binge-card');
   if (card) card.hidden = false;
+  saveBingePref();   // 换一部就记一部，冷启动能停在同一部
 };
 window.hgBingeFailed = (message) => {
   const msgEl = document.getElementById('binge-msg');
@@ -3719,52 +3802,62 @@ window.hgBingeFailed = (message) => {
   if (card) card.hidden = true;
 };
 
-// 卡片按钮：查看详情（退出刷剧并进详情，记住位置以便返回恢复）、观看全集（原生引擎进播放页）
-document.getElementById('binge-detail-btn')?.addEventListener('click', () => {
-  if (bingeCurrentId != null) window.hgBingeAction('detail', bingeCurrentId, bingeCurrentIndex);
-});
+// 卡片按钮：查看详情 —— 不退出刷剧形态，只让 syncBinge 把浮层收起并 pause；
+// 从详情返回时 route 回到 home，syncBinge 自动 resume，全程不经过传统首页。
+function openBingeDetail(id) {
+  if (id == null) return;
+  goDetail(String(id)).catch(() => { });
+}
+document.getElementById('binge-detail-btn')?.addEventListener('click', () => openBingeDetail(bingeCurrentId));
 document.getElementById('binge-full-btn')?.addEventListener('click', () => {
-  if (window.api) api('binge-full', { episode: 1 }).catch(() => {});
+  if (window.api) api('binge-full', { episode: 1 }).catch(() => { });
 });
-
-window.hgBingeAction = (type, id, index) => {
-  if (type === 'detail' && id) {
-    // 记住刷剧位置：从详情返回首页时自动回到刷剧模式、停在同一部剧
-    if (bingePayload && typeof index === 'number') bingeReturnIndex = index;
-    exitBingeMode();                 // 退出刷剧（隐藏浮层 + 通知原生引擎释放播放器）
-    goDetail(id).catch(() => {});
-  }
+window.hgBingeAction = (type, id) => {
+  if (type === 'detail') openBingeDetail(id);
 };
 
-// 上下滑换剧：由 #binge 浮层捕获竖向滑动 → 原生引擎 next/prev
+// 上下滑换剧：#binge 浮层铺满全屏但本身没有可测的盒子，绑在 window 捕获阶段最稳
+// （之前绑在 #binge 上、依赖命中测试，滑不动就是这么来的）。
 (function setupBingeSwipe() {
-  const binge = document.getElementById('binge');
-  if (!binge) return;
-  let startY = 0, swiping = false;
-  const SLOP = 14, THRESH = 110;
-  binge.addEventListener('pointerdown', e => {
-    if (e.target.closest('.binge-card')) return;   // 卡片按钮区域不触发滑动
-    startY = e.clientY; swiping = true;
-  }, { passive: true });
-  binge.addEventListener('pointermove', () => {}, { passive: true });
-  binge.addEventListener('pointerup', e => {
-    if (!swiping) return;
-    swiping = false;
-    const dy = e.clientY - startY;
-    if (Math.abs(dy) > THRESH) {
-      if (dy < 0) api('binge-next').catch(() => {});
-      else api('binge-prev').catch(() => {});
-    }
-  }, { passive: true });
-  binge.addEventListener('pointercancel', () => { swiping = false; }, { passive: true });
-})();
+  let tracking = false, startX = 0, startY = 0, lastX = 0, lastY = 0;
+  const IGNORE = '#dock, #binge-fab, .binge-card, .binge-msg, #toast-host';
 
-// 从详情返回首页 → 恢复刷剧（同一批剧 + 同一位置）；须在 setRoute 更新 state.route 之前调用
-function resumeBingeIfReturned(target) {
-  if (target !== 'home' || bingeReturnIndex == null || !bingePayload) return;
-  if (state.route !== 'detail') return;
-  const i = bingeReturnIndex;
-  bingeReturnIndex = null;
-  startBingeMode();
-  api('binge-start', { items: bingePayload.items, index: i, source: contentSource }).catch(() => {});
-}
+  function onScreen() {
+    const layer = document.getElementById('binge');
+    return !!state.binge && layer && !layer.hidden;
+  }
+  function begins(e) {
+    if (!onScreen()) { tracking = false; return; }
+    const target = e.target;
+    if (target && target.closest && target.closest(IGNORE)) { tracking = false; return; }
+    const touch = e.touches ? e.touches[0] : e;
+    startX = lastX = touch.clientX;
+    startY = lastY = touch.clientY;
+    tracking = true;
+  }
+  function moves(e) {
+    if (!tracking) return;
+    const touch = e.touches ? e.touches[0] : e;
+    lastX = touch.clientX;
+    lastY = touch.clientY;
+  }
+  function ends() {
+    if (!tracking) return;
+    tracking = false;
+    const dy = lastY - startY;
+    const dx = lastX - startX;
+    // 只认纵向手势：横向留给首页的整页横滑；阈值按屏高算，短屏手机也滑得动
+    if (Math.abs(dy) < Math.max(52, Math.round(window.innerHeight * 0.06))) return;
+    if (Math.abs(dy) < Math.abs(dx) * 1.2) return;
+    if (!window.api) return;
+    if (dy < 0) api('binge-next').catch(() => { });
+    else api('binge-prev').catch(() => { });
+  }
+  window.addEventListener('touchstart', begins, { passive: true, capture: true });
+  window.addEventListener('touchmove', moves, { passive: true, capture: true });
+  window.addEventListener('touchend', ends, { passive: true, capture: true });
+  window.addEventListener('touchcancel', () => { tracking = false; }, { passive: true, capture: true });
+  // 桌面/调试环境兜底
+  window.addEventListener('pointerdown', e => { if (e.pointerType === 'mouse') begins(e); }, { passive: true, capture: true });
+  window.addEventListener('pointerup', e => { if (e.pointerType === 'mouse') ends(); }, { passive: true, capture: true });
+})();

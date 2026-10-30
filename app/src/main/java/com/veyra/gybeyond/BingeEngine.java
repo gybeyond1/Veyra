@@ -86,6 +86,9 @@ public class BingeEngine {
     private boolean destroyed;
     private boolean animating;
     private boolean active;
+    // 刷剧形态被「挂起」（切到别的 tab / 进详情 / 看全集）。挂起期间不恢复播放、不抢沉浸态，
+    // 播放器与进度原样保留，resume() 回来就能接着播 —— 不用重新 loadShow，也就不会闪传统首页。
+    private boolean suspended;
     private final Map<String, Bitmap> posterCache = new HashMap<>();
     private final Map<String, JSONObject> detailCache = new ConcurrentHashMap<>();
     private final Map<String, JSONObject> readyCache = new ConcurrentHashMap<>();
@@ -145,6 +148,7 @@ public class BingeEngine {
             pool = items;
             index = Math.max(0, Math.min(startIndex, items.length() - 1));
             active = true;
+            suspended = false;
             videoLayer.setVisibility(View.VISIBLE);
             videoLayer.setAlpha(1f);
             videoLayer.setTranslationY(0f);
@@ -159,6 +163,7 @@ public class BingeEngine {
 
     public void exit() {
         active = false;
+        suspended = false;
         releasePlayer();
         videoLayer.setVisibility(View.GONE);
         showBars();
@@ -166,7 +171,28 @@ public class BingeEngine {
     }
 
     public void onResume() {
-        if (!active) return;
+        // 挂起期间（切到别的 tab / 在详情页 / 在看全集）不要自作主张恢复播放，也不要去抢沉浸态
+        if (!active || suspended) return;
+        hideBars();
+        if (player != null) player.setPlayWhenReady(true);
+        handler.post(tick);
+    }
+
+    /** 挂起：只暂停 + 存进度，播放器与当前剧原样保留（切 tab / 进详情 / 看全集都走这里）。*/
+    public void pause() {
+        suspended = true;
+        if (player != null) {
+            player.setPlayWhenReady(false);
+            saveProgress(false);
+        }
+        handler.removeCallbacks(tick);
+    }
+
+    /** 从挂起恢复：同一个播放器接着播，不重新 loadShow（因此不会闪一下传统首页）。*/
+    public void resume() {
+        if (!active) { videoLayer.setVisibility(View.GONE); return; }
+        suspended = false;
+        videoLayer.setVisibility(View.VISIBLE);
         hideBars();
         if (player != null) player.setPlayWhenReady(true);
         handler.post(tick);
