@@ -173,7 +173,7 @@ public final class MainActivity extends Activity {
 
             android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(this)
                     .setTitle("检测到上次崩溃")
-                    .setView(scroll, 28, 16, 28, 0)
+                    .setView(scroll)
                     .setPositiveButton("复制日志", (d, w) -> {
                         try {
                             ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
