@@ -1803,6 +1803,8 @@ function backDestination() {
   return state.route === 'home' ? null : 'home';
 }
 
+let bingePreviewClass = false;
+
 function clearPredictivePreview() {
   clearTimeout(predictiveTimer);
   if (predictiveFrame) cancelAnimationFrame(predictiveFrame);
@@ -1811,7 +1813,15 @@ function clearPredictivePreview() {
   predictiveSourceNode = null;
   predictivePreview?.remove();
   predictivePreview = null;
-  document.getElementById('app').classList.remove('predictive-active');
+  document.getElementById('app').classList.remove('predictive-active', 'binge-preview');
+  document.body.classList.remove('binge-preview');
+  if (bingePreviewClass) {
+    // 这次预览是我们临时给 #app 挂的 binge 类：先撤掉，再让 syncBinge 按真实状态决定要不要加回来
+    // （提交返回时 home 已经进入刷剧态，syncBinge 会立刻把它加回去；取消时则不该有任何残留）
+    bingePreviewClass = false;
+    document.getElementById('app').classList.remove('binge');
+    window.__bingeSync && window.__bingeSync();
+  }
   scroll.style.removeProperty('transition');
   scroll.style.removeProperty('transform');
 }
@@ -1824,6 +1834,33 @@ window.hgPredictiveBackStart = fromRight => {
     return detailCard.begin();
   }
   const destination = backDestination();
+  // 刷剧态从详情返回：快照里存的是「传统首页」，直接拿来当预览就会看到
+  // 「先跳回原首页、再跳回刷剧页」。这里改成透明预览层 + 克隆刷剧 UI，
+  // 透出后面暂停住的原生视频帧 —— 视觉上就是原地返回，不经过首页。
+  if (state.route === 'detail' && destination === 'home' && state.binge) {
+    const preview = document.createElement('div');
+    preview.className = 'back-preview back-preview-binge';
+    preview.setAttribute('aria-hidden', 'true');
+    // 克隆保留 id：样式表全是 #dock / #binge 这种 id 选择器，去掉 id 就散架了。
+    // 真元素在详情路由下本来就被藏起来（#app.route-detail>#dock{visibility:hidden}、#binge hidden），
+    // 克隆在 .back-preview 里不是 #app 的直接子元素，所以不会被那条规则命中。
+    const layer = document.getElementById('binge')?.cloneNode(true);
+    const dock = document.getElementById('dock')?.cloneNode(true);
+    const fab = document.getElementById('binge-fab')?.cloneNode(true);
+    if (layer) { layer.hidden = false; preview.appendChild(layer); }
+    if (dock) preview.appendChild(dock);
+    if (fab) { fab.hidden = false; preview.appendChild(fab); }
+    const app = document.getElementById('app');
+    app.appendChild(preview);
+    app.classList.add('predictive-active', 'binge-preview');
+    // 让克隆出来的底栏/卡片吃刷剧态那套玻璃（选择器是 #app.binge #dock）
+    if (!app.classList.contains('binge')) { app.classList.add('binge'); bingePreviewClass = true; }
+    document.body.classList.add('binge-preview');
+    scroll.style.transition = 'none';
+    predictivePreview = preview;
+    predictivePreview.fromRight = fromRight;
+    return true;
+  }
   const fromDetail = state.route === 'detail' && state.previous?.route === destination && state.previous.pageNode;
   const snapshot = fromDetail ? state.previous : screenSnapshots[destination];
   if (!snapshot) return false;
@@ -3709,8 +3746,44 @@ function syncBinge() {
     // 只是暂停：保留播放器与位置，回来 resume 就能接着播，不用重新 loadShow
     api('binge-pause').catch(() => { });
   }
+  scheduleBingeGlass();
 }
 window.__bingeSync = syncBinge;
+
+/* ---- 真玻璃：把底栏 / 悬浮按钮 / 详情卡的位置报给原生 ----
+   刷剧态 WebView 是整页透明的，CSS 的 backdrop-filter 采不到垫在后面的原生视频，
+   所以这几块板的模糊由原生做（BingeGlass），这里只负责把它们的圆角矩形告诉原生。
+   位置变了（换剧改了卡片高度、转屏、横竖切换）就重报一次。 */
+let bingeGlassFrame = 0;
+function pushBingeGlass() {
+  const host = window.AndroidHost;
+  if (!host || typeof host.bingeGlass !== 'function') return;
+  const glassOff = document.documentElement.dataset.glass === 'off';
+  if (glassOff || !(state.binge && state.route === 'home')) {
+    try { host.bingeGlass('[]'); } catch (error) { }
+    return;
+  }
+  const list = [];
+  const add = element => {
+    if (!element || element.hidden) return;
+    const rect = element.getBoundingClientRect();
+    if (rect.width < 2 || rect.height < 2) return;
+    const radius = parseFloat(getComputedStyle(element).borderTopLeftRadius) || 0;
+    list.push([
+      Math.round(rect.left), Math.round(rect.top),
+      Math.round(rect.width), Math.round(rect.height), Math.round(radius),
+    ]);
+  };
+  add(document.getElementById('dock'));
+  add(document.getElementById('binge-fab'));
+  add(document.getElementById('binge-card'));
+  try { host.bingeGlass(JSON.stringify(list)); } catch (error) { }
+}
+function scheduleBingeGlass() {
+  if (bingeGlassFrame) return;
+  bingeGlassFrame = requestAnimationFrame(() => { bingeGlassFrame = 0; pushBingeGlass(); });
+}
+window.addEventListener('resize', scheduleBingeGlass);
 
 function startBingeEngine() {
   const items = (bingePayload && bingePayload.items) || [];
@@ -3794,6 +3867,7 @@ window.hgBingeUpdate = (info) => {
   const card = document.getElementById('binge-card');
   if (card) card.hidden = false;
   saveBingePref();   // 换一部就记一部，冷启动能停在同一部
+  scheduleBingeGlass();   // 简介长短会改变卡片高度，玻璃底板要跟着重划
 };
 window.hgBingeFailed = (message) => {
   const msgEl = document.getElementById('binge-msg');
@@ -3816,48 +3890,105 @@ window.hgBingeAction = (type, id) => {
   if (type === 'detail') openBingeDetail(id);
 };
 
-// 上下滑换剧：#binge 浮层铺满全屏但本身没有可测的盒子，绑在 window 捕获阶段最稳
-// （之前绑在 #binge 上、依赖命中测试，滑不动就是这么来的）。
+/* 上下滑换剧（跟手）—— 和红果一致：手指按住画面就跟着走，松手才决定切不切。
+   位移逐帧同步给原生视频层（AndroidHost.bingeDrag），判定在原生侧（BingeEngine.dragEnd）：
+     · 慢滑：位移超过屏高 22% → 切
+     · 快滑：抬手瞬间速度 > 780px/s → 直接切
+     · 边界方向：位移打三折，松手回弹
+   WebView 这边只负责把位移交出去，顺便给卡片一点视差，别让整屏像块贴纸。 */
 (function setupBingeSwipe() {
-  let tracking = false, startX = 0, startY = 0, lastX = 0, lastY = 0;
   const IGNORE = '#dock, #binge-fab, .binge-card, .binge-msg, #toast-host';
+  let tracking = false, dragging = false;
+  let startX = 0, startY = 0, dy = 0, lastY = 0, lastAt = 0, velocity = 0;
+
+  const cardEl = () => document.getElementById('binge-card');
 
   function onScreen() {
     const layer = document.getElementById('binge');
     return !!state.binge && layer && !layer.hidden;
   }
-  function begins(e) {
-    if (!onScreen()) { tracking = false; return; }
-    const target = e.target;
-    if (target && target.closest && target.closest(IGNORE)) { tracking = false; return; }
-    const touch = e.touches ? e.touches[0] : e;
-    startX = lastX = touch.clientX;
-    startY = lastY = touch.clientY;
+
+  function bridge(phase, offset, speed) {
+    const host = window.AndroidHost;
+    if (!host || typeof host.bingeDrag !== 'function') return;
+    try { host.bingeDrag(phase, offset || 0, speed || 0); } catch (error) { }
+  }
+
+  function paintCard(value) {
+    const card = cardEl();
+    if (!card) return;
+    card.style.transform = value ? 'translate3d(0,' + (value * 0.26).toFixed(1) + 'px,0)' : '';
+    card.style.opacity = value ? String(Math.max(0.2, 1 - Math.abs(value) / 520)) : '';
+  }
+
+  function begin(x, y) {
+    if (!onScreen()) return;
     tracking = true;
+    dragging = false;
+    startX = x; startY = y;
+    dy = 0; lastY = y; lastAt = performance.now(); velocity = 0;
   }
-  function moves(e) {
+
+  function move(x, y) {
     if (!tracking) return;
-    const touch = e.touches ? e.touches[0] : e;
-    lastX = touch.clientX;
-    lastY = touch.clientY;
+    const deltaY = y - startY;
+    const deltaX = x - startX;
+    if (!dragging) {
+      // 只认纵向：横向留给首页整页横滑，抢了的话两边都用不了
+      if (Math.abs(deltaY) < 8 || Math.abs(deltaY) < Math.abs(deltaX)) return;
+      dragging = true;
+      bridge('start', 0, 0);
+      const card = cardEl();
+      if (card) card.style.transition = 'none';
+    }
+    const now = performance.now();
+    const elapsed = Math.max(1, now - lastAt);
+    // 单帧速度容易抖，这里用最近一帧的瞬时值：快速一划时它才是判定依据
+    velocity = (y - lastY) / elapsed * 1000;
+    lastY = y; lastAt = now;
+    dy = deltaY;
+    bridge('move', dy);
+    paintCard(dy);
   }
-  function ends() {
+
+  function finish(cancelled) {
     if (!tracking) return;
     tracking = false;
-    const dy = lastY - startY;
-    const dx = lastX - startX;
-    // 只认纵向手势：横向留给首页的整页横滑；阈值按屏高算，短屏手机也滑得动
-    if (Math.abs(dy) < Math.max(52, Math.round(window.innerHeight * 0.06))) return;
-    if (Math.abs(dy) < Math.abs(dx) * 1.2) return;
-    if (!window.api) return;
-    if (dy < 0) api('binge-next').catch(() => { });
-    else api('binge-prev').catch(() => { });
+    if (!dragging) return;
+    dragging = false;
+    bridge('end', dy, cancelled ? 0 : velocity);
+    const card = cardEl();
+    if (card) card.style.transition = 'transform 220ms cubic-bezier(.22,.7,.2,1),opacity 220ms ease';
+    paintCard(0);
+    setTimeout(() => {
+      const el = cardEl();
+      if (el) { el.style.transition = ''; el.style.transform = ''; el.style.opacity = ''; }
+      scheduleBingeGlass();
+    }, 230);
+    dy = 0; velocity = 0;
   }
-  window.addEventListener('touchstart', begins, { passive: true, capture: true });
-  window.addEventListener('touchmove', moves, { passive: true, capture: true });
-  window.addEventListener('touchend', ends, { passive: true, capture: true });
-  window.addEventListener('touchcancel', () => { tracking = false; }, { passive: true, capture: true });
+
+  function fromIgnored(target) {
+    return !!(target && target.closest && target.closest(IGNORE));
+  }
+
+  window.addEventListener('touchstart', e => {
+    if (e.touches.length !== 1 || fromIgnored(e.target)) { tracking = false; return; }
+    begin(e.touches[0].clientX, e.touches[0].clientY);
+  }, { passive: true, capture: true });
+  window.addEventListener('touchmove', e => {
+    if (!tracking || e.touches.length !== 1) return;
+    move(e.touches[0].clientX, e.touches[0].clientY);
+  }, { passive: true, capture: true });
+  window.addEventListener('touchend', () => finish(false), { passive: true, capture: true });
+  window.addEventListener('touchcancel', () => finish(true), { passive: true, capture: true });
   // 桌面/调试环境兜底
-  window.addEventListener('pointerdown', e => { if (e.pointerType === 'mouse') begins(e); }, { passive: true, capture: true });
-  window.addEventListener('pointerup', e => { if (e.pointerType === 'mouse') ends(); }, { passive: true, capture: true });
+  window.addEventListener('pointerdown', e => {
+    if (e.pointerType !== 'mouse' || fromIgnored(e.target)) return;
+    begin(e.clientX, e.clientY);
+  }, { passive: true, capture: true });
+  window.addEventListener('pointermove', e => {
+    if (e.pointerType === 'mouse') move(e.clientX, e.clientY);
+  }, { passive: true, capture: true });
+  window.addEventListener('pointerup', e => { if (e.pointerType === 'mouse') finish(false); }, { passive: true, capture: true });
 })();

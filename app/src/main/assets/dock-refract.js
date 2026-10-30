@@ -56,6 +56,19 @@
     return [circle * -push * nx, circle * -push * ny];
   }
 
+  /* 折射强度来自外观设置：--glass-refract 是百分比（158 = 默认 1.0 倍）。
+     玻璃总开关关掉、或按钮材质选了「模糊」时直接不挂折射（0 = 纯模糊）。 */
+  function lensRatio() {
+    var root = document.documentElement;
+    if (root.dataset.glass === 'off') return 0;
+    if (root.dataset.btnMat === 'fuzzy') return 0;
+    var raw = parseFloat(getComputedStyle(root).getPropertyValue('--glass-refract'));
+    if (!isFinite(raw) || raw <= 0) return 1;
+    return Math.max(0, Math.min(2.2, raw / 158));
+  }
+
+  var refreshers = [];
+
   var hostSvg = null;
   function ensureHost() {
     if (hostSvg && hostSvg.parentNode) return hostSvg;
@@ -97,9 +110,14 @@
       if (disposed) return;
       var w = target.offsetWidth, h = target.offsetHeight;   // 未变形尺寸：位移图用 CSS 像素坐标系
       if (w < 2 || h < 2) return;
+      var ratio = lensRatio();
+      if (ratio <= 0) {
+        target.removeAttribute('data-lens');   // 交回 CSS 的原生模糊
+        return;
+      }
       var cs = getComputedStyle(target);
       var radius = parseFloat(cs.borderTopLeftRadius) || 0;
-      var key = Math.round(w) + ':' + Math.round(h) + ':' + Math.round(radius);
+      var key = Math.round(w) + ':' + Math.round(h) + ':' + Math.round(radius) + ':' + ratio.toFixed(2);
       if (key !== lastKey) {
         var factor = Math.min(1, MAX_EDGE / Math.max(w, h));
         var cw = Math.max(1, Math.round(w * factor)), ch = Math.max(1, Math.round(h * factor));
@@ -111,7 +129,7 @@
         var data = img.data, i = 0;
         for (var yy = 0; yy < ch; yy++) {
           for (var xx = 0; xx < cw; xx++) {
-            var dxy = lensDisplacement((xx + 0.5) / factor, (yy + 0.5) / factor, w, h, radius, depth, push);
+            var dxy = lensDisplacement((xx + 0.5) / factor, (yy + 0.5) / factor, w, h, radius, depth, push * ratio);
             data[i]     = Math.round(255 * (0.5 + dxy[0] / SCALE));   // R = x 位移
             data[i + 1] = Math.round(255 * (0.5 + dxy[1] / SCALE));   // G = y 位移
             data[i + 2] = 128;
@@ -149,10 +167,13 @@
     var dock = target.closest ? target.closest('#dock') : null;
     if (dock && dock !== target) mo.observe(dock, { attributes: true, attributeFilter: ['class'] });
 
+    refreshers.push(schedule);
     schedule();
 
     return {
       dispose: function () {
+        var at = refreshers.indexOf(schedule);
+        if (at >= 0) refreshers.splice(at, 1);
         disposed = true;
         if (queued) cancelAnimationFrame(queued);
         if (ro) ro.disconnect(); else window.removeEventListener('resize', schedule);
@@ -181,6 +202,12 @@
     // v0.18.106：设置按钮（我的页右上）同款玻璃折射。初始 hidden，显示后 RO 自动补挂。
     var settings = document.querySelector('.header-settings');
     if (settings) applyLens(settings, { id: 'header-settings-lens', depth: 10, push: 7 });
+    // 外观设置改了折射强度/材质后，由 appearance.js 调这里重算
+    window.__veyraRelens = function () {
+      for (var i = 0; i < refreshers.length; i++) {
+        try { refreshers[i](); } catch (error) { }
+      }
+    };
   }
 
   if (document.readyState === 'loading') {

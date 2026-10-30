@@ -1,101 +1,138 @@
-/* 外观预设数据 —— 逐字取自 Sunny UI 的 assets/appearance/presets.ts（Apache-2.0）。
- * materials 的 sample 就是原稿材质缩略块的 CSS，直接内联到缩略图上，不用手绘替代。 */
-var SUNNY_MATERIALS = [{"id":"soft","name":"柔软浮雕","sample":"background:linear-gradient(158deg,#f8f9fb,#edf0f4);border:1px solid rgba(26,42,68,.05);box-shadow:4px 4px 9px rgba(26,42,68,.16),-3px -3px 7px #fff"},{"id":"clear","name":"清晰默认","sample":"background:#fff;border:1px solid #e4e8ef;box-shadow:0 1px 2px rgba(16,26,42,.08)"},{"id":"paper","name":"纸页档案","sample":"background:linear-gradient(110deg,rgba(139,116,82,.07),transparent 45%),#fffdf7;border:1px solid #e0d6c3;box-shadow:inset 0 0 0 2px #fffefb,0 2px 0 rgba(139,116,82,.18)"},{"id":"linen","name":"亚麻织纹","sample":"background:repeating-linear-gradient(45deg,rgba(110,100,80,.13) 0 1px,transparent 1px 3px),repeating-linear-gradient(-45deg,rgba(110,100,80,.11) 0 1px,transparent 1px 3px),#f6f4ee;border:1px solid #d5d0c2"},{"id":"glass","name":"iOS 玻璃","sample":"background:linear-gradient(135deg,rgba(255,255,255,.92),rgba(214,228,246,.5));border:1px solid rgba(255,255,255,.95);box-shadow:inset 0 1px 0 #fff,0 4px 10px rgba(16,26,42,.14)"},{"id":"frosted","name":"雾面玻璃","sample":"background:rgba(255,255,255,.68);border:1px solid rgba(255,255,255,.95);box-shadow:inset 0 2px 0 #fff,inset 0 -3px 6px rgba(20,30,45,.16)"},{"id":"aurora","name":"极光玻璃","sample":"background:linear-gradient(120deg,rgba(255,255,255,.8),rgba(110,205,225,.55) 45%,rgba(200,150,240,.5));border:1px solid rgba(255,255,255,.8);box-shadow:0 3px 10px rgba(70,140,170,.2)"},{"id":"duotone","name":"双色渐层","sample":"background:linear-gradient(125deg,color-mix(in srgb,var(--accent) 58%,#fff),color-mix(in srgb,var(--accent-2) 58%,#fff));border:1px solid color-mix(in srgb,var(--accent) 22%,#fff)"},{"id":"satin","name":"缎光瓷面","sample":"background:linear-gradient(155deg,#fff,#e6edf8 38%,#fff 56%,#f0eef9);border:1px solid #e3e8f0;box-shadow:inset 0 1px 1px #fff,0 3px 8px rgba(24,38,61,.1)"},{"id":"outline","name":"精致描边","sample":"background:#fff;border:1px solid color-mix(in srgb,var(--accent) 48%,#fff);box-shadow:0 2px 0 color-mix(in srgb,var(--accent) 20%,transparent)"},{"id":"metal","name":"拉丝金属","sample":"background:linear-gradient(105deg,transparent 26%,rgba(255,255,255,.65) 44%,transparent 60%),repeating-linear-gradient(0deg,rgba(255,255,255,.9) 0 1px,rgba(120,134,152,.22) 1px 2px,transparent 2px 4px),linear-gradient(180deg,#eef3f7,#c9d2dc);border:1px solid #aeb9c7;box-shadow:inset 0 1px 0 #fff,inset 0 -2px 0 #9ca8b8"},{"id":"clay","name":"陶土哑光","sample":"background:radial-gradient(120% 100% at 20% 0%,#fbf2e7,#e8d5c3);border:1px solid rgba(160,130,100,.24);box-shadow:0 7px 14px rgba(120,86,58,.24),inset 0 2px 2px rgba(255,255,255,.8)"},{"id":"marble","name":"大理石","sample":"background:conic-gradient(from 118deg at 26% 38%,rgba(150,162,180,.3),transparent 12%,rgba(190,198,210,.26) 26%,transparent 42%,rgba(140,152,170,.28) 58%,transparent 76%),linear-gradient(160deg,#fff,#ecf0f4);border:1px solid rgba(150,160,175,.32);box-shadow:inset 0 1px 0 #fff"},{"id":"neon","name":"霓虹暗夜","sample":"background:linear-gradient(160deg,#1a2236,#0b0f17);border:1px solid color-mix(in srgb,var(--accent) 65%,transparent);box-shadow:0 0 10px color-mix(in srgb,var(--accent) 50%,transparent),inset 0 0 10px color-mix(in srgb,var(--accent) 30%,transparent)"},{"id":"cutout","name":"纸片拼贴","sample":"background:#fff;border:1px solid color-mix(in srgb,var(--accent) 58%,#93a2b6);box-shadow:3px 3px 0 color-mix(in srgb,var(--accent) 34%,transparent)"},{"id":"mesh","name":"雾面色场","sample":"background:radial-gradient(60% 80% at 18% 12%,color-mix(in srgb,var(--accent) 60%,#fff),transparent 72%),radial-gradient(65% 85% at 88% 82%,color-mix(in srgb,var(--accent-2) 60%,#fff),transparent 72%),#f7f8fb;border:1px solid transparent;box-shadow:0 4px 10px rgba(20,30,50,.1)"}];
-var SUNNY_COLORS_SINGLE = [{"id":"blue","name":"晴蓝","light":"#376bd8","dark":"#9dbbff"},{"id":"celadon","name":"青瓷","light":"#2f7f76","dark":"#8fd6c9"},{"id":"green","name":"松绿","light":"#188466","dark":"#7fd3b0"},{"id":"violet","name":"鸢紫","light":"#8855cc","dark":"#c0a4f5"},{"id":"rose","name":"莓红","light":"#c34278","dark":"#f0a3bf"},{"id":"brick","name":"砖窑","light":"#a8433a","dark":"#eda79e"},{"id":"amber","name":"琥珀","light":"#b27a16","dark":"#ebc078"},{"id":"mustard","name":"芥末","light":"#8f7a12","dark":"#ddc66a"},{"id":"indigo","name":"靛蓝","light":"#3b4fa8","dark":"#a9b6f0"},{"id":"slate","name":"石墨","light":"#61758f","dark":"#b2c1d4"}];
-var SUNNY_COLORS_MULTI = [{"id":"catppuccin","name":"奶霜花园","light":["#c14f7c","#179299","#d20f39"],"dark":["#f0acc7","#94e2d5","#f5c2e7"]},{"id":"nord","name":"北境极光","light":["#427fa4","#5e678d","#42776c"],"dark":["#88c0d0","#b48ead","#a3be8c"]},{"id":"iris","name":"鸢尾暮色","light":["#7958c8","#b34379","#22778a"],"dark":["#b7a5ff","#f3a6ce","#79d1de"]},{"id":"deepsea","name":"深海鎏金","light":["#1d6f8b","#b4892f","#4c5d8a"],"dark":["#7fd2e8","#ecd08a","#a9b6e0"]},{"id":"coast","name":"海盐日落","light":["#14869a","#b64d38","#866519"],"dark":["#79d5e5","#ffaf98","#edcf86"]},{"id":"lava","name":"暮色熔岩","light":["#b4465e","#7a4c93","#d97a3d"],"dark":["#f2a5b2","#c3a6ea","#f6c39a"]},{"id":"macaron","name":"马卡龙","light":["#329383","#9461ac","#b35a70"],"dark":["#a7dfd0","#dab6ef","#f4bacb"]},{"id":"cedar","name":"薄荷雪松","light":["#2e8b74","#8fa06a","#c9a227"],"dark":["#9fe0c9","#cfd9a8","#ecd08a"]},{"id":"peach","name":"蜜桃乌龙","light":["#c16648","#7e6541","#6b7d49"],"dark":["#f5b79d","#e2cb9d","#c8d7a7"]},{"id":"lavender","name":"蓝调花雾","light":["#467fb2","#7758a6","#9b586e"],"dark":["#a5c7e8","#c9b4ef","#e8b4c7"]},{"id":"mist","name":"海雾晨光","light":["#4f7fa8","#8fb9c9","#d9a98a"],"dark":["#a9cbe8","#cfe6ec","#f0cfb4"]},{"id":"forest","name":"雨后花园","light":["#3d895f","#8a6532","#625eaa"],"dark":["#9bd0af","#dfc392","#bdb8ef"]},{"id":"honey","name":"蜂蜜麦田","light":["#a17a24","#397976","#ad6556"],"dark":["#e4c278","#9dcfcb","#e5b0a3"]},{"id":"oasis","name":"沙漠绿洲","light":["#b07a2e","#4e8a6b","#8a5a3c"],"dark":["#eccd94","#a8d4b6","#d5ad8c"]},{"id":"ruby","name":"红茶玫瑰","light":["#c04757","#567647","#9b742e"],"dark":["#ee9aa5","#b5cda4","#dfc48a"]},{"id":"nightviolet","name":"紫罗兰夜","light":["#6c4ab6","#c05a8e","#2f8fa8"],"dark":["#bfa6f5","#f0a8c2","#8fd8e6"]}];
-var SUNNY_CORNERS = [{"id":"tight","name":"紧致"},{"id":"default","name":"标准"},{"id":"round","name":"圆润"}];
-
-/* Sunny UI 外观四维：明暗 × 质感 × 配色 × 圆角。四者独立保存，互不重置。 */
+/* 外观设置 —— 按参考稿（流影「玻璃材质」页）重排：
+ *   玻璃材质开关 / 按钮材质（模糊·液态玻璃）/ 背景（浅色·彩色·深色）/ 实时预览
+ *   / 高光强度 · 模糊程度 · 折射强度 三条滑杆 / 恢复默认材质
+ *   / 显示导航文字 / 界面动效（标准·减少·关闭）
+ *
+ * 四件事都落成 HTML 上的 data-* 与 CSS 变量，样式表只消费、不判断：
+ *   data-glass=on|off      → 玻璃全关时退回实底（不模糊、不折射）
+ *   data-btn-mat=fuzzy|liquid → 按钮材质：模糊 vs 液态玻璃（后者额外吃折射透镜）
+ *   data-bg=light|color|dark  → 背景：浅色 / 彩色（accent 渐变）/ 深色
+ *   data-nav-text=on|off   → 底栏是否显示文字
+ *   data-motion=standard|reduce|off → 界面动效
+ *   --glass-blur / --glass-hi / --glass-hi-strong / --glass-refract
+ */
 (function () {
   'use strict';
-  var KEY = 'veyra.appearance.v1';
-  var DEFAULT = { theme: 'light', material: 'soft', color: 'blue', corner: 'default' };
+
+  var KEY = 'veyra.appearance.v2';
+  var LEGACY_KEY = 'veyra.appearance.v1';
+  var DEFAULT = {
+    glass: 'on',
+    btnMat: 'liquid',
+    bg: 'color',
+    specular: 138,
+    // 默认沿用首页底栏原本的 2.2dp：不在用户没要求的情况下改掉他们已经认可的观感
+    blur: 2.2,
+    refract: 158,
+    navText: 'on',
+    motion: 'standard',
+    // 兼容旧四维：材质/配色/圆角仍由 Sunny 令牌层消费，只是不再占设置页的位置
+    theme: 'light',
+    material: 'soft',
+    color: 'blue',
+    corner: 'default'
+  };
   var root = document.documentElement;
+
+  function clamp(value, min, max) {
+    value = Number(value);
+    if (isNaN(value)) return min;
+    return Math.max(min, Math.min(max, value));
+  }
 
   function read() {
     var out = {};
-    for (var k in DEFAULT) out[k] = DEFAULT[k];
+    for (var key in DEFAULT) out[key] = DEFAULT[key];
     try {
-      var raw = localStorage.getItem(KEY);
+      var raw = localStorage.getItem(KEY) || localStorage.getItem(LEGACY_KEY);
       if (raw) {
         var saved = JSON.parse(raw);
-        for (var k2 in DEFAULT) if (saved[k2]) out[k2] = saved[k2];
+        for (var name in DEFAULT) {
+          if (saved[name] !== undefined && saved[name] !== null) out[name] = saved[name];
+        }
+        // 旧版本只存了 theme；新的「背景」三选一以它为准
+        if (saved.bg === undefined && saved.theme) out.bg = saved.theme === 'dark' ? 'dark' : 'light';
       }
-    } catch (e) {}
+    } catch (error) { }
+    out.specular = clamp(out.specular, 40, 220);
+    out.blur = clamp(out.blur, 0, 24);
+    out.refract = clamp(out.refract, 0, 200);
     return out;
   }
 
   var state = read();
 
   function paint() {
-    root.dataset.theme = state.theme;
+    var dark = state.bg === 'dark';
+    root.dataset.theme = dark ? 'dark' : 'light';
+    root.dataset.bg = state.bg;
+    root.dataset.glass = state.glass;
+    root.dataset.btnMat = state.btnMat;
+    root.dataset.navText = state.navText;
+    root.dataset.motion = state.motion;
     root.dataset.material = state.material;
     root.dataset.color = state.color;
     root.dataset.corner = state.corner;
-    // 系统状态栏/导航栏跟随明暗（原生侧读的是同一个 data-theme）
+
+    var spec = state.specular / 100;
+    root.style.setProperty('--glass-blur', state.blur.toFixed(1) + 'px');
+    root.style.setProperty('--glass-hi', Math.min(0.96, 0.30 * spec).toFixed(3));
+    root.style.setProperty('--glass-hi-strong', Math.min(0.98, 0.62 * spec).toFixed(3));
+    root.style.setProperty('--glass-refract', String(Math.round(state.refract)));
+
     var meta = document.querySelector('meta[name="color-scheme"]');
-    if (meta) meta.setAttribute('content', state.theme === 'dark' ? 'dark' : 'light');
+    if (meta) meta.setAttribute('content', dark ? 'dark' : 'light');
+    // 折射透镜要跟着强度/材质重挂（dock-refract.js 提供）
+    if (typeof window.__veyraRelens === 'function') window.__veyraRelens();
   }
 
   function save() {
-    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {}
+    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (error) { }
   }
 
   window.VeyraAppearance = {
-    get: function () { var o = {}; for (var k in state) o[k] = state[k]; return o; },
+    get: function () { var out = {}; for (var key in state) out[key] = state[key]; return out; },
     set: function (patch) {
-      for (var k in patch) if (patch.hasOwnProperty(k) && state.hasOwnProperty(k)) state[k] = patch[k];
-      paint(); save();
+      var changed = false;
+      for (var key in patch) {
+        if (!patch.hasOwnProperty(key) || !state.hasOwnProperty(key)) continue;
+        if (state[key] === patch[key]) continue;
+        state[key] = patch[key];
+        changed = true;
+      }
+      if (!changed) return;
+      paint();
+      save();
+      if (typeof window.VeyraAppearance.onChange === 'function') window.VeyraAppearance.onChange(state);
+    },
+    reset: function () {
+      for (var key in DEFAULT) state[key] = DEFAULT[key];
+      paint();
+      save();
+      syncSelection();
+      updateSummary();
       if (typeof window.VeyraAppearance.onChange === 'function') window.VeyraAppearance.onChange(state);
     }
   };
 
   paint();
 
-  /* ---------- 设置页 UI ---------- */
-  function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) {
-    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
-  }); }
-
-  function matGrid() {
-    return SUNNY_MATERIALS.map(function (m) {
-      return '<button type="button" class="mat-tile" data-mat="' + m.id + '" aria-pressed="false">'
-        + '<i style="' + esc(m.sample) + '"></i><span>' + m.name + '</span></button>';
-    }).join('');
+  /* ---------- 文案 ---------- */
+  function esc(value) {
+    return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
   }
 
-  // 原稿取色是 item[theme]：色点必须显示「切换后真正会应用的那一版」。
-  // 这里不重渲染，直接把浅/深两版都写进自定义属性，由 [data-theme=dark] 选择器切换。
-  function swatch(v) {
-    return Array.isArray(v)
-      ? 'conic-gradient(from -90deg,' + v[0] + ',' + v[1] + ',' + v[2] + ',' + v[0] + ')'
-      : v;
-  }
-
-  function dot(c) {
-    return '<button type="button" class="color-dot" data-color="' + c.id + '" aria-pressed="false"'
-      + ' title="' + c.name + '" aria-label="' + c.name + '"'
-      + ' style="--dot:' + swatch(c.light) + ';--dot-d:' + swatch(c.dark) + '"></button>';
-  }
-
-  /* ---------- 设置页 UI：一行入口 + 弹窗 ----------
-   * 四维组合铺在设置页里要占满一屏，把后面的设置项全挤下去。改成和「账号管理」一样的
-   * 一行入口（副标题显示当前组合），点开才以浮层弹出完整选项；点遮罩/关闭/返回导航都会收起。 */
-  function findById(list, id) {
-    for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
-    return null;
-  }
-
-  function cornerName() {
-    var c = findById(SUNNY_CORNERS, state.corner);
-    return c ? c.name : state.corner;
-  }
+  var BTN_MAT = { fuzzy: '模糊', liquid: '液态玻璃' };
+  var BG = { light: '浅色背景', color: '彩色背景', dark: '深色背景' };
+  var MOTION = { standard: '标准', reduce: '减少', off: '关闭' };
 
   function summaryText() {
-    var m = findById(SUNNY_MATERIALS, state.material);
-    var c = findById(SUNNY_COLORS_SINGLE, state.color) || findById(SUNNY_COLORS_MULTI, state.color);
-    return (m ? m.name : state.material) + ' · ' + (c ? c.name : state.color)
-      + ' · ' + (state.theme === 'dark' ? '深色' : '浅色') + ' · ' + cornerName() + '圆角';
+    return (BTN_MAT[state.btnMat] || '液态玻璃')
+      + ' · ' + (BG[state.bg] || '彩色背景')
+      + ' · 高光 ' + Math.round(state.specular) + '%'
+      + ' · 模糊 ' + state.blur.toFixed(1) + 'dp';
   }
 
   function updateSummary() {
@@ -103,29 +140,85 @@ var SUNNY_CORNERS = [{"id":"tight","name":"紧致"},{"id":"default","name":"标�
     if (el) el.textContent = summaryText();
   }
 
+  /* ---------- 面板 ---------- */
   var ARROW = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"'
     + ' stroke-linecap="round" stroke-linejoin="round"><path d="m9 5 7 7-7 7"/></svg>';
 
-  function optionsHtml() {
-    var single = SUNNY_COLORS_SINGLE.map(dot).join('');
-    var multi = SUNNY_COLORS_MULTI.map(dot).join('');
-    return '<div class="appearance-block"><span class="appearance-label">明暗</span>'
-      +   '<div class="seg" role="group" aria-label="明暗">'
-      +     '<button type="button" data-theme-set="light">浅色</button>'
-      +     '<button type="button" data-theme-set="dark">深色</button>'
-      +   '</div></div>'
-      + '<div class="appearance-block"><span class="appearance-label">质感</span>'
-      +   '<div class="mat-grid">' + matGrid() + '</div></div>'
-      + '<div class="appearance-block"><span class="appearance-label">单色</span>'
-      +   '<div class="color-row">' + single + '</div></div>'
-      + '<div class="appearance-block"><span class="appearance-label">多色</span>'
-      +   '<div class="color-row">' + multi + '</div></div>'
-      + '<div class="appearance-block"><span class="appearance-label">圆角</span>'
-      +   '<div class="seg" role="group" aria-label="圆角">'
-      +     '<button type="button" data-corner-set="tight">紧致</button>'
-      +     '<button type="button" data-corner-set="default">标准</button>'
-      +     '<button type="button" data-corner-set="round">圆润</button>'
-      +   '</div></div>';
+  var CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"'
+    + ' stroke-linecap="round" stroke-linejoin="round"><path d="m5 13 4 4L19 7"/></svg>';
+
+  var PREVIEW_ICONS = [
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 4.5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1Z"/><path d="m10 9 5 3-5 3z" fill="currentColor" stroke="none"/></svg>',
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3 2"/></svg>',
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="4" width="16" height="6" rx="1.6"/><rect x="4" y="14" width="16" height="6" rx="1.6"/></svg>',
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6l1.4 1.4m10 10 1.4 1.4m0-12.8-1.4 1.4m-10 10-1.4 1.4"/></svg>',
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>'
+  ];
+
+  function seg(group, options, current) {
+    var html = '<div class="seg ap-seg" data-group="' + group + '" role="group">';
+    for (var id in options) {
+      html += '<button type="button" data-value="' + id + '" aria-pressed="'
+        + (id === current ? 'true' : 'false') + '">'
+        + (id === current ? '<i class="ap-tick">' + CHECK + '</i>' : '')
+        + '<span>' + options[id] + '</span></button>';
+    }
+    return html + '</div>';
+  }
+
+  function switchRow(label, key, on) {
+    return '<div class="ap-row"><span class="ap-row-title">' + label + '</span>'
+      + '<button type="button" class="ap-switch" data-switch="' + key + '" role="switch"'
+      + ' aria-pressed="' + (on ? 'true' : 'false') + '" aria-label="' + label + '"><i></i></button></div>';
+  }
+
+  function slider(key, label, value, min, max, step, unit) {
+    return '<div class="ap-slider">'
+      + '<div class="ap-slider-head"><span>' + label + '</span>'
+      + '<b data-out="' + key + '">' + value + unit + '</b></div>'
+      + '<input type="range" min="' + min + '" max="' + max + '" step="' + step + '"'
+      + ' value="' + value + '" data-range="' + key + '" aria-label="' + label + '">'
+      + '</div>';
+  }
+
+  function panelHtml() {
+    return '<div class="ap-sec">'
+      +   switchRow('玻璃材质', 'glass', state.glass === 'on')
+      + '</div>'
+
+      + '<div class="ap-sec">'
+      +   '<span class="ap-label">按钮材质</span>'
+      +   seg('btnMat', BTN_MAT, state.btnMat)
+      +   '<div class="ap-seg-gap"></div>'
+      +   seg('bg', BG, state.bg)
+      +   '<div class="ap-preview" aria-hidden="true">'
+      +     '<span class="ap-preview-title">VEYRA · 流影</span>'
+      +     '<div class="ap-preview-bar"><i class="ap-preview-lens"></i>'
+      +       PREVIEW_ICONS.map(function (icon) { return '<span>' + icon + '</span>'; }).join('')
+      +     '</div>'
+      +   '</div>'
+      +   slider('specular', '高光强度', Math.round(state.specular), 40, 220, 1, '%')
+      +   slider('blur', '模糊程度', state.blur.toFixed(1), 0, 24, 0.1, ' dp')
+      +   slider('refract', '折射强度', Math.round(state.refract), 0, 200, 1, '%')
+      +   '<button type="button" class="ap-reset" data-appearance-reset>恢复默认材质</button>'
+      + '</div>'
+
+      + '<div class="ap-sec">'
+      +   switchRow('显示导航文字', 'navText', state.navText === 'on')
+      + '</div>'
+
+      + '<div class="ap-sec">'
+      +   '<span class="ap-label">界面动效</span>'
+      +   seg('motion', MOTION, state.motion)
+      + '</div>';
+  }
+
+  /* ---------- 弹窗 ---------- */
+  function renderPop(pop) {
+    pop.innerHTML = '<div class="appearance-head"><h2 id="appearance-title">外观</h2>'
+      + '<button type="button" class="appearance-close" data-appearance-close aria-label="关闭">✕</button></div>'
+      + '<p class="appearance-note">玻璃材质、按钮材质、背景各存一份，改了立刻生效。</p>'
+      + '<div class="appearance ap-panel" id="appearance-panel">' + panelHtml() + '</div>';
   }
 
   window.renderAppearance = function () {
@@ -142,25 +235,64 @@ var SUNNY_CORNERS = [{"id":"tight","name":"紧致"},{"id":"default","name":"标�
     scrim = document.createElement('div');
     scrim.className = 'appearance-scrim';
     scrim.hidden = true;
-    scrim.innerHTML = '<div class="appearance-pop" role="dialog" aria-modal="true" aria-labelledby="appearance-title">'
-      + '<div class="appearance-head"><h2 id="appearance-title">外观</h2>'
-      +   '<button type="button" class="appearance-close" data-appearance-close aria-label="关闭">✕</button></div>'
-      + '<p class="appearance-note">明暗、质感、配色、圆角各存一份，互不影响。</p>'
-      + '<div class="appearance" id="appearance-panel">' + optionsHtml() + '</div></div>';
+    scrim.innerHTML = '<div class="appearance-pop" role="dialog" aria-modal="true"'
+      + ' aria-labelledby="appearance-title"></div>';
     document.body.appendChild(scrim);
-    scrim.addEventListener('click', function (e) {
-      // 点遮罩空白处或关闭按钮 → 收起；点选项 → 就地改状态，弹窗不关
-      if (e.target === scrim || e.target.closest('[data-appearance-close]')) { closePop(); return; }
-      var t = e.target.closest('[data-theme-set],[data-mat],[data-color],[data-corner-set]');
-      if (!t) return;
-      if (t.dataset.themeSet) window.VeyraAppearance.set({ theme: t.dataset.themeSet });
-      else if (t.dataset.mat) window.VeyraAppearance.set({ material: t.dataset.mat });
-      else if (t.dataset.color) window.VeyraAppearance.set({ color: t.dataset.color });
-      else if (t.dataset.cornerSet) window.VeyraAppearance.set({ corner: t.dataset.cornerSet });
-      syncSelection();
+    var pop = scrim.querySelector('.appearance-pop');
+    renderPop(pop);
+
+    // 滑杆：input 事件就地改 + 就地刷数值，拖的时候预览同步变
+    pop.addEventListener('input', function (event) {
+      var range = event.target.closest('[data-range]');
+      if (!range) return;
+      var key = range.dataset.range;
+      var value = key === 'blur' ? Number(range.value) : Math.round(Number(range.value));
+      window.VeyraAppearance.set(key === 'blur' ? { blur: value } : buildRangePatch(key, value));
+      var out = pop.querySelector('[data-out="' + key + '"]');
+      if (out) out.textContent = (key === 'blur' ? Number(range.value).toFixed(1) + ' dp' : value + '%');
       updateSummary();
     });
+
+    pop.addEventListener('click', function (event) {
+      if (event.target.closest('[data-appearance-close]')) { closePop(); return; }
+      var sw = event.target.closest('[data-switch]');
+      if (sw) {
+        var key = sw.dataset.switch;
+        var on = sw.getAttribute('aria-pressed') !== 'true';
+        window.VeyraAppearance.set(key === 'glass'
+          ? { glass: on ? 'on' : 'off' }
+          : { navText: on ? 'on' : 'off' });
+        syncSelection();
+        updateSummary();
+        return;
+      }
+      var option = event.target.closest('[data-group] button');
+      if (option) {
+        var group = option.closest('[data-group]').dataset.group;
+        var patch = {};
+        patch[group] = option.dataset.value;
+        window.VeyraAppearance.set(patch);
+        syncSelection();
+        updateSummary();
+        return;
+      }
+      if (event.target.closest('[data-appearance-reset]')) {
+        window.VeyraAppearance.reset();
+        renderPop(pop);
+        syncSelection();
+      }
+    });
+
+    scrim.addEventListener('click', function (event) {
+      if (event.target === scrim) closePop();
+    });
     return scrim;
+  }
+
+  function buildRangePatch(key, value) {
+    var patch = {};
+    patch[key] = value;
+    return patch;
   }
 
   function openPop() {
@@ -176,15 +308,46 @@ var SUNNY_CORNERS = [{"id":"tight","name":"紧致"},{"id":"default","name":"标�
     document.body.classList.remove('appearance-open');
   }
 
-  /** 系统侧滑/返回键拦截入口（由 app.js hgBack 调用）：外观弹窗开着时先关弹窗，返回 true 表示已消费。 */
+  /** 系统侧滑/返回键拦截入口（由 app.js hgBack 调用）。 */
   window.__veyraAppearanceBack = function () {
     if (scrim && !scrim.hidden) { closePop(); return true; }
     return false;
-  }
+  };
 
-  /** 供 hgPredictiveBackStart 判断：外观弹窗是否打开（开着时不启动预测性返回预览）。 */
+  /** 供 hgPredictiveBackStart 判断：外观弹窗是否打开。 */
   window.__veyraAppearanceOpen = function () {
     return !!(scrim && !scrim.hidden);
+  };
+
+  function syncSelection() {
+    var panel = scrim && document.body.contains(scrim)
+      ? scrim.querySelector('#appearance-panel')
+      : document.getElementById('appearance-panel');
+    if (!panel) return;
+    panel.querySelectorAll('[data-group]').forEach(function (group) {
+      var key = group.dataset.group;
+      group.querySelectorAll('button').forEach(function (button) {
+        var on = button.dataset.value === state[key];
+        button.setAttribute('aria-pressed', on ? 'true' : 'false');
+        var tick = button.querySelector('.ap-tick');
+        if (on && !tick) {
+          button.insertAdjacentHTML('afterbegin', '<i class="ap-tick">' + CHECK + '</i>');
+        } else if (!on && tick) {
+          tick.remove();
+        }
+      });
+    });
+    panel.querySelectorAll('[data-switch]').forEach(function (button) {
+      var key = button.dataset.switch;
+      var on = key === 'glass' ? state.glass === 'on' : state.navText === 'on';
+      button.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+    panel.querySelectorAll('[data-range]').forEach(function (range) {
+      var key = range.dataset.range;
+      range.value = key === 'blur' ? state.blur : state[key];
+      var out = panel.querySelector('[data-out="' + key + '"]');
+      if (out) out.textContent = key === 'blur' ? state.blur.toFixed(1) + ' dp' : Math.round(state[key]) + '%';
+    });
   }
 
   /** 设置页渲染完调用：刷新入口文案/选中态，并挂一次性全局事件。 */
@@ -193,29 +356,13 @@ var SUNNY_CORNERS = [{"id":"tight","name":"紧致"},{"id":"default","name":"标�
     syncSelection();
     if (window.__veyraAppearanceWired) return;
     window.__veyraAppearanceWired = true;
-    document.addEventListener('click', function (e) {
-      if (e.target.closest('[data-appearance-open]')) { openPop(); return; }
-      // 离开设置页（切 Dock / 点返回）时顺手收起，避免弹窗留在别的页面上
+    document.addEventListener('click', function (event) {
+      if (event.target.closest('[data-appearance-open]')) { openPop(); return; }
       if (!scrim || scrim.hidden) return;
-      if (e.target.closest('[data-nav],[data-back]')) closePop();
+      if (event.target.closest('[data-nav],[data-back]')) closePop();
     });
-    document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape') closePop();
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') closePop();
     });
   };
-
-  function syncSelection() {
-    var panel = scrim && document.body.contains(scrim) ? scrim.querySelector('#appearance-panel')
-      : document.getElementById('appearance-panel');
-    if (!panel) return;
-    var set = function (sel, attr, val) {
-      panel.querySelectorAll(sel).forEach(function (b) {
-        b.setAttribute('aria-pressed', b.getAttribute(attr) === val ? 'true' : 'false');
-      });
-    };
-    set('[data-theme-set]', 'data-theme-set', state.theme);
-    set('[data-mat]', 'data-mat', state.material);
-    set('[data-color]', 'data-color', state.color);
-    set('[data-corner-set]', 'data-corner-set', state.corner);
-  }
 })();

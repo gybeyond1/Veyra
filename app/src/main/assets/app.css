@@ -13,7 +13,18 @@ img[data-cover]:not([src]){opacity:0}.poster img,.hero img,.category-spotlight>i
 .hero-slide{position:absolute;inset:0;overflow:hidden;background:var(--hero-tint-light);will-change:transform}html[data-theme=dark] .hero-slide{background:var(--hero-tint-dark)}.hero-slide.animating{transition:transform .32s cubic-bezier(.2,.72,.16,1)}.poster-letter{display:none}.poster.fallback .poster-letter{display:grid;place-items:center;position:absolute;inset:0}.poster.loading:before{content:"";position:absolute;inset:0;z-index:1;background:linear-gradient(105deg,var(--panel) 23%,#fff7 45%,var(--panel) 68%);background-size:230% 100%;animation:shimmer 1.5s linear infinite}html[data-theme=dark] .poster.loading:before{background:linear-gradient(105deg,var(--panel) 23%,#fff2 45%,var(--panel) 68%);background-size:230% 100%}@media(prefers-reduced-motion:reduce){.hero-slide.animating{transition:none}.poster.loading:before{animation:none}}
 .hero-copy h2{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}.hero-index,.hero-index b,html[data-theme=dark] .hero-index,html[data-theme=dark] .hero-index b{color:#fff;text-shadow:0 1px 5px #000c}
 .app-icon{clip-path:inset(0 9% 0 0)}
-.back-preview{position:absolute;inset:calc(65px + var(--status-bar-height)) 0 0;z-index:1;overflow:hidden;background:var(--bg);pointer-events:none}.back-preview>div{min-height:100%;padding-bottom:110px}.predictive-active #scroll{position:relative;z-index:2;background:var(--bg);will-change:transform;overflow:hidden}
+.back-preview{position:absolute;inset:calc(65px + var(--status-bar-height)) 0 0;z-index:1;overflow:hidden;background:var(--bg);pointer-events:none}
+/* 刷剧态返回：预览层必须透明 —— 后面暂停住的原生视频帧就是「刷剧页」本身，
+   再叠一层克隆的底栏/卡片，看着就是原地返回，不会闪一下传统首页。 */
+.back-preview.back-preview-binge{inset:0;background:transparent}
+#app.binge-preview{background:transparent!important}
+body.binge-preview{background:transparent!important}
+/* 预览期间给 #app 临时挂了 .binge（让克隆的底栏/卡片吃刷剧玻璃），
+   但详情页本身还得显示出来滑动 —— 把 .binge 那条 display:none 顶掉 */
+#app.binge.binge-preview #scroll{display:block!important}
+.back-preview-binge>#dock,.back-preview-binge>nav,.back-preview-binge>button{pointer-events:none}
+.back-preview-binge #binge{display:flex}
+.back-preview-binge>button#binge-fab,.back-preview-binge #binge-fab{position:absolute}.back-preview>div{min-height:100%;padding-bottom:110px}.predictive-active #scroll{position:relative;z-index:2;background:var(--bg);will-change:transform;overflow:hidden}
 #app{--screen-corner-topLeft:22px;--screen-corner-topRight:22px;--screen-corner-bottomRight:22px;--screen-corner-bottomLeft:22px}#app.route-detail>.app-top{display:none}#app.route-detail>#scroll{height:100%}#app.route-detail>.back-preview{inset:0}.predictive-active #scroll{border-radius:var(--screen-corner-topLeft) var(--screen-corner-topRight) var(--screen-corner-bottomRight) var(--screen-corner-bottomLeft)}
 .listing-page{padding:20px 17px 0}.listing-back{display:inline-flex;align-items:center;gap:4px;padding:0;border:0;background:none;color:var(--muted);font-size:12px}.listing-back svg{width:16px;height:16px}.listing-page h1{font-size:26px;letter-spacing:-.04em;margin:18px 0 5px}.listing-page>p{color:var(--muted);font-size:12px;margin:0}.listing-grid{margin-top:20px}.listing-footer{min-height:78px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12px}.listing-footer button{border:1px solid var(--line);border-radius:calc(10px * var(--corner-scale,1));background:var(--panel);color:var(--text);padding:10px 14px;font-size:12px}
 .category-spotlight-copy button{display:inline-flex;align-items:center;justify-content:center;gap:4px;line-height:1.2}.category-spotlight-copy button svg{display:block;width:14px;height:14px;flex:none}
@@ -527,43 +538,55 @@ html[data-theme=dark] #binge-fab{background:rgba(34,40,43,.04);background:color-
 /* 刷剧态「同一颗按钮」：不再切成 accent 实心（那会被看成另一个控件）。
    WebView 是透明的，backdrop-filter 采样不到垫在后面的原生视频层 —— 4% 的玻璃底在视频上等于
    看不见，所以给同一颗按钮补一层明确的磨砂底，形状/图标/配色全部沿用首页。 */
+/* 刷剧态的玻璃由两层拼成：
+   1) 原生 BingeGlass 把视频帧缩小 + 模糊 + 压暗，按这颗按钮的圆角矩形裁好，垫在 WebView 底下；
+   2) 这一层只放很淡的底色 + 边缘打光 + 折射带。
+   真正的「透过去看到模糊视频」来自第 1 层，所以底色必须极淡，否则又变塑料板。 */
 #app.binge #binge-fab{
-  background:color-mix(in srgb,var(--surface) 46%,transparent);
+  background:linear-gradient(180deg,rgba(255,255,255,.14),rgba(255,255,255,.05) 46%,rgba(255,255,255,.02));
   border-color:rgba(255,255,255,.30);
-  color:var(--text);
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.46),0 12px 30px rgba(0,0,0,.28);
+  color:#fff;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.52),
+    inset 0 -1px 0 rgba(0,0,0,.22),
+    inset 0 0 0 1px rgba(255,255,255,.06),
+    0 10px 26px rgba(0,0,0,.30);
 }
-html[data-theme=dark] #app.binge #binge-fab{background:color-mix(in srgb,var(--surface) 46%,transparent);border-color:rgba(255,255,255,.18);box-shadow:inset 0 1px 0 rgba(255,255,255,.20),0 12px 30px rgba(0,0,0,.42)}
 
 /* ===== 刷剧态底栏 =====
    底栏是首页元素，形状/位置/材质一律不动；只是「刷剧态整页透明」时 backdrop-filter 采不到原生
    视频，玻璃会凭空消失。这里给同一块 #dock 补一层磨砂底 + 更亮的边缘打光，视觉上仍是那块玻璃。 */
 #app.binge #dock{
-  background:color-mix(in srgb,var(--surface) 58%,transparent);
+  background:linear-gradient(180deg,rgba(255,255,255,.16),rgba(255,255,255,.06) 44%,rgba(255,255,255,.02));
   border-color:rgba(255,255,255,.30);
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.50),0 12px 30px rgba(0,0,0,.28);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.50),
+    inset 0 -1px 0 rgba(0,0,0,.24),
+    inset 0 0 0 1px rgba(255,255,255,.05),
+    0 12px 30px rgba(0,0,0,.32);
 }
-html[data-theme=dark] #app.binge #dock{background:color-mix(in srgb,var(--surface) 58%,transparent);border-color:rgba(255,255,255,.16);box-shadow:inset 0 1px 0 rgba(255,255,255,.20),0 12px 30px rgba(0,0,0,.44)}
+/* 折射带：贴边一圈亮、往下 40% 化开，模拟玻璃边缘把背景掰弯后的高光 */
 #app.binge #dock::after{
   background:
-    linear-gradient(180deg,rgba(255,255,255,.62),rgba(255,255,255,.20) 1.5px,rgba(255,255,255,0) 1.5px),
-    linear-gradient(90deg,rgba(255,255,255,.40),rgba(255,255,255,0) 1.5px),
-    linear-gradient(270deg,rgba(255,255,255,.36),rgba(255,255,255,0) 1.5px),
-    linear-gradient(0deg,rgba(255,255,255,.26),rgba(255,255,255,0) 1.5px);
+    linear-gradient(180deg,rgba(255,255,255,.66),rgba(255,255,255,.22) 1.5px,rgba(255,255,255,0) 1.5px),
+    linear-gradient(90deg,rgba(255,255,255,.44),rgba(255,255,255,0) 1.5px),
+    linear-gradient(270deg,rgba(255,255,255,.40),rgba(255,255,255,0) 1.5px),
+    linear-gradient(0deg,rgba(255,255,255,.28),rgba(255,255,255,0) 1.5px);
 }
 #app.binge #dock-blob b{
-  background:color-mix(in srgb,var(--surface) 34%,transparent);
+  background:linear-gradient(180deg,rgba(255,255,255,.24),rgba(255,255,255,.10));
   box-shadow:
-    inset 0 1px 0 rgba(255,255,255,.66),
-    inset 0 -1px 0 rgba(255,255,255,.20),
-    inset 1px 0 0 rgba(255,255,255,.44),
-    inset -1px 0 0 rgba(255,255,255,.44),
-    0 10px 26px rgba(0,0,0,.26);
+    inset 0 1px 0 rgba(255,255,255,.78),
+    inset 0 -1px 0 rgba(255,255,255,.26),
+    inset 1px 0 0 rgba(255,255,255,.52),
+    inset -1px 0 0 rgba(255,255,255,.52),
+    0 10px 26px rgba(0,0,0,.28);
 }
-#app.binge #dock button{color:#4a463d}
-#app.binge #dock button.active{color:#20180a}
-html[data-theme=dark] #app.binge #dock button{color:#e6e0d2}
-html[data-theme=dark] #app.binge #dock button.active{color:var(--accent)}
+/* 刷剧态底栏在视频上：文字一律走白色系，否则深色字压在亮画面上读不出来 */
+#app.binge #dock button{color:rgba(255,255,255,.68)}
+#app.binge #dock button.active{color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.35)}
+#app.binge #dock button.active .nav-icon{background:rgba(255,255,255,.18)!important;color:#fff!important}
+#app.binge #dock button.drag-over{color:#fff}
 
 /* ===== 刷剧浮层（首页的第二种形态，与首页平级） =====
    视频区透明：原生视频层垫在透明 WebView 之后，视频/海报直接透出。
@@ -573,24 +596,173 @@ html[data-theme=dark] #app.binge #dock button.active{color:var(--accent)}
 #app.binge{background:transparent!important}
 body.binge{background:transparent!important}
 #app.binge #scroll,#app.binge .app-top,#app.binge #search-suggest{display:none}
+/* 微圆角矩形（12px）+ 同款真玻璃：底色极淡，模糊来自原生底板 */
 .binge-card{
   margin:0 84px 88px 14px;
   padding:15px 16px;
-  border-radius:calc(12px * var(--corner-scale,1));
-  background:color-mix(in srgb,var(--surface) 66%,transparent);
-  border:1px solid rgba(255,255,255,.34);
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.52),0 18px 46px rgba(6,8,12,.34);
-  -webkit-backdrop-filter:blur(18px) saturate(1.2);
-  backdrop-filter:blur(18px) saturate(1.2);
-  color:var(--text);
+  border-radius:10px;
+  background:linear-gradient(180deg,rgba(255,255,255,.15),rgba(255,255,255,.055) 40%,rgba(255,255,255,.02));
+  border:1px solid rgba(255,255,255,.28);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.50),
+    inset 0 -1px 0 rgba(0,0,0,.22),
+    inset 0 0 0 1px rgba(255,255,255,.05),
+    0 16px 40px rgba(0,0,0,.30);
+  color:#fff;
   pointer-events:auto;
+  will-change:transform,opacity;
 }
-html[data-theme=dark] .binge-card{background:color-mix(in srgb,var(--surface) 62%,transparent);border-color:rgba(255,255,255,.16);box-shadow:inset 0 1px 0 rgba(255,255,255,.18),0 18px 46px rgba(0,0,0,.46)}
-.binge-title{font-size:17px;font-weight:800;margin:0 0 5px;letter-spacing:-.02em;line-height:1.25}
-.binge-desc{font-size:12px;line-height:1.5;margin:0;color:var(--muted);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.binge-title{font-size:17px;font-weight:800;margin:0 0 5px;letter-spacing:-.02em;line-height:1.25;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.32)}
+.binge-desc{font-size:12px;line-height:1.5;margin:0;color:rgba(255,255,255,.74);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .binge-actions{display:flex;gap:9px;margin-top:11px}
-.binge-actions button{flex:none;border:1px solid rgba(255,255,255,.28);border-radius:calc(8px * var(--corner-scale,1));padding:8px 15px;font-size:13px;font-weight:700}
-.binge-detail{background:color-mix(in srgb,var(--surface) 80%,transparent);color:var(--text)}
-html[data-theme=dark] .binge-detail{background:color-mix(in srgb,var(--surface) 82%,transparent);color:var(--text)}
-.binge-full{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+.binge-actions button{flex:none;border:1px solid rgba(255,255,255,.26);border-radius:8px;padding:8px 15px;font-size:13px;font-weight:700;color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.30)}
+.binge-detail{background:rgba(255,255,255,.16)}
+.binge-full{background:var(--accent);color:var(--accent-ink);border-color:transparent;box-shadow:none}
 .binge-msg{position:absolute;left:24px;right:24px;top:50%;transform:translateY(-50%);text-align:center;color:#fff;font-size:13px;white-space:pre-line;background:rgba(0,0,0,.45);padding:16px;border-radius:14px}
+
+
+/* ================= v0.23.1 外观（对齐参考稿的「玻璃材质」页） =================
+   面板结构：玻璃材质开关 / 按钮材质 / 背景 / 实时预览 / 三条滑杆 / 恢复默认
+            + 显示导航文字 / 界面动效。
+   所有选项只写 data-* 与 CSS 变量，样式表不判断业务、只看属性。 */
+.appearance.ap-panel{display:flex;flex-direction:column;gap:10px}
+.ap-sec{
+  padding:13px 14px 12px;
+  border-radius:calc(14px * var(--corner-scale,1));
+  background:var(--mat-control,var(--surface));
+  border:1px solid var(--mat-control-edge,var(--line));
+  box-shadow:var(--mat-control-shadow,none);
+}
+.ap-row{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:30px}
+.ap-row-title{font-size:14px;font-weight:600;color:var(--text)}
+.ap-label{display:block;font-size:13px;font-weight:600;color:var(--text);margin:2px 0 10px}
+.ap-seg-gap{height:8px}
+.ap-panel .ap-seg{padding:4px;gap:6px;border-radius:calc(12px * var(--corner-scale,1))}
+.ap-panel .ap-seg button{
+  height:38px;display:flex;align-items:center;justify-content:center;gap:5px;
+  font-size:12.5px;font-weight:600;
+}
+.ap-tick{display:inline-grid;place-items:center;width:13px;height:13px;flex:none}
+.ap-tick svg{width:13px;height:13px}
+
+/* 开关：轨迹是强调色，圆钮纯白，跟参考稿一致 */
+.ap-switch{
+  position:relative;width:47px;height:28px;flex:none;padding:0;border:0;border-radius:14px;
+  background:color-mix(in srgb,var(--text) 20%,transparent);
+  transition:background .2s ease;
+}
+.ap-switch i{
+  position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;
+  background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.24);
+  transition:transform .22s cubic-bezier(.32,1.3,.3,1);
+}
+.ap-switch[aria-pressed=true]{background:var(--accent)}
+.ap-switch[aria-pressed=true] i{transform:translateX(19px)}
+
+/* 预览：一张彩色底 + 一条真玻璃胶囊。滑杆一动，胶囊的模糊/高光立刻跟着变 */
+.ap-preview{
+  position:relative;height:134px;margin:12px 0 2px;
+  border-radius:calc(14px * var(--corner-scale,1));overflow:hidden;
+  display:flex;align-items:flex-end;justify-content:center;padding-bottom:16px;
+  background:linear-gradient(105deg,#7fc3c7 0%,#9db7dc 32%,#c6b2d5 56%,#e7c2a0 82%,#d8b092 100%);
+}
+.ap-preview-title{
+  position:absolute;top:16px;left:0;right:0;text-align:center;
+  font-size:15px;font-weight:700;letter-spacing:.14em;color:rgba(18,24,32,.5);
+}
+.ap-preview-bar{
+  position:relative;display:flex;align-items:center;gap:14px;
+  padding:9px 15px;border-radius:999px;
+  background:rgba(255,255,255,.07);
+  border:1px solid rgba(255,255,255,.42);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,var(--glass-hi,.30)),0 8px 20px rgba(20,26,34,.16);
+  -webkit-backdrop-filter:blur(var(--glass-blur,5.4px)) saturate(1.15);
+  backdrop-filter:blur(var(--glass-blur,5.4px)) saturate(1.15);
+  color:#1d2a33;
+}
+.ap-preview-bar span{display:grid;place-items:center;width:18px;height:18px;opacity:.82}
+.ap-preview-bar svg{width:17px;height:17px}
+.ap-preview-lens{
+  position:absolute;left:7px;top:50%;transform:translateY(-50%);
+  width:34px;height:26px;border-radius:999px;
+  background:rgba(255,255,255,.24);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.7);
+}
+
+/* 滑杆 */
+.ap-slider{margin-top:15px}
+.ap-slider-head{display:flex;align-items:center;justify-content:space-between;font-size:13px;color:var(--text)}
+.ap-slider-head b{font-weight:600;color:var(--muted)}
+.ap-slider input[type=range]{
+  -webkit-appearance:none;appearance:none;width:100%;height:24px;margin:6px 0 0;
+  background:transparent;accent-color:var(--accent);
+}
+.ap-reset{
+  display:inline-flex;align-items:center;margin-top:16px;padding:9px 14px;
+  border-radius:calc(10px * var(--corner-scale,1));
+  border:1px solid var(--mat-control-edge,var(--line));
+  background:var(--mat-control);color:var(--text);font-size:12.5px;font-weight:600;
+}
+
+/* 玻璃总开关：关掉就全部退回实底，不再采样、不再折射 */
+html[data-glass=off] #dock,
+html[data-glass=off] #dock-blob b,
+html[data-glass=off] #binge-fab,
+html[data-glass=off] .binge-card,
+html[data-glass=off] .appearance-scrim{
+  -webkit-backdrop-filter:none!important;
+  backdrop-filter:none!important;
+}
+html[data-glass=off] #dock{background:var(--surface)}
+html[data-glass=off] #app.binge #dock{background:rgba(18,20,24,.86)}
+html[data-glass=off] #app.binge .binge-card{background:rgba(18,20,24,.86)}
+html[data-glass=off] #app.binge #binge-fab{background:rgba(18,20,24,.86)}
+html[data-glass=off] .ap-preview-bar{
+  -webkit-backdrop-filter:none;backdrop-filter:none;
+  background:rgba(255,255,255,.55);border-color:rgba(255,255,255,.72);
+  box-shadow:0 1px 2px rgba(20,26,34,.12);
+}
+
+/* 按钮材质：模糊 = 小半径厚磨砂、不折射；液态玻璃 = 吃 --glass-blur + 折射透镜 */
+html[data-btn-mat=fuzzy] #dock,
+html[data-btn-mat=fuzzy] #dock-blob b,
+html[data-btn-mat=fuzzy] #binge-fab{
+  -webkit-backdrop-filter:blur(2.2px) saturate(.85)!important;
+  backdrop-filter:blur(2.2px) saturate(.85)!important;
+}
+
+/* 背景：彩色 = accent 两色淡淡的渐变，浅色/深色沿用 Sunny 主题底色。
+   注意 #app 自己有一层 --mat-page 实底，只给 body 画渐变是看不见的，得画在 #app 上。 */
+html[data-bg=color] #app{
+  background:linear-gradient(168deg,
+    color-mix(in srgb,var(--accent) 10%,var(--mat-page)) 0%,
+    var(--mat-page) 44%,
+    color-mix(in srgb,var(--accent-2,var(--accent)) 12%,var(--mat-page)) 100%);
+}
+html[data-bg=color] body{background:var(--mat-page)}
+
+/* 显示导航文字 */
+html[data-nav-text=off] #dock button>span:not(.nav-icon){display:none}
+html[data-nav-text=off] #dock button{justify-content:center;gap:0}
+
+/* 界面动效 */
+html[data-motion=reduce] *,
+html[data-motion=reduce] *::before,
+html[data-motion=reduce] *::after{
+  animation-duration:.12s!important;
+  transition-duration:.12s!important;
+}
+html[data-motion=off] *,
+html[data-motion=off] *::before,
+html[data-motion=off] *::after{
+  animation:none!important;
+  transition:none!important;
+}
+
+/* 玻璃半径统一读 --glass-blur（滑杆拖到哪，底栏/按钮/卡片就糊到哪） */
+#dock,#dock-blob b,#binge-fab{
+  -webkit-backdrop-filter:blur(var(--glass-blur,2.2px)) saturate(.85);
+  backdrop-filter:blur(var(--glass-blur,2.2px)) saturate(.85);
+}
+#dock{box-shadow:inset 0 1px 0 rgba(255,255,255,var(--glass-hi,.28)),0 10px 26px rgba(8,14,24,.12)}
+#binge-fab{box-shadow:inset 0 1px 0 rgba(255,255,255,var(--glass-hi,.28)),0 10px 26px rgba(8,14,24,.12)}

@@ -58,6 +58,8 @@ public final class MainActivity extends Activity {
     private WebView webView;
     private FrameLayout root;
     private FrameLayout bingeVideoLayer;
+    // 玻璃底板层：夹在原生视频层与 WebView 之间，负责把视频糊掉后透出给 WebView 里的玻璃板
+    private FrameLayout bingeGlassLayer;
     private BingeEngine bingeEngine;
     private final BingeEngine.Callback bingeCallback = new BingeEngine.Callback() {
         @Override public Activity getActivity() { return MainActivity.this; }
@@ -242,6 +244,10 @@ public final class MainActivity extends Activity {
         bingeVideoLayer = new FrameLayout(this);
         bingeVideoLayer.setVisibility(View.GONE);
         root.addView(bingeVideoLayer, new FrameLayout.LayoutParams(-1, -1));
+        // 玻璃底板必须压在 WebView 之下、视频之上：WebView 透明处才能看到被模糊的画面
+        bingeGlassLayer = new FrameLayout(this);
+        bingeGlassLayer.setVisibility(View.GONE);
+        root.addView(bingeGlassLayer, new FrameLayout.LayoutParams(-1, -1));
         webView = new WebView(this);
         webView.setBackgroundColor(Color.TRANSPARENT);
         root.addView(webView, new FrameLayout.LayoutParams(-1, -1));
@@ -502,7 +508,7 @@ public final class MainActivity extends Activity {
     private void ensureBingeEngine() {
         if (bingeEngine != null) return;
         if (Looper.myLooper() != Looper.getMainLooper()) { runOnUiThread(this::ensureBingeEngine); return; }
-        bingeEngine = new BingeEngine(bingeCallback, bingeVideoLayer);
+        bingeEngine = new BingeEngine(bingeCallback, bingeVideoLayer, bingeGlassLayer);
     }
 
     private void installUpdate(File apk) {
@@ -992,6 +998,25 @@ public final class MainActivity extends Activity {
         }
         @JavascriptInterface public void setBackEnabled(boolean enabled) {
             runOnUiThread(() -> updateBackRegistration(enabled));
+        }
+
+        /** 跟手拖拽：phase = start/move/end，dy 为手指纵向位移（CSS px，向上为负）。 */
+        @JavascriptInterface public void bingeDrag(String phase, double dy, double velocity) {
+            if (bingeEngine == null) return;
+            final float offset = (float) dy;
+            final float speed = (float) velocity;
+            runOnUiThread(() -> {
+                if (bingeEngine == null) return;
+                if ("start".equals(phase)) bingeEngine.dragStart();
+                else if ("move".equals(phase)) bingeEngine.dragMove(offset);
+                else bingeEngine.dragEnd(offset, speed);
+            });
+        }
+
+        /** WebView 上报需要做「真玻璃」的区域（底栏 / 悬浮按钮 / 详情卡），[][] 形式：[x,y,w,h,r]。 */
+        @JavascriptInterface public void bingeGlass(String rectsJson) {
+            if (bingeEngine == null || rectsJson == null) return;
+            runOnUiThread(() -> { if (bingeEngine != null) bingeEngine.updateGlass(rectsJson); });
         }
 
         @JavascriptInterface public void request(String requestId, String action, String argsText) {

@@ -12,6 +12,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Base64;
 import android.view.Gravity;
+import android.view.TextureView;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
@@ -33,8 +34,10 @@ import androidx.media3.ui.PlayerView;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -89,16 +92,33 @@ public class BingeEngine {
     // 刷剧形态被「挂起」（切到别的 tab / 进详情 / 看全集）。挂起期间不恢复播放、不抢沉浸态，
     // 播放器与进度原样保留，resume() 回来就能接着播 —— 不用重新 loadShow，也就不会闪传统首页。
     private boolean suspended;
+
+    // ---- 跟手拖拽（上下滑换剧）----
+    private ImageView neighbor;          // 「下一部」的画面，拖拽时垫在视频层上面跟着手指走
+    private boolean dragging;
+    private int dragDirection;           // 0=未定 1=下一部 -1=上一部
+    private float dragOffset;
+
+    // ---- 真玻璃底板 ----
+    private final FrameLayout glassHost;
+    private BingeGlass glass;
+    private TextureView texture;         // PlayerView 内部的 TextureView（surface_type=texture_view）
+    private Bitmap glassFrame;           // 复用的缩小帧，避免每帧分配
+    // 玻璃是重度模糊的底板，8fps 已经完全看不出卡顿，再快只是白烧 GPU 读回
+    private static final long GLASS_INTERVAL = 120L;
+
     private final Map<String, Bitmap> posterCache = new HashMap<>();
     private final Map<String, JSONObject> detailCache = new ConcurrentHashMap<>();
     private final Map<String, JSONObject> readyCache = new ConcurrentHashMap<>();
     private final HashSet<String> prefetching = new HashSet<>();
 
-    public BingeEngine(Callback cb, FrameLayout videoLayer) {
+    public BingeEngine(Callback cb, FrameLayout videoLayer, FrameLayout glassHost) {
         this.cb = cb;
         this.videoLayer = videoLayer;
+        this.glassHost = glassHost;
         buildVideoLayer();
         videoLayer.setVisibility(View.GONE);
+        if (glassHost != null) glassHost.setVisibility(View.GONE);
     }
 
     private Activity activity() { return cb.getActivity(); }
@@ -127,6 +147,17 @@ public class BingeEngine {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         videoLayer.addView(playerView);
 
+        // 换剧时「下一部」的画面：只在跟手拖拽过程中显示，承接手指并顶住换页的那一瞬间
+        neighbor = new ImageView(activity());
+        neighbor.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        neighbor.setVisibility(View.GONE);
+        neighbor.setLayoutParams(new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        videoLayer.addView(neighbor);
+
+        View surface = playerView.getVideoSurfaceView();
+        if (surface instanceof TextureView) texture = (TextureView) surface;
+
         message = new TextView(activity());
         message.setTextColor(0xCCFFFFFF);
         message.setTextSize(13);
@@ -135,6 +166,13 @@ public class BingeEngine {
         message.setLayoutParams(new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
         videoLayer.addView(message);
+
+        // 玻璃底板独立挂在 root 上（不随视频层平移），WebView 的底栏/卡片正好落在它上面
+        if (glassHost != null) {
+            glass = new BingeGlass(activity());
+            glassHost.addView(glass, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        }
     }
 
     // ---------- 生命周期 ----------
@@ -152,6 +190,7 @@ public class BingeEngine {
             videoLayer.setVisibility(View.VISIBLE);
             videoLayer.setAlpha(1f);
             videoLayer.setTranslationY(0f);
+            showGlass();
             hideBars();
             loadShow();
         } catch (Throwable error) {
@@ -166,6 +205,7 @@ public class BingeEngine {
         suspended = false;
         releasePlayer();
         videoLayer.setVisibility(View.GONE);
+        hideGlass();
         showBars();
         activity().setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
     }
@@ -186,13 +226,16 @@ public class BingeEngine {
             saveProgress(false);
         }
         handler.removeCallbacks(tick);
+        stopGlass();
     }
 
     /** 从挂起恢复：同一个播放器接着播，不重新 loadShow（因此不会闪一下传统首页）。*/
     public void resume() {
-        if (!active) { videoLayer.setVisibility(View.GONE); return; }
+        if (!active) { videoLayer.setVisibility(View.GONE); hideGlass(); return; }
         suspended = false;
         videoLayer.setVisibility(View.VISIBLE);
+        videoLayer.setTranslationY(0f);
+        showGlass();
         hideBars();
         if (player != null) player.setPlayWhenReady(true);
         handler.post(tick);
@@ -204,6 +247,7 @@ public class BingeEngine {
             saveProgress(false);
         }
         handler.removeCallbacks(tick);
+        stopGlass();
     }
 
     public void onDestroy() {
@@ -389,6 +433,193 @@ public class BingeEngine {
 
     public void next() { advance(1); }
     public void prev() { advance(-1); }
+
+    /* ---- 跟手拖拽：手指按住时画面就跟着走，松手才决定切不切 ----
+     * 手指在 WebView 上，位移由 JS 逐帧同步过来（Bridge.bingeDrag）。
+     * 规则（和红果一致）：
+     *   · 慢滑：位移超过屏高 22% 才切
+     *   · 快滑：速度超过 780 px/s（且位移超过 18dp）直接切，抬手就到位
+     *   · 边界：位移打三折（阻尼），松手必定回弹
+     * 拖拽期间把「下一部」的海报垫进来，看起来是真的翻了一页，而不是闪一下。 */
+
+    public void dragStart() {
+        if (!active || animating || suspended || pool == null) return;
+        dragging = true;
+        dragDirection = 0;
+        dragOffset = 0f;
+        videoLayer.animate().cancel();
+        videoLayer.setTranslationY(0f);
+        // 手指按住就停播：拖拽时画面顿住，切过去才继续，省得声音和画面对不上
+        if (player != null) player.setPlayWhenReady(false);
+        if (neighbor != null) {
+            neighbor.animate().cancel();
+            neighbor.setVisibility(View.GONE);
+            neighbor.setTranslationY(0f);
+        }
+    }
+
+    public void dragMove(float dy) {
+        if (!dragging) return;
+        int direction = dy < 0 ? 1 : -1;
+        boolean blocked = !hasNeighbor(direction);
+        dragOffset = blocked ? dy * 0.26f : dy;      // 边界给阻尼，手感上就是「拽不动」
+        videoLayer.setTranslationY(dragOffset);
+        if (blocked) {
+            if (neighbor != null) neighbor.setVisibility(View.GONE);
+            dragDirection = 0;
+            return;
+        }
+        if (dragDirection != direction) {
+            dragDirection = direction;
+            loadNeighbor(direction);
+        }
+        if (neighbor != null) {
+            float height = videoLayer.getHeight();
+            neighbor.setTranslationY(direction > 0 ? height : -height);
+            if (neighbor.getVisibility() != View.VISIBLE) neighbor.setVisibility(View.VISIBLE);
+        }
+    }
+
+    public void dragEnd(float dy, float velocity) {
+        if (!dragging) return;
+        dragging = false;
+        float height = Math.max(1f, videoLayer.getHeight());
+        int direction = dy < 0 ? 1 : -1;
+        boolean blocked = !hasNeighbor(direction);
+        float moved = Math.abs(dy);
+        boolean far = moved > height * 0.22f;
+        boolean fling = Math.abs(velocity) > 780f && moved > dp(18);
+        boolean commit = !blocked && (far || fling);
+
+        if (!commit) {
+            animating = true;
+            videoLayer.animate().translationY(0f).setDuration(200).start();
+            if (neighbor != null) {
+                neighbor.animate().translationY(direction > 0 ? height : -height).setDuration(200)
+                        .withEndAction(() -> { if (neighbor != null) neighbor.setVisibility(View.GONE); })
+                        .start();
+            }
+            handler.postDelayed(() -> {
+                animating = false;
+                if (active && !suspended && player != null) player.setPlayWhenReady(true);
+            }, 200);
+            return;
+        }
+
+        animating = true;
+        final int target = index + direction;
+        final long duration = 210;
+        videoLayer.animate().translationY(direction > 0 ? -height : height).setDuration(duration).start();
+        if (neighbor != null) neighbor.animate().translationY(0f).setDuration(duration).start();
+        handler.postDelayed(() -> {
+            if (destroyed || !active) { animating = false; return; }
+            index = target;
+            loadShow();
+            // 新一页就位：视频层立刻归零，把上一页的位移抹掉（此刻屏幕上是新剧的海报）
+            videoLayer.setTranslationY(0f);
+            if (neighbor != null) {
+                neighbor.setVisibility(View.GONE);
+                neighbor.setTranslationY(0f);
+            }
+            animating = false;
+        }, duration);
+    }
+
+    private boolean hasNeighbor(int direction) {
+        if (pool == null) return false;
+        int target = index + direction;
+        return target >= 0 && target < pool.length();
+    }
+
+    /** 预铺「下一部」的画面：优先用海报缓存，没有就现拉一张（只影响拖拽手感，失败不报错）。 */
+    private void loadNeighbor(int direction) {
+        if (neighbor == null || pool == null) return;
+        JSONObject e = entry(index + direction);
+        if (e == null) return;
+        String cover = e.optString("cover");
+        if (cover.isEmpty()) { neighbor.setImageDrawable(null); return; }
+        Bitmap cached;
+        synchronized (posterCache) { cached = posterCache.get(cover); }
+        if (cached != null) { neighbor.setImageBitmap(cached); return; }
+        neighbor.setImageDrawable(null);
+        final String url = cover;
+        worker.execute(() -> {
+            try {
+                String data = repository.coverData(url);
+                byte[] bytes = Base64.decode(data.substring(data.indexOf(',') + 1), Base64.DEFAULT);
+                Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                if (bitmap == null) return;
+                synchronized (posterCache) { posterCache.put(url, bitmap); }
+                handler.post(() -> {
+                    if (destroyed || neighbor == null) return;
+                    // 只有还停在这次的方向上才贴图，避免快速来回划时贴错
+                    if (dragging && dragDirection == direction && dragOffset != 0f) neighbor.setImageBitmap(bitmap);
+                });
+            } catch (Exception ignored) { }
+        });
+    }
+
+    // ---------- 真玻璃底板（WebView 采样不到原生视频，模糊只能在这里做） ----------
+
+    /** WebView 上报底栏 / 悬浮按钮 / 详情卡的圆角矩形（CSS px，含圆角半径）。 */
+    public void updateGlass(String rectsJson) {
+        if (glass == null) return;
+        if (rectsJson == null || rectsJson.isEmpty() || "[]".equals(rectsJson)) {
+            glass.setRects(null);
+            return;
+        }
+        float density = activity().getResources().getDisplayMetrics().density;
+        List<float[]> list = new ArrayList<>();
+        try {
+            JSONArray array = new JSONArray(rectsJson);
+            for (int i = 0; i < array.length(); i++) {
+                JSONArray item = array.optJSONArray(i);
+                if (item == null || item.length() < 5) continue;
+                double x = item.optDouble(0, 0), y = item.optDouble(1, 0);
+                double w = item.optDouble(2, 0), h = item.optDouble(3, 0), radius = item.optDouble(4, 0);
+                if (w < 2 || h < 2) continue;
+                list.add(new float[]{(float) (x * density), (float) (y * density),
+                        (float) (w * density), (float) (h * density), (float) (radius * density)});
+            }
+        } catch (Exception ignored) { return; }
+        glass.setRects(list);
+    }
+
+    private final Runnable glassTick = new Runnable() {
+        @Override public void run() {
+            if (destroyed || !active || suspended) return;
+            captureGlass();
+            handler.postDelayed(this, GLASS_INTERVAL);
+        }
+    };
+
+    private void captureGlass() {
+        if (glass == null || texture == null || !texture.isAvailable()) return;
+        int w = glass.getWidth(), h = glass.getHeight();
+        if (w <= 0 || h <= 0) return;
+        int tw = Math.max(32, Math.round(w / 14f));
+        int th = Math.max(32, Math.round(h / 14f));
+        try {
+            if (glassFrame == null || glassFrame.isRecycled()
+                    || glassFrame.getWidth() != tw || glassFrame.getHeight() != th) {
+                glassFrame = Bitmap.createBitmap(tw, th, Bitmap.Config.ARGB_8888);
+            }
+            texture.getBitmap(glassFrame);
+            glass.pushFrame(glassFrame);
+        } catch (Throwable ignored) { }
+    }
+
+    private void showGlass() {
+        if (glassHost != null) glassHost.setVisibility(View.VISIBLE);
+        handler.removeCallbacks(glassTick);
+        handler.post(glassTick);
+    }
+
+    private void hideGlass() {
+        handler.removeCallbacks(glassTick);
+        if (glassHost != null) glassHost.setVisibility(View.GONE);
+        if (glass != null) glass.clear();
+    }
 
     private void advance(int direction) {
         if (animating || !active) return;
