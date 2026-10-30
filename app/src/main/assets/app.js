@@ -3725,13 +3725,24 @@ function readBingePref() {
     host.insertBefore(layer, host.firstChild);
     return layer;
   }
+  function ensureFab() {
+    var host = document.getElementById('app') || document.body;
+    var el = document.getElementById('binge-backdrop-fab');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'binge-backdrop-fab';
+      el.setAttribute('aria-hidden', 'true');
+      host.insertBefore(el, host.firstChild);
+    }
+    return el;
+  }
+  // 两块背板共享一个 CSS 变量：只写一次，两张图天然对齐
   window.__bingeBackdrop = function (url) {
-    var el = ensure();
-    if (!url) { el.style.backgroundImage = ''; return; }
-    el.style.backgroundImage = 'url("' + url + '")';
+    ensure(); ensureFab();
+    document.documentElement.style.setProperty('--binge-bg', url ? 'url("' + url + '")' : 'none');
   };
   window.__bingeBackdropClear = function () {
-    if (layer) layer.style.backgroundImage = '';
+    document.documentElement.style.removeProperty('--binge-bg');
   };
 })();
 

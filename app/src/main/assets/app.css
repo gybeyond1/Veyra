@@ -537,25 +537,35 @@ html[data-theme=dark] #binge-fab{background:rgba(34,40,43,.04);background:color-
 #binge-fab .binge-fab-icon[hidden]{display:none}
 /* ===== 刷剧态：底栏 / 悬浮按钮 = 首页那一套代码路径 =====
    之前把 backdrop-filter 关了，以为能消掉「灰雾塑料板」。错了：
-   dock-refract.js 的液态折射是 SVG filter **作用在 backdrop 上的**，backdrop-filter 一关，
-   折射整个失效 —— 那就是「这他妈是液态玻璃？？？」的真正原因，跟颜色一点关系没有。
+   dock-refract.js 的液态折射是 SVG filter **作用在 backdrop 上的**（它自己注释里写明
+   「没有 backdrop-filter 时什么都不做」），backdrop-filter 一关，折射整个失效 ——
+   那就是「这他妈是液态玻璃？？？」的真正原因，跟颜色一点关系没有。
 
-   正确解法是给它东西采样：视频在原生层，backdrop-filter 采不到；所以在 WebView 里垫一层
-   同色调的画面（换剧时由原生把封面压成 96px 的 JPEG 推进来，见 BingeEngine.pushBackdrop），
-   backdrop-filter 有得采，折射 / 高光 / 滑块 blob 全部和首页一致。
+   正确解法是给它东西采样，而不是关掉它：视频在原生层，backdrop-filter 采不到，
+   所以在 WebView 里垫两块背板（一块铺底栏那一条、一块正好是悬浮按钮那个圆），
+   换剧时由原生把封面压成 96px 的小 JPEG 推进来当背景。backdrop-filter 有得采，
+   折射 / 高光 / 滑块 blob 全部和首页一致。
 
-   这层背板只在底部一条（底栏那一带）可见，其余部分 mask 透明，视频照常从原生层透出。 */
-#binge-backdrop{
-  position:absolute;left:0;right:0;top:0;bottom:0;z-index:0;
-  background-size:cover;background-position:center;
-  pointer-events:none;
-  /* 只露底部 150px：底栏(bottom:12 + h:68) 和悬浮按钮都在这一带，够采样又不挡视频 */
-  -webkit-mask-image:linear-gradient(to top,#000 0,#000 150px,transparent 150px);
-  mask-image:linear-gradient(to top,#000 0,#000 150px,transparent 150px);
+   背板只在这两块矩形里存在，其余区域完全透明 —— 视频照常从原生层透出。
+   两块用 background-attachment:fixed 共享同一张图，位置自动对齐，等于一整张背景。 */
+#binge-backdrop,
+#binge-backdrop-fab{
+  position:absolute;z-index:0;pointer-events:none;
+  background-image:var(--binge-bg,none);
+  background-size:cover;background-position:center;background-repeat:no-repeat;
+  background-attachment:fixed;
 }
-/* 底栏本体：一个规则体都不碰（形状/圆角/图标/字重/间距/文字色全走首页），
-   只把 --dock 换成半透表面色 —— 首页那 4% 的底在视频上等于没有。 */
+/* 底栏那一条：#dock 是 bottom:12 h:68，铺到 88px 完全盖住 */
+#binge-backdrop{left:0;right:0;bottom:0;height:88px}
+/* 悬浮按钮那个圆：#binge-fab 是 right:16 bottom:96 52x52，这里逐像素对齐 */
+#binge-backdrop-fab{right:16px;bottom:96px;width:52px;height:52px;border-radius:50%}
+
+/* 底栏本体：一个规则体都不碰（形状 / 圆角 / 图标 / 字重 / 间距 / 文字色全走首页），
+   只把 --dock 换成半透表面色 —— 首页那 4% 的底在视频上等于没有。
+   悬浮按钮那条规则体里写死了 var(--surface) 4%，拿不到 --dock，只能单独补一条同值的底：
+   不补的话它在视频上就是完全隐形的一颗按钮。 */
 #app.binge{--dock:color-mix(in srgb,var(--surface) 52%,transparent)}
+#app.binge #binge-fab{background:color-mix(in srgb,var(--surface) 52%,transparent)}
 /* ===== 刷剧浮层（首页的第二种形态，与首页平级） =====
    视频区透明：原生视频层垫在透明 WebView 之后，视频直接透出。
    卡片照首页面板的配方（同底色、同边框、同阴影），只把不透明度降一点让底下视频透出来；
