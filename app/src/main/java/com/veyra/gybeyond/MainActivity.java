@@ -107,6 +107,11 @@ public final class MainActivity extends Activity {
                     java.io.FileOutputStream fos = new java.io.FileOutputStream(f, true);
                     fos.write(sb.toString().getBytes("UTF-8"));
                     fos.close();
+                    // 单独写一份"上次崩溃"快照：覆盖写、启动不清空，供下次启动原生弹窗展示 + 一键复制
+                    java.io.File flast = new java.io.File(getFilesDir(), "crash_last.log");
+                    java.io.FileOutputStream fosl = new java.io.FileOutputStream(flast, false);
+                    fosl.write(sb.toString().getBytes("UTF-8"));
+                    fosl.close();
                     android.util.Log.e(TAG, "uncaught crash", throwable);
                 } catch (Exception ignored) { }
                 if (prev != null) prev.uncaughtException(thread, throwable);
@@ -129,6 +134,64 @@ public final class MainActivity extends Activity {
             // 注意：filesDir/native.log 是合并引擎的普通阶段日志，不是崩溃日志，不再作为崩溃提示来源。
             return sb.toString();
         } catch (Exception e) { return ""; }
+    }
+
+    /** 读取上次崩溃快照（crash_last.log，覆盖写、启动不清空），无则返回 null。 */
+    private String readCrashLast() {
+        try {
+            java.io.File f = new java.io.File(getFilesDir(), "crash_last.log");
+            if (!f.exists() || f.length() == 0) return null;
+            byte[] b = new byte[(int) f.length()];
+            java.io.FileInputStream fis = new java.io.FileInputStream(f);
+            try { fis.read(b); } finally { fis.close(); }
+            String s = new String(b, "UTF-8").trim();
+            return s.isEmpty() ? null : s;
+        } catch (Exception e) { return null; }
+    }
+
+    /** 启动时检查上次崩溃：有快照则弹窗展示，支持一键复制。 */
+    private void checkLastCrash() {
+        hotHandler.postDelayed(() -> {
+            if (isDestroyed() || isFinishing()) return;
+            String log = readCrashLast();
+            if (log == null) return;
+            showCrashDialog(log);
+        }, 700);
+    }
+
+    private void showCrashDialog(String log) {
+        try {
+            android.widget.TextView tv = new android.widget.TextView(this);
+            tv.setText(log);
+            tv.setTextIsSelectable(true);
+            tv.setTypeface(android.graphics.Typeface.MONOSPACE);
+            tv.setTextSize(12f);
+            tv.setTextColor(0xFFDFE3EA);
+            tv.setPadding(28, 22, 28, 22);
+            android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+            scroll.addView(tv, new FrameLayout.LayoutParams(-1, -2));
+
+            android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(this)
+                    .setTitle("检测到上次崩溃")
+                    .setView(scroll, 28, 16, 28, 0)
+                    .setPositiveButton("复制日志", (d, w) -> {
+                        try {
+                            ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                            cm.setPrimaryClip(ClipData.newPlainText("Veyra崩溃日志", log));
+                            android.widget.Toast.makeText(this, "已复制，请粘贴发给开发者", android.widget.Toast.LENGTH_LONG).show();
+                        } catch (Exception ignored) { }
+                    })
+                    .setNegativeButton("关闭", null)
+                    .setCancelable(false)
+                    .create();
+            // 无论复制还是关闭，dismiss 后清掉快照，避免每次启动重复弹
+            dialog.setOnDismissListener(d -> {
+                try { new java.io.File(getFilesDir(), "crash_last.log").delete(); } catch (Exception ignored) { }
+            });
+            dialog.show();
+        } catch (Exception e) {
+            android.util.Log.e(TAG, "崩溃弹窗失败", e);
+        }
     }
 
     @Override public void onCreate(Bundle state) {
@@ -255,6 +318,7 @@ public final class MainActivity extends Activity {
         webView.addJavascriptInterface(new Bridge(), "AndroidHost");
         webView.loadUrl(migratingOrigin ? "file:///android_asset/app.html" : HotUpdateManager.UI_URL);
         checkHotUpdates();
+        checkLastCrash();
     }
 
     private void checkHotUpdates() {
