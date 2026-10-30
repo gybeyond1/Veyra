@@ -3,6 +3,7 @@ package com.veyra.gybeyond;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
+import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
@@ -145,6 +146,17 @@ public class BingeActivity extends Activity {
         return g;
     }
 
+    /** 与首页底栏/悬浮按钮完全同源的配色：浅玻璃 + 深色图标文字（夜间模式自动切换） */
+    private boolean isNight() {
+        return (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
+                == Configuration.UI_MODE_NIGHT_YES;
+    }
+    private int glassFill()   { return isNight() ? 0x0A22282B : 0x0AFFFFFF; } // 表面 4%
+    private int glassStroke() { return isNight() ? 0x17F5F1E7 : 0x17FFFFFF; } // 文字 9% 描边
+    private int blobFill()    { return isNight() ? 0x0F22282B : 0x0FFFFFFF; } // blob 6%
+    private int textDim()     { return isNight() ? 0xFFD9D2C3 : 0xFF4F4B42; }
+    private int textActive()  { return isNight() ? 0xFFE8C879 : 0xFF20180A; }
+
     private void buildUi() {
         root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
@@ -182,26 +194,33 @@ public class BingeActivity extends Activity {
         buildFab();
     }
 
-    /** 首页同款底栏：刷剧页也保留，点 tab 切回传统首页对应栏目 */
+    /** 首页同款底栏（与 WebView #dock 完全一致：浅玻璃 + 深色图标文字 + 首页态高亮 blob）。
+     *  刷剧页是首页的一种表现形式，底栏就是那一条全局底栏，不做成另一个底栏。 */
     private void buildDock() {
         FrameLayout dock = new FrameLayout(this);
-        dock.setBackground(glassDrawable(0x14FFFFFF, 0x26FFFFFF, 22));
+        dock.setBackground(glassDrawable(glassFill(), glassStroke(), 22));
         dock.setElevation(dp(10));
+
+        // 首页态高亮块（与 #dock-blob 同族玻璃，定位到第一个 tab）
+        FrameLayout blob = new FrameLayout(this);
+        blob.setBackground(glassDrawable(blobFill(), glassStroke(), 17));
+        dock.addView(blob);
+
         LinearLayout row = new LinearLayout(this);
-        row.setWeightSum(4);
         row.setLayoutParams(new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         String[] tabs = {"首页", "剧场", "AI", "我的"};
         int[] icons = {R.drawable.ic_dock_home, R.drawable.ic_dock_theater, R.drawable.ic_dock_ai, R.drawable.ic_dock_me};
         for (int i = 0; i < tabs.length; i++) {
             final String tab = tabs[i];
+            final boolean active = (i == 0);   // 刷剧是首页态，默认高亮「首页」
             LinearLayout item = new LinearLayout(this);
             item.setOrientation(LinearLayout.VERTICAL);
             item.setGravity(Gravity.CENTER);
             item.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
             ImageView iv = new ImageView(this);
             iv.setImageResource(icons[i]);
-            iv.setColorFilter(0xCCFFFFFF, PorterDuff.Mode.SRC_IN);
+            iv.setColorFilter(active ? textActive() : textDim(), PorterDuff.Mode.SRC_IN);
             iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
             LinearLayout.LayoutParams ivp = new LinearLayout.LayoutParams(dp(22), dp(22));
             ivp.bottomMargin = dp(3);
@@ -209,12 +228,24 @@ public class BingeActivity extends Activity {
             TextView tv = new TextView(this);
             tv.setText(tabs[i]);
             tv.setTextSize(11);
-            tv.setTextColor(0xCCFFFFFF);
+            tv.setTextColor(active ? textActive() : textDim());
+            if (active) tv.setTypeface(boldTypeface());
             item.addView(tv);
             item.setOnClickListener(v -> switchHome(tab));
             row.addView(item);
         }
         dock.addView(row);
+        // 高亮块对齐到「首页」tab（dock 左右内边距 5px，4 等分）
+        dock.post(() -> {
+            int w = dock.getWidth();
+            if (w <= 0) return;
+            int pad = dp(5);
+            int q = (w - pad * 2) / 4;
+            FrameLayout.LayoutParams bp = new FrameLayout.LayoutParams(q, dock.getHeight() - dp(10));
+            bp.leftMargin = pad;
+            bp.topMargin = dp(5);
+            blob.setLayoutParams(bp);
+        });
         FrameLayout.LayoutParams dockParams = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(64), Gravity.BOTTOM);
         dockParams.leftMargin = dp(14);
@@ -223,15 +254,15 @@ public class BingeActivity extends Activity {
         root.addView(dock, dockParams);
     }
 
-    /** 切换悬浮按钮：与首页常驻按钮同一语义、同一位置（right:16 / bottom:96）、同一玻璃材质。
-     *  刷剧页里它是「首页」图标：点一下切回传统首页（finish 本页）。 */
+    /** 切换悬浮按钮：与首页常驻按钮完全相同（同位置 right:16 / bottom:96、同 52px 圆、同浅玻璃材质、
+     *  同切换箭头图标）。它就是首页那条切换按钮——点一下切回传统首页（两种首页表现形式互切）。 */
     private void buildFab() {
         FrameLayout fab = new FrameLayout(this);
-        fab.setBackground(glassDrawable(0x14FFFFFF, 0x26FFFFFF, 26));
+        fab.setBackground(glassDrawable(glassFill(), glassStroke(), 26));
         fab.setElevation(dp(10));
         ImageView icon = new ImageView(this);
-        icon.setImageResource(R.drawable.ic_dock_home);
-        icon.setColorFilter(0xFFFFFFFF, PorterDuff.Mode.SRC_IN);
+        icon.setImageResource(R.drawable.ic_binge_switch);
+        icon.setColorFilter(textActive(), PorterDuff.Mode.SRC_IN);
         icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
         fab.addView(icon, new FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER));
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(dp(52), dp(52), Gravity.END | Gravity.BOTTOM);
@@ -269,9 +300,10 @@ public class BingeActivity extends Activity {
         frame.addView(posterFit);
 
         // 底部液态玻璃卡片：高度跟随「标题 + 简介 + 按钮」自适应，不再固定一大块。
-        // 右侧留 76dp 给切换悬浮按钮，底部 90dp 落在底栏（bottom12+height64）之上。
+        // 背景与底栏同款浅玻璃（4% 表面 + 9% 描边 + 内高光），右侧留 76dp 给切换按钮，
+        // 底部 90dp 落在底栏（bottom12+height64）之上。
         FrameLayout card = new FrameLayout(this);
-        card.setBackground(glassDrawable(0x59000000, 0x33FFFFFF, 20));
+        card.setBackground(glassDrawable(glassFill(), glassStroke(), 20));
         card.setElevation(dp(8));
         FrameLayout.LayoutParams cardParams = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM);
@@ -287,20 +319,18 @@ public class BingeActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         TextView title = new TextView(this);
-        title.setTextColor(Color.WHITE);
+        title.setTextColor(textActive());
         title.setTextSize(18);
         title.setTypeface(boldTypeface());
-        title.setShadowLayer(dp(2), 0, dp(1), 0xB3000000);
         info.addView(title, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         TextView desc = new TextView(this);
-        desc.setTextColor(0xE6FFFFFF);
+        desc.setTextColor(textDim());
         desc.setTextSize(12);
         desc.setLineSpacing(dp(2), 1f);
         desc.setMaxLines(2);
         desc.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        desc.setShadowLayer(dp(2), 0, dp(1), 0x99000000);
         LinearLayout.LayoutParams descParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         descParams.topMargin = dp(6);
@@ -339,13 +369,20 @@ public class BingeActivity extends Activity {
     private TextView pillButton(String text, boolean primary) {
         TextView button = new TextView(this);
         button.setText(text);
-        button.setTextColor(primary ? 0xFF221F17 : Color.WHITE);
         button.setTextSize(13);
         button.setGravity(Gravity.CENTER);
         button.setPadding(dp(18), 0, dp(18), 0);
         GradientDrawable bg = new GradientDrawable();
         bg.setCornerRadius(dp(11));
-        bg.setColor(primary ? 0xFFFFC93E : 0x2EFFFFFF);
+        if (primary) {
+            bg.setColor(0xFFFFC93E);
+            button.setTextColor(0xFF221F17);
+        } else {
+            // 浅玻璃卡片上的次要按钮：深色描边 + 深色字，与底栏同族
+            bg.setColor(isNight() ? 0x26F5F1E7 : 0x1A000000);
+            bg.setStroke(dp(1), isNight() ? 0x55F5F1E7 : 0x55000000);
+            button.setTextColor(textActive());
+        }
         button.setBackground(bg);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, dp(38));
