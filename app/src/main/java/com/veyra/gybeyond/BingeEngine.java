@@ -247,7 +247,7 @@ public class BingeEngine {
                 episodeCount = episodes == null ? 0 : episodes.length();
                 String description = d.optString("description", "");
                 final String desc = description;
-                runOnUiThread(() -> {
+                handler.post(() -> {
                     if (destroyed || !active || token != loadToken) return;
                     if (!desc.isEmpty()) cb.onShowLoaded(currentTitle, desc, currentCover, currentId, index);
                 });
@@ -257,10 +257,10 @@ public class BingeEngine {
                         ? cachedReady : repository.episode(currentId, 1);
                 if (cachedReady == null) readyCache.put(currentId, ready);
                 if (Thread.currentThread().isInterrupted()) return;
-                runOnUiThread(() -> { if (!destroyed && active && token == loadToken) startPlayback(ready); });
+                handler.post(() -> { if (!destroyed && active && token == loadToken) startPlayback(ready); });
                 schedulePrefetch();
             } catch (Exception error) {
-                runOnUiThread(() -> {
+                handler.post(() -> {
                     if (destroyed || !active || token != loadToken) return;
                     cb.onShowFailed("加载失败: " + error.getMessage() + "\n上滑换一部");
                 });
@@ -379,7 +379,7 @@ public class BingeEngine {
         float height = videoLayer.getHeight();
         videoLayer.animate().translationY(direction > 0 ? -height : height).setDuration(280).start();
         worker.execute(() -> {
-            runOnUiThread(() -> {
+            handler.post(() -> {
                 index = target;
                 loadShow();
                 videoLayer.setTranslationY(direction > 0 ? height : -height);
@@ -403,7 +403,7 @@ public class BingeEngine {
                 Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
                 if (bitmap == null) return;
                 synchronized (posterCache) { posterCache.put(url, bitmap); }
-                runOnUiThread(() -> {
+                handler.post(() -> {
                     if (destroyed || !active) return;
                     applyPosterMode(bitmap, false, true);
                 });

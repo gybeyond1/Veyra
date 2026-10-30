@@ -525,7 +525,7 @@ html[data-theme=dark] #binge-fab{background:rgba(34,40,43,.04);background:color-
 #binge-fab .binge-fab-icon{display:grid;place-items:center}
 #binge-fab .binge-fab-icon[hidden]{display:none}
 #binge-fab.active{background:var(--accent);color:var(--accent-ink);border-color:transparent}
-/* 刷剧层由原生 BingeActivity 承载，这里只负责按钮可见性 */
+/* 刷剧即首页的一种形态，这里只负责按钮可见性（底栏/玻璃复用首页原组件） */
 
 /* ===== 刷剧浮层（首页的一种形态） =====
    视频区透明：原生视频层垫在透明 WebView 之后，视频/海报直接透出。
