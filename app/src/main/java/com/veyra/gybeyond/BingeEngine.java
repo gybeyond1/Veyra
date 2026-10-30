@@ -615,6 +615,11 @@ public class BingeEngine {
         handler.post(glassTick);
     }
 
+    /** 只停刷新，不动显隐：进详情/切 tab 时玻璃还在（被不透明页面盖住），回来能立刻用。 */
+    private void stopGlass() {
+        handler.removeCallbacks(glassTick);
+    }
+
     private void hideGlass() {
         handler.removeCallbacks(glassTick);
         if (glassHost != null) glassHost.setVisibility(View.GONE);

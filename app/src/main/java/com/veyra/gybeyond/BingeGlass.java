@@ -6,6 +6,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.Rect;
 import android.graphics.RectF;
 import android.view.View;
 
@@ -33,7 +34,7 @@ public class BingeGlass extends View {
     private final Paint dimPaint = new Paint();
     private final Path clip = new Path();
     private final RectF dst = new RectF();
-    private final RectF src = new RectF();
+    private final Rect src = new Rect();
 
     private Bitmap blurred;
     private int[] pixels;
@@ -107,7 +108,8 @@ public class BingeGlass extends View {
                     Path.Direction.CW);
             canvas.save();
             canvas.clipPath(clip);
-            src.set(x / viewW * bw, y / viewH * bh, (x + w) / viewW * bw, (y + h) / viewH * bh);
+            src.set(Math.round(x / viewW * bw), Math.round(y / viewH * bh),
+                    Math.round((x + w) / viewW * bw), Math.round((y + h) / viewH * bh));
             dst.set(x, y, x + w, y + h);
             canvas.drawBitmap(source, src, dst, bitmapPaint);
             if (dimAlpha > 0) {
