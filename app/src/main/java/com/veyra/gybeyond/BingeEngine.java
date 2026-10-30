@@ -133,6 +133,11 @@ public class BingeEngine {
 
            播放器一直挂着、从不 GONE / INVISIBLE —— TextureView 一藏一显会重建 SurfaceTexture，
            表现就是「有声音、画面全白」。首帧没来之前由 posterFit 盖住那块黑。 */
+        // 下一部（neighbor）是邻页，静止时整个躺在视频层边界之外。
+        // FrameLayout 默认 clipChildren=true，会把它裁得一点不剩 ——
+        // 拖拽时手指让开的那一条就只剩窗口底色（一片白），用户原话「下面全是白色的」。
+        videoLayer.setClipChildren(false);
+
         poster = new ImageView(activity());
         poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
         poster.setVisibility(View.GONE);
@@ -149,7 +154,10 @@ public class BingeEngine {
         videoLayer.addView(playerView);
 
         posterFit = new ImageView(activity());
-        posterFit.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        // CENTER_CROP 而不是 FIT_CENTER：邻页(neighbor)是铺满的，切过去的瞬间
+        // 如果变成「居中小图 + 模糊底」，画面会明显跳一下。取景一致才是平滑过渡。
+        // 模糊那张 poster 仍然垫在播放器下面，专门用来填横屏视频的上下黑边。
+        posterFit.setScaleType(ImageView.ScaleType.CENTER_CROP);
         posterFit.setVisibility(View.GONE);
         posterFit.setLayoutParams(new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -158,6 +166,8 @@ public class BingeEngine {
         // 换剧时「下一部」的画面：只在跟手拖拽过程中显示，承接手指并顶住换页的那一瞬间
         neighbor = new ImageView(activity());
         neighbor.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        // 封面是异步解的，没解出来之前它是透明的，露出来就是一片白。垫个黑底。
+        neighbor.setBackgroundColor(0xFF000000);
         neighbor.setVisibility(View.GONE);
         neighbor.setLayoutParams(new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -541,10 +551,12 @@ public class BingeEngine {
         }
         if (neighbor != null) {
             float height = Math.max(1f, videoLayer.getHeight());
-            // 关键：下一部要跟着手指一起进来（播放页是 height + dragY）。
-            // 原来写死成不带位移，手指拖的时候底下那部纹丝不动，只有当前画面在挪 ——
-            // 看着就不像翻页，像在拽一块板。
-            neighbor.setTranslationY((direction > 0 ? height : -height) + dragOffset);
+            /* 只给「邻页」一个固定偏移，不再叠 dragOffset。
+               neighbor 是 videoLayer 的子视图，videoLayer 本身已经跟着手指平移了，
+               这里再加一次 dragOffset 就等于位移翻倍：邻页比手指快一倍冲进来，
+               只有上半截露在视频层里、下半截被裁掉 —— 用户看到的「海报只加载了小半张」。
+               父层带它走，才是真正的 1:1 跟手。 */
+            neighbor.setTranslationY(direction > 0 ? height : -height);
             if (neighbor.getVisibility() != View.VISIBLE) neighbor.setVisibility(View.VISIBLE);
         }
     }
@@ -576,9 +588,13 @@ public class BingeEngine {
 
         animating = true;
         final int target = index + direction;
-        final long duration = 260;
+        // 时长按「还剩多少距离」收：已经拖过去八成了还要走满 260ms，手感就是拖不动。
+        final long duration = Math.max(140L, Math.min(260L,
+                (long) (260f * Math.max(0.25f, 1f - moved / height))));
         videoLayer.animate().translationY(direction > 0 ? -height : height).setDuration(duration).start();
-        if (neighbor != null) neighbor.animate().translationY(0f).setDuration(duration).start();
+        // 邻页不动它：它在 videoLayer 里，父层滑到 ∓height 时它正好落到 0，天然对齐。
+        // 原来这里另跑一个 translationY(0) 的动画，等于把它提前拽到父层原点，
+        // 跟着父层一起飞出屏幕 —— 翻页过程中邻页反而没了。
         handler.postDelayed(() -> {
             if (destroyed || !active) { animating = false; return; }
             if (player != null) player.setPlayWhenReady(false);
