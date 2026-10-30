@@ -517,7 +517,9 @@ html[data-theme=dark] .seg-blob b{
 @media (prefers-reduced-motion:reduce){.swipe-skel .skeleton::after{animation:none}}
 
 /* ===== 刷剧模式悬浮按钮（公开模式首页右下角，dock 之上） ===== */
-#binge-fab{position:absolute;right:16px;bottom:96px;width:52px;height:52px;z-index:12;display:grid;place-items:center;padding:0;border:1px solid var(--line);border-radius:calc(50% * var(--corner-scale,1));background:var(--dock);color:var(--text);box-shadow:0 10px 24px #4c442330}
+/* 玻璃效果与底栏 #dock 同一套配方：4% 底色 + 2.2px 模糊降饱和 + 内高光描边 */
+#binge-fab{position:absolute;right:16px;bottom:96px;width:52px;height:52px;z-index:12;display:grid;place-items:center;padding:0;border:1px solid rgba(34,32,25,.09);border-color:color-mix(in srgb,var(--text) 9%,transparent);border-radius:calc(50% * var(--corner-scale,1));background:rgba(255,252,244,.04);background:color-mix(in srgb,var(--surface) 4%,transparent);-webkit-backdrop-filter:blur(2.2px) saturate(.85);backdrop-filter:blur(2.2px) saturate(.85);box-shadow:inset 0 1px 0 rgba(255,255,255,.28),0 10px 26px rgba(8,14,24,.12);color:var(--text);isolation:isolate}
+html[data-theme=dark] #binge-fab{background:rgba(34,40,43,.04);background:color-mix(in srgb,var(--surface) 4%,transparent);border-color:rgba(245,241,231,.09);border-color:color-mix(in srgb,var(--text) 9%,transparent)}
 #binge-fab[hidden]{display:none}
 #binge-fab svg{width:22px;height:22px}
 #binge-fab .binge-fab-icon{display:grid;place-items:center}

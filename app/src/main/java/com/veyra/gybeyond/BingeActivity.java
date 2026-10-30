@@ -24,6 +24,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.MimeTypes;
@@ -96,20 +97,21 @@ public class BingeActivity extends Activity {
         if (Build.VERSION.SDK_INT >= 30) getWindow().setDecorFitsSystemWindows(false);
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
         hideBars();
-        repository = new DualContentRepository(this);
-        store = new AppStore(this);
         try {
+            repository = new DualContentRepository(this);
+            store = new AppStore(this);
             JSONObject payload = new JSONObject(getIntent().getStringExtra("payload"));
             ContentMode.get(this).require(payload.optString("source", ContentMode.get(this).active()));
             pool = payload.optJSONArray("items");
             if (pool == null || pool.length() == 0) throw new IllegalArgumentException("没有可刷的内容");
             index = Math.max(0, payload.optInt("index", 0));
-        } catch (Exception error) {
+            buildUi();
+            loadShow();
+        } catch (Throwable error) {
+            try { Toast.makeText(this, "进入刷剧模式失败: " + error.getMessage(), Toast.LENGTH_LONG).show(); }
+            catch (Exception ignored) { }
             finish();
-            return;
         }
-        buildUi();
-        loadShow();
     }
 
     private void hideBars() {
@@ -140,10 +142,9 @@ public class BingeActivity extends Activity {
         pageB.setVisibility(View.GONE);
 
         playerLayer = new FrameLayout(this);
-        playerView = new PlayerView(this);
-        playerView.setUseController(false);
-        playerView.setLayoutParams(new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        // 与 PlayerActivity 完全同源：用 XML 布局 inflate（surface_type=texture_view + use_controller=false）。
+        // 代码 new PlayerView(this) 默认 surface_view，在 edge-to-edge 全屏下可能初始化异常。
+        playerView = (PlayerView) getLayoutInflater().inflate(R.layout.episode_player, playerLayer, false);
         playerLayer.addView(playerView);
         loading = new ProgressBar(this);
         FrameLayout.LayoutParams loadingParams = new FrameLayout.LayoutParams(
@@ -238,6 +239,7 @@ public class BingeActivity extends Activity {
         buttons.addView(fullButton);
 
         mask.addView(info);
+        frame.addView(mask);
         frame.setTag(R.id.binge_poster, poster);
         frame.setTag(R.id.binge_mask_title, title);
         frame.setTag(R.id.binge_mask_desc, desc);
@@ -383,6 +385,7 @@ public class BingeActivity extends Activity {
     }
 
     private void startPlayback(JSONObject ready) {
+        try {
         currentSource = ready.optString("source");
         currentMime = ready.optString("mimeType", MimeTypes.APPLICATION_M3U8);
         if (currentSource.isEmpty()) {
@@ -432,6 +435,13 @@ public class BingeActivity extends Activity {
         player.setPlayWhenReady(true);
         playerLayer.setVisibility(View.VISIBLE);
         loading.setVisibility(View.VISIBLE);
+        } catch (Throwable error) {
+            if (destroyed || isFinishing()) return;
+            try { releasePlayer(); } catch (Exception ignored) { }
+            loading.setVisibility(View.GONE);
+            message.setText("播放启动失败: " + error.getMessage() + "\n上滑换一部");
+            message.setVisibility(View.VISIBLE);
+        }
     }
 
     private void onEpisodeEnded() {
