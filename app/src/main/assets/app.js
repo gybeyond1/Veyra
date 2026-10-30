@@ -3935,10 +3935,10 @@ window.hgBingeAction = (type, id) => {
     const deltaY = y - startY;
     const deltaX = x - startX;
     if (!dragging) {
-      // 阈值/判定完全照抄首页横滑那套（10px 起步、占优比 1.3），只把轴换成纵向。
-      // 横向留给首页整页横滑，抢了的话两边都用不了。
-      if (Math.abs(deltaX) < 10 && Math.abs(deltaY) < 10) return;
-      if (Math.abs(deltaY) < Math.abs(deltaX) * 1.3) { tracking = false; return; }
+      // 判定照抄 PlayerActivity.handleGesture：先过 slop（斜向距离），
+      // 再用 |dx| > |dy| * 1.15 分横竖。刷剧页只吃纵向，横向让回首页的整页横滑。
+      if (Math.hypot(deltaX, deltaY) < 10) return;
+      if (Math.abs(deltaX) > Math.abs(deltaY) * 1.15) { tracking = false; return; }
       dragging = true;
       bridge('start', 0, 0);
       const card = cardEl();

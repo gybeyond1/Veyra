@@ -472,8 +472,8 @@ public class BingeEngine {
         dragOffset = 0f;
         videoLayer.animate().cancel();
         videoLayer.setTranslationY(0f);
-        // 手指按住就停播：拖拽时画面顿住，切过去才继续，省得声音和画面对不上
-        if (player != null) player.setPlayWhenReady(false);
+        // 不暂停：PlayerActivity.handleGesture 拖拽时画面是照常在播的，跟着手指走。
+        // 原来这里一按就停播，手指拖过去的那一屏是张静止画，看着像卡住。
         if (neighbor != null) {
             neighbor.animate().cancel();
             neighbor.setVisibility(View.GONE);
@@ -485,7 +485,11 @@ public class BingeEngine {
         if (!dragging) return;
         int direction = dy < 0 ? 1 : -1;
         boolean blocked = !hasNeighbor(direction);
-        dragOffset = blocked ? dy * 0.26f : dy;      // 边界给阻尼，手感上就是「拽不动」
+        // 照抄 PlayerActivity.handleGesture：位移 1:1 跟手，边界也不做阻尼
+        // （原来给 0.26 阻尼，手指拽着画面不跟，手感就是「拖不动」）。
+        // 边界只表现为「没有下一部可以接上来」，抬手照样回弹。
+        float limit = Math.max(1f, videoLayer.getHeight());
+        dragOffset = Math.max(-limit, Math.min(limit, dy));
         videoLayer.setTranslationY(dragOffset);
         if (blocked) {
             if (neighbor != null) neighbor.setVisibility(View.GONE);
@@ -497,8 +501,11 @@ public class BingeEngine {
             loadNeighbor(direction);
         }
         if (neighbor != null) {
-            float height = videoLayer.getHeight();
-            neighbor.setTranslationY(direction > 0 ? height : -height);
+            float height = Math.max(1f, videoLayer.getHeight());
+            // 关键：下一部要跟着手指一起进来（播放页是 height + dragY）。
+            // 原来写死成不带位移，手指拖的时候底下那部纹丝不动，只有当前画面在挪 ——
+            // 看着就不像翻页，像在拽一块板。
+            neighbor.setTranslationY((direction > 0 ? height : -height) + dragOffset);
             if (neighbor.getVisibility() != View.VISIBLE) neighbor.setVisibility(View.VISIBLE);
         }
     }
@@ -510,32 +517,32 @@ public class BingeEngine {
         int direction = dy < 0 ? 1 : -1;
         boolean blocked = !hasNeighbor(direction);
         float moved = Math.abs(dy);
-        boolean far = moved > height * 0.22f;
-        boolean fling = Math.abs(velocity) > 780f && moved > dp(18);
+        // 阈值照抄 PlayerActivity：Math.max(dp(76), height * 0.12f)。
+        // 原来用 22%，要拖过五分之一屏才切，正常手一划根本够不着 —— 就是「滑不动」。
+        boolean far = moved > Math.max(dp(76), height * 0.12f);
+        boolean fling = Math.abs(velocity) > 780f && moved > dp(24);
         boolean commit = !blocked && (far || fling);
 
         if (!commit) {
             animating = true;
-            videoLayer.animate().translationY(0f).setDuration(200).start();
+            videoLayer.animate().translationY(0f).setDuration(220).start();
             if (neighbor != null) {
-                neighbor.animate().translationY(direction > 0 ? height : -height).setDuration(200)
+                neighbor.animate().translationY(direction > 0 ? height : -height).setDuration(220)
                         .withEndAction(() -> { if (neighbor != null) neighbor.setVisibility(View.GONE); })
                         .start();
             }
-            handler.postDelayed(() -> {
-                animating = false;
-                if (active && !suspended && player != null) player.setPlayWhenReady(true);
-            }, 200);
+            handler.postDelayed(() -> { animating = false; }, 220);
             return;
         }
 
         animating = true;
         final int target = index + direction;
-        final long duration = 210;
+        final long duration = 260;
         videoLayer.animate().translationY(direction > 0 ? -height : height).setDuration(duration).start();
         if (neighbor != null) neighbor.animate().translationY(0f).setDuration(duration).start();
         handler.postDelayed(() -> {
             if (destroyed || !active) { animating = false; return; }
+            if (player != null) player.setPlayWhenReady(false);
             index = target;
             loadShow();
             // 新一页就位：视频层立刻归零，把上一页的位移抹掉（此刻屏幕上是新剧的海报）
@@ -627,7 +634,7 @@ public class BingeEngine {
         animating = true;
         if (player != null) player.setPlayWhenReady(false);
         float height = videoLayer.getHeight();
-        videoLayer.animate().translationY(direction > 0 ? -height : height).setDuration(280).start();
+        videoLayer.animate().translationY(direction > 0 ? -height : height).setDuration(260).start();
         // 换剧的下一步只是 UI 动作：不要排进 worker（worker 可能正被 loadShow/封面解码占着，
         // 一旦排队就会在滑出动画还没播完时突然跳帧），直接按动画时长在 UI 线程对齐。
         videoLayer.postDelayed(() -> {
@@ -635,9 +642,9 @@ public class BingeEngine {
             index = target;
             loadShow();
             videoLayer.setTranslationY(direction > 0 ? height : -height);
-            videoLayer.animate().translationY(0).setDuration(280)
+            videoLayer.animate().translationY(0).setDuration(260)
                     .withEndAction(() -> animating = false).start();
-        }, 280);
+        }, 260);
     }
 
     // ---------- 海报 / 模糊背景 ----------
