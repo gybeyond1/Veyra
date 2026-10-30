@@ -535,37 +535,23 @@ html[data-theme=dark] #binge-fab{background:rgba(34,40,43,.04);background:color-
 #binge-fab svg{width:22px;height:22px}
 #binge-fab .binge-fab-icon{display:grid;place-items:center}
 #binge-fab .binge-fab-icon[hidden]{display:none}
-/* ===== 刷剧态：底栏 / 悬浮按钮 = 首页那一套代码路径 =====
-   之前把 backdrop-filter 关了，以为能消掉「灰雾塑料板」。错了：
-   dock-refract.js 的液态折射是 SVG filter **作用在 backdrop 上的**（它自己注释里写明
-   「没有 backdrop-filter 时什么都不做」），backdrop-filter 一关，折射整个失效 ——
-   那就是「这他妈是液态玻璃？？？」的真正原因，跟颜色一点关系没有。
+/* ===== 刷剧态：底栏 / 悬浮按钮 / 简介卡片 = 同一套材质 =====
+   走过的弯路，记在这里别再犯：
+   1) 一开始重写底栏的 background/border/shadow/文字色 —— 它就不是首页那颗按钮了。
+   2) 然后为了消「灰雾」把 backdrop-filter 关掉 —— 折射（dock-refract.js）整个失效，
+      玻璃感全没了。玻璃感来自折射，不是来自颜色。
+   3) 再然后往 WebView 里垫 96px 的背板图给 backdrop-filter 采样 —— 放大到全屏就是一坨
+      糊的色块，用户原话「一团糊，不知道从哪里取的色」。
 
-   正确解法是给它东西采样，而不是关掉它：视频在原生层，backdrop-filter 采不到，
-   所以在 WebView 里垫两块背板（一块铺底栏那一条、一块正好是悬浮按钮那个圆），
-   换剧时由原生把封面压成 96px 的小 JPEG 推进来当背景。backdrop-filter 有得采，
-   折射 / 高光 / 滑块 blob 全部和首页一致。
-
-   背板只在这两块矩形里存在，其余区域完全透明 —— 视频照常从原生层透出。
-   两块用 background-attachment:fixed 共享同一张图，位置自动对齐，等于一整张背景。 */
-#binge-backdrop,
-#binge-backdrop-fab{
-  position:absolute;z-index:0;pointer-events:none;
-  background-image:var(--binge-bg,none);
-  background-size:cover;background-position:center;background-repeat:no-repeat;
-  background-attachment:fixed;
-}
-/* 底栏那一条：#dock 是 bottom:12 h:68，铺到 88px 完全盖住 */
-#binge-backdrop{left:0;right:0;bottom:0;height:88px}
-/* 悬浮按钮那个圆：#binge-fab 是 right:16 bottom:96 52x52，这里逐像素对齐 */
-#binge-backdrop-fab{right:16px;bottom:96px;width:52px;height:52px;border-radius:50%}
-
-/* 底栏本体：一个规则体都不碰（形状 / 圆角 / 图标 / 字重 / 间距 / 文字色全走首页），
-   只把 --dock 换成半透表面色 —— 首页那 4% 的底在视频上等于没有。
-   悬浮按钮那条规则体里写死了 var(--surface) 4%，拿不到 --dock，只能单独补一条同值的底：
-   不补的话它在视频上就是完全隐形的一颗按钮。 */
+   结论：**不要垫背板**。底栏就用首页的 --dock（半透表面色）+ 原生 backdrop-filter，
+   背后没东西可采时它就是一块干净的深色半透面板 —— 这正是用户要的样子（图三）。
+   简介卡片跟底栏用同一个 --dock、同一条 backdrop-filter、同一条边框，
+   材质完全一致（用户要的「卡片的材质要和底栏一样」）。 */
 #app.binge{--dock:color-mix(in srgb,var(--surface) 52%,transparent)}
-#app.binge #binge-fab{background:color-mix(in srgb,var(--surface) 52%,transparent)}
+html[data-glass=off] #app.binge{--dock:var(--surface)}
+/* #binge-fab 那条规则体写死了 var(--surface) 4%，拿不到 --dock，只能单独补一条同值的底：
+   不补的话它在视频上就是完全隐形的一颗按钮。 */
+#app.binge #binge-fab{background:var(--dock)}
 /* ===== 刷剧浮层（首页的第二种形态，与首页平级） =====
    视频区透明：原生视频层垫在透明 WebView 之后，视频直接透出。
    卡片照首页面板的配方（同底色、同边框、同阴影），只把不透明度降一点让底下视频透出来；
@@ -579,11 +565,13 @@ body.binge{background:transparent!important}
   margin:0 76px 92px 14px;
   padding:14px 15px;
   border-radius:10px;
-  /* 照抄首页面板（.ap-sec）的配方：同一套变量，实心不透明。
-     之前做成 86% 半透明，后面视频一动卡片就像块脏玻璃，用户直接骂了。 */
-  background:var(--mat-control,var(--surface));
-  border:1px solid var(--mat-control-edge,var(--line));
-  box-shadow:var(--mat-control-shadow,none);
+  /* 材质和底栏一模一样：同一个 --dock、同一条 backdrop-filter、同一条边框。
+     之前做成实心不透明（--mat-control），用户要的是「卡片的材质要和底栏一样」的玻璃。 */
+  background:var(--dock);
+  border:1px solid var(--line);
+  -webkit-backdrop-filter:blur(var(--glass-blur,2.2px)) saturate(.85);
+  backdrop-filter:blur(var(--glass-blur,2.2px)) saturate(.85);
+  box-shadow:0 10px 24px rgba(8,14,24,.12);
   color:var(--text);
   pointer-events:auto;
   will-change:transform;

@@ -3711,41 +3711,6 @@ function readBingePref() {
   } catch (error) { return null; }
 }
 
-/* ---- 玻璃背板：底栏的 backdrop-filter 在刷剧态采不到原生视频层，折射就整个失效 ----
-   原生换剧时把封面压成一张 96px 的小 JPEG 推过来，垫在 WebView 最底层（只在底部一条可见），
-   backdrop-filter 有东西可采，dock-refract.js 的液态折射和高光才和首页一样。 */
-(function setupBingeBackdrop() {
-  var layer = null;
-  function ensure() {
-    if (layer && layer.parentNode) return layer;
-    var host = document.getElementById('app') || document.body;
-    layer = document.createElement('div');
-    layer.id = 'binge-backdrop';
-    layer.setAttribute('aria-hidden', 'true');
-    host.insertBefore(layer, host.firstChild);
-    return layer;
-  }
-  function ensureFab() {
-    var host = document.getElementById('app') || document.body;
-    var el = document.getElementById('binge-backdrop-fab');
-    if (!el) {
-      el = document.createElement('div');
-      el.id = 'binge-backdrop-fab';
-      el.setAttribute('aria-hidden', 'true');
-      host.insertBefore(el, host.firstChild);
-    }
-    return el;
-  }
-  // 两块背板共享一个 CSS 变量：只写一次，两张图天然对齐
-  window.__bingeBackdrop = function (url) {
-    ensure(); ensureFab();
-    document.documentElement.style.setProperty('--binge-bg', url ? 'url("' + url + '")' : 'none');
-  };
-  window.__bingeBackdropClear = function () {
-    document.documentElement.style.removeProperty('--binge-bg');
-  };
-})();
-
 function updateBingeChrome() {
   if (!bingeFab) return;
   // 刷剧态无条件显示（否则退出按钮会跟着剧单一起消失）；传统态仍按首页池子决定
@@ -3780,7 +3745,6 @@ function syncBinge() {
   } else if (bingeEngineLive && window.api) {
     // 只是暂停：保留播放器与位置，回来 resume 就能接着播，不用重新 loadShow
     api('binge-pause').catch(() => { });
-    if (window.__bingeBackdropClear) window.__bingeBackdropClear();
   }
 }
 window.__bingeSync = syncBinge;

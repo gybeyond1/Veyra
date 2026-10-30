@@ -57,13 +57,6 @@ public class BingeEngine {
         void onShowLoaded(String title, String description, String cover, String id, int index);
         /** 加载失败：把提示交给 WebView 显示 */
         void onShowFailed(String message);
-        /**
-         * 把当前剧的封面（压到很小、JPEG）交给 WebView 当「玻璃背后的内容」。
-         * 刷剧态 WebView 整页透明，底栏的 backdrop-filter 采不到垫在后面的原生视频层，
-         * 于是折射（dock-refract.js 的 SVG 位移）整个失效 —— 那就是「没有液态玻璃」的真正原因。
-         * 在 WebView 里垫一层同色调的画面，backdrop-filter 就有东西可采，折射和高光全部回来。
-         */
-        void onBackdrop(String dataUri);
     }
 
     private final Callback cb;
@@ -234,6 +227,10 @@ public class BingeEngine {
         // 从页面没盖住的地方（状态栏那一截）透出来，就是「画面顶到状态栏」。
         // 用 INVISIBLE 不用 GONE：GONE 会重建 TextureView 的 SurfaceTexture。
         videoLayer.setVisibility(View.INVISIBLE);
+        // 必须把系统栏放回来：进刷剧时 hideBars() 隐藏了状态栏，WebView 的
+        // safe-area-inset-top 随之变 0，切到底栏其它页时内容就顶到屏幕最上面去了
+        // （用户截图：搜索框贴着顶边、状态栏整个没了）。
+        showBars();
     }
 
     /** 从挂起恢复：同一个播放器接着播，不重新 loadShow（因此不会闪一下传统首页）。*/
@@ -438,11 +435,30 @@ public class BingeEngine {
             player.setPlayWhenReady(true);
             playerView.setAlpha(1f);
             playerView.setVisibility(View.VISIBLE);
+            // 兜底：READY / onRenderedFirstFrame 在 TextureView 上不一定都到，
+            // 到了也不保证真的画上去。表现就是「声音有了、画面一片空白，
+            // 手指一动才刷出来」。这里按时间点补两次强制重绘 + 撤海报。
+            final int token2 = loadToken;
+            for (long delay : new long[]{300, 900, 1800}) {
+                handler.postDelayed(() -> {
+                    if (destroyed || !active || token2 != loadToken) return;
+                    forceRepaint();
+                    hidePoster();
+                }, delay);
+            }
         } catch (Throwable error) {
             if (destroyed || !active) return;
             try { releasePlayer(); } catch (Exception ignored) { }
             cb.onShowFailed("播放启动失败: " + error.getMessage() + "\n上滑换一部");
         }
+    }
+
+    /** TextureView 拿不到可靠的首帧通知，这里一次性把该催的都催一遍。 */
+    private void forceRepaint() {
+        if (texture != null) texture.invalidate();
+        playerView.invalidate();
+        videoLayer.invalidate();
+        videoLayer.postInvalidateOnAnimation();
     }
 
     private void onEpisodeEnded() {
@@ -688,7 +704,6 @@ public class BingeEngine {
     private void applyPosterMode(Bitmap bitmap, boolean forceBlur, boolean showFit) {
         if (bitmap == null) return;
         poster.setVisibility(View.VISIBLE);
-        pushBackdrop(bitmap);
         boolean blur = forceBlur || bitmap.getWidth() >= bitmap.getHeight() * 0.85f;
         if (blur) {
             poster.setImageBitmap(gaussianBlur(bitmap, 12));
@@ -700,27 +715,6 @@ public class BingeEngine {
             poster.setAlpha(1f);
             posterFit.setVisibility(View.GONE);
         }
-    }
-
-    /**
-     * 把封面压成一张极小的 JPEG 交给 WebView 当玻璃背板。
-     * 玻璃是模糊的，只需要色调和明暗，所以用 96px 长边、quality 55 就够 —— 一张 3KB 上下，
-     * 换剧才推一次，没有运行时开销。
-     */
-    private void pushBackdrop(Bitmap source) {
-        if (source == null) return;
-        try {
-            int w = source.getWidth(), h = source.getHeight();
-            float scale = 96f / Math.max(1, Math.max(w, h));
-            if (scale >= 1f) scale = 1f;
-            Bitmap small = Bitmap.createScaledBitmap(source,
-                    Math.max(1, Math.round(w * scale)), Math.max(1, Math.round(h * scale)), true);
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            small.compress(Bitmap.CompressFormat.JPEG, 55, out);
-            if (small != source) small.recycle();
-            byte[] bytes = out.toByteArray();
-            cb.onBackdrop("data:image/jpeg;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP));
-        } catch (Throwable ignored) { }
     }
 
     private Bitmap gaussianBlur(Bitmap source, int radius) {
