@@ -446,8 +446,10 @@ public class BingeActivity extends Activity {
                     if (desc != null && !description.isEmpty()) desc.setText(description);
                 });
                 if (episodeCount <= 0) throw new IllegalStateException("该剧暂无可播放的选集");
-                JSONObject ready = readyCache.get(currentId);
-                if (ready == null) { ready = repository.episode(currentId, 1); readyCache.put(currentId, ready); }
+                JSONObject cachedReady = readyCache.get(currentId);
+                final JSONObject ready = cachedReady != null
+                        ? cachedReady : repository.episode(currentId, 1);
+                if (cachedReady == null) readyCache.put(currentId, ready);
                 if (Thread.currentThread().isInterrupted()) return;
                 runOnUiThread(() -> { if (!destroyed && !isFinishing() && token == loadToken) startPlayback(ready); });
                 schedulePrefetch();
