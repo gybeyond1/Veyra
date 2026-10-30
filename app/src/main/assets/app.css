@@ -525,6 +525,10 @@ html[data-theme=dark] #binge-fab{background:rgba(34,40,43,.04);background:color-
 #binge-fab .binge-fab-icon{display:grid;place-items:center}
 #binge-fab .binge-fab-icon[hidden]{display:none}
 #binge-fab.active{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+/* 刷剧态整页透明（原生视频透出），悬浮按钮原本 4% 的玻璃底在视频上几乎看不见，
+   会被当成「换成了另一个按钮」；这里给同一颗按钮补一层实底，保持和首页一致的可辨识度。 */
+#app.binge #binge-fab{background:color-mix(in srgb,var(--surface) 58%,transparent);border-color:rgba(255,255,255,.22);box-shadow:inset 0 1px 0 rgba(255,255,255,.30),0 12px 30px rgba(0,0,0,.30);-webkit-backdrop-filter:blur(14px) saturate(1.15);backdrop-filter:blur(14px) saturate(1.15)}
+#app.binge #binge-fab.active{background:var(--accent);color:var(--accent-ink);border-color:transparent}
 /* 刷剧即首页的一种形态，这里只负责按钮可见性（底栏/玻璃复用首页原组件） */
 
 /* ===== 刷剧浮层（首页的一种形态） =====

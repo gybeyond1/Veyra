@@ -3640,11 +3640,14 @@ function updateBingeChrome() {
   if (!bingeFab) return;
   const show = state.route === 'home' && !privateMode() && bingePoolItems().length > 0;
   bingeFab.hidden = !show;
-  // 刷剧态显示「回首页」图标，传统态显示「进入刷剧」图标
+  // 始终是首页那一个按钮、那一个图标：进刷剧只切「按下态」(.active)，不再把图标换成「回首页」，
+  // 否则同一个控件在刷剧页看起来像换成了另一个按钮。
   const play = bingeFab.querySelector('.binge-fab-play');
   const home = bingeFab.querySelector('.binge-fab-home');
-  if (play) play.hidden = !!state.binge;
-  if (home) home.hidden = !state.binge;
+  if (play) play.hidden = false;
+  if (home) home.hidden = true;
+  bingeFab.classList.toggle('active', !!state.binge);
+  bingeFab.setAttribute('aria-pressed', state.binge ? 'true' : 'false');
 }
 window.__bingeUpdateChrome = updateBingeChrome;
 
@@ -3683,6 +3686,8 @@ function enterBingeFresh() {
   bingePayload = { items: payload };
   startBingeMode();
   api('binge-start', { items: payload, index: 0, source: contentSource }).catch(error => {
+    // 原生引擎没起来（起播失败/异常）：退回普通首页，别把人卡在一个没有画面的刷剧页里
+    if (state.binge) exitBingeMode();
     toast(error.message || '进入刷剧模式失败', true);
   });
 }

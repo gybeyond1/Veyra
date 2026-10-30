@@ -495,8 +495,14 @@ public final class MainActivity extends Activity {
         });
     }
 
+    // 必须在主线程建：BingeEngine 构造里会 inflate PlayerView / ImageView 并 addView 到已 attach 的
+    // bingeVideoLayer，而 "binge-start" 是在 requests 线程池里 dispatch 的，子线程动视图会抛
+    // CalledFromWrongThreadException（Only the original thread that created a view hierarchy can touch its views），
+    // 结果引擎没建起来 → 进刷剧页黑屏、什么都不播。
     private void ensureBingeEngine() {
-        if (bingeEngine == null) bingeEngine = new BingeEngine(bingeCallback, bingeVideoLayer);
+        if (bingeEngine != null) return;
+        if (Looper.myLooper() != Looper.getMainLooper()) { runOnUiThread(this::ensureBingeEngine); return; }
+        bingeEngine = new BingeEngine(bingeCallback, bingeVideoLayer);
     }
 
     private void installUpdate(File apk) {
@@ -921,11 +927,14 @@ public final class MainActivity extends Activity {
             case "binge-start": {
                 // 刷剧模式：做成首页 WebView 的一种形态；原生视频层（BingeEngine）垫在透明 WebView 后。
                 args.put("source", mode.active());
-                ensureBingeEngine();
                 final JSONArray items = args.optJSONArray("items");
                 final int startIndex = args.optInt("index", 0);
                 final String source = args.optString("source");
-                runOnUiThread(() -> bingeEngine.start(items, startIndex, source));
+                // 建引擎 + 启动必须都在主线程（这里是 requests 线程池，不能碰视图）
+                runOnUiThread(() -> {
+                    ensureBingeEngine();
+                    if (bingeEngine != null) bingeEngine.start(items, startIndex, source);
+                });
                 return true;
             }
             case "binge-exit": {

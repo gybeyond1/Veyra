@@ -378,15 +378,16 @@ public class BingeEngine {
         if (player != null) player.setPlayWhenReady(false);
         float height = videoLayer.getHeight();
         videoLayer.animate().translationY(direction > 0 ? -height : height).setDuration(280).start();
-        worker.execute(() -> {
-            handler.post(() -> {
-                index = target;
-                loadShow();
-                videoLayer.setTranslationY(direction > 0 ? height : -height);
-                videoLayer.animate().translationY(0).setDuration(280)
-                        .withEndAction(() -> animating = false).start();
-            });
-        });
+        // 换剧的下一步只是 UI 动作：不要排进 worker（worker 可能正被 loadShow/封面解码占着，
+        // 一旦排队就会在滑出动画还没播完时突然跳帧），直接按动画时长在 UI 线程对齐。
+        videoLayer.postDelayed(() -> {
+            if (destroyed || !active) { animating = false; return; }
+            index = target;
+            loadShow();
+            videoLayer.setTranslationY(direction > 0 ? height : -height);
+            videoLayer.animate().translationY(0).setDuration(280)
+                    .withEndAction(() -> animating = false).start();
+        }, 280);
     }
 
     // ---------- 海报 / 模糊背景 ----------
