@@ -535,48 +535,38 @@ html[data-theme=dark] #binge-fab{background:rgba(34,40,43,.04);background:color-
 #binge-fab svg{width:22px;height:22px}
 #binge-fab .binge-fab-icon{display:grid;place-items:center}
 #binge-fab .binge-fab-icon[hidden]{display:none}
-/* ===== 刷剧态：底栏 / 悬浮按钮沿用首页那一套，一个字都不改 =====
-   上一版在这里重写了底色、边框、阴影、文字色，结果它从「首页那颗按钮」变成了另一个控件 ——
-   这是被说「全是毛病」的主因。现在只做两件事，形状 / 圆角 / 图标 / 字重 / 间距 / 文字色
-   全部保持首页原样：
-     1) 关掉 backdrop-filter。WebView 整页透明时它采样不到垫在后面的原生视频，Chromium 会
-        退化成一层灰雾 —— 这才是「塑料板」的真正来头，不是颜色不够白。
-     2) 给一层能压住视频的底（44% 表面色）。模糊由原生 BingeGlass 抓帧做，视频的明暗和色彩
-        从下面透上来，那才是玻璃。 */
+/* ===== 刷剧态：底栏 / 悬浮按钮 = 首页那一套代码路径，只换变量值 =====
+   原来这里重写了 background / border / box-shadow / 文字色，等于另造了一个控件 —— 用户一眼就看出来
+   「不是同一颗按钮」。现在一个规则体都不碰：只覆盖 --dock 这个变量的取值，
+   #dock{background:var(--dock)} 那条原规则照旧生效，形状 / 圆角 / 图标 / 字重 / 间距 /
+   文字色 / 滑块 blob / 折射 SVG 全部与首页逐像素一致。
+   唯一必须关的是 backdrop-filter：WebView 整页透明时它采样不到垫在后面的原生视频，
+   Chromium 会退化成一层灰雾 —— 那块「塑料板」就是这么来的，不是颜色不对。 */
+#app.binge{--dock:color-mix(in srgb,var(--surface) 52%,transparent)}
 #app.binge #dock,
 #app.binge #binge-fab{
-  /* !important 是必须的：'模糊' 按钮材质那条规则带了 !important，不吃掉它这里又会变灰雾 */
   -webkit-backdrop-filter:none!important;
   backdrop-filter:none!important;
-  background:color-mix(in srgb,var(--surface) 44%,transparent);
-  border-color:color-mix(in srgb,var(--text) 12%,transparent);
 }
-html[data-theme=dark] #app.binge #dock,
-html[data-theme=dark] #app.binge #binge-fab{
-  background:color-mix(in srgb,var(--surface) 54%,transparent);
-  border-color:color-mix(in srgb,var(--text) 14%,transparent);
-}
-/* 滑块是 dock 内部同源的一小块玻璃，颜色跟着走，别贴一块死白上去 */
-#app.binge #dock-blob b{
-  background:color-mix(in srgb,var(--surface) 58%,transparent);
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.40),0 4px 12px rgba(0,0,0,.18);
-}
-
+html[data-glass=off] #app.binge{--dock:var(--surface)}
 /* ===== 刷剧浮层（首页的第二种形态，与首页平级） =====
-   视频区透明：原生视频层垫在透明 WebView 之后，视频/海报直接透出。
-   卡片是「微圆角矩形 + 浅色玻璃 + 深色字」—— 和首页卡片同一套配色，只是背后透出视频。 */
+   视频区透明：原生视频层垫在透明 WebView 之后，视频直接透出。
+   卡片照首页面板的配方（同底色、同边框、同阴影），只把不透明度降一点让底下视频透出来；
+   圆角保留 10px 微圆角。 */
 #binge{position:absolute;inset:0;z-index:8;display:flex;flex-direction:column;justify-content:flex-end;pointer-events:auto;touch-action:none}
 #app.binge{background:transparent!important}
+html:has(body.binge){background:transparent!important}
 body.binge{background:transparent!important}
 #app.binge #scroll,#app.binge .app-top,#app.binge #search-suggest{display:none}
-/* 微圆角矩形（10px）+ 浅色玻璃：配色跟首页卡片同源，只是更透一点 */
 .binge-card{
-  margin:0 84px 88px 14px;
+  margin:0 76px 92px 14px;
   padding:14px 15px;
   border-radius:10px;
-  background:color-mix(in srgb,var(--surface) 56%,transparent);
-  border:1px solid color-mix(in srgb,var(--text) 12%,transparent);
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.34),0 14px 34px rgba(8,14,24,.24);
+  /* 照抄首页面板（.ap-sec）的配方：同一套变量，实心不透明。
+     之前做成 86% 半透明，后面视频一动卡片就像块脏玻璃，用户直接骂了。 */
+  background:var(--mat-control,var(--surface));
+  border:1px solid var(--mat-control-edge,var(--line));
+  box-shadow:var(--mat-control-shadow,none);
   color:var(--text);
   pointer-events:auto;
   will-change:transform;
@@ -585,7 +575,7 @@ body.binge{background:transparent!important}
 .binge-desc{font-size:12px;line-height:1.5;margin:0;color:color-mix(in srgb,var(--text) 70%,transparent);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .binge-actions{display:flex;gap:9px;margin-top:11px}
 .binge-actions button{flex:none;border:1px solid color-mix(in srgb,var(--text) 14%,transparent);border-radius:8px;padding:8px 15px;font-size:13px;font-weight:700;color:var(--text);box-shadow:inset 0 1px 0 rgba(255,255,255,.34)}
-.binge-detail{background:color-mix(in srgb,var(--surface) 34%,transparent)}
+.binge-detail{background:color-mix(in srgb,var(--surface) 46%,transparent)}
 .binge-full{background:var(--accent);color:var(--accent-ink);border-color:transparent;box-shadow:none}
 .binge-msg{position:absolute;left:24px;right:24px;top:50%;transform:translateY(-50%);text-align:center;color:#fff;font-size:13px;white-space:pre-line;background:rgba(0,0,0,.55);padding:16px;border-radius:12px}
 

@@ -62,6 +62,9 @@ public class BingeEngine {
     private final FrameLayout videoLayer;
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final ExecutorService prefetcher = Executors.newSingleThreadExecutor();
+    // 封面单独一条线：和 worker（详情 / 选集 / 地址解析）抢同一个单线程池时，
+    // 封面会被排到详情请求后面，等它回来视频早就起来了 —— 海报等于没做。
+    private final ExecutorService posterLoader = Executors.newSingleThreadExecutor();
     private final Handler handler = new Handler(Looper.getMainLooper());
 
     private DualContentRepository repository;
@@ -99,27 +102,18 @@ public class BingeEngine {
     private int dragDirection;           // 0=未定 1=下一部 -1=上一部
     private float dragOffset;
 
-    // ---- 真玻璃底板 ----
-    private final FrameLayout glassHost;
-    private BingeGlass glass;
     private TextureView texture;         // PlayerView 内部的 TextureView（surface_type=texture_view）
-    private Bitmap glassFrame;           // 复用的缩小帧，避免每帧分配
-    // getBitmap 是 GPU 同步读回，会把 UI 线程卡住十几毫秒；5fps 在重度模糊的底板上
-    // 完全看不出滞后，再快只是周期性掉帧
-    private static final long GLASS_INTERVAL = 200L;
 
     private final Map<String, Bitmap> posterCache = new HashMap<>();
     private final Map<String, JSONObject> detailCache = new ConcurrentHashMap<>();
     private final Map<String, JSONObject> readyCache = new ConcurrentHashMap<>();
     private final HashSet<String> prefetching = new HashSet<>();
 
-    public BingeEngine(Callback cb, FrameLayout videoLayer, FrameLayout glassHost) {
+    public BingeEngine(Callback cb, FrameLayout videoLayer) {
         this.cb = cb;
         this.videoLayer = videoLayer;
-        this.glassHost = glassHost;
         buildVideoLayer();
         videoLayer.setVisibility(View.GONE);
-        if (glassHost != null) glassHost.setVisibility(View.GONE);
     }
 
     private Activity activity() { return cb.getActivity(); }
@@ -129,8 +123,19 @@ public class BingeEngine {
     }
 
     private void buildVideoLayer() {
+        // 图层顺序（下 → 上）：播放器 → 海报 → 拖拽用的下一部 → 错误提示。
+        // 海报必须【盖在播放器上面】：原来海报垫在下面、切剧时把播放器 GONE 掉再让 alpha 从 0 淡入，
+        // TextureView 一藏一显会重建 SurfaceTexture，表现就是「有声音、画面全白，手滑一下才出来」。
+        // 现在播放器一直挂着，用海报把它盖住，首帧来了再撤海报 —— 不重建、不白屏、也有海报。
+        playerView = (PlayerView) activity().getLayoutInflater()
+                .inflate(R.layout.episode_player, videoLayer, false);
+        playerView.setLayoutParams(new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        videoLayer.addView(playerView);
+
         poster = new ImageView(activity());
         poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        poster.setVisibility(View.GONE);
         poster.setLayoutParams(new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         videoLayer.addView(poster);
@@ -141,12 +146,6 @@ public class BingeEngine {
         posterFit.setLayoutParams(new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         videoLayer.addView(posterFit);
-
-        playerView = (PlayerView) activity().getLayoutInflater()
-                .inflate(R.layout.episode_player, videoLayer, false);
-        playerView.setLayoutParams(new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        videoLayer.addView(playerView);
 
         // 换剧时「下一部」的画面：只在跟手拖拽过程中显示，承接手指并顶住换页的那一瞬间
         neighbor = new ImageView(activity());
@@ -168,12 +167,10 @@ public class BingeEngine {
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
         videoLayer.addView(message);
 
-        // 玻璃底板独立挂在 root 上（不随视频层平移），WebView 的底栏/卡片正好落在它上面
-        if (glassHost != null) {
-            glass = new BingeGlass(activity());
-            glassHost.addView(glass, new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        }
+        // 兜底黑底：海报还没下载下来、播放器还没出首帧的那几百毫秒里，
+        // 这一层是纯透明的 —— 底下没有东西，屏幕上就是一片白，用户骂的就是这个。
+        // 铺一层黑，中间态是黑场而不是白场，视觉上就是「正常起播」。
+        videoLayer.setBackgroundColor(0xFF000000);
     }
 
     // ---------- 生命周期 ----------
@@ -191,7 +188,6 @@ public class BingeEngine {
             videoLayer.setVisibility(View.VISIBLE);
             videoLayer.setAlpha(1f);
             videoLayer.setTranslationY(0f);
-            showGlass();
             hideBars();
             loadShow();
         } catch (Throwable error) {
@@ -206,7 +202,6 @@ public class BingeEngine {
         suspended = false;
         releasePlayer();
         videoLayer.setVisibility(View.GONE);
-        hideGlass();
         showBars();
         activity().setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
     }
@@ -227,16 +222,20 @@ public class BingeEngine {
             saveProgress(false);
         }
         handler.removeCallbacks(tick);
-        stopGlass();
+        // 切到别的 tab 时整层藏掉：原来只暂停播放，视频画面还挂在页面底下，
+        // 从页面没盖住的地方（状态栏那一截）透出来，就是「画面顶到状态栏」。
+        // 用 INVISIBLE 不用 GONE：GONE 会重建 TextureView 的 SurfaceTexture。
+        videoLayer.setVisibility(View.INVISIBLE);
     }
 
     /** 从挂起恢复：同一个播放器接着播，不重新 loadShow（因此不会闪一下传统首页）。*/
     public void resume() {
-        if (!active) { videoLayer.setVisibility(View.GONE); hideGlass(); return; }
+        if (!active) { videoLayer.setVisibility(View.GONE); return; }
         suspended = false;
         videoLayer.setVisibility(View.VISIBLE);
         videoLayer.setTranslationY(0f);
-        showGlass();
+        // TextureView 被藏起来过，回来时补一次重绘，否则画面要等下一次布局才刷新
+        if (texture != null) videoLayer.post(() -> texture.invalidate());
         hideBars();
         if (player != null) player.setPlayWhenReady(true);
         handler.post(tick);
@@ -248,7 +247,6 @@ public class BingeEngine {
             saveProgress(false);
         }
         handler.removeCallbacks(tick);
-        stopGlass();
     }
 
     public void onDestroy() {
@@ -257,6 +255,7 @@ public class BingeEngine {
         releasePlayer();
         worker.shutdown();
         prefetcher.shutdown();
+        posterLoader.shutdown();
     }
 
     // ---------- 沉浸状态栏 / 竖屏锁定 ----------
@@ -303,9 +302,14 @@ public class BingeEngine {
         detail = null;
         currentSource = null;
         message.setVisibility(View.GONE);
-        playerView.setAlpha(0f);
-        playerView.setVisibility(View.GONE);
+        // 播放器不动它（见 buildVideoLayer 注释），只把海报盖上去
+        playerView.setAlpha(1f);
+        playerView.setVisibility(View.VISIBLE);
         releasePlayer();
+        poster.setVisibility(View.VISIBLE);
+        // 不主动清空上一张：清了就是一次「有 -> 无 -> 有」的闪白。
+        // 新封面到位才替换；新封面取不到时至少还是上一部的图，不是白板。
+        posterFit.setVisibility(View.GONE);
         loadPoster(currentCover);
         prefetchNeighborCovers();   // 先把手边上一部/下一部的封面垫进缓存，滑动时才能秒出
         cb.onShowLoaded(currentTitle, "正在加载…", currentCover, currentId, index);
@@ -376,7 +380,11 @@ public class BingeEngine {
             player.addListener(new Player.Listener() {
                 @Override public void onPlaybackStateChanged(int state) {
                     if (destroyed || !active) return;
-                    if (state == Player.STATE_READY) message.setVisibility(View.GONE);
+                    if (state == Player.STATE_READY) {
+                        message.setVisibility(View.GONE);
+                        // 首帧回调在 TextureView 上不一定可靠，READY 也撤一次（延一点，等真的画上去）
+                        scheduleHidePoster();
+                    }
                     else if (state == Player.STATE_ENDED) {
                         saveProgress(true);
                         onEpisodeEnded();
@@ -385,8 +393,7 @@ public class BingeEngine {
 
                 @Override public void onRenderedFirstFrame() {
                     if (destroyed || !active) return;
-                    playerView.animate().alpha(1f).setDuration(200).start();
-                    posterFit.setVisibility(View.GONE);
+                    scheduleHidePoster();
                 }
 
                 @Override public void onVideoSizeChanged(VideoSize size) {
@@ -415,7 +422,7 @@ public class BingeEngine {
                     resumePosition(currentId, currentEpisode));
             player.prepare();
             player.setPlayWhenReady(true);
-            playerView.setAlpha(0f);
+            playerView.setAlpha(1f);
             playerView.setVisibility(View.VISIBLE);
         } catch (Throwable error) {
             if (destroyed || !active) return;
@@ -453,9 +460,6 @@ public class BingeEngine {
         videoLayer.setTranslationY(0f);
         // 手指按住就停播：拖拽时画面顿住，切过去才继续，省得声音和画面对不上
         if (player != null) player.setPlayWhenReady(false);
-        // 视频层要跟着手指平移，玻璃底板是独立一层、抓的是静止帧 —— 留着它只会让
-        // 底栏里的画面和外面的视频错开。滑动期间淡掉，松手再淡回来。
-        fadeGlass(0f, 90);
         if (neighbor != null) {
             neighbor.animate().cancel();
             neighbor.setVisibility(View.GONE);
@@ -488,7 +492,6 @@ public class BingeEngine {
     public void dragEnd(float dy, float velocity) {
         if (!dragging) return;
         dragging = false;
-        fadeGlass(1f, 220);
         float height = Math.max(1f, videoLayer.getHeight());
         int direction = dy < 0 ? 1 : -1;
         boolean blocked = !hasNeighbor(direction);
@@ -595,83 +598,7 @@ public class BingeEngine {
 
     // ---------- 真玻璃底板（WebView 采样不到原生视频，模糊只能在这里做） ----------
 
-    /** WebView 上报底栏 / 悬浮按钮 / 详情卡的圆角矩形（CSS px，含圆角半径）。 */
-    public void updateGlass(String rectsJson) {
-        if (glass == null) return;
-        if (rectsJson == null || rectsJson.isEmpty() || "[]".equals(rectsJson)) {
-            glass.setRects(null);
-            return;
-        }
-        float density = activity().getResources().getDisplayMetrics().density;
-        List<float[]> list = new ArrayList<>();
-        try {
-            JSONArray array = new JSONArray(rectsJson);
-            for (int i = 0; i < array.length(); i++) {
-                JSONArray item = array.optJSONArray(i);
-                if (item == null || item.length() < 5) continue;
-                double x = item.optDouble(0, 0), y = item.optDouble(1, 0);
-                double w = item.optDouble(2, 0), h = item.optDouble(3, 0), radius = item.optDouble(4, 0);
-                if (w < 2 || h < 2) continue;
-                list.add(new float[]{(float) (x * density), (float) (y * density),
-                        (float) (w * density), (float) (h * density), (float) (radius * density)});
-            }
-        } catch (Exception ignored) { return; }
-        glass.setRects(list);
-    }
-
-    private final Runnable glassTick = new Runnable() {
-        @Override public void run() {
-            if (destroyed || !active || suspended) return;
-            captureGlass();
-            handler.postDelayed(this, GLASS_INTERVAL);
-        }
-    };
-
-    private void captureGlass() {
-        // 拖拽 / 换剧动画期间玻璃是淡的，画面又在动 —— 抓了也白抓，还白占 UI 线程
-        if (dragging || animating) return;
-        if (glass == null || texture == null || !texture.isAvailable()) return;
-        int w = glass.getWidth(), h = glass.getHeight();
-        if (w <= 0 || h <= 0) return;
-        int tw = Math.max(32, Math.round(w / 14f));
-        int th = Math.max(32, Math.round(h / 14f));
-        try {
-            if (glassFrame == null || glassFrame.isRecycled()
-                    || glassFrame.getWidth() != tw || glassFrame.getHeight() != th) {
-                glassFrame = Bitmap.createBitmap(tw, th, Bitmap.Config.ARGB_8888);
-            }
-            texture.getBitmap(glassFrame);
-            glass.pushFrame(glassFrame);
-        } catch (Throwable ignored) { }
-    }
-
-    private void showGlass() {
-        if (glassHost != null) {
-            glassHost.animate().cancel();
-            glassHost.setAlpha(1f);
-            glassHost.setVisibility(View.VISIBLE);
-        }
-        handler.removeCallbacks(glassTick);
-        handler.post(glassTick);
-    }
-
-    /** 拖拽时淡出 / 松手淡回：玻璃只做「静止画面的模糊底板」，画面一动它就必须让路。 */
-    private void fadeGlass(float target, long duration) {
-        if (glassHost == null || glassHost.getVisibility() != View.VISIBLE) return;
-        glassHost.animate().cancel();
-        glassHost.animate().alpha(target).setDuration(duration).start();
-    }
-
-    /** 只停刷新，不动显隐：进详情/切 tab 时玻璃还在（被不透明页面盖住），回来能立刻用。 */
-    private void stopGlass() {
-        handler.removeCallbacks(glassTick);
-    }
-
-    private void hideGlass() {
-        handler.removeCallbacks(glassTick);
-        if (glassHost != null) glassHost.setVisibility(View.GONE);
-        if (glass != null) glass.clear();
-    }
+;
 
     private void advance(int direction) {
         if (animating || !active) return;
@@ -701,12 +628,27 @@ public class BingeEngine {
 
     // ---------- 海报 / 模糊背景 ----------
 
+    /** 撤掉盖在播放器上的海报，露出真正的画面。 */
+    private void hidePoster() {
+        poster.setVisibility(View.GONE);
+        posterFit.setVisibility(View.GONE);
+    }
+
+    /** 首帧前后撤海报：READY 和 onRenderedFirstFrame 都会来，谁先到算谁，切剧后作废。 */
+    private void scheduleHidePoster() {
+        final int token = loadToken;
+        handler.postDelayed(() -> {
+            if (destroyed || !active || token != loadToken) return;
+            hidePoster();
+        }, 160);
+    }
+
     private void loadPoster(String url) {
         if (url == null || url.isEmpty()) return;
         Bitmap cached;
         synchronized (posterCache) { cached = posterCache.get(url); }
         if (cached != null) { applyPosterMode(cached, false, true); return; }
-        worker.execute(() -> {
+        posterLoader.execute(() -> {
             try {
                 String data = repository.coverData(url);
                 byte[] bytes = Base64.decode(data.substring(data.indexOf(',') + 1), Base64.DEFAULT);
@@ -724,6 +666,7 @@ public class BingeEngine {
     /** 竖图 → CENTER_CROP 铺满；横/方图或视频横屏 → 高斯模糊暗化背景 + 居中完整海报 */
     private void applyPosterMode(Bitmap bitmap, boolean forceBlur, boolean showFit) {
         if (bitmap == null) return;
+        poster.setVisibility(View.VISIBLE);
         boolean blur = forceBlur || bitmap.getWidth() >= bitmap.getHeight() * 0.85f;
         if (blur) {
             poster.setImageBitmap(gaussianBlur(bitmap, 12));

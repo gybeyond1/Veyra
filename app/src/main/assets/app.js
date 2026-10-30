@@ -3746,44 +3746,8 @@ function syncBinge() {
     // 只是暂停：保留播放器与位置，回来 resume 就能接着播，不用重新 loadShow
     api('binge-pause').catch(() => { });
   }
-  scheduleBingeGlass();
 }
 window.__bingeSync = syncBinge;
-
-/* ---- 真玻璃：把底栏 / 悬浮按钮 / 详情卡的位置报给原生 ----
-   刷剧态 WebView 是整页透明的，CSS 的 backdrop-filter 采不到垫在后面的原生视频，
-   所以这几块板的模糊由原生做（BingeGlass），这里只负责把它们的圆角矩形告诉原生。
-   位置变了（换剧改了卡片高度、转屏、横竖切换）就重报一次。 */
-let bingeGlassFrame = 0;
-function pushBingeGlass() {
-  const host = window.AndroidHost;
-  if (!host || typeof host.bingeGlass !== 'function') return;
-  const glassOff = document.documentElement.dataset.glass === 'off';
-  if (glassOff || !(state.binge && state.route === 'home')) {
-    try { host.bingeGlass('[]'); } catch (error) { }
-    return;
-  }
-  const list = [];
-  const add = element => {
-    if (!element || element.hidden) return;
-    const rect = element.getBoundingClientRect();
-    if (rect.width < 2 || rect.height < 2) return;
-    const radius = parseFloat(getComputedStyle(element).borderTopLeftRadius) || 0;
-    list.push([
-      Math.round(rect.left), Math.round(rect.top),
-      Math.round(rect.width), Math.round(rect.height), Math.round(radius),
-    ]);
-  };
-  add(document.getElementById('dock'));
-  add(document.getElementById('binge-fab'));
-  add(document.getElementById('binge-card'));
-  try { host.bingeGlass(JSON.stringify(list)); } catch (error) { }
-}
-function scheduleBingeGlass() {
-  if (bingeGlassFrame) return;
-  bingeGlassFrame = requestAnimationFrame(() => { bingeGlassFrame = 0; pushBingeGlass(); });
-}
-window.addEventListener('resize', scheduleBingeGlass);
 
 function startBingeEngine() {
   const items = (bingePayload && bingePayload.items) || [];
@@ -3867,7 +3831,6 @@ window.hgBingeUpdate = (info) => {
   const card = document.getElementById('binge-card');
   if (card) card.hidden = false;
   saveBingePref();   // 换一部就记一部，冷启动能停在同一部
-  scheduleBingeGlass();   // 简介长短会改变卡片高度，玻璃底板要跟着重划
 };
 window.hgBingeFailed = (message) => {
   const msgEl = document.getElementById('binge-msg');
@@ -3900,7 +3863,7 @@ window.hgBingeAction = (type, id) => {
   // 卡片文字区也要能滑（红果整屏都能划），只让按钮和底栏吃掉事件
   const IGNORE = '#dock, #binge-fab, .binge-actions, .binge-msg, #toast-host';
   let tracking = false, dragging = false;
-  let startX = 0, startY = 0, dy = 0, lastY = 0, lastAt = 0, velocity = 0;
+  let startX = 0, startY = 0, dy = 0, lastY = 0, lastAt = 0, velocity = 0, beginAt = 0;
 
   const cardEl = () => document.getElementById('binge-card');
 
@@ -3928,7 +3891,7 @@ window.hgBingeAction = (type, id) => {
     tracking = true;
     dragging = false;
     startX = x; startY = y;
-    dy = 0; lastY = y; lastAt = performance.now(); velocity = 0;
+    dy = 0; lastY = y; lastAt = Date.now(); beginAt = lastAt; velocity = 0;
   }
 
   function move(x, y) {
@@ -3936,17 +3899,22 @@ window.hgBingeAction = (type, id) => {
     const deltaY = y - startY;
     const deltaX = x - startX;
     if (!dragging) {
-      // 只认纵向：横向留给首页整页横滑，抢了的话两边都用不了
-      if (Math.abs(deltaY) < 8 || Math.abs(deltaY) < Math.abs(deltaX)) return;
+      // 阈值/判定完全照抄首页横滑那套（10px 起步、占优比 1.3），只把轴换成纵向。
+      // 横向留给首页整页横滑，抢了的话两边都用不了。
+      if (Math.abs(deltaX) < 10 && Math.abs(deltaY) < 10) return;
+      if (Math.abs(deltaY) < Math.abs(deltaX) * 1.3) { tracking = false; return; }
       dragging = true;
       bridge('start', 0, 0);
       const card = cardEl();
       if (card) card.style.transition = 'none';
     }
-    const now = performance.now();
+    const now = Date.now();
     const elapsed = Math.max(1, now - lastAt);
-    // 单帧速度容易抖，这里用最近一帧的瞬时值：快速一划时它才是判定依据
     velocity = (y - lastY) / elapsed * 1000;
+    // 单帧瞬时值抖得厉害（一次 4ms 的帧能把速度算出几千），
+    // 用「起点到当前」的平均速度兜底，取两者较小值，快划才不会误判成慢拖。
+    const avg = (y - startY) / Math.max(1, now - beginAt) * 1000;
+    velocity = Math.abs(velocity) > Math.abs(avg) ? avg : velocity;
     lastY = y; lastAt = now;
     dy = deltaY;
     bridge('move', dy);
@@ -3965,7 +3933,6 @@ window.hgBingeAction = (type, id) => {
     setTimeout(() => {
       const el = cardEl();
       if (el) { el.style.transition = ''; el.style.transform = ''; el.style.opacity = ''; }
-      scheduleBingeGlass();
     }, 200);
     dy = 0; velocity = 0;
   }
@@ -3978,10 +3945,13 @@ window.hgBingeAction = (type, id) => {
     if (e.touches.length !== 1 || fromIgnored(e.target)) { tracking = false; return; }
     begin(e.touches[0].clientX, e.touches[0].clientY);
   }, { passive: true, capture: true });
+  // passive:false + preventDefault：不拦的话 WebView 会先把手势判成页面滚动，
+  // 手指抬起后自己弹一下 —— 表现就是「滑完又自己跳一下」，跟首页横滑同病。
   window.addEventListener('touchmove', e => {
     if (!tracking || e.touches.length !== 1) return;
     move(e.touches[0].clientX, e.touches[0].clientY);
-  }, { passive: true, capture: true });
+    if (dragging && e.cancelable) e.preventDefault();
+  }, { passive: false, capture: true });
   window.addEventListener('touchend', () => finish(false), { passive: true, capture: true });
   window.addEventListener('touchcancel', () => finish(true), { passive: true, capture: true });
   // 桌面/调试环境兜底
