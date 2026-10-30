@@ -459,6 +459,13 @@ public final class MainActivity extends Activity {
                             + JSONObject.quote(id) + "," + index + ")";
                     runOnUiThread(() -> { if (webView != null) webView.evaluateJavascript(script, null); });
                 }
+            } else if (data != null && "home".equals(data.getStringExtra("bingeAction"))) {
+                // 刷剧页底栏点栏目 → 切回传统首页对应 tab
+                String nav = data.getStringExtra("nav");
+                if (nav != null && !nav.isEmpty()) {
+                    String script = "window.navigateDock && window.navigateDock(" + JSONObject.quote(nav) + ")";
+                    runOnUiThread(() -> { if (webView != null) webView.evaluateJavascript(script, null); });
+                }
             }
             return;
         }

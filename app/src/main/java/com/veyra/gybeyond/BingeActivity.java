@@ -6,7 +6,9 @@ import android.content.pm.ActivityInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
-import android.graphics.drawable.GradientDrawable;
+import android.graphics.GradientDrawable;
+import android.graphics.PorterDuff;
+import android.graphics.drawable.Drawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -46,10 +48,11 @@ import java.util.concurrent.Executors;
  * 刷剧模式（公开模式首页悬浮按钮进入）：
  * 从推荐/榜单随机拉剧，全屏自动播第 1 集；上下滑换剧（红果首页式）。
  * 竖屏视频铺满全屏（ZOOM 裁切），横屏视频按比例完整显示（FIT）。
- * 视频未起播前显示该剧海报；底部一层轻模糊遮罩承载标题/简介和
+ * 视频未起播前显示该剧海报；底部一张跟随内容高度的液态玻璃卡片承载标题/简介和
  * 「查看详情 / 观看全集」两个按钮。进度实时写入 AppStore，
  * 「观看全集」进 PlayerActivity 时按已存进度续播；
  * 第 1 集播完未滑动 → 自动进播放页播第 2 集并一直连播。
+ * 刷剧页与首页共用同一个底栏与同一个切换悬浮按钮（同位置、同玻璃材质）。
  */
 public class BingeActivity extends Activity {
 
@@ -132,6 +135,16 @@ public class BingeActivity extends Activity {
 
     private int dp(float v) { return Math.round(getResources().getDisplayMetrics().density * v); }
 
+    /** 液态玻璃底（与首页 #dock / #binge-fab 同族：半透明填充 + 1px 描边 + 圆角，由 elevation 出阴影） */
+    private GradientDrawable glassDrawable(int fill, int stroke, int radiusDp) {
+        GradientDrawable g = new GradientDrawable();
+        g.setShape(GradientDrawable.RECTANGLE);
+        g.setCornerRadius(dp(radiusDp));
+        g.setColor(fill);
+        g.setStroke(dp(1), stroke);
+        return g;
+    }
+
     private void buildUi() {
         root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
@@ -165,43 +178,77 @@ public class BingeActivity extends Activity {
         root.setOnTouchListener((v, event) -> { handleTouch(event); return true; });
         populatePage(page, entry(index));
         mountPlayerLayer();
+        buildDock();
         buildFab();
     }
 
-    /** 右下角原生悬浮按钮：与首页悬浮按钮同一「切换」语义——点了就回传统首页（finish 本页） */
+    /** 首页同款底栏：刷剧页也保留，点 tab 切回传统首页对应栏目 */
+    private void buildDock() {
+        FrameLayout dock = new FrameLayout(this);
+        dock.setBackground(glassDrawable(0x14FFFFFF, 0x26FFFFFF, 22));
+        dock.setElevation(dp(10));
+        LinearLayout row = new LinearLayout(this);
+        row.setWeightSum(4);
+        row.setLayoutParams(new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        String[] tabs = {"首页", "剧场", "AI", "我的"};
+        int[] icons = {R.drawable.ic_dock_home, R.drawable.ic_dock_theater, R.drawable.ic_dock_ai, R.drawable.ic_dock_me};
+        for (int i = 0; i < tabs.length; i++) {
+            final String tab = tabs[i];
+            LinearLayout item = new LinearLayout(this);
+            item.setOrientation(LinearLayout.VERTICAL);
+            item.setGravity(Gravity.CENTER);
+            item.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
+            ImageView iv = new ImageView(this);
+            iv.setImageResource(icons[i]);
+            iv.setColorFilter(0xCCFFFFFF, PorterDuff.Mode.SRC_IN);
+            iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            LinearLayout.LayoutParams ivp = new LinearLayout.LayoutParams(dp(22), dp(22));
+            ivp.bottomMargin = dp(3);
+            item.addView(iv, ivp);
+            TextView tv = new TextView(this);
+            tv.setText(tabs[i]);
+            tv.setTextSize(11);
+            tv.setTextColor(0xCCFFFFFF);
+            item.addView(tv);
+            item.setOnClickListener(v -> switchHome(tab));
+            row.addView(item);
+        }
+        dock.addView(row);
+        FrameLayout.LayoutParams dockParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(64), Gravity.BOTTOM);
+        dockParams.leftMargin = dp(14);
+        dockParams.rightMargin = dp(14);
+        dockParams.bottomMargin = dp(12);
+        root.addView(dock, dockParams);
+    }
+
+    /** 切换悬浮按钮：与首页常驻按钮同一语义、同一位置（right:16 / bottom:96）、同一玻璃材质。
+     *  刷剧页里它是「首页」图标：点一下切回传统首页（finish 本页）。 */
     private void buildFab() {
         FrameLayout fab = new FrameLayout(this);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setShape(GradientDrawable.OVAL);
-        bg.setColor(0x33242219);          // 与底栏玻璃近似的半透明深底
-        bg.setStroke(dp(1), 0x4DFFFFFF);  // 内高光描边
-        fab.setBackground(bg);
-        fab.addView(new SwapIcon(this), new FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER));
+        fab.setBackground(glassDrawable(0x14FFFFFF, 0x26FFFFFF, 26));
+        fab.setElevation(dp(10));
+        ImageView icon = new ImageView(this);
+        icon.setImageResource(R.drawable.ic_dock_home);
+        icon.setColorFilter(0xFFFFFFFF, PorterDuff.Mode.SRC_IN);
+        icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        fab.addView(icon, new FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER));
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(dp(52), dp(52), Gravity.END | Gravity.BOTTOM);
         params.rightMargin = dp(16);
-        params.bottomMargin = dp(232);    // 悬在底部遮罩（210dp）之上
+        params.bottomMargin = dp(96);    // 与首页悬浮按钮同位置（在底栏之上）
         fab.setOnClickListener(v -> finish());
         root.addView(fab, params);
     }
 
-    /** 自绘「切换」图标：上箭头向右、下箭头向左，圆头 */
-    private class SwapIcon extends View {
-        private final android.graphics.Paint paint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
-        SwapIcon(android.content.Context c) { super(c); }
-        @Override protected void onDraw(android.graphics.Canvas canvas) {
-            float w = getWidth(), h = getHeight();
-            paint.setColor(0xFFFFFFFF);
-            paint.setStrokeWidth(Math.max(1.5f, dp(1.6f)));
-            paint.setStrokeCap(android.graphics.Paint.Cap.ROUND);
-            paint.setStyle(android.graphics.Paint.Style.STROKE);
-            float y1 = h * 0.32f, y2 = h * 0.68f, padX = w * 0.20f, head = w * 0.20f;
-            canvas.drawLine(padX, y1, w - padX, y1, paint);
-            canvas.drawLine(w - padX - head, y1 - head, w - padX, y1, paint);
-            canvas.drawLine(w - padX - head, y1 + head, w - padX, y1, paint);
-            canvas.drawLine(w - padX, y2, padX, y2, paint);
-            canvas.drawLine(padX + head, y2 - head, padX, y2, paint);
-            canvas.drawLine(padX + head, y2 + head, padX, y2, paint);
-        }
+    /** 切回传统首页：finish 并带上目标栏目，由 MainActivity 切换 tab */
+    private void switchHome(String tab) {
+        if (player != null) saveProgress(false);
+        Intent data = new Intent();
+        data.putExtra("bingeAction", "home");
+        data.putExtra("nav", tab);
+        setResult(RESULT_OK, data);
+        finish();
     }
 
     private FrameLayout buildPage() {
@@ -221,35 +268,27 @@ public class BingeActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         frame.addView(posterFit);
 
-        // 底部轻模糊遮罩：FrameLayout 叠层（模糊底 + 渐变 + 信息），挂在页面底部
-        FrameLayout mask = new FrameLayout(this);
-        FrameLayout.LayoutParams maskParams = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(210), Gravity.BOTTOM);
-        mask.setLayoutParams(maskParams);
-
-        ImageView backdrop = new ImageView(this);
-        backdrop.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        backdrop.setAlpha(0.32f);
-        backdrop.setLayoutParams(new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        mask.addView(backdrop);
-
-        View shade = new View(this);
-        shade.setBackground(gradient(0x00000000, 0xB3000000));
-        shade.setLayoutParams(new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        mask.addView(shade);
+        // 底部液态玻璃卡片：高度跟随「标题 + 简介 + 按钮」自适应，不再固定一大块。
+        // 右侧留 76dp 给切换悬浮按钮，底部 90dp 落在底栏（bottom12+height64）之上。
+        FrameLayout card = new FrameLayout(this);
+        card.setBackground(glassDrawable(0x59000000, 0x33FFFFFF, 20));
+        card.setElevation(dp(8));
+        FrameLayout.LayoutParams cardParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM);
+        cardParams.leftMargin = dp(14);
+        cardParams.rightMargin = dp(76);
+        cardParams.bottomMargin = dp(90);
+        card.setLayoutParams(cardParams);
 
         LinearLayout info = new LinearLayout(this);
         info.setOrientation(LinearLayout.VERTICAL);
-        info.setPadding(dp(18), dp(10), dp(18), dp(26));
-        info.setGravity(Gravity.BOTTOM);
+        info.setPadding(dp(16), dp(14), dp(16), dp(16));
         info.setLayoutParams(new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.BOTTOM));
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         TextView title = new TextView(this);
         title.setTextColor(Color.WHITE);
-        title.setTextSize(19);
+        title.setTextSize(18);
         title.setTypeface(boldTypeface());
         title.setShadowLayer(dp(2), 0, dp(1), 0xB3000000);
         info.addView(title, new LinearLayout.LayoutParams(
@@ -284,13 +323,12 @@ public class BingeActivity extends Activity {
         fullButton.setOnClickListener(v -> openFullEpisode());
         buttons.addView(fullButton);
 
-        mask.addView(info);
-        frame.addView(mask);
+        card.addView(info);
+        frame.addView(card);
         frame.setTag(R.id.binge_poster, poster);
         frame.setTag(R.id.binge_poster_fit, posterFit);
         frame.setTag(R.id.binge_mask_title, title);
         frame.setTag(R.id.binge_mask_desc, desc);
-        frame.setTag(R.id.binge_mask_backdrop, backdrop);
         return frame;
     }
 
@@ -315,12 +353,7 @@ public class BingeActivity extends Activity {
         return button;
     }
 
-    private GradientDrawable gradient(int top, int bottom) {
-        GradientDrawable drawable = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{top, bottom});
-        return drawable;
-    }
-
-    /** 把视频层（playerView/message）插到当前页海报之上、遮罩之下 */
+    /** 把视频层（playerView/message）插到当前页海报之上、卡片之下 */
     private void mountPlayerLayer() {
         page.addView(playerLayer, Math.min(1, page.getChildCount()), new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -331,13 +364,11 @@ public class BingeActivity extends Activity {
         ImageView poster = (ImageView) frame.getTag(R.id.binge_poster);
         TextView title = (TextView) frame.getTag(R.id.binge_mask_title);
         TextView desc = (TextView) frame.getTag(R.id.binge_mask_desc);
-        ImageView backdrop = (ImageView) frame.getTag(R.id.binge_mask_backdrop);
         String cover = entry.optString("cover");
         poster.setImageDrawable(null);
         poster.setAlpha(1f);
         ImageView posterFit = (ImageView) frame.getTag(R.id.binge_poster_fit);
         if (posterFit != null) { posterFit.setImageDrawable(null); posterFit.setVisibility(View.GONE); }
-        backdrop.setImageDrawable(null);
         title.setText(entry.optString("title"));
         String description = entry.optString("description");
         desc.setText(description.isEmpty() ? "正在加载…" : description);
@@ -351,8 +382,6 @@ public class BingeActivity extends Activity {
         synchronized (posterCache) { cached = posterCache.get(url); }
         if (cached != null) {
             applyPosterMode(frame, cached, false, true);
-            ImageView backdrop = (ImageView) frame.getTag(R.id.binge_mask_backdrop);
-            if (backdrop != null) backdrop.setImageBitmap(blurStub(cached, 28));
             return;
         }
         final FrameLayout frameRef = frame;
@@ -366,8 +395,6 @@ public class BingeActivity extends Activity {
                 runOnUiThread(() -> {
                     if (destroyed || isFinishing() || !url.equals(target.getTag())) return;
                     applyPosterMode(frameRef, bitmap, false, true);
-                    ImageView backdrop = (ImageView) frameRef.getTag(R.id.binge_mask_backdrop);
-                    if (backdrop != null) backdrop.setImageBitmap(blurStub(bitmap, 28));
                 });
             } catch (Exception ignored) { }
         });
@@ -385,8 +412,8 @@ public class BingeActivity extends Activity {
         if (poster == null) return;
         boolean blur = forceBlur || bitmap.getWidth() >= bitmap.getHeight() * 0.85f;
         if (blur) {
-            poster.setImageBitmap(blurStub(bitmap, 14));
-            poster.setAlpha(0.6f);   // 模糊底压暗，突出完整海报与视频
+            poster.setImageBitmap(gaussianBlur(bitmap, 12));
+            poster.setAlpha(0.72f);   // 模糊底压暗，突出完整海报与视频
             if (fit != null) {
                 fit.setImageBitmap(bitmap);
                 fit.setVisibility(showFit ? View.VISIBLE : View.GONE);
@@ -398,15 +425,60 @@ public class BingeActivity extends Activity {
         }
     }
 
-    /** 缩到极小再放大 = 天然高斯模糊；factor 越小模糊越强 */
-    private Bitmap blurStub(Bitmap source, int factor) {
+    /** 真正的高斯模糊：小图先放大到合适尺寸（避免放大马赛克），再用 3 次盒式模糊逼近高斯。
+     *  输出分辨率无关、平滑，不像「缩到极小再放大」那样出马赛克。 */
+    private Bitmap gaussianBlur(Bitmap source, int radius) {
+        if (source == null) return null;
         try {
-            int w = Math.max(8, source.getWidth() / factor);
-            int h = Math.max(8, source.getHeight() / factor);
-            Bitmap small = Bitmap.createScaledBitmap(source, w, h, true);
-            return Bitmap.createScaledBitmap(small, source.getWidth(), source.getHeight(), true);
+            Bitmap b = source;
+            int minSide = Math.min(source.getWidth(), source.getHeight());
+            if (minSide < 540) {
+                float scale = 540f / minSide;
+                b = Bitmap.createScaledBitmap(source, Math.round(source.getWidth() * scale),
+                        Math.round(source.getHeight() * scale), true);
+            }
+            int r = Math.max(2, radius);
+            Bitmap out = boxBlur(b, r, 3);
+            if (b != source) b.recycle();
+            return out;
         } catch (Exception ignored) { return source; }
     }
+
+    /** 基于滑动窗口求和的可分离盒式模糊，passes 次迭代逼近高斯 */
+    private Bitmap boxBlur(Bitmap src, int r, int passes) {
+        int w = src.getWidth(), h = src.getHeight();
+        int[] pix = new int[w * h];
+        src.getPixels(pix, 0, w, 0, 0, w, h);
+        int[] tmp = new int[w * h];
+        for (int p = 0; p < passes; p++) {
+            boxPass(pix, tmp, w, h, r, true);
+            boxPass(tmp, pix, w, h, r, false);
+        }
+        Bitmap out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        out.setPixels(pix, 0, w, 0, 0, w, h);
+        return out;
+    }
+
+    private void boxPass(int[] src, int[] dst, int w, int h, int r, boolean horizontal) {
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                int sumR = 0, sumG = 0, sumB = 0, count = 0;
+                for (int k = -r; k <= r; k++) {
+                    int cx = horizontal ? clamp(x + k, 0, w - 1) : x;
+                    int cy = horizontal ? y : clamp(y + k, 0, h - 1);
+                    int c = src[cy * w + cx];
+                    sumR += (c >> 16) & 0xff;
+                    sumG += (c >> 8) & 0xff;
+                    sumB += c & 0xff;
+                    count++;
+                }
+                int idx = y * w + x;
+                dst[idx] = 0xff000000 | ((sumR / count) << 16) | ((sumG / count) << 8) | (sumB / count);
+            }
+        }
+    }
+
+    private static int clamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
     private JSONObject entry(int i) { return pool.optJSONObject(i); }
 
