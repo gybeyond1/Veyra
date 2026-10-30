@@ -92,6 +92,7 @@ public class BingeEngine {
     private int loadToken;
     private boolean destroyed;
     private boolean animating;
+    private boolean landscapeVideo;   // 当前视频是横屏：海报要一直垫底，不能撤
     private boolean active;
     // 刷剧形态被「挂起」（切到别的 tab / 进详情 / 看全集）。挂起期间不恢复播放、不抢沉浸态，
     // 播放器与进度原样保留，resume() 回来就能接着播 —— 不用重新 loadShow，也就不会闪传统首页。
@@ -304,6 +305,7 @@ public class BingeEngine {
         currentTitle = entry.optString("title");
         currentEpisode = 1;
         episodeCount = 0;
+        landscapeVideo = false;
         detail = null;
         currentSource = null;
         message.setVisibility(View.GONE);
@@ -387,10 +389,9 @@ public class BingeEngine {
                     if (destroyed || !active) return;
                     if (state == Player.STATE_READY) {
                         message.setVisibility(View.GONE);
-                        // 首帧回调在 TextureView 上不一定可靠，READY 也撤一次（延一点，等真的画上去）
-                        if (texture != null) texture.invalidate();
-                        videoLayer.invalidate();
-                        scheduleHidePoster();
+                        // READY 通常早于首帧，这里只催重绘；真要撤海报等 onVideoSizeChanged
+                        // 拿到尺寸后再排（见下），否则就是「有声音、画面一片空白」。
+                        forceRepaint();
                     }
                     else if (state == Player.STATE_ENDED) {
                         saveProgress(true);
@@ -408,14 +409,19 @@ public class BingeEngine {
                 }
 
                 @Override public void onVideoSizeChanged(VideoSize size) {
-                    playerView.setResizeMode(size.width > 0 && size.width > size.height
+                    landscapeVideo = size.width > 0 && size.width > size.height;
+                    playerView.setResizeMode(landscapeVideo
                             ? AspectRatioFrameLayout.RESIZE_MODE_FIT
                             : AspectRatioFrameLayout.RESIZE_MODE_ZOOM);
-                    if (size.width > size.height) {
+                    if (landscapeVideo) {
+                        // 横屏视频上下是两条黑边，很秃 —— 海报垫底填满（用户明确要求）
                         Bitmap bmp;
                         synchronized (posterCache) { bmp = posterCache.get(currentCover); }
                         if (bmp != null) applyPosterMode(bmp, true, false);
                     }
+                    forceRepaint();
+                    // 拿到尺寸说明解码器真的出画了，这时才排撤海报
+                    scheduleHidePoster(420);
                 }
 
                 @Override public void onPlayerError(PlaybackException error) {
@@ -442,8 +448,9 @@ public class BingeEngine {
             for (long delay : new long[]{300, 900, 1800}) {
                 handler.postDelayed(() -> {
                     if (destroyed || !active || token2 != loadToken) return;
+                    // 只催重绘，绝不撤海报：视频还没画出来就把海报撤掉，
+                    // 中间那段时间就是一片空白（用户截图：切剧后纯白，动一下才出来）。
                     forceRepaint();
-                    hidePoster();
                 }, delay);
             }
         } catch (Throwable error) {
@@ -667,17 +674,21 @@ public class BingeEngine {
 
     /** 撤掉盖在播放器上的海报，露出真正的画面。 */
     private void hidePoster() {
-        poster.setVisibility(View.GONE);
+        // 横屏时 poster 是垫在视频底下的模糊背景，撤了上下就是两条黑边 —— 留着。
+        // 只撤中间那张完整海报（posterFit）。
+        if (!landscapeVideo) poster.setVisibility(View.GONE);
         posterFit.setVisibility(View.GONE);
     }
 
-    /** 首帧前后撤海报：READY 和 onRenderedFirstFrame 都会来，谁先到算谁，切剧后作废。 */
-    private void scheduleHidePoster() {
+    /** 撤海报：谁先到算谁（首帧 / 拿到尺寸），切剧后作废。 */
+    private void scheduleHidePoster() { scheduleHidePoster(160); }
+
+    private void scheduleHidePoster(long delay) {
         final int token = loadToken;
         handler.postDelayed(() -> {
             if (destroyed || !active || token != loadToken) return;
             hidePoster();
-        }, 160);
+        }, delay);
     }
 
     private void loadPoster(String url) {

@@ -582,6 +582,31 @@ body.binge{background:transparent!important}
 .binge-actions button{flex:none;border:1px solid color-mix(in srgb,var(--text) 14%,transparent);border-radius:8px;padding:8px 15px;font-size:13px;font-weight:700;color:var(--text);box-shadow:inset 0 1px 0 rgba(255,255,255,.34)}
 .binge-detail{background:color-mix(in srgb,var(--surface) 46%,transparent)}
 .binge-full{background:var(--accent);color:var(--accent-ink);border-color:transparent;box-shadow:none}
+/* 关掉玻璃时：撤掉 backdrop-filter（.appearance-scrim 是外观面板的遮罩）；
+   底栏回到实心表面色（原来这里写的是硬编码深色 rgba(18,20,24,.86)，
+   跟统一规则打架 —— 卡片因此变成浅灰白而底栏是深灰，材质看着不是同一种）。 */
+html[data-glass=off] .appearance-scrim{
+  -webkit-backdrop-filter:none!important;
+  backdrop-filter:none!important;
+}
+html[data-glass=off] #dock{background:var(--surface)}
+html[data-glass=off] #app.binge #dock,
+html[data-glass=off] #app.binge .binge-card,
+html[data-glass=off] #app.binge #binge-fab{
+  -webkit-backdrop-filter:none!important;
+  backdrop-filter:none!important;
+  background:var(--surface);
+}
+/* 底栏 / 简介卡片 / 悬浮按钮 = 同一条规则、同一个 --dock、同一条 backdrop-filter。
+   分开写迟早会漂：卡片一度是浅灰白实心、底栏是深灰半透，用户一眼看出不是同一种材质。 */
+#app.binge #dock,
+#app.binge .binge-card,
+#app.binge #binge-fab{
+  background:var(--dock);
+  border:1px solid var(--line);
+  -webkit-backdrop-filter:blur(var(--glass-blur,2.2px)) saturate(.85);
+  backdrop-filter:blur(var(--glass-blur,2.2px)) saturate(.85);
+}
 .binge-msg{position:absolute;left:24px;right:24px;top:50%;transform:translateY(-50%);text-align:center;color:#fff;font-size:13px;white-space:pre-line;background:rgba(0,0,0,.55);padding:16px;border-radius:12px}
 
 
@@ -672,14 +697,6 @@ body.binge{background:transparent!important}
 html[data-glass=off] #dock,
 html[data-glass=off] #dock-blob b,
 html[data-glass=off] #binge-fab,
-html[data-glass=off] .binge-card,
-html[data-glass=off] .appearance-scrim{
-  -webkit-backdrop-filter:none!important;
-  backdrop-filter:none!important;
-}
-html[data-glass=off] #dock{background:var(--surface)}
-html[data-glass=off] #app.binge #dock{background:rgba(18,20,24,.86)}
-html[data-glass=off] #app.binge .binge-card{background:rgba(18,20,24,.86)}
 html[data-glass=off] #app.binge #binge-fab{background:rgba(18,20,24,.86)}
 html[data-glass=off] .ap-preview-bar{
   -webkit-backdrop-filter:none;backdrop-filter:none;
