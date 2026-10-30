@@ -52,6 +52,7 @@ import java.util.concurrent.Executors;
 public final class MainActivity extends Activity {
     private static final String TAG = "HuangGuo";
     private static final int AVATAR_PICKER = 7101;
+    private static final int BINGE_REQUEST = 7102;
     private final ExecutorService requests = Executors.newFixedThreadPool(4);
     private final ExecutorService localRequests = Executors.newSingleThreadExecutor();
     private final ExecutorService coverRequests = Executors.newFixedThreadPool(2);
@@ -385,6 +386,16 @@ public final class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == BINGE_REQUEST) {
+            if (data != null && "detail".equals(data.getStringExtra("bingeAction"))) {
+                String id = data.getStringExtra("id");
+                if (id != null && !id.isEmpty()) {
+                    String script = "window.hgBingeAction && window.hgBingeAction('detail'," + JSONObject.quote(id) + ")";
+                    runOnUiThread(() -> { if (webView != null) webView.evaluateJavascript(script, null); });
+                }
+            }
+            return;
+        }
         if (requestCode != AVATAR_PICKER || resultCode != RESULT_OK || data == null || data.getData() == null) return;
         Uri selected = data.getData();
         requests.execute(() -> {
@@ -814,6 +825,15 @@ public final class MainActivity extends Activity {
                 Intent intent = new Intent(this, PlayerActivity.class);
                 intent.putExtra("payload", args.toString());
                 runOnUiThread(() -> startActivity(intent));
+                return true;
+            }
+            case "open-binge": {
+                // 刷剧模式：全屏 feed 播随机推荐剧第一集；BingeActivity 通过
+                // setResult 把「查看详情」带回来，由 onActivityResult 转 JS 路由
+                args.put("source", mode.active());
+                Intent intent = new Intent(this, BingeActivity.class);
+                intent.putExtra("payload", args.toString());
+                runOnUiThread(() -> startActivityForResult(intent, BINGE_REQUEST));
                 return true;
             }
             default: throw new IllegalArgumentException("未知请求");

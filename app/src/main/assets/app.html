@@ -39,6 +39,11 @@
       <button type="button" data-nav="ai"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 1.8 6.2L20 10l-6.2 1.8L12 18l-1.8-6.2L4 10l6.2-1.8zM19 17l.6 1.4L21 19l-1.4.6L19 21l-.6-1.4L17 19l1.4-.6z"/></svg></span><span>AI</span></button>
       <button type="button" data-nav="library"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.5"/><path d="M4.5 21c.5-4.3 3-6.5 7.5-6.5s7 2.2 7.5 6.5"/></svg></span><span>我的</span></button>
     </nav>
+    <!-- 刷剧模式悬浮按钮：只在公开模式首页可见，点击进入/退出刷剧 feed（BingeActivity） -->
+    <button id="binge-fab" type="button" aria-label="刷剧模式" hidden>
+      <span class="binge-fab-icon binge-fab-play" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.4v13.2c0 .8.9 1.3 1.6.9l10.4-6.6c.6-.4.6-1.4 0-1.8L9.6 4.5c-.7-.4-1.6.1-1.6.9z"/></svg></span>
+      <span class="binge-fab-icon binge-fab-home" aria-hidden="true" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/></svg></span>
+    </button>
     <div id="toast-host" role="status" aria-live="polite"></div>
     <div id="auth-overlay" hidden>
       <section class="auth-panel" role="dialog" aria-modal="true" aria-labelledby="auth-title">

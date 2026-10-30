@@ -31,6 +31,11 @@
             android:exported="false"
             android:configChanges="orientation|screenSize|uiMode" />
         <activity
+            android:name=".BingeActivity"
+            android:enableOnBackInvokedCallback="true"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|uiMode" />
+        <activity
             android:name=".LocalPlayerActivity"
             android:enableOnBackInvokedCallback="true"
             android:exported="false"

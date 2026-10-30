@@ -741,6 +741,7 @@ function renderHome() {
   hydrateImages();
   slides.forEach(item => { if (item.cover) getCover(item.cover).catch(() => {}); });
   scheduleBannerAuto();
+  window.__bingeUpdateChrome && window.__bingeUpdateChrome();
 }
 
 function renderTags() {
@@ -1767,6 +1768,7 @@ function setRoute(route) {
   document.getElementById('app').classList.toggle('route-detail', route === 'detail');
   window.AndroidHost?.setDetailMode?.(route === 'detail');
   headerSettings.hidden = route !== 'library';
+  window.__bingeUpdateChrome && window.__bingeUpdateChrome();
   searchInput.placeholder = libraryArea ? '搜索观看历史和收藏' : privateMode() ? '搜索剧名或 #标签' : '搜索剧名';
   searchInput.setAttribute('aria-label', libraryArea ? '搜索观看历史和收藏' : '搜索剧名或标签');
   if (route === 'library') searchInput.value = state.libraryQuery;
@@ -3611,3 +3613,47 @@ document.getElementById('unlock-form').addEventListener('submit', async event =>
   catch (error) { const label = document.getElementById('unlock-error'); label.textContent = error.message; label.hidden = false; }
   finally { button.disabled = false; }
 });
+
+/* ================= 刷剧模式（公开模式首页悬浮按钮） =================
+   点击进入原生 BingeActivity：随机推荐剧第 1 集全屏自动播，上下滑换剧；
+   「查看详情」由 BingeActivity 通过 hgBingeAction 回传路由。 */
+const bingeFab = document.getElementById('binge-fab');
+
+function bingePoolItems() {
+  const data = state.home || {};
+  const pool = [
+    ...asArray(data.homepageRecommend), ...asArray(data.recommend?.items),
+    ...asArray(data.homepageNewest), ...asArray(data.newest?.items),
+  ];
+  const seen = new Set();
+  return pool.filter(item => item && item.id && item.cover && item.kind !== 'campaign'
+    && !seen.has(String(item.id)) && seen.add(String(item.id)));
+}
+
+function updateBingeChrome() {
+  if (!bingeFab) return;
+  const show = state.route === 'home' && !privateMode() && bingePoolItems().length > 0;
+  bingeFab.hidden = !show;
+}
+window.__bingeUpdateChrome = updateBingeChrome;
+
+bingeFab?.addEventListener('click', async () => {
+  if (privateMode() || state.route !== 'home') return;
+  const items = bingePoolItems();
+  if (!items.length) { toast('首页还没有推荐内容，稍后再试', true); return; }
+  // 洗牌后取一批：每次进入刷的是不同的随机剧
+  for (let i = items.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [items[i], items[j]] = [items[j], items[i]];
+  }
+  const payload = items.slice(0, 40).map(item => ({
+    id: String(item.id), title: item.title || '',
+    cover: item.cover || '', description: item.description || item.episodeLabel || '',
+  }));
+  try { await api('open-binge', { items: payload, source: contentSource }); }
+  catch (error) { toast(error.message || '进入刷剧模式失败', true); }
+});
+
+window.hgBingeAction = (type, id) => {
+  if (type === 'detail' && id) goDetail(id).catch(() => {});
+};

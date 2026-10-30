@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="binge_poster" type="id" />
+    <item name="binge_mask_title" type="id" />
+    <item name="binge_mask_desc" type="id" />
+    <item name="binge_mask_backdrop" type="id" />
+</resources>
