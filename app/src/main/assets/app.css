@@ -84,7 +84,7 @@ button,a,input,[role=tab]{-webkit-tap-highlight-color:transparent}button{transit
 /* Settings has its own heading and back button, shared by both content modes. */
 #app[data-route=settings]>.app-top{display:none}
 #app[data-route=settings]::before{content:"";position:absolute;top:0;left:0;right:0;height:calc(-2px + var(--status-bar-height));pointer-events:none;z-index:5;background:linear-gradient(180deg,rgba(34,32,25,.012),rgba(34,32,25,.012) calc(100% - 1px),rgba(34,32,25,.06) calc(100% - 1px),rgba(34,32,25,.06))}html[data-theme=dark] #app[data-route=settings]::before{background:linear-gradient(180deg,rgba(245,241,231,.012),rgba(245,241,231,.012) calc(100% - 1px),rgba(245,241,231,.06) calc(100% - 1px),rgba(245,241,231,.06))}#app[data-route=settings]>#scroll{height:100%}
-#app[data-route=settings] .settings-page{padding-top:calc(8px + var(--status-bar-height))}
+#app[data-route=settings] .settings-page{padding-top:8px}
 #app[data-route=settings]>.back-preview{inset:0}
 
 /* Homepage shelves show two rows while retaining horizontal browsing. */

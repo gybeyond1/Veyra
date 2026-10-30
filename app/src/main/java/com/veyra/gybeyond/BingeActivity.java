@@ -174,13 +174,11 @@ public class BingeActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         frame.addView(poster);
 
-        // 底部轻模糊遮罩：用缩小海报拉伸作模糊底 + 渐变压暗
-        LinearLayout mask = new LinearLayout(this);
-        mask.setOrientation(LinearLayout.VERTICAL);
+        // 底部轻模糊遮罩：FrameLayout 叠层（模糊底 + 渐变 + 信息），挂在页面底部
+        FrameLayout mask = new FrameLayout(this);
         FrameLayout.LayoutParams maskParams = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(210), Gravity.BOTTOM);
         mask.setLayoutParams(maskParams);
-        mask.setClipChildren(false);
 
         ImageView backdrop = new ImageView(this);
         backdrop.setScaleType(ImageView.ScaleType.CENTER_CROP);
@@ -198,8 +196,9 @@ public class BingeActivity extends Activity {
         LinearLayout info = new LinearLayout(this);
         info.setOrientation(LinearLayout.VERTICAL);
         info.setPadding(dp(18), dp(10), dp(18), dp(26));
+        info.setGravity(Gravity.BOTTOM);
         info.setLayoutParams(new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.BOTTOM));
 
         TextView title = new TextView(this);
         title.setTextColor(Color.WHITE);
@@ -238,8 +237,7 @@ public class BingeActivity extends Activity {
         fullButton.setOnClickListener(v -> openFullEpisode());
         buttons.addView(fullButton);
 
-        mask.addView(info, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        mask.addView(info);
         frame.setTag(R.id.binge_poster, poster);
         frame.setTag(R.id.binge_mask_title, title);
         frame.setTag(R.id.binge_mask_desc, desc);
