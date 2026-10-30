@@ -163,15 +163,32 @@ public class BingeEngine {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         videoLayer.addView(posterFit);
 
-        // 换剧时「下一部」的画面：只在跟手拖拽过程中显示，承接手指并顶住换页的那一瞬间
+        /* 换剧时「下一部」的画面：只在跟手拖拽过程中显示，承接手指并顶住换页的那一瞬间。
+           它是【独立的一层】，与 videoLayer 平级（插在 videoLayer 与 webView 之间），
+           不是 videoLayer 的子视图。
+
+           为什么不能做子视图：子视图要偏移 ±屏高才能停在屏幕外，等于把内容画到父布局
+           边界之外，只能靠 setClipChildren(false) 兜 —— 硬件加速下这条路各家实现不一致，
+           实测就是一点都画不出来（用户：连半张都没了），也解释不了「有时有半张」。
+
+           独立层自身就是全屏大小，只是整体平移，绘制内容永远在自己 bounds 内，
+           由 root 裁到屏幕范围，不依赖任何 clip 开关，必定画得出来。
+           位移因此也不再受父层带动：自己算 ±屏高 + 手指位移，天然 1:1。 */
         neighbor = new ImageView(activity());
         neighbor.setScaleType(ImageView.ScaleType.CENTER_CROP);
         // 封面是异步解的，没解出来之前它是透明的，露出来就是一片白。垫个黑底。
         neighbor.setBackgroundColor(0xFF000000);
         neighbor.setVisibility(View.GONE);
-        neighbor.setLayoutParams(new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        videoLayer.addView(neighbor);
+        FrameLayout.LayoutParams nlp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+        ViewGroup host = (videoLayer.getParent() instanceof ViewGroup)
+                ? (ViewGroup) videoLayer.getParent() : null;
+        if (host != null) {
+            int at = host.indexOfChild(videoLayer);
+            host.addView(neighbor, at >= 0 ? at + 1 : host.getChildCount(), nlp);
+        } else {
+            videoLayer.addView(neighbor, nlp);   // 兜底：拿不到父布局就退回原来的位置
+        }
 
         View surface = playerView.getVideoSurfaceView();
         if (surface instanceof TextureView) texture = (TextureView) surface;
@@ -244,6 +261,8 @@ public class BingeEngine {
         // 从页面没盖住的地方（状态栏那一截）透出来，就是「画面顶到状态栏」。
         // 用 INVISIBLE 不用 GONE：GONE 会重建 TextureView 的 SurfaceTexture。
         videoLayer.setVisibility(View.INVISIBLE);
+        // 邻页现在是与 videoLayer 平级的独立层，不会跟着父层藏，得自己收
+        if (neighbor != null) { neighbor.animate().cancel(); neighbor.setVisibility(View.GONE); }
         // 必须把系统栏放回来：进刷剧时 hideBars() 隐藏了状态栏，WebView 的
         // safe-area-inset-top 随之变 0，切到底栏其它页时内容就顶到屏幕最上面去了
         // （用户截图：搜索框贴着顶边、状态栏整个没了）。
@@ -551,12 +570,10 @@ public class BingeEngine {
         }
         if (neighbor != null) {
             float height = Math.max(1f, videoLayer.getHeight());
-            /* 只给「邻页」一个固定偏移，不再叠 dragOffset。
-               neighbor 是 videoLayer 的子视图，videoLayer 本身已经跟着手指平移了，
-               这里再加一次 dragOffset 就等于位移翻倍：邻页比手指快一倍冲进来，
-               只有上半截露在视频层里、下半截被裁掉 —— 用户看到的「海报只加载了小半张」。
-               父层带它走，才是真正的 1:1 跟手。 */
-            neighbor.setTranslationY(direction > 0 ? height : -height);
+            /* 独立层：自己算「停在屏幕外 + 跟着手指进来」。
+               videoLayer 平移 dragOffset，邻页平移 (±屏高 + dragOffset)，
+               两者同步，露出的一条恰好等于手指让开的一条 —— 真 1:1，不多不少。 */
+            neighbor.setTranslationY((direction > 0 ? height : -height) + dragOffset);
             if (neighbor.getVisibility() != View.VISIBLE) neighbor.setVisibility(View.VISIBLE);
         }
     }
@@ -578,7 +595,8 @@ public class BingeEngine {
             animating = true;
             videoLayer.animate().translationY(0f).setDuration(220).start();
             if (neighbor != null) {
-                neighbor.animate().translationY(direction > 0 ? height : -height).setDuration(220)
+                neighbor.animate()
+                        .translationY(direction > 0 ? height : -height).setDuration(220)
                         .withEndAction(() -> { if (neighbor != null) neighbor.setVisibility(View.GONE); })
                         .start();
             }
@@ -592,9 +610,11 @@ public class BingeEngine {
         final long duration = Math.max(140L, Math.min(260L,
                 (long) (260f * Math.max(0.25f, 1f - moved / height))));
         videoLayer.animate().translationY(direction > 0 ? -height : height).setDuration(duration).start();
-        // 邻页不动它：它在 videoLayer 里，父层滑到 ∓height 时它正好落到 0，天然对齐。
-        // 原来这里另跑一个 translationY(0) 的动画，等于把它提前拽到父层原点，
-        // 跟着父层一起飞出屏幕 —— 翻页过程中邻页反而没了。
+        // 独立层必须自己走：当前页滑出屏幕的同时，邻页滑到 0 补上 —— 两帧对齐，
+        // 视觉上就是「下一页被手指推上来」，中间不会露底。
+        if (neighbor != null) {
+            neighbor.animate().translationY(0f).setDuration(duration).start();
+        }
         handler.postDelayed(() -> {
             if (destroyed || !active) { animating = false; return; }
             if (player != null) player.setPlayWhenReady(false);
@@ -633,7 +653,7 @@ public class BingeEngine {
             String cover = item.optString("cover");
             if (cover.isEmpty()) continue;
             synchronized (posterCache) { if (posterCache.get(cover) != null) continue; }
-            worker.execute(() -> decodeCover(cover));
+            posterLoader.execute(() -> decodeCover(cover));
         }
     }
 
@@ -664,7 +684,8 @@ public class BingeEngine {
         if (cached != null) { neighbor.setImageBitmap(cached); return; }
         neighbor.setImageDrawable(null);
         final String url = cover;
-        worker.execute(() -> {
+        // 走 posterLoader：和详情 / 选集解析分开排队，轮不到就一直排在后面
+        posterLoader.execute(() -> {
             decodeCover(url);
             Bitmap bitmap;
             synchronized (posterCache) { bitmap = posterCache.get(url); }

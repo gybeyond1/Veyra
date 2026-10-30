@@ -560,6 +560,8 @@ html[data-glass=off] #app.binge{--dock:var(--surface)}
 #app.binge{background:transparent!important}
 html:has(body.binge){background:transparent!important}
 body.binge{background:transparent!important}
+/* 拖到头时 WebView 自带的回弹会把页面往回拽一下，手感像有阻力 */
+html:has(body.binge),body.binge{overscroll-behavior:none}
 #app.binge #scroll,#app.binge .app-top,#app.binge #search-suggest{display:none}
 .binge-card{
   margin:0 76px 92px 14px;
