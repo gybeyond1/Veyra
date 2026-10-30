@@ -22,7 +22,6 @@ import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -57,6 +56,7 @@ public class BingeActivity extends Activity {
     private DualContentRepository repository;
     private AppStore store;
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    private final ExecutorService prefetcher = Executors.newSingleThreadExecutor();
     private final Handler handler = new Handler(Looper.getMainLooper());
 
     private JSONArray pool;
@@ -70,7 +70,6 @@ public class BingeActivity extends Activity {
     private FrameLayout incoming;      // 过渡页
     private FrameLayout playerLayer;   // 视频层（随当前页重新挂载）
     private PlayerView playerView;
-    private ProgressBar loading;
     private TextView message;
 
     private ExoPlayer player;
@@ -87,6 +86,10 @@ public class BingeActivity extends Activity {
     private float downY;
     private boolean swiping;
     private final Map<String, Bitmap> posterCache = new HashMap<>();
+    // 预缓存：详情与第 1 集播放地址提前解析好，滑到即播（不再等转圈）
+    private final Map<String, JSONObject> detailCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<String, JSONObject> readyCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.Set<String> prefetching = new java.util.HashSet<>();
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -149,11 +152,6 @@ public class BingeActivity extends Activity {
         // 代码 new PlayerView(this) 默认 surface_view，在 edge-to-edge 全屏下可能初始化异常。
         playerView = (PlayerView) getLayoutInflater().inflate(R.layout.episode_player, playerLayer, false);
         playerLayer.addView(playerView);
-        loading = new ProgressBar(this);
-        FrameLayout.LayoutParams loadingParams = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER);
-        loading.setLayoutParams(loadingParams);
-        playerLayer.addView(loading);
         message = new TextView(this);
         message.setTextColor(0xCCFFFFFF);
         message.setTextSize(13);
@@ -167,6 +165,43 @@ public class BingeActivity extends Activity {
         root.setOnTouchListener((v, event) -> { handleTouch(event); return true; });
         populatePage(page, entry(index));
         mountPlayerLayer();
+        buildFab();
+    }
+
+    /** 右下角原生悬浮按钮：与首页悬浮按钮同一「切换」语义——点了就回传统首页（finish 本页） */
+    private void buildFab() {
+        FrameLayout fab = new FrameLayout(this);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setShape(GradientDrawable.OVAL);
+        bg.setColor(0x33242219);          // 与底栏玻璃近似的半透明深底
+        bg.setStroke(dp(1), 0x4DFFFFFF);  // 内高光描边
+        fab.setBackground(bg);
+        fab.addView(new SwapIcon(this), new FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER));
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(dp(52), dp(52), Gravity.END | Gravity.BOTTOM);
+        params.rightMargin = dp(16);
+        params.bottomMargin = dp(232);    // 悬在底部遮罩（210dp）之上
+        fab.setOnClickListener(v -> finish());
+        root.addView(fab, params);
+    }
+
+    /** 自绘「切换」图标：上箭头向右、下箭头向左，圆头 */
+    private class SwapIcon extends View {
+        private final android.graphics.Paint paint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        SwapIcon(android.content.Context c) { super(c); }
+        @Override protected void onDraw(android.graphics.Canvas canvas) {
+            float w = getWidth(), h = getHeight();
+            paint.setColor(0xFFFFFFFF);
+            paint.setStrokeWidth(Math.max(1.5f, dp(1.6f)));
+            paint.setStrokeCap(android.graphics.Paint.Cap.ROUND);
+            paint.setStyle(android.graphics.Paint.Style.STROKE);
+            float y1 = h * 0.32f, y2 = h * 0.68f, padX = w * 0.20f, head = w * 0.20f;
+            canvas.drawLine(padX, y1, w - padX, y1, paint);
+            canvas.drawLine(w - padX - head, y1 - head, w - padX, y1, paint);
+            canvas.drawLine(w - padX - head, y1 + head, w - padX, y1, paint);
+            canvas.drawLine(w - padX, y2, padX, y2, paint);
+            canvas.drawLine(padX + head, y2 - head, padX, y2, paint);
+            canvas.drawLine(padX + head, y2 + head, padX, y2, paint);
+        }
     }
 
     private FrameLayout buildPage() {
@@ -177,6 +212,14 @@ public class BingeActivity extends Activity {
         poster.setLayoutParams(new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         frame.addView(poster);
+
+        // 横图/方图海报的完整居中层：模糊底之上显示完整海报（竖图或视频已起播时隐藏）
+        ImageView posterFit = new ImageView(this);
+        posterFit.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        posterFit.setVisibility(View.GONE);
+        posterFit.setLayoutParams(new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        frame.addView(posterFit);
 
         // 底部轻模糊遮罩：FrameLayout 叠层（模糊底 + 渐变 + 信息），挂在页面底部
         FrameLayout mask = new FrameLayout(this);
@@ -244,6 +287,7 @@ public class BingeActivity extends Activity {
         mask.addView(info);
         frame.addView(mask);
         frame.setTag(R.id.binge_poster, poster);
+        frame.setTag(R.id.binge_poster_fit, posterFit);
         frame.setTag(R.id.binge_mask_title, title);
         frame.setTag(R.id.binge_mask_desc, desc);
         frame.setTag(R.id.binge_mask_backdrop, backdrop);
@@ -276,7 +320,7 @@ public class BingeActivity extends Activity {
         return drawable;
     }
 
-    /** 把视频层（playerView/loading/message）插到当前页海报之上、遮罩之下 */
+    /** 把视频层（playerView/message）插到当前页海报之上、遮罩之下 */
     private void mountPlayerLayer() {
         page.addView(playerLayer, Math.min(1, page.getChildCount()), new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -290,6 +334,9 @@ public class BingeActivity extends Activity {
         ImageView backdrop = (ImageView) frame.getTag(R.id.binge_mask_backdrop);
         String cover = entry.optString("cover");
         poster.setImageDrawable(null);
+        poster.setAlpha(1f);
+        ImageView posterFit = (ImageView) frame.getTag(R.id.binge_poster_fit);
+        if (posterFit != null) { posterFit.setImageDrawable(null); posterFit.setVisibility(View.GONE); }
         backdrop.setImageDrawable(null);
         title.setText(entry.optString("title"));
         String description = entry.optString("description");
@@ -303,9 +350,9 @@ public class BingeActivity extends Activity {
         Bitmap cached;
         synchronized (posterCache) { cached = posterCache.get(url); }
         if (cached != null) {
-            target.setImageBitmap(cached);
+            applyPosterMode(frame, cached, false, true);
             ImageView backdrop = (ImageView) frame.getTag(R.id.binge_mask_backdrop);
-            if (backdrop != null) backdrop.setImageBitmap(blurStub(cached));
+            if (backdrop != null) backdrop.setImageBitmap(blurStub(cached, 28));
             return;
         }
         final FrameLayout frameRef = frame;
@@ -318,19 +365,44 @@ public class BingeActivity extends Activity {
                 synchronized (posterCache) { posterCache.put(url, bitmap); }
                 runOnUiThread(() -> {
                     if (destroyed || isFinishing() || !url.equals(target.getTag())) return;
-                    target.setImageBitmap(bitmap);
+                    applyPosterMode(frameRef, bitmap, false, true);
                     ImageView backdrop = (ImageView) frameRef.getTag(R.id.binge_mask_backdrop);
-                    if (backdrop != null) backdrop.setImageBitmap(blurStub(bitmap));
+                    if (backdrop != null) backdrop.setImageBitmap(blurStub(bitmap, 28));
                 });
             } catch (Exception ignored) { }
         });
     }
 
-    /** 缩到极小再放大 = 天然的轻模糊遮罩底 */
-    private Bitmap blurStub(Bitmap source) {
+    /**
+     * 海报展示模式：
+     * 竖图 → CENTER_CROP 铺满（现状不变）；
+     * 横图/方图、或视频是横屏 → 高斯模糊海报做全屏暗化背景 +（可选）完整海报居中显示。
+     */
+    private void applyPosterMode(FrameLayout frame, Bitmap bitmap, boolean forceBlur, boolean showFit) {
+        if (frame == null || bitmap == null) return;
+        ImageView poster = (ImageView) frame.getTag(R.id.binge_poster);
+        ImageView fit = (ImageView) frame.getTag(R.id.binge_poster_fit);
+        if (poster == null) return;
+        boolean blur = forceBlur || bitmap.getWidth() >= bitmap.getHeight() * 0.85f;
+        if (blur) {
+            poster.setImageBitmap(blurStub(bitmap, 14));
+            poster.setAlpha(0.6f);   // 模糊底压暗，突出完整海报与视频
+            if (fit != null) {
+                fit.setImageBitmap(bitmap);
+                fit.setVisibility(showFit ? View.VISIBLE : View.GONE);
+            }
+        } else {
+            poster.setImageBitmap(bitmap);
+            poster.setAlpha(1f);
+            if (fit != null) fit.setVisibility(View.GONE);
+        }
+    }
+
+    /** 缩到极小再放大 = 天然高斯模糊；factor 越小模糊越强 */
+    private Bitmap blurStub(Bitmap source, int factor) {
         try {
-            int w = Math.max(8, source.getWidth() / 28);
-            int h = Math.max(8, source.getHeight() / 28);
+            int w = Math.max(8, source.getWidth() / factor);
+            int h = Math.max(8, source.getHeight() / factor);
             Bitmap small = Bitmap.createScaledBitmap(source, w, h, true);
             return Bitmap.createScaledBitmap(small, source.getWidth(), source.getHeight(), true);
         } catch (Exception ignored) { return source; }
@@ -355,13 +427,14 @@ public class BingeActivity extends Activity {
         // 视频层从旧页搬到当前页（换剧时页已交换）
         if (playerLayer.getParent() instanceof ViewGroup) ((ViewGroup) playerLayer.getParent()).removeView(playerLayer);
         mountPlayerLayer();
+        playerLayer.setAlpha(0f);   // 海报 → 视频无缝衔接：首帧渲染后才淡入
         playerLayer.setVisibility(View.GONE);
-        loading.setVisibility(View.VISIBLE);
         message.setVisibility(View.GONE);
         releasePlayer();
         worker.execute(() -> {
             try {
-                JSONObject d = repository.detail(currentId);
+                JSONObject d = detailCache.get(currentId);
+                if (d == null) { d = repository.detail(currentId); detailCache.put(currentId, d); }
                 if (Thread.currentThread().isInterrupted()) return;
                 detail = d;
                 JSONArray episodes = d.optJSONArray("episodes");
@@ -373,16 +446,39 @@ public class BingeActivity extends Activity {
                     if (desc != null && !description.isEmpty()) desc.setText(description);
                 });
                 if (episodeCount <= 0) throw new IllegalStateException("该剧暂无可播放的选集");
-                JSONObject ready = repository.episode(currentId, 1);
+                JSONObject ready = readyCache.get(currentId);
+                if (ready == null) { ready = repository.episode(currentId, 1); readyCache.put(currentId, ready); }
                 if (Thread.currentThread().isInterrupted()) return;
                 runOnUiThread(() -> { if (!destroyed && !isFinishing() && token == loadToken) startPlayback(ready); });
+                schedulePrefetch();
             } catch (Exception error) {
                 runOnUiThread(() -> {
                     if (destroyed || isFinishing() || token != loadToken) return;
-                    loading.setVisibility(View.GONE);
                     message.setText("加载失败: " + error.getMessage() + "\n上滑换一部");
                     message.setVisibility(View.VISIBLE);
                 });
+            }
+        });
+    }
+
+    /** 预缓存后面三部剧的详情与第 1 集播放地址：滑到即播，不再现场解析等待 */
+    private void schedulePrefetch() {
+        prefetcher.execute(() -> {
+            for (int i = index + 1; i <= index + 3 && i < pool.length(); i++) {
+                JSONObject e = entry(i);
+                if (e == null) continue;
+                String id = e.optString("id");
+                if (id.isEmpty() || detailCache.containsKey(id) || !prefetching.add(id)) continue;
+                try {
+                    JSONObject d = repository.detail(id);
+                    detailCache.put(id, d);
+                    JSONArray eps = d == null ? null : d.optJSONArray("episodes");
+                    if (eps != null && eps.length() > 0) {
+                        JSONObject ready = repository.episode(id, 1);
+                        if (ready != null && !ready.optString("source").isEmpty()) readyCache.put(id, ready);
+                    }
+                } catch (Exception ignored) { }
+                finally { prefetching.remove(id); }
             }
         });
     }
@@ -392,7 +488,6 @@ public class BingeActivity extends Activity {
         currentSource = ready.optString("source");
         currentMime = ready.optString("mimeType", MimeTypes.APPLICATION_M3U8);
         if (currentSource.isEmpty()) {
-            loading.setVisibility(View.GONE);
             message.setText("暂时取不到播放地址\n上滑换一部");
             message.setVisibility(View.VISIBLE);
             return;
@@ -405,7 +500,6 @@ public class BingeActivity extends Activity {
             @Override public void onPlaybackStateChanged(int state) {
                 if (destroyed || isFinishing()) return;
                 if (state == Player.STATE_READY) {
-                    loading.setVisibility(View.GONE);
                     message.setVisibility(View.GONE);
                 } else if (state == Player.STATE_ENDED) {
                     saveProgress(true);
@@ -413,16 +507,29 @@ public class BingeActivity extends Activity {
                 }
             }
 
+            @Override public void onRenderedFirstFrame() {
+                // 海报 → 视频 无缝衔接：首帧真正渲染出来才淡入，全程无转圈、无黑屏
+                if (destroyed || isFinishing()) return;
+                playerLayer.animate().alpha(1f).setDuration(200).start();
+                ImageView fit = (ImageView) page.getTag(R.id.binge_poster_fit);
+                if (fit != null) fit.setVisibility(View.GONE);
+            }
+
             @Override public void onVideoSizeChanged(VideoSize size) {
                 // 竖屏铺满裁切，横屏按比例完整显示
                 playerView.setResizeMode(size.width > 0 && size.width > size.height
                         ? AspectRatioFrameLayout.RESIZE_MODE_FIT
                         : AspectRatioFrameLayout.RESIZE_MODE_ZOOM);
+                // 横屏视频：海报切换为高斯模糊暗化背景，视频两侧不再露出杂乱的裁切海报
+                if (size.width > size.height) {
+                    Bitmap bmp;
+                    synchronized (posterCache) { bmp = posterCache.get(currentCover); }
+                    if (bmp != null) applyPosterMode(page, bmp, true, false);
+                }
             }
 
             @Override public void onPlayerError(PlaybackException error) {
                 if (destroyed || isFinishing()) return;
-                loading.setVisibility(View.GONE);
                 message.setText("播放失败: " + error.getMessage() + "\n上滑换一部");
                 message.setVisibility(View.VISIBLE);
             }
@@ -436,12 +543,11 @@ public class BingeActivity extends Activity {
         player.setMediaSource(VideoPlaybackCache.sources(this).createMediaSource(mediaItem), resumePosition(currentId, currentEpisode));
         player.prepare();
         player.setPlayWhenReady(true);
-        playerLayer.setVisibility(View.VISIBLE);
-        loading.setVisibility(View.VISIBLE);
+        playerLayer.setAlpha(0f);
+        playerLayer.setVisibility(View.VISIBLE);   // alpha 0：首帧渲染后才淡入（onRenderedFirstFrame）
         } catch (Throwable error) {
             if (destroyed || isFinishing()) return;
             try { releasePlayer(); } catch (Exception ignored) { }
-            loading.setVisibility(View.GONE);
             message.setText("播放启动失败: " + error.getMessage() + "\n上滑换一部");
             message.setVisibility(View.VISIBLE);
         }
@@ -470,8 +576,8 @@ public class BingeActivity extends Activity {
                     .put("source", ContentMode.get(this).active());
             Intent intent = new Intent(this, PlayerActivity.class);
             intent.putExtra("payload", payload.toString());
+            // 不 finish：播放页返回后仍停留在刷剧模式的这部剧上
             startActivity(intent);
-            finish();
         } catch (Exception ignored) { }
     }
 
@@ -578,6 +684,7 @@ public class BingeActivity extends Activity {
         Intent data = new Intent();
         data.putExtra("bingeAction", "detail");
         data.putExtra("id", currentId);
+        data.putExtra("index", index);   // 返回后要回到刷剧的这部剧
         setResult(RESULT_OK, data);
         finish();
     }
@@ -618,5 +725,6 @@ public class BingeActivity extends Activity {
         handler.removeCallbacksAndMessages(null);
         releasePlayer();
         worker.shutdown();
+        prefetcher.shutdown();
     }
 }

@@ -453,8 +453,10 @@ public final class MainActivity extends Activity {
         if (requestCode == BINGE_REQUEST) {
             if (data != null && "detail".equals(data.getStringExtra("bingeAction"))) {
                 String id = data.getStringExtra("id");
+                int index = data.getIntExtra("index", 0);
                 if (id != null && !id.isEmpty()) {
-                    String script = "window.hgBingeAction && window.hgBingeAction('detail'," + JSONObject.quote(id) + ")";
+                    String script = "window.hgBingeAction && window.hgBingeAction('detail',"
+                            + JSONObject.quote(id) + "," + index + ")";
                     runOnUiThread(() -> { if (webView != null) webView.evaluateJavascript(script, null); });
                 }
             }

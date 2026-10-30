@@ -1757,6 +1757,7 @@ function updateBackEnabled() {
 
 function setRoute(route) {
   stopBannerAuto();
+  resumeBingeIfReturned(route);   // 详情返回首页 → 自动回到刷剧模式同一部剧（须在 state.route 更新前判断）
   if (route !== 'downloads') stopDownloadsTimer();
   if (state.route === 'detail' && route !== 'detail') { detailCard?.dispose(); detailCard = null; }
   const libraryArea = ['library', 'settings', 'account-management'].includes(route);
@@ -3618,6 +3619,8 @@ document.getElementById('unlock-form').addEventListener('submit', async event =>
    点击进入原生 BingeActivity：随机推荐剧第 1 集全屏自动播，上下滑换剧；
    「查看详情」由 BingeActivity 通过 hgBingeAction 回传路由。 */
 const bingeFab = document.getElementById('binge-fab');
+let bingePayload = null;     // 最近一次进入刷剧的剧单（返回恢复用）
+let bingeReturnIndex = null; // 从刷剧进详情后要恢复的位置
 
 function bingePoolItems() {
   const data = state.home || {};
@@ -3650,10 +3653,24 @@ bingeFab?.addEventListener('click', async () => {
     id: String(item.id), title: item.title || '',
     cover: item.cover || '', description: item.description || item.episodeLabel || '',
   }));
+  bingePayload = { items: payload };
   try { await api('open-binge', { items: payload, source: contentSource }); }
   catch (error) { toast(error.message || '进入刷剧模式失败', true); }
 });
 
-window.hgBingeAction = (type, id) => {
-  if (type === 'detail' && id) goDetail(id).catch(() => {});
+window.hgBingeAction = (type, id, index) => {
+  if (type === 'detail' && id) {
+    // 记住刷剧位置：从详情返回首页时自动回到刷剧模式、停在同一部剧
+    if (bingePayload && typeof index === 'number') bingeReturnIndex = index;
+    goDetail(id).catch(() => {});
+  }
 };
+
+// 从详情返回首页 → 恢复刷剧（同一批剧 + 同一位置）；须在 setRoute 更新 state.route 之前调用
+function resumeBingeIfReturned(target) {
+  if (target !== 'home' || bingeReturnIndex == null || !bingePayload) return;
+  if (state.route !== 'detail') return;
+  const i = bingeReturnIndex;
+  bingeReturnIndex = null;
+  api('open-binge', { items: bingePayload.items, index: i, source: contentSource }).catch(() => {});
+}
