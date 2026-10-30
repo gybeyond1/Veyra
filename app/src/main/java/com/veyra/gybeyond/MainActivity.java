@@ -989,6 +989,13 @@ public final class MainActivity extends Activity {
     }
 
     private final class Bridge {
+        // 跟手拖拽的合帧状态：触摸事件只更新这些值，真正碰视图的只有 applyDrag 一次
+        private volatile boolean pendingDragStart;
+        private volatile boolean pendingDragEnd;
+        private volatile float pendingDragOffset;
+        private volatile float pendingDragVelocity;
+        private volatile boolean dragFlushQueued;
+
         @JavascriptInterface public void setDetailMode(boolean enabled) {
             runOnUiThread(() -> {
                 if (detailSystemBars == enabled) return;
@@ -1003,15 +1010,39 @@ public final class MainActivity extends Activity {
         /** 跟手拖拽：phase = start/move/end，dy 为手指纵向位移（CSS px，向上为负）。 */
         @JavascriptInterface public void bingeDrag(String phase, double dy, double velocity) {
             if (bingeEngine == null) return;
-            final float offset = (float) dy;
-            final float speed = (float) velocity;
-            runOnUiThread(() -> {
-                if (bingeEngine == null) return;
-                if ("start".equals(phase)) bingeEngine.dragStart();
-                else if ("move".equals(phase)) bingeEngine.dragMove(offset);
-                else bingeEngine.dragEnd(offset, speed);
-            });
+            // 触摸事件比 UI 帧密，原来每来一个 move 就 runOnUiThread 一次，主线程上一帧还没画完
+            // 消息已经堆了十几条 —— 手感就是「拖不动 / 落后半拍」。这里只记最新值，一帧只处理一次。
+            if ("start".equals(phase)) { pendingDragStart = true; pendingDragEnd = false; }
+            else if ("end".equals(phase)) pendingDragEnd = true;
+            pendingDragOffset = (float) dy;
+            pendingDragVelocity = (float) velocity;
+            if (!dragFlushQueued) {
+                dragFlushQueued = true;
+                webView.post(applyDrag);
+            }
         }
+
+        private final Runnable applyDrag = new Runnable() {
+            @Override public void run() {
+                dragFlushQueued = false;
+                BingeEngine engine = bingeEngine;
+                if (engine == null) return;
+                boolean start = pendingDragStart;
+                boolean end = pendingDragEnd;
+                pendingDragStart = false;
+                pendingDragEnd = false;
+                float offset = pendingDragOffset;
+                float velocity = pendingDragVelocity;
+                if (start) {
+                    engine.dragStart();
+                    if (end) engine.dragEnd(offset, velocity);
+                    else if (offset != 0f) engine.dragMove(offset);
+                    return;
+                }
+                if (end) engine.dragEnd(offset, velocity);
+                else engine.dragMove(offset);
+            }
+        };
 
         /** WebView 上报需要做「真玻璃」的区域（底栏 / 悬浮按钮 / 详情卡），[][] 形式：[x,y,w,h,r]。 */
         @JavascriptInterface public void bingeGlass(String rectsJson) {

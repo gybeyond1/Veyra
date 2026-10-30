@@ -535,90 +535,59 @@ html[data-theme=dark] #binge-fab{background:rgba(34,40,43,.04);background:color-
 #binge-fab svg{width:22px;height:22px}
 #binge-fab .binge-fab-icon{display:grid;place-items:center}
 #binge-fab .binge-fab-icon[hidden]{display:none}
-/* 刷剧态「同一颗按钮」：不再切成 accent 实心（那会被看成另一个控件）。
-   WebView 是透明的，backdrop-filter 采样不到垫在后面的原生视频层 —— 4% 的玻璃底在视频上等于
-   看不见，所以给同一颗按钮补一层明确的磨砂底，形状/图标/配色全部沿用首页。 */
-/* 刷剧态的玻璃由两层拼成：
-   1) 原生 BingeGlass 把视频帧缩小 + 模糊 + 压暗，按这颗按钮的圆角矩形裁好，垫在 WebView 底下；
-   2) 这一层只放很淡的底色 + 边缘打光 + 折射带。
-   真正的「透过去看到模糊视频」来自第 1 层，所以底色必须极淡，否则又变塑料板。 */
+/* ===== 刷剧态：底栏 / 悬浮按钮沿用首页那一套，一个字都不改 =====
+   上一版在这里重写了底色、边框、阴影、文字色，结果它从「首页那颗按钮」变成了另一个控件 ——
+   这是被说「全是毛病」的主因。现在只做两件事，形状 / 圆角 / 图标 / 字重 / 间距 / 文字色
+   全部保持首页原样：
+     1) 关掉 backdrop-filter。WebView 整页透明时它采样不到垫在后面的原生视频，Chromium 会
+        退化成一层灰雾 —— 这才是「塑料板」的真正来头，不是颜色不够白。
+     2) 给一层能压住视频的底（44% 表面色）。模糊由原生 BingeGlass 抓帧做，视频的明暗和色彩
+        从下面透上来，那才是玻璃。 */
+#app.binge #dock,
 #app.binge #binge-fab{
-  background:linear-gradient(180deg,rgba(255,255,255,.14),rgba(255,255,255,.05) 46%,rgba(255,255,255,.02));
-  border-color:rgba(255,255,255,.30);
-  color:#fff;
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,.52),
-    inset 0 -1px 0 rgba(0,0,0,.22),
-    inset 0 0 0 1px rgba(255,255,255,.06),
-    0 10px 26px rgba(0,0,0,.30);
+  /* !important 是必须的：'模糊' 按钮材质那条规则带了 !important，不吃掉它这里又会变灰雾 */
+  -webkit-backdrop-filter:none!important;
+  backdrop-filter:none!important;
+  background:color-mix(in srgb,var(--surface) 44%,transparent);
+  border-color:color-mix(in srgb,var(--text) 12%,transparent);
 }
-
-/* ===== 刷剧态底栏 =====
-   底栏是首页元素，形状/位置/材质一律不动；只是「刷剧态整页透明」时 backdrop-filter 采不到原生
-   视频，玻璃会凭空消失。这里给同一块 #dock 补一层磨砂底 + 更亮的边缘打光，视觉上仍是那块玻璃。 */
-#app.binge #dock{
-  background:linear-gradient(180deg,rgba(255,255,255,.16),rgba(255,255,255,.06) 44%,rgba(255,255,255,.02));
-  border-color:rgba(255,255,255,.30);
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,.50),
-    inset 0 -1px 0 rgba(0,0,0,.24),
-    inset 0 0 0 1px rgba(255,255,255,.05),
-    0 12px 30px rgba(0,0,0,.32);
+html[data-theme=dark] #app.binge #dock,
+html[data-theme=dark] #app.binge #binge-fab{
+  background:color-mix(in srgb,var(--surface) 54%,transparent);
+  border-color:color-mix(in srgb,var(--text) 14%,transparent);
 }
-/* 折射带：贴边一圈亮、往下 40% 化开，模拟玻璃边缘把背景掰弯后的高光 */
-#app.binge #dock::after{
-  background:
-    linear-gradient(180deg,rgba(255,255,255,.66),rgba(255,255,255,.22) 1.5px,rgba(255,255,255,0) 1.5px),
-    linear-gradient(90deg,rgba(255,255,255,.44),rgba(255,255,255,0) 1.5px),
-    linear-gradient(270deg,rgba(255,255,255,.40),rgba(255,255,255,0) 1.5px),
-    linear-gradient(0deg,rgba(255,255,255,.28),rgba(255,255,255,0) 1.5px);
-}
+/* 滑块是 dock 内部同源的一小块玻璃，颜色跟着走，别贴一块死白上去 */
 #app.binge #dock-blob b{
-  background:linear-gradient(180deg,rgba(255,255,255,.24),rgba(255,255,255,.10));
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,.78),
-    inset 0 -1px 0 rgba(255,255,255,.26),
-    inset 1px 0 0 rgba(255,255,255,.52),
-    inset -1px 0 0 rgba(255,255,255,.52),
-    0 10px 26px rgba(0,0,0,.28);
+  background:color-mix(in srgb,var(--surface) 58%,transparent);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.40),0 4px 12px rgba(0,0,0,.18);
 }
-/* 刷剧态底栏在视频上：文字一律走白色系，否则深色字压在亮画面上读不出来 */
-#app.binge #dock button{color:rgba(255,255,255,.68)}
-#app.binge #dock button.active{color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.35)}
-#app.binge #dock button.active .nav-icon{background:rgba(255,255,255,.18)!important;color:#fff!important}
-#app.binge #dock button.drag-over{color:#fff}
 
 /* ===== 刷剧浮层（首页的第二种形态，与首页平级） =====
    视频区透明：原生视频层垫在透明 WebView 之后，视频/海报直接透出。
-   卡片是「微圆角矩形 + 玻璃」：圆角 12px（不再是面板那种 22px 大圆角），底子是与底栏同源的
-   磨砂玻璃 —— 因为采样不到原生视频，这里用偏实的半透明底 + 1px 亮边 + 内高光来还原玻璃质感。 */
+   卡片是「微圆角矩形 + 浅色玻璃 + 深色字」—— 和首页卡片同一套配色，只是背后透出视频。 */
 #binge{position:absolute;inset:0;z-index:8;display:flex;flex-direction:column;justify-content:flex-end;pointer-events:auto;touch-action:none}
 #app.binge{background:transparent!important}
 body.binge{background:transparent!important}
 #app.binge #scroll,#app.binge .app-top,#app.binge #search-suggest{display:none}
-/* 微圆角矩形（12px）+ 同款真玻璃：底色极淡，模糊来自原生底板 */
+/* 微圆角矩形（10px）+ 浅色玻璃：配色跟首页卡片同源，只是更透一点 */
 .binge-card{
   margin:0 84px 88px 14px;
-  padding:15px 16px;
+  padding:14px 15px;
   border-radius:10px;
-  background:linear-gradient(180deg,rgba(255,255,255,.15),rgba(255,255,255,.055) 40%,rgba(255,255,255,.02));
-  border:1px solid rgba(255,255,255,.28);
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,.50),
-    inset 0 -1px 0 rgba(0,0,0,.22),
-    inset 0 0 0 1px rgba(255,255,255,.05),
-    0 16px 40px rgba(0,0,0,.30);
-  color:#fff;
+  background:color-mix(in srgb,var(--surface) 56%,transparent);
+  border:1px solid color-mix(in srgb,var(--text) 12%,transparent);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.34),0 14px 34px rgba(8,14,24,.24);
+  color:var(--text);
   pointer-events:auto;
-  will-change:transform,opacity;
+  will-change:transform;
 }
-.binge-title{font-size:17px;font-weight:800;margin:0 0 5px;letter-spacing:-.02em;line-height:1.25;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.32)}
-.binge-desc{font-size:12px;line-height:1.5;margin:0;color:rgba(255,255,255,.74);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.binge-title{font-size:16px;font-weight:800;margin:0 0 4px;letter-spacing:-.02em;line-height:1.25;color:var(--text)}
+.binge-desc{font-size:12px;line-height:1.5;margin:0;color:color-mix(in srgb,var(--text) 70%,transparent);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .binge-actions{display:flex;gap:9px;margin-top:11px}
-.binge-actions button{flex:none;border:1px solid rgba(255,255,255,.26);border-radius:8px;padding:8px 15px;font-size:13px;font-weight:700;color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.30)}
-.binge-detail{background:rgba(255,255,255,.16)}
+.binge-actions button{flex:none;border:1px solid color-mix(in srgb,var(--text) 14%,transparent);border-radius:8px;padding:8px 15px;font-size:13px;font-weight:700;color:var(--text);box-shadow:inset 0 1px 0 rgba(255,255,255,.34)}
+.binge-detail{background:color-mix(in srgb,var(--surface) 34%,transparent)}
 .binge-full{background:var(--accent);color:var(--accent-ink);border-color:transparent;box-shadow:none}
-.binge-msg{position:absolute;left:24px;right:24px;top:50%;transform:translateY(-50%);text-align:center;color:#fff;font-size:13px;white-space:pre-line;background:rgba(0,0,0,.45);padding:16px;border-radius:14px}
+.binge-msg{position:absolute;left:24px;right:24px;top:50%;transform:translateY(-50%);text-align:center;color:#fff;font-size:13px;white-space:pre-line;background:rgba(0,0,0,.55);padding:16px;border-radius:12px}
 
 
 /* ================= v0.23.1 外观（对齐参考稿的「玻璃材质」页） =================

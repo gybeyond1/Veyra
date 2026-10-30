@@ -104,8 +104,9 @@ public class BingeEngine {
     private BingeGlass glass;
     private TextureView texture;         // PlayerView 内部的 TextureView（surface_type=texture_view）
     private Bitmap glassFrame;           // 复用的缩小帧，避免每帧分配
-    // 玻璃是重度模糊的底板，8fps 已经完全看不出卡顿，再快只是白烧 GPU 读回
-    private static final long GLASS_INTERVAL = 120L;
+    // getBitmap 是 GPU 同步读回，会把 UI 线程卡住十几毫秒；5fps 在重度模糊的底板上
+    // 完全看不出滞后，再快只是周期性掉帧
+    private static final long GLASS_INTERVAL = 200L;
 
     private final Map<String, Bitmap> posterCache = new HashMap<>();
     private final Map<String, JSONObject> detailCache = new ConcurrentHashMap<>();
@@ -306,6 +307,7 @@ public class BingeEngine {
         playerView.setVisibility(View.GONE);
         releasePlayer();
         loadPoster(currentCover);
+        prefetchNeighborCovers();   // 先把手边上一部/下一部的封面垫进缓存，滑动时才能秒出
         cb.onShowLoaded(currentTitle, "正在加载…", currentCover, currentId, index);
         worker.execute(() -> {
             try {
@@ -451,6 +453,9 @@ public class BingeEngine {
         videoLayer.setTranslationY(0f);
         // 手指按住就停播：拖拽时画面顿住，切过去才继续，省得声音和画面对不上
         if (player != null) player.setPlayWhenReady(false);
+        // 视频层要跟着手指平移，玻璃底板是独立一层、抓的是静止帧 —— 留着它只会让
+        // 底栏里的画面和外面的视频错开。滑动期间淡掉，松手再淡回来。
+        fadeGlass(0f, 90);
         if (neighbor != null) {
             neighbor.animate().cancel();
             neighbor.setVisibility(View.GONE);
@@ -483,6 +488,7 @@ public class BingeEngine {
     public void dragEnd(float dy, float velocity) {
         if (!dragging) return;
         dragging = false;
+        fadeGlass(1f, 220);
         float height = Math.max(1f, videoLayer.getHeight());
         int direction = dy < 0 ? 1 : -1;
         boolean blocked = !hasNeighbor(direction);
@@ -531,6 +537,36 @@ public class BingeEngine {
         return target >= 0 && target < pool.length();
     }
 
+    /** 把手边上一部 / 下一部的封面提前解出来。拖拽时才去拉网络图，滑到一半是空白，切过去就闪。 */
+    private void prefetchNeighborCovers() {
+        if (pool == null) return;
+        for (int delta = 1; delta >= -1; delta -= 2) {
+            int i = index + delta;
+            if (i < 0 || i >= pool.length()) continue;
+            JSONObject item = pool.optJSONObject(i);
+            if (item == null) continue;
+            String cover = item.optString("cover");
+            if (cover.isEmpty()) continue;
+            synchronized (posterCache) { if (posterCache.get(cover) != null) continue; }
+            worker.execute(() -> decodeCover(cover));
+        }
+    }
+
+    /** 解码一张封面进 posterCache。失败静默 —— 它只影响手感，不影响播放。 */
+    private void decodeCover(String url) {
+        try {
+            synchronized (posterCache) { if (posterCache.get(url) != null) return; }
+            String data = repository.coverData(url);
+            if (data == null || data.isEmpty()) return;
+            int comma = data.indexOf(',');
+            if (comma < 0) return;
+            byte[] bytes = Base64.decode(data.substring(comma + 1), Base64.DEFAULT);
+            Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+            if (bitmap == null || destroyed) return;
+            synchronized (posterCache) { posterCache.put(url, bitmap); }
+        } catch (Throwable ignored) { }
+    }
+
     /** 预铺「下一部」的画面：优先用海报缓存，没有就现拉一张（只影响拖拽手感，失败不报错）。 */
     private void loadNeighbor(int direction) {
         if (neighbor == null || pool == null) return;
@@ -544,18 +580,16 @@ public class BingeEngine {
         neighbor.setImageDrawable(null);
         final String url = cover;
         worker.execute(() -> {
-            try {
-                String data = repository.coverData(url);
-                byte[] bytes = Base64.decode(data.substring(data.indexOf(',') + 1), Base64.DEFAULT);
-                Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
-                if (bitmap == null) return;
-                synchronized (posterCache) { posterCache.put(url, bitmap); }
-                handler.post(() -> {
-                    if (destroyed || neighbor == null) return;
-                    // 只有还停在这次的方向上才贴图，避免快速来回划时贴错
-                    if (dragging && dragDirection == direction && dragOffset != 0f) neighbor.setImageBitmap(bitmap);
-                });
-            } catch (Exception ignored) { }
+            decodeCover(url);
+            Bitmap bitmap;
+            synchronized (posterCache) { bitmap = posterCache.get(url); }
+            if (bitmap == null) return;
+            final Bitmap ready = bitmap;
+            handler.post(() -> {
+                if (destroyed || neighbor == null) return;
+                // 只有还停在这个方向上才贴图，避免快速来回划时贴错
+                if (dragging && dragDirection == direction && dragOffset != 0f) neighbor.setImageBitmap(ready);
+            });
         });
     }
 
@@ -594,6 +628,8 @@ public class BingeEngine {
     };
 
     private void captureGlass() {
+        // 拖拽 / 换剧动画期间玻璃是淡的，画面又在动 —— 抓了也白抓，还白占 UI 线程
+        if (dragging || animating) return;
         if (glass == null || texture == null || !texture.isAvailable()) return;
         int w = glass.getWidth(), h = glass.getHeight();
         if (w <= 0 || h <= 0) return;
@@ -610,9 +646,20 @@ public class BingeEngine {
     }
 
     private void showGlass() {
-        if (glassHost != null) glassHost.setVisibility(View.VISIBLE);
+        if (glassHost != null) {
+            glassHost.animate().cancel();
+            glassHost.setAlpha(1f);
+            glassHost.setVisibility(View.VISIBLE);
+        }
         handler.removeCallbacks(glassTick);
         handler.post(glassTick);
+    }
+
+    /** 拖拽时淡出 / 松手淡回：玻璃只做「静止画面的模糊底板」，画面一动它就必须让路。 */
+    private void fadeGlass(float target, long duration) {
+        if (glassHost == null || glassHost.getVisibility() != View.VISIBLE) return;
+        glassHost.animate().cancel();
+        glassHost.animate().alpha(target).setDuration(duration).start();
     }
 
     /** 只停刷新，不动显隐：进详情/切 tab 时玻璃还在（被不透明页面盖住），回来能立刻用。 */

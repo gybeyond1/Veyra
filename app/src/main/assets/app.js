@@ -3897,7 +3897,8 @@ window.hgBingeAction = (type, id) => {
      · 边界方向：位移打三折，松手回弹
    WebView 这边只负责把位移交出去，顺便给卡片一点视差，别让整屏像块贴纸。 */
 (function setupBingeSwipe() {
-  const IGNORE = '#dock, #binge-fab, .binge-card, .binge-msg, #toast-host';
+  // 卡片文字区也要能滑（红果整屏都能划），只让按钮和底栏吃掉事件
+  const IGNORE = '#dock, #binge-fab, .binge-actions, .binge-msg, #toast-host';
   let tracking = false, dragging = false;
   let startX = 0, startY = 0, dy = 0, lastY = 0, lastAt = 0, velocity = 0;
 
@@ -3917,8 +3918,9 @@ window.hgBingeAction = (type, id) => {
   function paintCard(value) {
     const card = cardEl();
     if (!card) return;
-    card.style.transform = value ? 'translate3d(0,' + (value * 0.26).toFixed(1) + 'px,0)' : '';
-    card.style.opacity = value ? String(Math.max(0.2, 1 - Math.abs(value) / 520)) : '';
+    // 视差要克制：之前卡片会淡到 0.2，滑一下整块信息都没了，看着像坏了
+    card.style.transform = value ? 'translate3d(0,' + (value * 0.18).toFixed(1) + 'px,0)' : '';
+    card.style.opacity = value ? String(Math.max(0.74, 1 - Math.abs(value) / 900)) : '';
   }
 
   function begin(x, y) {
@@ -3958,13 +3960,13 @@ window.hgBingeAction = (type, id) => {
     dragging = false;
     bridge('end', dy, cancelled ? 0 : velocity);
     const card = cardEl();
-    if (card) card.style.transition = 'transform 220ms cubic-bezier(.22,.7,.2,1),opacity 220ms ease';
+    if (card) card.style.transition = 'transform 180ms cubic-bezier(.22,.7,.2,1),opacity 180ms ease';
     paintCard(0);
     setTimeout(() => {
       const el = cardEl();
       if (el) { el.style.transition = ''; el.style.transform = ''; el.style.opacity = ''; }
       scheduleBingeGlass();
-    }, 230);
+    }, 200);
     dy = 0; velocity = 0;
   }
 
