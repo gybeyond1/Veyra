@@ -562,6 +562,16 @@ html:has(body.binge){background:transparent!important}
 body.binge{background:transparent!important}
 /* 拖到头时 WebView 自带的回弹会把页面往回拽一下，手感像有阻力 */
 html:has(body.binge),body.binge{overscroll-behavior:none}
+/* 拖拽期间临时摘掉 backdrop-filter —— 这是「滑动有阻力」的主因。
+   底栏 / 卡片的 backdrop-filter 采的是它背后的内容；手指拖动时视频层每帧都在平移，
+   Chromium 就得每帧重新采样 + 模糊一次 backdrop，全屏两处 blur 直接把帧率拖垮，
+   画面自然跟不上手指。松手回弹结束后立刻恢复，静止时的玻璃感一点不受影响。 */
+html[data-binge-drag] #app.binge #dock,
+html[data-binge-drag] #app.binge .binge-card,
+html[data-binge-drag] #app.binge #binge-fab{
+  -webkit-backdrop-filter:none!important;
+  backdrop-filter:none!important;
+}
 #app.binge #scroll,#app.binge .app-top,#app.binge #search-suggest{display:none}
 .binge-card{
   margin:0 76px 92px 14px;

@@ -587,20 +587,22 @@ public class BingeEngine {
         float moved = Math.abs(dy);
         // 阈值照抄 PlayerActivity：Math.max(dp(76), height * 0.12f)。
         // 原来用 22%，要拖过五分之一屏才切，正常手一划根本够不着 —— 就是「滑不动」。
-        boolean far = moved > Math.max(dp(76), height * 0.12f);
-        boolean fling = Math.abs(velocity) > 780f && moved > dp(24);
+        // 阈值再放低一档：红果那种「轻轻一划就翻」的手感来自低阈值 + 速度优先。
+        // 12%/76dp 是播放页切集的参数，刷剧是整屏翻页，手指行程本来就短，照搬偏重。
+        boolean far = moved > Math.max(dp(64), height * 0.10f);
+        boolean fling = Math.abs(velocity) > 600f && moved > dp(14);
         boolean commit = !blocked && (far || fling);
 
         if (!commit) {
             animating = true;
-            videoLayer.animate().translationY(0f).setDuration(220).start();
+            videoLayer.animate().translationY(0f).setDuration(180).start();
             if (neighbor != null) {
                 neighbor.animate()
-                        .translationY(direction > 0 ? height : -height).setDuration(220)
+                        .translationY(direction > 0 ? height : -height).setDuration(180)
                         .withEndAction(() -> { if (neighbor != null) neighbor.setVisibility(View.GONE); })
                         .start();
             }
-            handler.postDelayed(() -> { animating = false; }, 220);
+            handler.postDelayed(() -> { animating = false; }, 180);
             return;
         }
 

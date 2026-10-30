@@ -3864,6 +3864,22 @@ window.hgBingeAction = (type, id) => {
   const IGNORE = '#dock, #binge-fab, .binge-actions, .binge-msg, #toast-host';
   let tracking = false, dragging = false;
   let startX = 0, startY = 0, dy = 0, lastY = 0, lastAt = 0, velocity = 0, beginAt = 0;
+  // 最近 ~100ms 的位移样本，用来算「松手瞬间」的真实速度
+  let samples = [];
+  let dragAttrTimer = 0;
+
+  // 拖拽期间摘掉底栏 / 卡片的 backdrop-filter：它每帧要重新采样背后的视频层，
+  // 是全屏两处 blur，帧率直接被吃光。松手后延迟一点再戴回来（等回弹动画跑完）。
+  function setDragging(on) {
+    clearTimeout(dragAttrTimer);
+    if (on) {
+      document.documentElement.setAttribute('data-binge-drag', '1');
+    } else {
+      dragAttrTimer = setTimeout(() => {
+        document.documentElement.removeAttribute('data-binge-drag');
+      }, 260);
+    }
+  }
 
   const cardEl = () => document.getElementById('binge-card');
 
@@ -3891,7 +3907,7 @@ window.hgBingeAction = (type, id) => {
     tracking = true;
     dragging = false;
     startX = x; startY = y;
-    dy = 0; lastY = y; lastAt = Date.now(); beginAt = lastAt; velocity = 0;
+    dy = 0; lastY = y; lastAt = Date.now(); beginAt = lastAt; velocity = 0; samples = [{ t: lastAt, y: y }];
   }
 
   function move(x, y) {
@@ -3904,21 +3920,24 @@ window.hgBingeAction = (type, id) => {
       if (Math.hypot(deltaX, deltaY) < 10) return;
       if (Math.abs(deltaX) > Math.abs(deltaY) * 1.15) { tracking = false; return; }
       dragging = true;
+      setDragging(true);
       bridge('start', 0, 0);
+      // 卡片不再跟着位移（红果的右侧信息栏也是浮层不动）。
+      // 每帧改 transform 会强制 WebView 重绘那块 backdrop-filter，是卡顿的另一半。
       const card = cardEl();
-      if (card) card.style.transition = 'none';
+      if (card) { card.style.transition = 'none'; card.style.transform = ''; card.style.opacity = ''; }
     }
     const now = Date.now();
-    const elapsed = Math.max(1, now - lastAt);
-    velocity = (y - lastY) / elapsed * 1000;
-    // 单帧瞬时值抖得厉害（一次 4ms 的帧能把速度算出几千），
-    // 用「起点到当前」的平均速度兜底，取两者较小值，快划才不会误判成慢拖。
-    const avg = (y - startY) / Math.max(1, now - beginAt) * 1000;
-    velocity = Math.abs(velocity) > Math.abs(avg) ? avg : velocity;
+    samples.push({ t: now, y: y });
+    // 只保留最近 100ms
+    while (samples.length > 2 && now - samples[0].t > 100) samples.shift();
+    const first = samples[0], last = samples[samples.length - 1];
+    // 用最近这一段窗口算速度，而不是全程平均：手指「先慢后快」是常态，
+    // 全程平均会被前面那段慢的拉平，快划判不出来 —— 感觉就是「滑不动」。
+    velocity = (last.y - first.y) / Math.max(1, last.t - first.t) * 1000;
     lastY = y; lastAt = now;
     dy = deltaY;
     bridge('move', dy);
-    paintCard(dy);
   }
 
   function finish(cancelled) {
@@ -3927,14 +3946,8 @@ window.hgBingeAction = (type, id) => {
     if (!dragging) return;
     dragging = false;
     bridge('end', dy, cancelled ? 0 : velocity);
-    const card = cardEl();
-    if (card) card.style.transition = 'transform 180ms cubic-bezier(.22,.7,.2,1),opacity 180ms ease';
-    paintCard(0);
-    setTimeout(() => {
-      const el = cardEl();
-      if (el) { el.style.transition = ''; el.style.transform = ''; el.style.opacity = ''; }
-    }, 200);
-    dy = 0; velocity = 0;
+    setDragging(false);
+    dy = 0; velocity = 0; samples = [];
   }
 
   function fromIgnored(target) {
