@@ -73,6 +73,17 @@ public final class MainActivity extends Activity {
                 } catch (Exception ignored) { }
             });
         }
+        @Override public void onBackdrop(String dataUri) {
+            // 把封面当玻璃背板塞进 WebView：底栏的 backdrop-filter 这才有的可采，
+            // 折射 / 高光 / 滑块才和首页一样。
+            if (webView == null || dataUri == null || dataUri.isEmpty()) return;
+            runOnUiThread(() -> {
+                if (webView == null) return;
+                webView.evaluateJavascript("window.__bingeBackdrop&&window.__bingeBackdrop("
+                        + JSONObject.quote(dataUri) + ")", null);
+            });
+        }
+
         @Override public void onShowFailed(String message) {
             runOnUiThread(() -> {
                 if (isDestroyed() || webView == null) return;

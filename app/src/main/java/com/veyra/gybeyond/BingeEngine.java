@@ -11,6 +11,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Base64;
+import java.io.ByteArrayOutputStream;
 import android.view.Gravity;
 import android.view.TextureView;
 import android.view.View;
@@ -56,6 +57,13 @@ public class BingeEngine {
         void onShowLoaded(String title, String description, String cover, String id, int index);
         /** 加载失败：把提示交给 WebView 显示 */
         void onShowFailed(String message);
+        /**
+         * 把当前剧的封面（压到很小、JPEG）交给 WebView 当「玻璃背后的内容」。
+         * 刷剧态 WebView 整页透明，底栏的 backdrop-filter 采不到垫在后面的原生视频层，
+         * 于是折射（dock-refract.js 的 SVG 位移）整个失效 —— 那就是「没有液态玻璃」的真正原因。
+         * 在 WebView 里垫一层同色调的画面，backdrop-filter 就有东西可采，折射和高光全部回来。
+         */
+        void onBackdrop(String dataUri);
     }
 
     private final Callback cb;
@@ -383,6 +391,8 @@ public class BingeEngine {
                     if (state == Player.STATE_READY) {
                         message.setVisibility(View.GONE);
                         // 首帧回调在 TextureView 上不一定可靠，READY 也撤一次（延一点，等真的画上去）
+                        if (texture != null) texture.invalidate();
+                        videoLayer.invalidate();
                         scheduleHidePoster();
                     }
                     else if (state == Player.STATE_ENDED) {
@@ -393,6 +403,10 @@ public class BingeEngine {
 
                 @Override public void onRenderedFirstFrame() {
                     if (destroyed || !active) return;
+                    // TextureView 拿到首帧后不保证自己排一次重绘，表现就是「声音有了、画面还是黑的，
+                    // 手指一动才刷出来」。这里显式催一次。
+                    if (texture != null) texture.invalidate();
+                    videoLayer.invalidate();
                     scheduleHidePoster();
                 }
 
@@ -667,6 +681,7 @@ public class BingeEngine {
     private void applyPosterMode(Bitmap bitmap, boolean forceBlur, boolean showFit) {
         if (bitmap == null) return;
         poster.setVisibility(View.VISIBLE);
+        pushBackdrop(bitmap);
         boolean blur = forceBlur || bitmap.getWidth() >= bitmap.getHeight() * 0.85f;
         if (blur) {
             poster.setImageBitmap(gaussianBlur(bitmap, 12));
@@ -678,6 +693,27 @@ public class BingeEngine {
             poster.setAlpha(1f);
             posterFit.setVisibility(View.GONE);
         }
+    }
+
+    /**
+     * 把封面压成一张极小的 JPEG 交给 WebView 当玻璃背板。
+     * 玻璃是模糊的，只需要色调和明暗，所以用 96px 长边、quality 55 就够 —— 一张 3KB 上下，
+     * 换剧才推一次，没有运行时开销。
+     */
+    private void pushBackdrop(Bitmap source) {
+        if (source == null) return;
+        try {
+            int w = source.getWidth(), h = source.getHeight();
+            float scale = 96f / Math.max(1, Math.max(w, h));
+            if (scale >= 1f) scale = 1f;
+            Bitmap small = Bitmap.createScaledBitmap(source,
+                    Math.max(1, Math.round(w * scale)), Math.max(1, Math.round(h * scale)), true);
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            small.compress(Bitmap.CompressFormat.JPEG, 55, out);
+            if (small != source) small.recycle();
+            byte[] bytes = out.toByteArray();
+            cb.onBackdrop("data:image/jpeg;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP));
+        } catch (Throwable ignored) { }
     }
 
     private Bitmap gaussianBlur(Bitmap source, int radius) {
