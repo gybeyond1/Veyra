@@ -49,7 +49,7 @@ const tagGroups = [
   ['relationship', '人物与关系'], ['style', '外形风格'], ['plot', '情节元素'], ['other', '更多标签']
 ];
 const state = {
-  route: 'home', tab: 'home', sub: { adult: 0, ai: 0 }, home: null,
+  route: 'home', tab: 'home', sub: { adult: 0, ai: 0 }, home: null, binge: false,
   category: null, categoryItems: [], detail: null, detailLoading: false, sourceItem: null,
   search: null, searchPending: false, searchError: '', query: '', filter: 'all', banner: 0, categoryBanner: 0,
   listing: null, tags: null, tagsReturn: null, listingReturn: null, settingsReturn: null,
@@ -1915,6 +1915,7 @@ window.hgPredictiveBackCommit = () => {
 };
 
 function setNav(tab) {
+  if (state.binge) exitBingeMode();   // 刷剧态点底栏任意栏 → 先退出刷剧（底栏本身是首页全局的，不动）
   listingObserver?.disconnect();
   categoryObserver?.disconnect();
   document.querySelectorAll('#dock [data-nav]').forEach(button => button.classList.toggle('active', button.dataset.nav === tab));
@@ -3615,12 +3616,14 @@ document.getElementById('unlock-form').addEventListener('submit', async event =>
   finally { button.disabled = false; }
 });
 
-/* ================= 刷剧模式（公开模式首页悬浮按钮） =================
-   点击进入原生 BingeActivity：随机推荐剧第 1 集全屏自动播，上下滑换剧；
-   「查看详情」由 BingeActivity 通过 hgBingeAction 回传路由。 */
+/* ================= 刷剧模式（首页的两种形态之一，底栏/悬浮按钮一字不动） =================
+   刷剧不是独立页面，而是首页 WebView 的一种形态：原生视频层垫在透明 WebView 之后，
+   真底栏 #dock 与真玻璃卡片都在首页里。点 #binge-fab 进入/退出；上下滑换剧由 WebView 触发原生引擎。 */
 const bingeFab = document.getElementById('binge-fab');
 let bingePayload = null;     // 最近一次进入刷剧的剧单（返回恢复用）
 let bingeReturnIndex = null; // 从刷剧进详情后要恢复的位置
+let bingeCurrentId = null;   // 当前剧 id（卡片按钮用）
+let bingeCurrentIndex = 0;   // 当前剧在池中的下标（返回恢复用）
 
 function bingePoolItems() {
   const data = state.home || {};
@@ -3637,10 +3640,34 @@ function updateBingeChrome() {
   if (!bingeFab) return;
   const show = state.route === 'home' && !privateMode() && bingePoolItems().length > 0;
   bingeFab.hidden = !show;
+  // 刷剧态显示「回首页」图标，传统态显示「进入刷剧」图标
+  const play = bingeFab.querySelector('.binge-fab-play');
+  const home = bingeFab.querySelector('.binge-fab-home');
+  if (play) play.hidden = !!state.binge;
+  if (home) home.hidden = !state.binge;
 }
 window.__bingeUpdateChrome = updateBingeChrome;
 
-bingeFab?.addEventListener('click', async () => {
+// 进入/退出刷剧（首页形态切换：真底栏 #dock 与 #binge-fab 本身是同一套，一字不动）
+function startBingeMode() {
+  state.binge = true;
+  document.getElementById('app')?.classList.add('binge');
+  document.body.classList.add('binge');
+  const binge = document.getElementById('binge');
+  if (binge) binge.hidden = false;
+  updateBingeChrome();
+}
+function exitBingeMode() {
+  state.binge = false;
+  document.getElementById('app')?.classList.remove('binge');
+  document.body.classList.remove('binge');
+  const binge = document.getElementById('binge');
+  if (binge) binge.hidden = true;
+  if (window.api) api('binge-exit').catch(() => {});
+  updateBingeChrome();
+}
+
+function enterBingeFresh() {
   if (privateMode() || state.route !== 'home') return;
   const items = bingePoolItems();
   if (!items.length) { toast('首页还没有推荐内容，稍后再试', true); return; }
@@ -3654,17 +3681,78 @@ bingeFab?.addEventListener('click', async () => {
     cover: item.cover || '', description: item.description || item.episodeLabel || '',
   }));
   bingePayload = { items: payload };
-  try { await api('open-binge', { items: payload, source: contentSource }); }
-  catch (error) { toast(error.message || '进入刷剧模式失败', true); }
+  startBingeMode();
+  api('binge-start', { items: payload, index: 0, source: contentSource }).catch(error => {
+    toast(error.message || '进入刷剧模式失败', true);
+  });
+}
+
+bingeFab?.addEventListener('click', () => {
+  if (privateMode() || state.route !== 'home') return;
+  if (state.binge) exitBingeMode();
+  else enterBingeFresh();
+});
+
+// 原生引擎回写卡片（标题/简介/封面 + 当前剧 id/下标）
+window.hgBingeUpdate = (info) => {
+  if (!info) return;
+  const titleEl = document.getElementById('binge-title');
+  const descEl = document.getElementById('binge-desc');
+  const msgEl = document.getElementById('binge-msg');
+  if (titleEl) titleEl.textContent = info.title || '';
+  if (descEl) descEl.textContent = info.description || '';
+  if (msgEl) msgEl.hidden = true;
+  bingeCurrentId = info.id || null;
+  bingeCurrentIndex = typeof info.index === 'number' ? info.index : bingeCurrentIndex;
+  const card = document.getElementById('binge-card');
+  if (card) card.hidden = false;
+};
+window.hgBingeFailed = (message) => {
+  const msgEl = document.getElementById('binge-msg');
+  if (msgEl) { msgEl.textContent = message || ''; msgEl.hidden = false; }
+  const card = document.getElementById('binge-card');
+  if (card) card.hidden = true;
+};
+
+// 卡片按钮：查看详情（退出刷剧并进详情，记住位置以便返回恢复）、观看全集（原生引擎进播放页）
+document.getElementById('binge-detail-btn')?.addEventListener('click', () => {
+  if (bingeCurrentId != null) window.hgBingeAction('detail', bingeCurrentId, bingeCurrentIndex);
+});
+document.getElementById('binge-full-btn')?.addEventListener('click', () => {
+  if (window.api) api('binge-full', { episode: 1 }).catch(() => {});
 });
 
 window.hgBingeAction = (type, id, index) => {
   if (type === 'detail' && id) {
     // 记住刷剧位置：从详情返回首页时自动回到刷剧模式、停在同一部剧
     if (bingePayload && typeof index === 'number') bingeReturnIndex = index;
+    exitBingeMode();                 // 退出刷剧（隐藏浮层 + 通知原生引擎释放播放器）
     goDetail(id).catch(() => {});
   }
 };
+
+// 上下滑换剧：由 #binge 浮层捕获竖向滑动 → 原生引擎 next/prev
+(function setupBingeSwipe() {
+  const binge = document.getElementById('binge');
+  if (!binge) return;
+  let startY = 0, swiping = false;
+  const SLOP = 14, THRESH = 110;
+  binge.addEventListener('pointerdown', e => {
+    if (e.target.closest('.binge-card')) return;   // 卡片按钮区域不触发滑动
+    startY = e.clientY; swiping = true;
+  }, { passive: true });
+  binge.addEventListener('pointermove', () => {}, { passive: true });
+  binge.addEventListener('pointerup', e => {
+    if (!swiping) return;
+    swiping = false;
+    const dy = e.clientY - startY;
+    if (Math.abs(dy) > THRESH) {
+      if (dy < 0) api('binge-next').catch(() => {});
+      else api('binge-prev').catch(() => {});
+    }
+  }, { passive: true });
+  binge.addEventListener('pointercancel', () => { swiping = false; }, { passive: true });
+})();
 
 // 从详情返回首页 → 恢复刷剧（同一批剧 + 同一位置）；须在 setRoute 更新 state.route 之前调用
 function resumeBingeIfReturned(target) {
@@ -3672,5 +3760,6 @@ function resumeBingeIfReturned(target) {
   if (state.route !== 'detail') return;
   const i = bingeReturnIndex;
   bingeReturnIndex = null;
-  api('open-binge', { items: bingePayload.items, index: i, source: contentSource }).catch(() => {});
+  startBingeMode();
+  api('binge-start', { items: bingePayload.items, index: i, source: contentSource }).catch(() => {});
 }

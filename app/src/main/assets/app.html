@@ -31,6 +31,19 @@
          backdrop 采样），放到 #app 层作为独立浮层：backdrop root 直达页面，能采样到 #scroll 滚动内容，液态玻璃折射才生效 -->
     <div id="search-suggest" class="search-suggest" hidden></div>
     <main id="scroll"><div id="content"></div></main>
+    <!-- 刷剧浮层：首页的一种形态。视频区透明（原生视频透出），卡片用与弹窗同款真·液态玻璃。
+         真底栏 #dock 与 #binge-fab 仍是首页全局元素，一字不动。 -->
+    <div id="binge" hidden>
+      <div class="binge-card" id="binge-card">
+        <h2 class="binge-title" id="binge-title"></h2>
+        <p class="binge-desc" id="binge-desc"></p>
+        <div class="binge-actions">
+          <button class="binge-detail" id="binge-detail-btn" type="button">查看详情</button>
+          <button class="binge-full" id="binge-full-btn" type="button">观看全集</button>
+        </div>
+      </div>
+      <div class="binge-msg" id="binge-msg" hidden></div>
+    </div>
     <div id="compact-category" aria-hidden="true"></div>
     <nav id="dock" aria-label="主导航">
       <i id="dock-blob" aria-hidden="true"><b></b></i>

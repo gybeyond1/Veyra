@@ -52,12 +52,34 @@ import java.util.concurrent.Executors;
 public final class MainActivity extends Activity {
     private static final String TAG = "HuangGuo";
     private static final int AVATAR_PICKER = 7101;
-    private static final int BINGE_REQUEST = 7102;
     private final ExecutorService requests = Executors.newFixedThreadPool(4);
     private final ExecutorService localRequests = Executors.newSingleThreadExecutor();
     private final ExecutorService coverRequests = Executors.newFixedThreadPool(2);
     private WebView webView;
     private FrameLayout root;
+    private FrameLayout bingeVideoLayer;
+    private BingeEngine bingeEngine;
+    private final BingeEngine.Callback bingeCallback = new BingeEngine.Callback() {
+        @Override public Activity getActivity() { return MainActivity.this; }
+        @Override public void onShowLoaded(String title, String description, String cover, String id, int index) {
+            runOnUiThread(() -> {
+                if (isDestroyed() || webView == null) return;
+                try {
+                    String json = new JSONObject().put("title", title)
+                            .put("description", description).put("cover", cover)
+                            .put("id", id).put("index", index).toString();
+                    webView.evaluateJavascript("window.hgBingeUpdate && window.hgBingeUpdate(" + json + ")", null);
+                } catch (Exception ignored) { }
+            });
+        }
+        @Override public void onShowFailed(String message) {
+            runOnUiThread(() -> {
+                if (isDestroyed() || webView == null) return;
+                webView.evaluateJavascript("window.hgBingeFailed && window.hgBingeFailed("
+                        + JSONObject.quote(message) + ")", null);
+            });
+        }
+    };
     private DualContentRepository repository;
     private AppStore store;
     private AccountService account;
@@ -216,6 +238,10 @@ public final class MainActivity extends Activity {
             WebView.setWebContentsDebuggingEnabled(true);
         }
         root = new FrameLayout(this);
+        // 刷剧原生视频层：垫在 webView 之下（先 add，叠在底层）。平时 GONE，进刷剧时由 BingeEngine 显示。
+        bingeVideoLayer = new FrameLayout(this);
+        bingeVideoLayer.setVisibility(View.GONE);
+        root.addView(bingeVideoLayer, new FrameLayout.LayoutParams(-1, -1));
         webView = new WebView(this);
         webView.setBackgroundColor(Color.TRANSPARENT);
         root.addView(webView, new FrameLayout.LayoutParams(-1, -1));
@@ -441,6 +467,12 @@ public final class MainActivity extends Activity {
             if (getPackageManager().canRequestPackageInstalls()) openUpdateInstaller(apk);
             else webView.evaluateJavascript("window.hgUpdateInstallPermissionDenied && window.hgUpdateInstallPermissionDenied()", null);
         }
+        if (bingeEngine != null) bingeEngine.onResume();
+    }
+
+    @Override protected void onPause() {
+        super.onPause();
+        if (bingeEngine != null) bingeEngine.onPause();
     }
 
     @Override public void onWindowFocusChanged(boolean hasFocus) {
@@ -450,25 +482,6 @@ public final class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == BINGE_REQUEST) {
-            if (data != null && "detail".equals(data.getStringExtra("bingeAction"))) {
-                String id = data.getStringExtra("id");
-                int index = data.getIntExtra("index", 0);
-                if (id != null && !id.isEmpty()) {
-                    String script = "window.hgBingeAction && window.hgBingeAction('detail',"
-                            + JSONObject.quote(id) + "," + index + ")";
-                    runOnUiThread(() -> { if (webView != null) webView.evaluateJavascript(script, null); });
-                }
-            } else if (data != null && "home".equals(data.getStringExtra("bingeAction"))) {
-                // 刷剧页底栏点栏目 → 切回传统首页对应 tab
-                String nav = data.getStringExtra("nav");
-                if (nav != null && !nav.isEmpty()) {
-                    String script = "window.navigateDock && window.navigateDock(" + JSONObject.quote(nav) + ")";
-                    runOnUiThread(() -> { if (webView != null) webView.evaluateJavascript(script, null); });
-                }
-            }
-            return;
-        }
         if (requestCode != AVATAR_PICKER || resultCode != RESULT_OK || data == null || data.getData() == null) return;
         Uri selected = data.getData();
         requests.execute(() -> {
@@ -480,6 +493,10 @@ public final class MainActivity extends Activity {
                 runOnUiThread(() -> webView.evaluateJavascript(script, null));
             }
         });
+    }
+
+    private void ensureBingeEngine() {
+        if (bingeEngine == null) bingeEngine = new BingeEngine(bingeCallback, bingeVideoLayer);
     }
 
     private void installUpdate(File apk) {
@@ -610,6 +627,7 @@ public final class MainActivity extends Activity {
             webView.removeJavascriptInterface("AndroidHost");
             webView.destroy();
         }
+        if (bingeEngine != null) bingeEngine.onDestroy();
         super.onDestroy();
     }
 
@@ -900,13 +918,45 @@ public final class MainActivity extends Activity {
                 runOnUiThread(() -> startActivity(intent));
                 return true;
             }
-            case "open-binge": {
-                // 刷剧模式：全屏 feed 播随机推荐剧第一集；BingeActivity 通过
-                // setResult 把「查看详情」带回来，由 onActivityResult 转 JS 路由
+            case "binge-start": {
+                // 刷剧模式：做成首页 WebView 的一种形态；原生视频层（BingeEngine）垫在透明 WebView 后。
                 args.put("source", mode.active());
-                Intent intent = new Intent(this, BingeActivity.class);
-                intent.putExtra("payload", args.toString());
-                runOnUiThread(() -> startActivityForResult(intent, BINGE_REQUEST));
+                ensureBingeEngine();
+                final JSONArray items = args.optJSONArray("items");
+                final int startIndex = args.optInt("index", 0);
+                final String source = args.optString("source");
+                runOnUiThread(() -> bingeEngine.start(items, startIndex, source));
+                return true;
+            }
+            case "binge-exit": {
+                runOnUiThread(() -> { if (bingeEngine != null) bingeEngine.exit(); });
+                return true;
+            }
+            case "binge-next": {
+                runOnUiThread(() -> { if (bingeEngine != null) bingeEngine.next(); });
+                return true;
+            }
+            case "binge-prev": {
+                runOnUiThread(() -> { if (bingeEngine != null) bingeEngine.prev(); });
+                return true;
+            }
+            case "binge-detail": {
+                // 退出刷剧（释放播放器、隐藏视频层）并回 WebView 进详情页；index 保留以便返回恢复
+                final int index = args.optInt("index", 0);
+                final String id = args.optString("id");
+                runOnUiThread(() -> {
+                    if (bingeEngine != null) bingeEngine.exit();
+                    if (webView != null && !id.isEmpty()) {
+                        webView.evaluateJavascript("window.hgBingeAction && window.hgBingeAction('detail',"
+                                + JSONObject.quote(id) + "," + index + ")", null);
+                    }
+                });
+                return true;
+            }
+            case "binge-full": {
+                // 观看全集：进 PlayerActivity 按已存进度续播；不退出刷剧（返回后继续）
+                final int episode = args.optInt("episode", 1);
+                runOnUiThread(() -> { if (bingeEngine != null) bingeEngine.openInPlayer(Math.max(1, episode)); });
                 return true;
             }
             default: throw new IllegalArgumentException("未知请求");
