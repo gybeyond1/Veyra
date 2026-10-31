@@ -88,12 +88,12 @@ body{background:var(--bg);color:var(--fg);font:14px/1.6 -apple-system,"PingFang 
 .ep-toolbar .chk-all{font-size:13px;color:var(--mut);display:flex;align-items:center;gap:6px}
 .ep-toolbar .chk-all input{width:auto}
 .ep-toolbar .ep-count{font-size:12px;color:var(--mut)}
-.ep-item{position:relative;display:flex;align-items:center;justify-content:center}
-.ep-item .ep-check{position:absolute;left:-2px;top:-2px;width:auto;accent-color:var(--acc);z-index:2}
-.ep-btn{background:#f0f2f6;border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:10px 0;text-align:center;cursor:pointer;font-size:13px;width:100%}
+.ep-btn{background:#f0f2f6;border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:10px 0;text-align:center;cursor:pointer;font-size:13px;width:100%;font-family:inherit;transition:background .15s,border-color .15s,color .15s,transform .1s;-webkit-tap-highlight-color:transparent}
 .ep-btn:hover{border-color:var(--acc2)}
+.ep-btn:active{transform:scale(.94)}
 .ep-btn.playing{background:var(--acc);color:#1a1e26;font-weight:700}
-.ep-item.off .ep-btn{opacity:.45}
+#dl-ep-list .ep-btn.sel{background:linear-gradient(180deg,#d6ac4d,#c89b3c);border-color:#b8892f;color:#231a06;font-weight:800;box-shadow:0 1px 2px rgba(184,137,47,.35)}
+#dl-ep-list .ep-btn:not(.sel){background:#f0f2f6;border-color:var(--line);color:#a6adba}
 .player-wrap{margin-top:16px;display:none}
 .player-wrap.open{display:block}
 video{width:100%;border-radius:10px;background:#000}
@@ -256,7 +256,7 @@ video{width:100%;border-radius:10px;background:#000}
   <div class="modal">
     <button class="modal-close" id="btn-close-dl">✕</button>
     <h3 id="dl-title" style="margin-bottom:4px"></h3>
-    <p id="dl-hint" style="font-size:12px;color:var(--mut);margin-bottom:12px">勾选要下载的集数，默认全选</p>
+    <p id="dl-hint" style="font-size:12px;color:var(--mut);margin-bottom:12px">点集数即可选中/取消，默认全选</p>
     <div class="dl-target" id="dl-target">
       <button type="button" data-dl-target="nas" class="active">下载到 NAS</button>
       <button type="button" data-dl-target="phone">下载到手机</button>
@@ -1121,22 +1121,22 @@ function openDownloadLayer(eps){
   const bar=document.getElementById('dl-toolbar');
   _dlSelected=new Set(eps.map(e=>e.number));
   list.innerHTML=eps.map((ep,j)=>
-    '<label class="ep-item" data-j="'+j+'">'+
-    '<input type="checkbox" class="dl-check" data-j="'+j+'" checked>'+
-    '<span class="ep-btn" style="display:flex;align-items:center;justify-content:center">'+ep.number+'</span></label>').join('');
+    '<button type="button" class="ep-btn sel" data-j="'+j+'" aria-pressed="true">'+ep.number+'</button>').join('');
+  const paint=(btn,on)=>{btn.classList.toggle('sel',on);btn.setAttribute('aria-pressed',on?'true':'false')};
   const all=document.getElementById('dl-chk-all');
   all.checked=true;all.onchange=()=>{
     const on=all.checked;
-    list.querySelectorAll('.dl-check').forEach(c=>{c.checked=on;c.closest('.ep-item').classList.toggle('off',!on);});
-    _dlSelected.clear();eps.forEach((e)=>{if(on)_dlSelected.add(e.number);});
+    list.querySelectorAll('.ep-btn').forEach(b=>paint(b,on));
+    _dlSelected.clear();eps.forEach(e=>{if(on)_dlSelected.add(e.number)});
     updateDlCount(eps);
   };
-  list.querySelectorAll('.dl-check').forEach(c=>c.onchange=()=>{
-    const n=eps[+c.dataset.j].number;
-    if(c.checked)_dlSelected.add(n);else _dlSelected.delete(n);
-    c.closest('.ep-item').classList.toggle('off',!c.checked);
-    const on=eps.every(e=>_dlSelected.has(e.number));
-    document.getElementById('dl-chk-all').checked=on&&eps.length>0;
+  // 直接点集数切换选中，不再用前面的复选框
+  list.querySelectorAll('.ep-btn').forEach(b=>b.onclick=()=>{
+    const on=!b.classList.contains('sel');
+    paint(b,on);
+    const n=eps[+b.dataset.j].number;
+    if(on)_dlSelected.add(n);else _dlSelected.delete(n);
+    document.getElementById('dl-chk-all').checked=_dlSelected.size===eps.length;
     updateDlCount(eps);
   });
   bar.style.display='flex';
@@ -1243,7 +1243,7 @@ document.getElementById('btn-dl-confirm').onclick=async()=>{
   const st=document.getElementById('dl-status');
   const btn=document.getElementById('btn-dl-confirm');
   const episodes=[..._dlSelected].filter(n=>n>0).sort((a,b)=>a-b);
-  if(!episodes.length){toast('请至少勾选 1 集');return}
+  if(!episodes.length){toast('请至少选择 1 集');return}
   if(dlTarget==='phone'&&!dlDeviceId){toast('请先选择账号与设备');return}
   btn.disabled=true;btn.textContent='提交中…';
   try{
