@@ -572,7 +572,12 @@ html[data-binge-drag] #app.binge #binge-fab{
   -webkit-backdrop-filter:none!important;
   backdrop-filter:none!important;
 }
-#app.binge #scroll,#app.binge .app-top,#app.binge #search-suggest{display:none}
+#app.binge #scroll{display:none}
+/* 刷剧仍是首页：保留同一个搜索框、联想与历史。顶栏只承载搜索，不遮挡视频手势。 */
+#app.binge .app-top{display:flex;z-index:14;pointer-events:none;background:transparent}
+#app.binge .app-top::before{display:none}
+#app.binge .app-top .search-form{pointer-events:auto;--sunny-glass-opacity:42%}
+#app.binge #search-suggest{--sunny-glass-opacity:42%}
 /* ===== 冷启动记忆恢复（app.html 里的 boot 脚本打的标记） =====
    上次停在刷剧页 → 进 app.js 之前先垫上那部剧的海报、把首页内容藏掉，
    不让传统首页有机会露出来。z-index 7：在 #binge(8) 与 #dock(9) 之下 ——
@@ -768,3 +773,89 @@ html[data-motion=off] *::after{
 }
 #dock{box-shadow:inset 0 1px 0 rgba(255,255,255,var(--glass-hi,.28)),0 10px 26px rgba(8,14,24,.12)}
 #binge-fab{box-shadow:inset 0 1px 0 rgba(255,255,255,var(--glass-hi,.28)),0 10px 26px rgba(8,14,24,.12)}
+
+/* ================= v0.23.15 Sunny UI 2.1 统一液态玻璃 =================
+   dock-refract.js 给所有目标挂 data-sunny-glass；模糊/液态与玻璃开关共用同一状态。
+   高优先级同时覆盖旧版写死的 2.2px 与固定 url(#dock-lens) 等规则。 */
+:is(#app,#age-gate,.appearance-scrim) [data-sunny-glass]{
+  --sunny-glass-opacity:4%;
+  background:color-mix(in srgb,var(--surface) var(--sunny-glass-opacity),transparent);
+  border:1px solid color-mix(in srgb,var(--text) 9%,transparent);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,var(--glass-hi,.28)),0 10px 26px rgba(8,14,24,.12);
+  -webkit-backdrop-filter:blur(var(--glass-blur,2.2px)) saturate(.85);
+  backdrop-filter:blur(var(--glass-blur,2.2px)) saturate(.85);
+}
+:is(#app,#age-gate,.appearance-scrim) [data-sunny-glass][data-lens=on]{
+  -webkit-backdrop-filter:var(--sunny-glass-filter);
+  backdrop-filter:var(--sunny-glass-filter);
+}
+#app.binge [data-sunny-glass]{--sunny-glass-opacity:52%}
+#dock-blob b[data-sunny-glass],.ap-preview-dock > i > b[data-sunny-glass]{--sunny-glass-opacity:6%}
+:is(.appearance-pop,.confirm-panel,.download-panel,.update-panel,.age-panel,#unlock-overlay .auth-panel)[data-sunny-glass]{--sunny-glass-opacity:42%}
+:is(.binge-card,.appearance-pop,.confirm-panel,.download-panel,.update-panel,.age-panel,#unlock-overlay .auth-panel){position:relative}
+
+/* Sunny 的 135° 镜面边缘：保留旧 WebView 可用的四边实现，强度实时跟随高光滑杆。 */
+:is(#dock,.search-form,#search-suggest,.header-settings,#binge-fab,.binge-card,.ap-preview-dock,.appearance-pop,.confirm-panel,.download-panel,.update-panel,.age-panel,#unlock-overlay .auth-panel)[data-sunny-glass]::after{
+  content:"";position:absolute;inset:-1px;border-radius:inherit;pointer-events:none;z-index:3;
+  background:
+    linear-gradient(180deg,rgba(255,255,255,var(--glass-hi-strong,.56)),rgba(255,255,255,var(--glass-hi,.28)) 1.5px,transparent 1.5px),
+    linear-gradient(90deg,rgba(255,255,255,var(--glass-hi,.28)),transparent 1.5px),
+    linear-gradient(270deg,rgba(255,255,255,var(--glass-hi,.28)),transparent 1.5px),
+    linear-gradient(0deg,rgba(255,255,255,var(--glass-hi,.28)),transparent 1.5px);
+}
+html[data-btn-mat=fuzzy] :is(#app,#age-gate,.appearance-scrim) [data-sunny-glass]{
+  -webkit-backdrop-filter:blur(2.2px) saturate(.85)!important;
+  backdrop-filter:blur(2.2px) saturate(.85)!important;
+}
+html[data-glass=off] :is(#app,#age-gate,.appearance-scrim) [data-sunny-glass]{
+  background:var(--surface);
+  -webkit-backdrop-filter:none!important;
+  backdrop-filter:none!important;
+}
+html[data-glass=off] [data-sunny-glass]::after{display:none}
+@media(prefers-reduced-transparency:reduce){
+  :is(#app,#age-gate,.appearance-scrim) [data-sunny-glass]{background:var(--surface);-webkit-backdrop-filter:none!important;backdrop-filter:none!important}
+}
+
+/* 刷剧海报卡片：左海报右文案，按钮保持原位；隐藏海报时文案自动占满。 */
+.binge-main{display:flex;align-items:flex-start;gap:11px;min-width:0}
+.binge-copy{flex:1;min-width:0}
+.binge-poster-box{width:58px;height:82px;flex:none;overflow:hidden;border-radius:calc(8px * var(--corner-scale,1));background:color-mix(in srgb,var(--text) 10%,transparent);box-shadow:0 3px 12px rgba(0,0,0,.18)}
+#binge-poster{width:100%;height:100%;object-fit:cover;object-position:center 24%}
+.binge-title{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+@media(max-width:360px){
+  .binge-card{margin-right:70px;padding:12px}
+  .binge-poster-box{width:52px;height:74px}
+  .binge-main{gap:9px}
+  .binge-actions button{padding:8px 11px;font-size:12px}
+}
+
+/* 外观预览：真实 #dock 的克隆结构，共用玻璃变量与动态折射引擎。 */
+.ap-preview,.ap-preview *{pointer-events:none}
+.ap-preview-title{color:color-mix(in srgb,var(--text) 55%,transparent)}
+html[data-bg=light] .ap-preview{background:linear-gradient(115deg,#f6f1e6,#dfe8ee)}
+html[data-bg=color] .ap-preview{background:linear-gradient(105deg,color-mix(in srgb,var(--accent) 38%,#a8d0d2),color-mix(in srgb,var(--accent-2,var(--accent)) 42%,#e4c1a4))}
+html[data-bg=dark] .ap-preview{background:linear-gradient(115deg,#11151c,#302b3a)}
+.ap-preview-dock{
+  position:relative;display:grid;grid-template-columns:repeat(4,1fr);align-items:center;
+  width:100%;height:64px;padding:0 5px;border-radius:calc(22px * var(--corner-scale,1));
+  color:var(--text);isolation:isolate;overflow:visible;
+}
+.ap-preview-dock button{
+  position:relative;z-index:2;height:54px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  min-width:0;padding:0;border:0;background:none;color:var(--muted);font-size:10px;white-space:nowrap;
+}
+.ap-preview-dock button.active{color:var(--text);font-weight:800}
+html[data-theme=dark] .ap-preview-dock button.active{color:var(--accent)}
+.ap-preview-dock button>span{display:block;width:auto;height:auto;opacity:1}
+.ap-preview-dock .nav-icon{height:25px;min-width:37px;display:grid;place-items:center;border-radius:calc(12px * var(--corner-scale,1))}
+.ap-preview-dock button.active .nav-icon{background:transparent;color:inherit}
+.ap-preview-dock svg{width:19px;height:19px}
+.ap-preview-dock > i{
+  position:absolute;top:5px;left:0;width:25%;height:calc(100% - 10px);z-index:1;pointer-events:none;
+  transform:translate3d(0,0,0);transition:transform .46s cubic-bezier(.32,1.34,.28,1),width .46s cubic-bezier(.32,1.34,.28,1);
+}
+.ap-preview-dock > i > b{position:relative;display:block;width:100%;height:100%;border-radius:calc(17px * var(--corner-scale,1))}
+html[data-nav-text=off] .ap-preview-dock button>span:not(.nav-icon){display:none}
+html[data-nav-text=off] .ap-preview-dock button{justify-content:center;gap:0}
+html[data-motion=off] .ap-preview-dock > i{transition:none}

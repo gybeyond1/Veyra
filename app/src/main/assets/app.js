@@ -3843,6 +3843,30 @@ bingeFab?.addEventListener('click', () => {
   else if (state.route === 'home') enterBingeFresh();
 });
 
+// 卡片海报走首页同一个封面桥；序号 + 当前剧 id 双重校验，快速换剧不会串图。
+let bingePosterSeq = 0;
+function updateBingePoster(info) {
+  const img = document.getElementById('binge-poster');
+  const box = document.getElementById('binge-poster-box');
+  if (!img || !box) return;
+  const seq = ++bingePosterSeq;
+  const id = String(info.id || '');
+  const cover = info.cover || '';
+  const isCurrent = () => seq === bingePosterSeq && String(bingeCurrentId || '') === id;
+  box.hidden = true;
+  img.onload = img.onerror = null;
+  img.removeAttribute('src');
+  if (!cover) return;
+  img.alt = (info.title || '当前剧集') + ' 海报';
+  getCover(cover).then(src => {
+    if (!isCurrent()) return;
+    img.onload = () => { if (isCurrent()) box.hidden = false; };
+    img.onerror = () => { if (isCurrent()) { box.hidden = true; img.removeAttribute('src'); } };
+    img.src = src;
+    if (img.complete && img.naturalWidth > 0) box.hidden = false;
+  }).catch(() => { if (isCurrent()) box.hidden = true; });
+}
+
 // 原生引擎回写卡片（标题/简介/封面 + 当前剧 id/下标）
 window.hgBingeUpdate = (info) => {
   if (!info) return;
@@ -3854,6 +3878,7 @@ window.hgBingeUpdate = (info) => {
   if (msgEl) msgEl.hidden = true;
   bingeCurrentId = info.id || null;
   if (typeof info.index === 'number') bingeCurrentIndex = info.index;
+  updateBingePoster(info);
   const card = document.getElementById('binge-card');
   if (card) card.hidden = false;
   if (document.documentElement.hasAttribute('data-binge-boot')) armBingeBootFallback();

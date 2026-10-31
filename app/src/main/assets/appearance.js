@@ -147,13 +147,33 @@
   var CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"'
     + ' stroke-linecap="round" stroke-linejoin="round"><path d="m5 13 4 4L19 7"/></svg>';
 
-  var PREVIEW_ICONS = [
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 4.5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1Z"/><path d="m10 9 5 3-5 3z" fill="currentColor" stroke="none"/></svg>',
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3 2"/></svg>',
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="4" width="16" height="6" rx="1.6"/><rect x="4" y="14" width="16" height="6" rx="1.6"/></svg>',
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6l1.4 1.4m10 10 1.4 1.4m0-12.8-1.4 1.4m-10 10-1.4 1.4"/></svg>',
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>'
-  ];
+  /* 预览直接复用当前真实底栏的四项导航和 SVG，去掉 id/业务事件后交给同一玻璃引擎。
+     不维护第二套图标，也不克隆真实节点 id。 */
+  function previewDockHtml() {
+    var dock = document.getElementById('dock');
+    if (!dock) return '';
+    var clone = dock.cloneNode(true);
+    clone.removeAttribute('id');
+    clone.removeAttribute('aria-label');
+    clone.removeAttribute('data-lens');
+    clone.removeAttribute('data-sunny-glass');
+    clone.removeAttribute('data-glass-renderer');
+    clone.className = 'ap-preview-bar ap-preview-dock';
+    clone.querySelectorAll('[id]').forEach(function (node) { node.removeAttribute('id'); });
+    clone.querySelectorAll('[style]').forEach(function (node) { node.removeAttribute('style'); });
+    clone.querySelectorAll('[data-lens],[data-sunny-glass],[data-glass-renderer]').forEach(function (node) {
+      node.removeAttribute('data-lens');
+      node.removeAttribute('data-sunny-glass');
+      node.removeAttribute('data-glass-renderer');
+    });
+    clone.querySelectorAll('button').forEach(function (button, index) {
+      button.removeAttribute('data-nav');
+      button.classList.remove('drag-over', 'dim', 'holding');
+      button.classList.toggle('active', index === 0);
+      button.tabIndex = -1;
+    });
+    return clone.outerHTML;
+  }
 
   function seg(group, options, current) {
     var html = '<div class="seg ap-seg" data-group="' + group + '" role="group">';
@@ -192,10 +212,8 @@
       +   '<div class="ap-seg-gap"></div>'
       +   seg('bg', BG, state.bg)
       +   '<div class="ap-preview" aria-hidden="true">'
-      +     '<span class="ap-preview-title">VEYRA · 流影</span>'
-      +     '<div class="ap-preview-bar"><i class="ap-preview-lens"></i>'
-      +       PREVIEW_ICONS.map(function (icon) { return '<span>' + icon + '</span>'; }).join('')
-      +     '</div>'
+      +     '<span class="ap-preview-title">VEYRA</span>'
+      +     previewDockHtml()
       +   '</div>'
       +   slider('specular', '高光强度', Math.round(state.specular), 40, 220, 1, '%')
       +   slider('blur', '模糊程度', state.blur.toFixed(1), 0, 24, 0.1, ' dp')

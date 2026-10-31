@@ -34,9 +34,8 @@
   </script>
 </head>
 <body>
-  <!-- Dock 的「折射」已经改成纯 CSS 的边缘光带（只在靠近边框的 6~8px 内有明暗，中心保持干净），
-       不再用 feDisplacementMap 对整块面板做位移 —— 那会把中间的图标和文字一起扭，看着发虚。
-       这段 SVG 暂时留空占位，方便以后需要时再挂真正局限于边缘的滤镜。 -->
+  <!-- 液态玻璃由 dock-refract.js 统一挂载：Sunny 圆角 SDF/circleMap 只折射边缘，
+       中心文字和图标独立绘制；底栏、搜索、刷剧卡片、预览和弹窗共享同一外观参数。 -->
   <div id="app">
     <header class="app-top">
       <button id="account-avatar" class="account-avatar" type="button" aria-label="登录账号">
@@ -58,8 +57,15 @@
          真底栏 #dock 与 #binge-fab 仍是首页全局元素，一字不动。 -->
     <div id="binge" hidden>
       <div class="binge-card" id="binge-card">
-        <h2 class="binge-title" id="binge-title"></h2>
-        <p class="binge-desc" id="binge-desc"></p>
+        <div class="binge-main">
+          <div class="binge-poster-box" id="binge-poster-box" hidden>
+            <img id="binge-poster" alt="">
+          </div>
+          <div class="binge-copy">
+            <h2 class="binge-title" id="binge-title"></h2>
+            <p class="binge-desc" id="binge-desc"></p>
+          </div>
+        </div>
         <div class="binge-actions">
           <button class="binge-detail" id="binge-detail-btn" type="button">查看详情</button>
           <button class="binge-full" id="binge-full-btn" type="button">观看全集</button>
