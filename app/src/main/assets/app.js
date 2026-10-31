@@ -2883,17 +2883,27 @@ function swipeOpenTrack(delta, dx) {
   const box = scroll.getBoundingClientRect();
   const current = content.firstElementChild;
   const currentStyle = current ? current.getAttribute('style') : null;
-  // 目标页从手势开始就放在最终 content 容器里。提交时只移除旧页，
-  // 目标页及其 <img> 不再 detach/reparent，避免 WebView 在抬手落位时重载图片。
+  const currentRect = current ? current.getBoundingClientRect() : null;
+  // 旧页临时脱离文档流；目标页从手势开始就处于最终普通文档流。
+  // 目标页全程只改横向 transform，不切 position/height/padding/overflow，落位不再跳变或整页重绘。
   const panel = node;
-  const panelStyle = panel.getAttribute('style');
-  panel.style.cssText += `;position:fixed;left:0;top:${Math.round(box.top)}px;width:100%;height:${Math.round(box.height)}px;`
-    + `margin:0;z-index:1;overflow:hidden;will-change:transform;contain:layout paint;background:${getComputedStyle(scroll).background};`;
+  const panelMotion = {
+    transform: panel.style.transform, transition: panel.style.transition,
+    willChange: panel.style.willChange, marginTop: panel.style.marginTop,
+  };
+  const scrollOverflowX = scroll.style.overflowX;
+  const previousScrollTop = scroll.scrollTop;
+  if (current && currentRect) {
+    current.style.cssText += `;position:absolute;left:0;top:${Math.round(currentRect.top - box.top)}px;`
+      + `width:100%;margin:0;z-index:2;background:${getComputedStyle(scroll).background};`;
+  }
+  scroll.style.overflowX = 'hidden';
+  // 同一 JS 帧内归零：旧页由 absolute 保持原视觉位置，目标页从最终滚动位置开始预览。
+  scroll.scrollTop = 0;
   content.appendChild(panel);
-  panel.style.paddingTop = `calc(${getComputedStyle(panel).paddingTop} + ${getComputedStyle(scroll).paddingTop})`;
   // inline（页内子项）：页头克隆到独立固定层绝对钉住（不可能被任何容器裁剪），
   // 内容区单独平移；面板从内容区顶部开始，目标页页头临时摘除使内容对齐。
-  const track = { panel, current, currentStyle, panelStyle, mode: 'page', width: Math.round(box.width || scroll.clientWidth || 360), dirSign: delta > 0 ? 1 : -1, guard: 0, resolve, pinned: [], clones: [], moving: [], savedDisplays: [] };
+  const track = { panel, current, currentStyle, panelMotion, scrollOverflowX, previousScrollTop, mode: 'page', width: Math.round(box.width || scroll.clientWidth || 360), dirSign: delta > 0 ? 1 : -1, guard: 0, resolve, pinned: [], clones: [], moving: [], savedDisplays: [] };
   const pageNode = current;
   if (resolve.mode === 'inline' && pageNode) {
     const tab = pageNode.querySelector(SWIPE_TAB_BAR_SELECTOR);
@@ -2930,15 +2940,6 @@ function swipeOpenTrack(delta, dx) {
   }
   if (track.mode === 'inline') {
     const firstMoving = track.moving[0];
-    const contentTop = firstMoving ? Math.round(firstMoving.getBoundingClientRect().top) : null;
-    if (contentTop != null && contentTop > box.top) {
-      panel.style.top = `${contentTop}px`;
-      panel.style.height = `${Math.max(80, Math.round(box.bottom - contentTop))}px`;
-      panel.style.paddingTop = '0';
-      panel.style.overflow = 'hidden';
-    } else {
-      panel.style.paddingTop = getComputedStyle(panel).paddingTop;
-    }
     // 垂直对齐补偿：目标页页头摘除后，其根节点自身的 padding-top（如 .library-page 的 20px）
     // 仍占位，预览内容被往下推 —— 落地后页头恢复、内容上抬，肉眼就是一次跳变。
     // 测出目标内容首块与当前页内容首块的落差，用负 margin 拉平，预览与落地逐像素一致。
@@ -2995,6 +2996,14 @@ function swipeCloseTrack(commit) {
     if (!el) return;
     if (value == null) el.removeAttribute('style'); else el.setAttribute('style', value);
   };
+  const restorePanelMotion = () => {
+    const m = t.panelMotion;
+    t.panel.style.transform = m.transform;
+    t.panel.style.transition = m.transition;
+    t.panel.style.willChange = m.willChange;
+    t.panel.style.marginTop = m.marginTop;
+    scroll.style.overflowX = t.scrollOverflowX;
+  };
   const moveCurrent = x => {
     if (t.mode === 'inline') {
       for (const el of t.moving) { el.style.transition = ease; el.style.transform = `translateX(${x}px)`; }
@@ -3023,7 +3032,7 @@ function swipeCloseTrack(commit) {
       // 旧页此刻已在屏外，可以安全 detach；目标页保持在原容器、原文档位置。
       if (t.current) t.current.remove();
       scroll.scrollTop = 0;
-      restoreStyle(t.panel, t.panelStyle);
+      restorePanelMotion();
       swiping = false;
       swipeAdopting = swipeAdoptable(t.panel);
       swipeSaveGuard = true;
@@ -3044,13 +3053,14 @@ function swipeCloseTrack(commit) {
     setTimeout(() => {
       swipeClearTabs(t);
       restoreStyle(t.current, t.currentStyle);
-      restoreStyle(t.panel, t.panelStyle);
+      restorePanelMotion();
       // 取消时目标页已在屏外，归还缓存不会形成可见闪帧。
       if (t.resolve.key && swipeAdoptable(t.panel)) {
         swipeCleanCloneImages(t.panel);
         swipePageCache.set(t.resolve.key, t.panel);
       }
       t.panel.remove();
+      scroll.scrollTop = t.previousScrollTop;
       swiping = false;
       if (state.route === 'downloads') refreshDownloads(routeToken, true);
     }, 210);

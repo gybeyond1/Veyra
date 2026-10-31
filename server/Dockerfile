@@ -11,7 +11,7 @@ RUN npm ci --omit=dev --no-audit --no-fund --prefer-offline
 
 # 业务代码（.dockerignore 排除 node_modules/test/data/旧签名器）
 # hongguo-sign.js：红果签名链 JS 内嵌实现（hongguo-app.js require 依赖，缺失会导致取流失败）
-COPY index.js webui.html downloader.js hongguo-app.js hongguo-decrypt.js proxy-fetch.js hls.min.js hongguo-sign.js ./
+COPY index.js webui.html downloader.js hongguo-app.js hongguo-content.js hongguo-decrypt.js proxy-fetch.js hls.min.js hongguo-sign.js ./
 
 ENV PORT=8080
 EXPOSE 8080
