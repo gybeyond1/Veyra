@@ -2807,9 +2807,10 @@ function swipeResolve(delta) {
       step: [pos, pos + delta],   // 高亮要跟着手从 pos 滑到 pos+delta
       // adopted：目标页 DOM 已由滑动的手放下（真内容），别再整体重渲染，否则会闪一下
       go: () => {
-        const adopted = swipeAdopting; swipeAdopting = false; swipeSaveGuard = true;
+        const adopted = swipeAdopting; swipeSaveGuard = true;
         try {
           if (state.route === 'library') {
+            swipeAdopting = false;
             state.libraryTab = next;
             if (!adopted) {
               // 没落下真内容（如首次滑动前尚未预取）——正常渲染
@@ -2841,6 +2842,7 @@ function swipeResolve(delta) {
   return {
     mode: 'page',       // 底栏页之间：整页平移
     key,
+    step: [index, index + delta], // 底栏透镜与页面共用同一滑动进度
     go: () => navigateDock(next),
     build: () => swipeBuildCached(key) || swipeBuildSkeleton(key),
   };
@@ -2871,6 +2873,21 @@ function swipeTabProgress(t, ratio) {
   if (!anim) return;
   const q = Math.max(0, Math.min(1, ratio || 0));
   anim.seg.progress(anim.from, anim.to, q);
+}
+
+function swipeBuildDockAnim(step) {
+  if (!step || !window.DockGlass) return null;
+  const [from, to] = step;
+  if (from === to || from < 0 || to < 0) return null;
+  window.DockGlass.begin(from, to);
+  return { api: window.DockGlass, from, to };
+}
+
+function swipeDockProgress(t, ratio) {
+  const anim = t && t.dockAnim;
+  if (!anim) return;
+  const q = Math.max(0, Math.min(1, ratio || 0));
+  anim.api.progress(anim.from, anim.to, q);
 }
 
 // 建轨：底层面板装目标页，真实 scroll 保持可见等待平移。
@@ -2954,6 +2971,7 @@ function swipeOpenTrack(delta, dx) {
       if (align) node.style.marginTop = `${align}px`;
     }
   }
+  if (track.mode === 'page') track.dockAnim = swipeBuildDockAnim(resolve.step);
   swipeTrack = track;
   routeToken++;   // 作废未落地的异步渲染，防止拖动中 content 被覆盖
   swipeLayTrack(dx);
@@ -2969,6 +2987,7 @@ function swipeLayTrack(dx) {
     swipeTabProgress(t, Math.abs(dx) / t.width);                              // 高亮同步跟到哪一格
   } else if (t.current) {
     t.current.style.transform = `translateX(${dx}px)`;
+    swipeDockProgress(t, Math.abs(dx) / t.width);                            // 底栏透镜同步跟手
   }
   t.panel.style.transform = `translateX(${t.dirSign * t.width + dx}px)`;
 }
@@ -2978,6 +2997,23 @@ function swipeClearTabs(t) {
   for (const el of t.pinned || []) el.style.visibility = '';
   for (const [el, d] of t.savedDisplays || []) el.style.display = d;
   for (const el of t.moving || []) { el.style.transform = ''; el.style.transition = ''; }
+  // 预览时真实目标页头 display:none，SegGlass 首次测量会得到 0 宽度。
+  // 恢复页头后必须在同一帧重新测量并归位，否则临时壳一移除，真实高亮就消失。
+  if (t.mode === 'inline' && window.SegGlass) {
+    const selectedIndex = t.resolve.step ? t.resolve.step[1] : -1;
+    for (const bar of t.panel.querySelectorAll(SWIPE_TAB_BAR_SELECTOR)) {
+      const buttons = [...bar.querySelectorAll('button')];
+      buttons.forEach((button, index) => {
+        if (selectedIndex < 0) return;
+        button.classList.toggle('selected', index === selectedIndex);
+        button.classList.remove('drag-over', 'dim', 'holding');
+        if (index === selectedIndex) button.setAttribute('aria-selected', 'true');
+        else button.removeAttribute('aria-selected');
+      });
+      const seg = window.SegGlass.handle(bar);
+      seg.setDragging(false); seg.setFollow(false); seg.clearHover(); seg.sync(false);
+    }
+  }
   // 页头壳里的透镜提前释放：它是克隆体，随壳一起移除，这里只需把「拖动态」撤干净
   try { t.tabAnim?.seg?.blob && (t.tabAnim.seg.blob.style.transition = ''); } catch (ignore) { }
   for (const c of t.clones || []) c.remove();
@@ -3014,6 +3050,7 @@ function swipeCloseTrack(commit) {
   };
   t.panel.style.transition = ease;
   const tabEase = 'transform .2s cubic-bezier(.22,.61,.36,1),width .2s cubic-bezier(.22,.61,.36,1),height .2s cubic-bezier(.22,.61,.36,1)';
+  if (t.dockAnim) t.dockAnim.api.settle(commit);
   if (commit) {
     if (t.tabAnim) {
       const anim = t.tabAnim;

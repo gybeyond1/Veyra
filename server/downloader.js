@@ -189,7 +189,7 @@ async function downloadWithFallback(urls, destPath, headers, progressCb, signal)
 // ---- 合并（对照 juku-backend media_merge.go / media_merge_plan.go 完整移植）----
 function probeFile(file) {
   const out = spawnSync('ffprobe', ['-v', 'error', '-show_entries',
-    'stream=index,codec_type,codec_name,width,height,profile,sample_rate,channels,channel_layout,duration,time_base,pix_fmt,codec_tag_string',
+    'stream=index,codec_type,codec_name,width,height,profile,sample_rate,channels,channel_layout,duration,start_time,time_base,pix_fmt,codec_tag_string',
     '-of', 'json', file], { encoding: 'utf8', timeout: 60_000 });
   if (out.status !== 0) throw new Error('ffprobe 探测失败: ' + (out.stderr || '').slice(0, 300));
   const parsed = JSON.parse(out.stdout);
@@ -211,6 +211,9 @@ function probeFile(file) {
     layout: audio ? audio.channel_layout || '' : '',
     audioTB: audio ? audio.time_base || '' : '',
     duration: Number(video.duration) || 0,
+    videoStart: Number(video.start_time) || 0,
+    audioStart: audio ? Number(audio.start_time) || 0 : 0,
+    avOffset: audio ? (Number(video.start_time) || 0) - (Number(audio.start_time) || 0) : 0,
     timescale: tb.length === 2 ? Number(tb[1]) || 0 : 0,
     audioTimescale: atb.length === 2 ? Number(atb[1]) || 0 : 0,
   };
@@ -241,13 +244,17 @@ function buildPlan(infos) {
   const ak = majorityKey(infos.filter(i => i.audioCodec), audioKey) || '';
   const audioTs = majorityValue(infos.filter(i => i.audioCodec), 'audioTimescale', audioKey) || 0;
   for (const info of infos) {
+    const video = videoKey(info) !== plan.video;
+    const sync = !!info.audioCodec && Math.abs(info.avOffset || 0) > 0.002;
     const step = {
-      video: videoKey(info) !== plan.video,
-      audio: !!info.audioCodec && audioKey(info) !== ak,
+      video,
+      audio: !!info.audioCodec && (video || audioKey(info) !== ak || sync),
+      sync,
       remux: false,
     };
     if (step.video || step.remux || (info.vTag && info.vTag !== infos[0].vTag)) plan.parameters = true;
-    step.remux = info.videoTB !== videoTB || (!!info.audioCodec && info.audioTimescale !== audioTs);
+    step.remux = info.videoTB !== videoTB || (!!info.audioCodec && info.audioTimescale !== audioTs)
+      || Math.abs(info.avOffset || 0) > 0.002;
     plan.steps.push(step);
   }
   return plan;
@@ -287,11 +294,20 @@ async function mergeEpisodes(episodeFiles, outputPath, workDir, report) {
     const step = plan.steps[i];
     if (!step.video && !step.audio && !step.remux) { prepared[i] = episodeFiles[i]; continue; }
     // 断点续传：已处理的集直接复用
-    const cooked = safeJoin(workDir, `ep${String(i + 1).padStart(3, '0')}.mp4`);
+    const cooked = safeJoin(workDir, `ep${String(i + 1).padStart(3, '0')}-sync4.mp4`);
     if (fs.existsSync(cooked) && fs.statSync(cooked).size > 1024) { prepared[i] = cooked; continue; }
-    const action = step.video ? '统一转码视频+音轨' : (step.audio ? '统一音轨' : '无损换封装(统一时间基)');
+    const action = step.video ? '统一转码视频+音轨' : (step.sync ? '校准音画起点'
+      : (step.audio ? '统一音轨' : '无损换封装(统一时间基)'));
     report(5 + Math.round(i * 55 / episodeFiles.length), `${action}第 ${i + 1} 集`);
-    const args = ['-i', episodeFiles[i], '-map', '0:v:0', '-sn', '-dn', '-map_metadata', '-1', '-c:v', 'copy'];
+    const args = [];
+    let audioInput = 0;
+    if (!step.video && step.audio && info.audioCodec) {
+      // 视频 copy、音频重编码时分别归零：避免 AAC priming 在正向偏移下多出一帧声音。
+      args.push('-itsoffset', (-(info.videoStart || 0)).toFixed(6), '-i', episodeFiles[i]);
+      args.push('-itsoffset', (-(info.audioStart || 0)).toFixed(6), '-i', episodeFiles[i]);
+      audioInput = 1;
+    } else args.push('-i', episodeFiles[i]);
+    args.push('-map', '0:v:0', '-sn', '-dn', '-map_metadata', '-1', '-c:v', 'copy');
     if (step.video) {
       let filter = 'setpts=PTS-STARTPTS,';
       if (targetW && targetH) {
@@ -307,7 +323,7 @@ async function mergeEpisodes(episodeFiles, outputPath, workDir, report) {
       }
     }
     if (info.audioCodec) {
-      args.push('-map', '0:a:0');
+      args.push('-map', `${audioInput}:a:0`);
       if (step.audio) {
         args.push('-c:a', 'aac', '-profile:a', 'aac_low', '-b:a', '192k', '-ar', String(targetSR), '-ac', String(targetCh));
         args.push('-af', `aresample=${targetSR}:async=1:first_pts=0`);
@@ -330,7 +346,7 @@ async function mergeEpisodes(episodeFiles, outputPath, workDir, report) {
   const lines = ['ffconcat version 1.0'];
   for (const f of prepared) lines.push(`file '${String(f).replace(/'/g, "'\\''")}'`);
   fs.writeFileSync(listFile, lines.join('\n') + '\n');
-  const concatArgs = ['-protocol_whitelist', 'file,pipe', '-f', 'concat', '-safe', '0', '-i', listFile,
+  const concatArgs = ['-copyts', '-protocol_whitelist', 'file,pipe', '-f', 'concat', '-safe', '0', '-i', listFile,
     '-map', '0:v:0', '-map', '0:a:0?', '-sn', '-dn', '-c', 'copy',
     '-video_track_timescale', String(plan.timescale), '-movflags', '+faststart'];
   // h264/hevc 产物一律 avc3/hev1（in-band SPS/PPS）：concat 后播放器 seek 到任何段都按帧内参数解码，杜绝快进花屏/乱码

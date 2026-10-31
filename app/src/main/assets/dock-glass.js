@@ -59,6 +59,42 @@
     rafId = requestAnimationFrame(() => { rafId = 0; paint(current(), true); });
   }
 
+  // 内容区整页横滑：底栏透镜使用与页面相同的进度，不在松手后才跳过去。
+  let contentFrom = 0, contentTo = 0, contentRatio = 0, contentFollowing = false;
+  function contentProgress(from, to, ratio, animate = false) {
+    const A = buttons[from], B = buttons[to];
+    if (!A || !B) return;
+    contentFrom = from; contentTo = to;
+    contentRatio = Math.max(0, Math.min(1, ratio || 0));
+    const a = metrics(A), b = metrics(B), q = contentRatio;
+    const mix = (x, y) => x + (y - x) * q;
+    blob.style.transition = animate
+      ? 'transform .2s cubic-bezier(.22,.61,.36,1),width .2s cubic-bezier(.22,.61,.36,1)'
+      : 'none';
+    blob.style.width = Math.max(0, mix(a.w, b.w) - PAD * 2) + 'px';
+    blob.style.transform = `translate3d(${mix(a.x, b.x) + PAD}px,0,0)`;
+    buttons.forEach((button, i) => {
+      button.classList.toggle('drag-over', i === (q >= .5 ? to : from) && button !== current());
+      button.classList.toggle('dim', i !== from && i !== to);
+    });
+  }
+  function contentBegin(from, to) {
+    contentFollowing = true;
+    clearHover();
+    contentFrom = from; contentTo = to; contentRatio = 0;
+    contentProgress(from, to, 0, false);
+  }
+  function contentSettle(commit) {
+    contentProgress(contentFrom, contentTo, commit ? 1 : 0, true);
+    setTimeout(() => {
+      contentFollowing = false;
+      blob.style.transition = '';
+      clearHover();
+      animate();
+    }, 210);
+  }
+  window.DockGlass = { begin: contentBegin, progress: contentProgress, settle: contentSettle };
+
   function setHovered(btn) {
     if (btn === hovered) return;
     hovered = btn;
@@ -186,7 +222,7 @@
 
   /* active 类由 app.js 切换，这里监听变化同步透镜位置 */
   const mo = new MutationObserver(records => {
-    if (dragging) return;
+    if (dragging || contentFollowing) return;
     for (const r of records) {
       if (r.target.classList && r.target.classList.contains('active')) { animate(); return; }
     }
