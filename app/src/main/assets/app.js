@@ -3016,6 +3016,9 @@ function swipeCloseTrack(commit) {
     t.panel.style.transform = 'translateX(0)';
     setTimeout(() => {
       swipeClearTabs(t);
+      // 旧页在跟手/收尾时被加了 translateX 和 transition。必须先恢复原始样式再入缓存，
+      // 否则下次滑回会把“仍在屏外”的 transform 一起恢复，造成全局页面空白/残条。
+      restoreStyle(t.current, t.currentStyle);
       swipeSaveCurrent();
       // 旧页此刻已在屏外，可以安全 detach；目标页保持在原容器、原文档位置。
       if (t.current) t.current.remove();
