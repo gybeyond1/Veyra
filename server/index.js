@@ -30,6 +30,7 @@ const http = require('http');
 const https = require('https');
 const downloader = require('./downloader');
 const hgApp = require('./hongguo-app');
+const { createHongguoContent } = require('./hongguo-content');
 
 const PORT = parseInt(process.env.PORT || '8080', 10);
 // 数据目录：环境变量指定，默认 /data（docker-compose volume 挂载）。
@@ -286,27 +287,16 @@ function extractRouterData(html) {
   throw new Error('页面数据不完整');
 }
 
-function parseSeriesCard(o) {
-  return {
-    id: String(o.series_id || o.id || ''),
-    title: o.series_name || o.series_title || o.title || o.name || '',
-    cover: o.series_cover || o.cover || o.horizontal_cover || o.vertical_cover || '',
-    badge: o.episode_cnt != null ? o.episode_cnt + '集' : (o.badge || ''),
-    tags: o.tags || o.category_list || [],
-    description: o.series_intro || o.description || '',
-  };
+const hgCatalog = createHongguoContent((url, timeoutMs) => new Promise((resolve, reject) => {
+  curlGet(url, timeoutMs, (err, html) => err ? reject(err) : resolve(html));
+}));
+function sendHongguoError(res, error) {
+  const status = error.statusCode || 502;
+  res.status(status).json({ error: (status === 400 ? '请求无效: ' : '内容加载失败: ') + error.message });
 }
 
-app.get('/api/web/hongguo/home', (req, res) => {
-  curlGet('https://hongguoduanju.com/category?tab=1&sort_type=1', 10000, (err, html) => {
-    if (err) return res.status(502).json({ error: '抓取失败: ' + err.message });
-    try {
-      const router = extractRouterData(html).loaderData || {};
-      const section = router.category_page || router.category_$ || {};
-      const list = section.recommendList || (section.categoryData && section.categoryData.recommendList) || [];
-      res.json({ items: list.map(parseSeriesCard) });
-    } catch (e) { res.status(502).json({ error: '解析失败: ' + e.message }); }
-  });
+app.get('/api/web/hongguo/home', async (_req, res) => {
+  try { res.json(await hgCatalog.home()); } catch (e) { sendHongguoError(res, e); }
 });
 
 app.get('/api/web/hongguo/search', (req, res) => {
@@ -357,27 +347,12 @@ app.get('/api/web/hongguo/detail', async (req, res) => {
   });
 });
 
-// 红果分类页：tab=1 推荐，其余为题材 slug（romance/period/legend…，与 APK 一致），返回题材分类条 + 列表
-app.get('/api/web/hongguo/category', (req, res) => {
-  const tab = String(req.query.tab || '1').replace(/[^0-9a-zA-Z-]/g, '');
-  const url = tab === '1'
-    ? 'https://hongguoduanju.com/category/real-drama'
-    : 'https://hongguoduanju.com/category/real-drama/' + encodeURIComponent(tab);
-  curlGet(url, 10000, (err, html) => {
-    if (err) return res.status(502).json({ error: '抓取失败: ' + err.message });
-    try {
-      const router = extractRouterData(html).loaderData || {};
-      const section = router.category_page || router.category_$ || {};
-      // 题材分类条：selectorList 第一行 items（selector_item_id + show_name）
-      const tabs = (section.selectorList || [])
-        .filter(r => String(r.row_id) === '1')
-        .flatMap(r => (r.items || []))
-        .map(c => ({ tab: String(c.selector_item_id || ''), name: String(c.show_name || '') }))
-        .filter(t => t.tab && t.name);
-      const list = section.recommendList || [];
-      res.json({ tabs, items: list.map(parseSeriesCard) });
-    } catch (e) { res.status(502).json({ error: '解析失败: ' + e.message }); }
-  });
+// 与 APP 同源：short=短剧精选，comic=漫剧热榜，slug=对应大类题材；绝不跨分类回退。
+app.get('/api/web/hongguo/category', async (req, res) => {
+  try { res.json(await hgCatalog.category(req.query)); } catch (e) { sendHongguoError(res, e); }
+});
+app.get('/api/web/hongguo/tags', async (_req, res) => {
+  try { res.json(await hgCatalog.tags()); } catch (e) { sendHongguoError(res, e); }
 });
 
 // 红果单集播放：签名取流（内置 videoModel）-> ffmpeg 解密转封装（浏览器不能播 CENC 密文）-> 明文 MP4 直发（sendFile 支持 Range 拖动）

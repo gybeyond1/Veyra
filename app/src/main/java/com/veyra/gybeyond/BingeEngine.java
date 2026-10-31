@@ -100,6 +100,8 @@ public class BingeEngine {
     // 刷剧形态被「挂起」（切到别的 tab / 进详情 / 看全集）。挂起期间不恢复播放、不抢沉浸态，
     // 播放器与进度原样保留，resume() 回来就能接着播 —— 不用重新 loadShow，也就不会闪传统首页。
     private boolean suspended;
+    private Integer statusBarAppearance;
+    private Integer legacySystemUiVisibility;
 
     // ---- 跟手拖拽（上下滑换剧）----
     private ImageView neighbor;          // 「下一部」的画面，拖拽时垫在视频层上面跟着手指走
@@ -314,12 +316,20 @@ public class BingeEngine {
             activity().setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
             if (Build.VERSION.SDK_INT >= 30) {
                 WindowInsetsController c = activity().getWindow().getInsetsController();
-                if (c != null) c.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+                if (c != null) {
+                    // 视频仍通过 LAYOUT_FULLSCREEN 铺到状态栏后方，只让时间、电量等内容可见。
+                    if (statusBarAppearance == null) statusBarAppearance = c.getSystemBarsAppearance();
+                    c.setSystemBarsAppearance(0, WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS);
+                    c.show(WindowInsets.Type.statusBars());
+                    c.hide(WindowInsets.Type.navigationBars());
+                }
             } else {
-                activity().getWindow().getDecorView().setSystemUiVisibility(
-                        View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_FULLSCREEN
-                                | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
+                View decor = activity().getWindow().getDecorView();
+                if (legacySystemUiVisibility == null) legacySystemUiVisibility = decor.getSystemUiVisibility();
+                decor.setSystemUiVisibility((legacySystemUiVisibility & ~View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR)
+                        | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                        | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
             }
         } catch (Exception ignored) { }
     }
@@ -328,10 +338,19 @@ public class BingeEngine {
         try {
             if (Build.VERSION.SDK_INT >= 30) {
                 WindowInsetsController c = activity().getWindow().getInsetsController();
-                if (c != null) c.show(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+                if (c != null) {
+                    c.show(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+                    if (statusBarAppearance != null) {
+                        c.setSystemBarsAppearance(statusBarAppearance, WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS);
+                        statusBarAppearance = null;
+                    }
+                }
             } else {
-                activity().getWindow().getDecorView().setSystemUiVisibility(
-                        View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
+                View decor = activity().getWindow().getDecorView();
+                decor.setSystemUiVisibility(legacySystemUiVisibility == null
+                        ? View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        : legacySystemUiVisibility);
+                legacySystemUiVisibility = null;
             }
         } catch (Exception ignored) { }
     }

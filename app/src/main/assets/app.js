@@ -2881,21 +2881,20 @@ function swipeOpenTrack(delta, dx) {
   const node = resolve.build();
   if (!node) return false;
   const box = scroll.getBoundingClientRect();
-  const panel = document.createElement('div');
-  panel.className = 'swipe-under';
-  panel.style.background = getComputedStyle(scroll).background;   // 跟随当前页真实底色（主题渐变/暗色都一致）
-  panel.style.top = `${Math.round(box.top)}px`;
-  panel.style.height = `${Math.round(box.height)}px`;
-  const inner = document.createElement('div');
-  inner.className = 'swipe-page-inner';
-  inner.style.paddingTop = getComputedStyle(scroll).paddingTop;
-  inner.appendChild(node);
-  panel.appendChild(inner);
-  (document.getElementById('app') || document.body).appendChild(panel);
+  const current = content.firstElementChild;
+  const currentStyle = current ? current.getAttribute('style') : null;
+  // 目标页从手势开始就放在最终 content 容器里。提交时只移除旧页，
+  // 目标页及其 <img> 不再 detach/reparent，避免 WebView 在抬手落位时重载图片。
+  const panel = node;
+  const panelStyle = panel.getAttribute('style');
+  panel.style.cssText += `;position:fixed;left:0;top:${Math.round(box.top)}px;width:100%;height:${Math.round(box.height)}px;`
+    + `margin:0;z-index:1;overflow:hidden;will-change:transform;contain:layout paint;background:${getComputedStyle(scroll).background};`;
+  content.appendChild(panel);
+  panel.style.paddingTop = `calc(${getComputedStyle(panel).paddingTop} + ${getComputedStyle(scroll).paddingTop})`;
   // inline（页内子项）：页头克隆到独立固定层绝对钉住（不可能被任何容器裁剪），
   // 内容区单独平移；面板从内容区顶部开始，目标页页头临时摘除使内容对齐。
-  const track = { panel, inner, mode: 'page', width: Math.round(box.width || scroll.clientWidth || 360), dirSign: delta > 0 ? 1 : -1, guard: 0, resolve, pinned: [], clones: [], moving: [], savedDisplays: [] };
-  const pageNode = content.firstElementChild;
+  const track = { panel, current, currentStyle, panelStyle, mode: 'page', width: Math.round(box.width || scroll.clientWidth || 360), dirSign: delta > 0 ? 1 : -1, guard: 0, resolve, pinned: [], clones: [], moving: [], savedDisplays: [] };
+  const pageNode = current;
   if (resolve.mode === 'inline' && pageNode) {
     const tab = pageNode.querySelector(SWIPE_TAB_BAR_SELECTOR);
     if (tab && tab.parentElement) {
@@ -2935,10 +2934,10 @@ function swipeOpenTrack(delta, dx) {
     if (contentTop != null && contentTop > box.top) {
       panel.style.top = `${contentTop}px`;
       panel.style.height = `${Math.max(80, Math.round(box.bottom - contentTop))}px`;
-      inner.style.paddingTop = '0';
-      inner.style.overflow = 'hidden';
+      panel.style.paddingTop = '0';
+      panel.style.overflow = 'hidden';
     } else {
-      inner.style.paddingTop = getComputedStyle(scroll).paddingTop;
+      panel.style.paddingTop = getComputedStyle(panel).paddingTop;
     }
     // 垂直对齐补偿：目标页页头摘除后，其根节点自身的 padding-top（如 .library-page 的 20px）
     // 仍占位，预览内容被往下推 —— 落地后页头恢复、内容上抬，肉眼就是一次跳变。
@@ -2953,10 +2952,7 @@ function swipeOpenTrack(delta, dx) {
       const align = Math.round(firstMoving.getBoundingClientRect().top - firstTarget.getBoundingClientRect().top);
       if (align) node.style.marginTop = `${align}px`;
     }
-  } else {
-    inner.style.paddingTop = getComputedStyle(scroll).paddingTop;
   }
-  inner.appendChild(node);
   swipeTrack = track;
   routeToken++;   // 作废未落地的异步渲染，防止拖动中 content 被覆盖
   swipeLayTrack(dx);
@@ -2970,8 +2966,8 @@ function swipeLayTrack(dx) {
   if (t.mode === 'inline') {
     for (const el of t.moving) el.style.transform = `translateX(${dx}px)`;   // 只有内容区跟手
     swipeTabProgress(t, Math.abs(dx) / t.width);                              // 高亮同步跟到哪一格
-  } else {
-    scroll.style.transform = `translateX(${dx}px)`;
+  } else if (t.current) {
+    t.current.style.transform = `translateX(${dx}px)`;
   }
   t.panel.style.transform = `translateX(${t.dirSign * t.width + dx}px)`;
 }
@@ -2980,13 +2976,14 @@ function swipeLayTrack(dx) {
 function swipeClearTabs(t) {
   for (const el of t.pinned || []) el.style.visibility = '';
   for (const [el, d] of t.savedDisplays || []) el.style.display = d;
-  for (const el of t.moving || []) el.style.transform = '';
+  for (const el of t.moving || []) { el.style.transform = ''; el.style.transition = ''; }
   // 页头壳里的透镜提前释放：它是克隆体，随壳一起移除，这里只需把「拖动态」撤干净
   try { t.tabAnim?.seg?.blob && (t.tabAnim.seg.blob.style.transition = ''); } catch (ignore) { }
   for (const c of t.clones || []) c.remove();
 }
 
 // 松手：提交则当前页滑出、目标页落位并真正路由；取消则全部归位（零副作用）。
+// 目标页始终是 content 的直接子节点；提交只删除旧页，不搬动目标页或其图片。
 function swipeCloseTrack(commit) {
   const t = swipeTrack;
   if (!t) return;
@@ -2994,31 +2991,39 @@ function swipeCloseTrack(commit) {
   swiping = true;
   clearTimeout(t.guard);
   const ease = 'transform .2s cubic-bezier(.22,.61,.36,1)';
-  scroll.style.transition = ease;
+  const restoreStyle = (el, value) => {
+    if (!el) return;
+    if (value == null) el.removeAttribute('style'); else el.setAttribute('style', value);
+  };
+  const moveCurrent = x => {
+    if (t.mode === 'inline') {
+      for (const el of t.moving) { el.style.transition = ease; el.style.transform = `translateX(${x}px)`; }
+    } else if (t.current) {
+      t.current.style.transition = ease;
+      t.current.style.transform = `translateX(${x}px)`;
+    }
+  };
   t.panel.style.transition = ease;
   const tabEase = 'transform .2s cubic-bezier(.22,.61,.36,1),width .2s cubic-bezier(.22,.61,.36,1),height .2s cubic-bezier(.22,.61,.36,1)';
   if (commit) {
-    if (t.tabAnim) {   // 透镜跟着收尾动画一路滑到目标格，不是落地才跳
+    if (t.tabAnim) {
       const anim = t.tabAnim;
       anim.seg.blob.style.transition = tabEase;
       for (const el of anim.items) el.style.transition = 'color .2s ease';
       swipeTabProgress(t, 1);
     }
-    scroll.style.transform = `translateX(${-t.dirSign * t.width}px)`;
+    moveCurrent(-t.dirSign * t.width);
     t.panel.style.transform = 'translateX(0)';
     setTimeout(() => {
-      swipeClearTabs(t);   // 先撤掉页头 hidden / 内容位移等临时样式，再存当前页 —— 缓存里不能有脏快照
+      swipeClearTabs(t);
       swipeSaveCurrent();
-      const node = t.inner.firstElementChild;
-      if (node) node.style.marginTop = '';   // 撤掉滑动时的垂直对齐补偿，别带进真实页面
-      scroll.style.transition = '';
-      scroll.style.transform = '';
-      if (node) { content.replaceChildren(node); scroll.scrollTop = 0; }
-      t.panel.remove();
+      // 旧页此刻已在屏外，可以安全 detach；目标页保持在原容器、原文档位置。
+      if (t.current) t.current.remove();
+      scroll.scrollTop = 0;
+      restoreStyle(t.panel, t.panelStyle);
       swiping = false;
-      // 预览已经是真内容 → 让这次路由只换状态、不再重画一遍（重画就是那一闪）
-      swipeAdopting = swipeAdoptable(node);
-      swipeSaveGuard = true;   // content 已被换成目标页，期间不许再存“当前页”
+      swipeAdopting = swipeAdoptable(t.panel);
+      swipeSaveGuard = true;
       try { const result = t.resolve.go(); if (result && result.catch) result.catch(() => { }); } catch (ignore) { }
       swipeSaveGuard = false;
       swipeAdopting = false;
@@ -3028,25 +3033,22 @@ function swipeCloseTrack(commit) {
     if (t.tabAnim) {
       const anim = t.tabAnim;
       for (const el of anim.items) el.style.transition = 'color .2s ease';
-      anim.seg.blob.style.transition = tabEase;   // 行内过渡优先于 .dragging 的 none
+      anim.seg.blob.style.transition = tabEase;
       swipeTabProgress(t, 0);
     }
-    scroll.style.transform = 'translateX(0)';
+    moveCurrent(0);
     t.panel.style.transform = `translateX(${t.dirSign * t.width}px)`;
     setTimeout(() => {
       swipeClearTabs(t);
-      const node = t.inner.firstElementChild;
-      if (node) node.style.marginTop = '';   // 缓存/复用的克隆不带对齐补偿
-      // 预览用的是缓存本体（取出式），取消要把节点放回缓存，否则这份真内容缓存被白白消耗
-      if (node && t.resolve.key && swipeAdoptable(node)) {
-        swipeCleanCloneImages(node);
-        swipePageCache.set(t.resolve.key, node);
+      restoreStyle(t.current, t.currentStyle);
+      restoreStyle(t.panel, t.panelStyle);
+      // 取消时目标页已在屏外，归还缓存不会形成可见闪帧。
+      if (t.resolve.key && swipeAdoptable(t.panel)) {
+        swipeCleanCloneImages(t.panel);
+        swipePageCache.set(t.resolve.key, t.panel);
       }
-      scroll.style.transition = '';
-      scroll.style.transform = '';
       t.panel.remove();
       swiping = false;
-      // downloads 页的轮询被 routeToken++ 打断过，重新挂上
       if (state.route === 'downloads') refreshDownloads(routeToken, true);
     }, 210);
   }

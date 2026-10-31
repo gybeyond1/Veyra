@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node index.js",
-    "test": "node test/smoke.js"
+    "test": "node test/hongguo-content.js && node test/smoke.js"
   },
   "dependencies": {
     "express": "^4.21.2",

@@ -10,24 +10,24 @@
 
 </script>
 <style>
-:root{--bg:#0f1115;--card:#1a1e26;--line:#2a3040;--fg:#e8ecf3;--mut:#8a93a5;--ok:#37d67a;--err:#ff5c5c;--acc:#f5d782;--acc2:#6c8cff}
+:root{--bg:#f4f6fa;--card:#ffffff;--line:#e3e7ee;--fg:#20242c;--mut:#858c99;--ok:#259c5b;--err:#e24b4b;--acc:#c89b3c;--acc2:#6c8cff}
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--fg);font:14px/1.6 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh}
-.header{position:sticky;top:0;z-index:100;background:rgba(15,17,21,.88);backdrop-filter:blur(20px);border-bottom:1px solid var(--line);padding:12px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.header{position:sticky;top:0;z-index:100;background:rgba(255,255,255,.9);backdrop-filter:blur(20px);border-bottom:1px solid var(--line);padding:12px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
 .logo{font-size:20px;font-weight:800;letter-spacing:1px;color:var(--acc);white-space:nowrap}
-.search{flex:1;min-width:180px;max-width:480px;background:#0d0f13;border:1px solid var(--line);border-radius:10px;padding:8px 14px;color:var(--fg);font-size:14px;outline:none}
+.search{flex:1;min-width:180px;max-width:480px;background:#f0f2f6;border:1px solid var(--line);border-radius:10px;padding:8px 14px;color:var(--fg);font-size:14px;outline:none}
 .search:focus{border-color:var(--acc2)}
-.mode-toggle{display:flex;background:#0d0f13;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.mode-toggle{display:flex;background:#f0f2f6;border:1px solid var(--line);border-radius:10px;overflow:hidden}
 .mode-toggle button{background:transparent;border:none;color:var(--mut);padding:8px 16px;cursor:pointer;font-size:13px;font-weight:600;transition:.2s}
 .mode-toggle button.active{background:var(--acc);color:#1a1e26}
 .gear{background:transparent;border:1px solid var(--line);color:var(--mut);width:38px;height:38px;border-radius:10px;cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center}
 .gear:hover{border-color:var(--mut);color:var(--fg)}
 .cat-bar{display:flex;gap:8px;overflow-x:auto;padding:10px 20px;max-width:1200px;margin:0 auto;scrollbar-width:none}
 .cat-bar::-webkit-scrollbar{display:none}
-.cat-btn{flex-shrink:0;background:#0d0f13;border:1px solid var(--line);color:var(--mut);border-radius:20px;padding:6px 16px;cursor:pointer;font-size:13px;white-space:nowrap;transition:.2s}
+.cat-btn{flex-shrink:0;background:#f0f2f6;border:1px solid var(--line);color:var(--mut);border-radius:20px;padding:6px 16px;cursor:pointer;font-size:13px;white-space:nowrap;transition:.2s}
 .cat-btn:hover{border-color:var(--mut);color:var(--fg)}
 .cat-btn.active{background:var(--acc);color:#1a1e26;font-weight:700;border-color:var(--acc)}
-.pc-nav{display:flex;gap:2px;background:#0d0f13;border:1px solid var(--line);border-radius:10px;padding:3px}
+.pc-nav{display:flex;gap:2px;background:#f0f2f6;border:1px solid var(--line);border-radius:10px;padding:3px}
 .pc-nav button{background:transparent;border:none;color:var(--mut);padding:7px 18px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;transition:.2s}
 .pc-nav button:hover{color:var(--fg)}
 .pc-nav button.active{background:var(--acc);color:#1a1e26}
@@ -36,7 +36,7 @@ body{background:var(--bg);color:var(--fg);font:14px/1.6 -apple-system,"PingFang 
 .view-head p{color:var(--mut);font-size:13px;margin-top:4px}
 .sub-tabs{display:flex;gap:8px;overflow-x:auto;margin-top:14px;scrollbar-width:none}
 .sub-tabs::-webkit-scrollbar{display:none}
-.sub-tabs button{flex-shrink:0;background:#0d0f13;border:1px solid var(--line);color:var(--mut);border-radius:20px;padding:7px 18px;cursor:pointer;font-size:13px;font-weight:600;white-space:nowrap;transition:.2s}
+.sub-tabs button{flex-shrink:0;background:#f0f2f6;border:1px solid var(--line);color:var(--mut);border-radius:20px;padding:7px 18px;cursor:pointer;font-size:13px;font-weight:600;white-space:nowrap;transition:.2s}
 .sub-tabs button:hover{border-color:var(--mut);color:var(--fg)}
 .sub-tabs button.active{background:var(--acc);color:#1a1e26;font-weight:700;border-color:var(--acc)}
 .hero-wrap{max-width:1200px;margin:0 auto;padding:20px 20px 0}
@@ -59,7 +59,7 @@ body{background:var(--bg);color:var(--fg);font:14px/1.6 -apple-system,"PingFang 
   .hero-card{aspect-ratio:3/4;border-radius:12px}
   .hero-copy{left:14px;bottom:12px}
   .hero-copy h2{font-size:16px;max-width:100%}
-  .mobile-dock{position:fixed;left:0;right:0;bottom:0;z-index:150;display:flex;justify-content:space-around;background:rgba(15,17,21,.94);backdrop-filter:blur(20px);border-top:1px solid var(--line);padding:8px 0 calc(8px + env(safe-area-inset-bottom,0px))}
+  .mobile-dock{position:fixed;left:0;right:0;bottom:0;z-index:150;display:flex;justify-content:space-around;background:rgba(255,255,255,.95);backdrop-filter:blur(20px);border-top:1px solid var(--line);padding:8px 0 calc(8px + env(safe-area-inset-bottom,0px))}
   .mobile-dock button{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;background:transparent;border:none;color:var(--mut);font-size:11px;cursor:pointer;padding:4px 0}
   .mobile-dock button.active{color:var(--acc)}
   .mobile-dock .dock-icon{font-size:19px;line-height:1}
@@ -90,7 +90,7 @@ body{background:var(--bg);color:var(--fg);font:14px/1.6 -apple-system,"PingFang 
 .ep-toolbar .ep-count{font-size:12px;color:var(--mut)}
 .ep-item{position:relative;display:flex;align-items:center;justify-content:center}
 .ep-item .ep-check{position:absolute;left:-2px;top:-2px;width:auto;accent-color:var(--acc);z-index:2}
-.ep-btn{background:#0d0f13;border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:10px 0;text-align:center;cursor:pointer;font-size:13px;width:100%}
+.ep-btn{background:#f0f2f6;border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:10px 0;text-align:center;cursor:pointer;font-size:13px;width:100%}
 .ep-btn:hover{border-color:var(--acc2)}
 .ep-btn.playing{background:var(--acc);color:#1a1e26;font-weight:700}
 .ep-item.off .ep-btn{opacity:.45}
@@ -104,7 +104,7 @@ video{width:100%;border-radius:10px;background:#000}
 .drawer-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
 .drawer h2{font-size:15px;color:var(--acc);margin:20px 0 10px}
 .drawer h2:first-child{margin-top:0}
-.drawer input{width:100%;background:#0d0f13;border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 10px;font-size:13px;margin-bottom:8px}
+.drawer input{width:100%;background:#f0f2f6;border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 10px;font-size:13px;margin-bottom:8px}
 .drawer button{background:var(--acc);color:#1a1e26;border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:700;cursor:pointer;margin-right:6px}
 .drawer button.ghost{background:transparent;color:var(--mut);border:1px solid var(--line)}
 .drawer button.danger{background:var(--err);color:#fff}
@@ -115,13 +115,13 @@ video{width:100%;border-radius:10px;background:#000}
 .drawer th{color:var(--mut)}
 .otp-big{font-size:28px;letter-spacing:4px;font-weight:700;color:var(--acc)}
 .radio-group{display:flex;gap:8px;margin:6px 0 12px}
-.radio-group label{background:#0d0f13;border:1px solid var(--line);border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px;color:var(--mut)}
+.radio-group label{background:#f0f2f6;border:1px solid var(--line);border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px;color:var(--mut)}
 .radio-group label.active{background:var(--acc);color:#1a1e26;font-weight:700;border-color:var(--acc)}
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--card);border:1px solid var(--line);padding:10px 20px;border-radius:10px;font-size:13px;z-index:400;display:none}
 .modal-wide{position:relative;width:min(560px,92vw);max-height:82vh;display:flex;flex-direction:column}
 .modal-wide .modal-close{position:absolute;top:14px;right:14px}
 .dlmgr-list{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding:2px 0}
-.dlmgr-item{background:#0d0f13;border:1px solid var(--line);border-radius:10px;padding:12px}
+.dlmgr-item{background:#f0f2f6;border:1px solid var(--line);border-radius:10px;padding:12px}
 .dlmgr-top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
 .dlmgr-title{font-size:14px;font-weight:600;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dlmgr-badge{font-size:11px;padding:2px 8px;border-radius:20px;background:#1a1e26;border:1px solid var(--line);color:var(--mut);white-space:nowrap}
@@ -138,7 +138,7 @@ video{width:100%;border-radius:10px;background:#000}
 /* ---- APK 对齐：手机首页分类横滑条 + 「我的」页（头像+组别徽章+NAS下载） ---- */
 .cat-strip{display:flex;gap:8px;overflow-x:auto;padding:0 14px 4px;margin-bottom:4px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
 .cat-strip::-webkit-scrollbar{display:none}
-.cat-strip button{flex-shrink:0;background:#0d0f13;border:1px solid var(--line);color:var(--mut);border-radius:999px;padding:6px 14px;font-size:13px;cursor:pointer;transition:.2s;white-space:nowrap}
+.cat-strip button{flex-shrink:0;background:#f0f2f6;border:1px solid var(--line);color:var(--mut);border-radius:999px;padding:6px 14px;font-size:13px;cursor:pointer;transition:.2s;white-space:nowrap}
 .cat-strip button.active{background:var(--acc);color:#1a1e26;border-color:var(--acc);font-weight:600}
 .mine-view{max-width:720px;margin:0 auto;padding:20px}
 .mine-head{display:flex;align-items:center;gap:14px;padding:18px;background:var(--card);border:1px solid var(--line);border-radius:16px;margin-bottom:14px}
@@ -148,10 +148,19 @@ video{width:100%;border-radius:10px;background:#000}
 .mine-sub{font-size:12px;color:var(--mut);margin-top:3px}
 .dl-apk-btn{flex-shrink:0;background:var(--acc);color:#1a1e26;border:none;border-radius:10px;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;margin-left:10px}
 .dl-apk-btn:active{opacity:.8}
-.mine-tabs{display:flex;background:#0d0f13;border:1px solid var(--line);border-radius:12px;padding:3px;margin-bottom:14px}
+.mine-tabs{display:flex;background:#f0f2f6;border:1px solid var(--line);border-radius:12px;padding:3px;margin-bottom:14px}
 .mine-tabs button{flex:1;background:transparent;border:none;color:var(--mut);padding:9px 0;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer}
 .mine-tabs button.active{background:var(--acc);color:#1a1e26}
 .mine-body-pad{padding:0 2px}
+/* ---- 公开内容严格沿用 APP：轮播、九项类型条、双板块、全部类型、三列作品 ---- */
+.hero-copy{color:#fff}.hero-card{box-shadow:0 10px 28px rgba(32,36,44,.12)}
+.hero-dots{display:flex;justify-content:center;gap:5px;margin:9px 0 2px}.hero-dots button{width:5px;height:5px;padding:0;border:0;border-radius:50%;background:#c9ced7}.hero-dots button.active{width:16px;border-radius:5px;background:var(--acc)}
+.home-section{margin-bottom:24px}.section-heading{display:flex;align-items:center;justify-content:space-between;margin:0 0 12px}.section-heading h2{font-size:19px;line-height:1.3}.section-heading span{font-size:12px;color:var(--mut)}
+.section-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:16px}.card-poster{min-width:0}.poster-img{border:0;box-shadow:0 3px 12px rgba(32,36,44,.08)}.poster-title{font-weight:600;color:var(--fg)}
+.catalog-sentinel{text-align:center;min-height:44px;padding:12px;color:var(--mut);font-size:13px}.catalog-sentinel button{border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:10px;padding:7px 16px;cursor:pointer}
+.tags-page{max-width:1200px;margin:0 auto}.tags-intro{color:var(--mut);margin:6px 0 20px}.tags-group{margin-bottom:24px}.tags-group h2{font-size:18px;margin-bottom:12px}.tags-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px}.tag-choice{border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:12px;padding:12px 8px;cursor:pointer}.tag-choice:hover{border-color:var(--acc);color:var(--acc)}
+.back-link{border:0;background:transparent;color:var(--mut);padding:0;margin-bottom:8px;cursor:pointer}.empty-block{grid-column:1/-1;text-align:center;color:var(--mut);padding:30px}
+@media(max-width:800px){.section-grid,.grid.app-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.section-heading h2{font-size:17px}.poster-title{font-size:12px}.tags-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.tag-choice{font-size:12px;padding:11px 4px}.hero-dots{margin-top:8px}}
 @media (max-width:800px){
   .mine-view{padding:12px 14px 84px}
   .mine-avatar{width:48px;height:48px;font-size:20px}
@@ -163,8 +172,8 @@ video{width:100%;border-radius:10px;background:#000}
   <div class="logo">Veyra</div>
   <nav class="pc-nav" id="pc-nav" aria-label="主导航">
     <button type="button" data-view="home" class="active">首页</button>
-    <button type="button" data-view="adult">剧场</button>
-    <button type="button" data-view="ai">AI</button>
+    <button type="button" data-view="adult">短剧</button>
+    <button type="button" data-view="ai">漫剧</button>
   </nav>
   <input class="search" id="search-input" placeholder="搜索短剧…">
   <div class="mode-toggle">
@@ -183,6 +192,7 @@ video{width:100%;border-radius:10px;background:#000}
 <div class="cat-strip" id="cat-strip" style="display:none"></div>
 <div class="container">
   <div class="grid" id="grid"><div class="loading">加载中…</div></div>
+  <div class="catalog-sentinel" id="catalog-sentinel" hidden></div>
 </div>
 
 <div class="mine-view" id="mine-view" style="display:none">
@@ -203,8 +213,8 @@ video{width:100%;border-radius:10px;background:#000}
 
 <nav class="mobile-dock" id="mobile-dock" aria-label="主导航">
   <button type="button" data-view="home" class="active"><span class="dock-icon">⌂</span><span>首页</span></button>
-  <button type="button" data-view="adult"><span class="dock-icon">▶</span><span>剧场</span></button>
-  <button type="button" data-view="ai"><span class="dock-icon">✦</span><span>AI</span></button>
+  <button type="button" data-view="adult"><span class="dock-icon">▶</span><span>短剧</span></button>
+  <button type="button" data-view="ai"><span class="dock-icon">✦</span><span>漫剧</span></button>
   <button type="button" id="dock-settings"><span class="dock-icon">☰</span><span>我的</span></button>
 </nav>
 
@@ -304,7 +314,7 @@ video{width:100%;border-radius:10px;background:#000}
 
 <div id="login-gate" style="position:fixed;inset:0;background:var(--bg);z-index:999;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px">
   <div style="font-size:28px;font-weight:800;color:var(--acc)">Veyra</div>
-  <input type="password" id="gate-pass" placeholder="管理员密码" style="width:280px;background:#0d0f13;border:1px solid var(--line);color:var(--fg);border-radius:10px;padding:12px 16px;font-size:15px;outline:center">
+  <input type="password" id="gate-pass" placeholder="管理员密码" style="width:280px;background:#f0f2f6;border:1px solid var(--line);color:var(--fg);border-radius:10px;padding:12px 16px;font-size:15px;outline:center">
   <button id="gate-btn" style="background:var(--acc);color:#1a1e26;border:none;border-radius:10px;padding:12px 40px;font-size:15px;font-weight:700;cursor:pointer">进入</button>
   <div id="gate-err" style="color:var(--err);font-size:13px"></div>
 </div>
@@ -365,132 +375,162 @@ document.getElementById('btn-close-detail').onclick=closeDetail;
 document.getElementById('detail-overlay').addEventListener('click',e=>{if(e.target.id==='detail-overlay')closeDetail()});
 
 function setMode(m){
-  mode=m;
+  mode=m;view='home';subTab=0;hgCat='';resetCatalog();
   document.getElementById('mode-public').classList.toggle('active',m==='public');
   document.getElementById('mode-private').classList.toggle('active',m==='private');
-  subTab=0;
+  document.querySelectorAll('.pc-nav [data-view="adult"]').forEach(b=>b.textContent=m==='public'?'短剧':'剧场');
+  document.querySelectorAll('.pc-nav [data-view="ai"]').forEach(b=>b.textContent=m==='public'?'漫剧':'AI');
+  document.querySelectorAll('.mobile-dock [data-view="adult"] span:last-child').forEach(b=>b.textContent=m==='public'?'短剧':'剧场');
+  document.querySelectorAll('.mobile-dock [data-view="ai"] span:last-child').forEach(b=>b.textContent=m==='public'?'漫剧':'AI');
   loadView();
 }
 
-// ---- 分区视图：首页 / 剧场 / AI（排版逻辑对齐 APK） ----
-let view='home', subTab=0, categoryTab='1', hgCat='';
+// ---- 分区视图：公开首页/短剧/漫剧，私密剧场/AI；接口与 APK 同源 ----
+let view='home', subTab=0, hgCat='', publicSlug='', publicName='';
 const PRIVATE_SUBS={adult:['ai-duanju','ai-manju'],ai:['ai-huanlian','ai-mogai']};
 const PRIVATE_SUB_NAMES={adult:['成人短剧','成人漫剧'],ai:['AI换脸','AI魔改']};
-const VIEW_META={
-  home:['首页','精选推荐，热播不断'],
-  adult:['剧场','走进不同的故事'],
-  ai:['AI专区','探索影像新可能']
-};
+const PUBLIC_POPULAR=[['short:romance','爱情'],['short:period','年代'],['short:comeback','逆袭'],['short:suspense','悬疑'],['comic:creative','脑洞'],['comic:fantasy','玄幻'],['comic:apocalypse','末世'],['comic:adventure','冒险']];
+let catalogEpoch=0,catalogItems=[],catalogNextPage=null,catalogLoading=false;
+let heroSlides=[],heroIndex=0,heroTimer=null;
+const sentinel=document.getElementById('catalog-sentinel');
+const catalogObserver=new IntersectionObserver(entries=>{if(entries.some(e=>e.isIntersecting))loadPublicCatalog(true)},{rootMargin:'360px'});
+function resetCatalog(){
+  catalogEpoch++;catalogItems=[];catalogNextPage=null;catalogLoading=false;catalogObserver.disconnect();
+  sentinel.hidden=true;clearHero();
+}
+function clearHero(){
+  clearInterval(heroTimer);heroTimer=null;heroSlides=[];
+  const hero=document.getElementById('hero-wrap');hero.style.display='none';hero.innerHTML='';
+}
 function setView(v){
-  view=v;
+  resetCatalog();view=v;subTab=0;hgCat='';
   document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
   document.getElementById('dock-settings').classList.toggle('active',v==='mine');
-  subTab=0;categoryTab='1';hgCat='';
   loadView();
 }
+function openPublicListing(slug,name){publicSlug=slug;publicName=name;setView('listing')}
 document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>setView(b.dataset.view));
 document.getElementById('dock-settings').onclick=()=>setView('mine');
 
 async function loadView(){
-  const head=document.getElementById('view-head');
-  const title=document.getElementById('view-title');
-  const subtitle=document.getElementById('view-subtitle');
-  const st=document.getElementById('sub-tabs');
-  const hero=document.getElementById('hero-wrap');
-  const strip=document.getElementById('cat-strip');
-  const gridEl=document.getElementById('grid');
+  const head=document.getElementById('view-head'),title=document.getElementById('view-title'),subtitle=document.getElementById('view-subtitle');
+  const st=document.getElementById('sub-tabs'),strip=document.getElementById('cat-strip');
+  clearHero();catalogObserver.disconnect();sentinel.hidden=true;
   if(view==='mine'){
-    head.style.display='none';st.style.display='none';hero.style.display='none';strip.style.display='none';
-    gridEl.style.display='none';
-    renderMine();
-    return;
+    head.style.display='none';st.style.display='none';strip.style.display='none';grid.style.display='none';renderMine();return;
   }
-  gridEl.style.display='grid';
-  strip.style.display='none';
-  if(view==='home'){
-    head.style.display='none';st.style.display='none';
-    await loadHomeView();
-    return;
+  grid.style.display='grid';strip.style.display='none';st.style.display='none';head.style.display='none';
+  if(view==='home'){await loadHomeView();return}
+  head.style.display='block';subtitle.innerHTML='';
+  if(view==='tags'){
+    title.textContent='全部类型';subtitle.textContent='按短剧、漫剧大类，发现相关作品';await loadPublicTags();return;
   }
-  head.style.display='block';
-  title.textContent=VIEW_META[view][0];
-  subtitle.textContent=VIEW_META[view][1];
+  if(view==='listing'){
+    title.textContent=publicName||'分类作品';subtitle.innerHTML='<button class="back-link" id="listing-back">‹ 返回首页</button>';
+    document.getElementById('listing-back').onclick=()=>setView('home');await loadPublicCatalog(false);return;
+  }
+  const adult=view==='adult';
+  title.textContent=mode==='public'?(adult?'短剧':'漫剧'):(adult?'剧场':'AI专区');
+  subtitle.textContent=mode==='public'?(adult?'真人演的看了不烧心':'探索热门漫剧。'):(adult?'短剧与漫剧，走进不同的人生。':'换脸与魔改，探索影像新可能。');
   if(mode==='private'){
     st.style.display='flex';
-    st.innerHTML=PRIVATE_SUB_NAMES[view].map((n,i)=>
-      '<button type="button" class="'+(i===subTab?'active':'')+'" data-sub="'+i+'">'+n+'</button>').join('');
-    st.querySelectorAll('[data-sub]').forEach(b=>b.onclick=()=>{
-      subTab=Number(b.dataset.sub);
-      st.querySelectorAll('[data-sub]').forEach(x=>x.classList.toggle('active',Number(x.dataset.sub)===subTab));
-      loadCategoryView();
-    });
-  }else{
-    st.style.display='none';
+    st.innerHTML=PRIVATE_SUB_NAMES[view].map((n,i)=>'<button type="button" class="'+(i===subTab?'active':'')+'" data-sub="'+i+'">'+n+'</button>').join('');
+    st.querySelectorAll('[data-sub]').forEach(b=>b.onclick=()=>{subTab=Number(b.dataset.sub);loadView()});
   }
-  hero.style.display='none';
   await loadCategoryView();
 }
 
+function renderPublicTagStrip(){
+  const strip=document.getElementById('cat-strip');strip.style.display='flex';
+  strip.innerHTML='<button type="button" data-all-tags="1">全部类型</button>'+PUBLIC_POPULAR.map(t=>'<button type="button" data-public-tag="'+t[0]+'">'+t[1]+'</button>').join('');
+  strip.querySelector('[data-all-tags]').onclick=()=>setView('tags');
+  strip.querySelectorAll('[data-public-tag]').forEach(b=>{const tag=PUBLIC_POPULAR.find(t=>t[0]===b.dataset.publicTag);b.onclick=()=>openPublicListing(tag[0],tag[1])});
+}
+async function loadPublicHome(){
+  const epoch=catalogEpoch;grid.classList.remove('app-grid');grid.innerHTML='<div class="loading">加载中…</div>';renderPublicTagStrip();
+  try{
+    const r=await fetch('/api/web/hongguo/home'),d=await r.json();if(!r.ok)throw new Error(d.error||('HTTP '+r.status));
+    if(epoch!==catalogEpoch||view!=='home'||mode!=='public')return;
+    const recommend=d.homepageRecommend||[],newest=d.homepageNewest||[];
+    grid.style.display='block';
+    grid.innerHTML='<section class="home-section"><div class="section-heading"><h2>精选推荐</h2><span>'+recommend.length+' 部</span></div><div class="section-grid" id="home-recommend"></div></section>'+
+      '<section class="home-section"><div class="section-heading"><h2>热门漫剧</h2><span>'+newest.length+' 部</span></div><div class="section-grid" id="home-newest"></div></section>';
+    renderGrid(recommend,document.getElementById('home-recommend'));renderGrid(newest,document.getElementById('home-newest'));
+    renderHeroSlides((d.slides&&d.slides.length?d.slides:recommend).slice(0,5));
+  }catch(e){if(epoch===catalogEpoch)grid.innerHTML='<div class="loading">加载失败: '+escapeHtml(e.message)+'</div>'}
+}
+async function loadPublicTags(){
+  const epoch=catalogEpoch;grid.classList.remove('app-grid');grid.style.display='block';grid.innerHTML='<div class="loading">加载中…</div>';
+  try{
+    const r=await fetch('/api/web/hongguo/tags'),d=await r.json();if(!r.ok)throw new Error(d.error||('HTTP '+r.status));
+    if(epoch!==catalogEpoch||view!=='tags')return;
+    grid.innerHTML='<div class="tags-page"><p class="tags-intro">点选大类，发现相关作品</p>'+[['short','短剧类型'],['comic','漫剧类型']].map(g=>{
+      const items=(d.items||[]).filter(t=>t.group===g[0]);
+      return '<section class="tags-group"><h2>'+g[1]+'</h2><div class="tags-grid">'+items.map(t=>'<button type="button" class="tag-choice" data-tag-slug="'+escapeHtml(t.slug)+'" data-tag-name="'+escapeHtml(t.name)+'">'+escapeHtml(t.name)+'</button>').join('')+'</div></section>';
+    }).join('')+'</div>';
+    grid.querySelectorAll('[data-tag-slug]').forEach(b=>b.onclick=()=>openPublicListing(b.dataset.tagSlug,b.dataset.tagName));
+  }catch(e){if(epoch===catalogEpoch)grid.innerHTML='<div class="loading">加载失败: '+escapeHtml(e.message)+'</div>'}
+}
 async function loadHomeView(){
-  const strip=document.getElementById('cat-strip');
-  grid.innerHTML='<div class="loading">加载中…</div>';
-  const hero=document.getElementById('hero-wrap');
-  hero.style.display='none';hero.innerHTML='';
+  if(mode==='public'){await loadPublicHome();return}
+  const strip=document.getElementById('cat-strip');grid.classList.remove('app-grid');grid.innerHTML='<div class="loading">加载中…</div>';
   try{
-    let items;
-    if(mode==='public'){
-      // 首页分类横滑条（与 APK 首页标签一致）：题材来自红果分类接口 selectorList
-      strip.style.display='flex';
-      const d=await fetch('/api/web/hongguo/category?tab=1').then(x=>x.json());
-      const tabs=[{tab:'1',name:'精选'},...(d.tabs||[])].filter(t=>t.tab&&t.name);
-      strip.innerHTML=tabs.map(t=>'<button type="button" data-tab="'+t.tab+'" class="'+(categoryTab===t.tab?'active':'')+'">'+escapeHtml(t.name)+'</button>').join('');
-      strip.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{categoryTab=b.dataset.tab;loadHomeView()});
-      if(categoryTab==='1'){
-        const r=await fetch('/api/web/hongguo/home').then(x=>x.json());
-        items=r.items||[];
-      }else{
-        const r=await fetch('/api/web/hongguo/category?tab='+categoryTab).then(x=>x.json());
-        items=r.items||[];
-      }
-    }else{
-      // 私密源首页：推荐 + 剧场合集分类（与 APK 剧场/AI 分类一致）
-      const cats=[['','推荐'],['ai-duanju/','成人短剧'],['ai-manju/','成人漫剧'],['ai-huanlian/','AI换脸'],['ai-mogai/','AI魔改']];
-      strip.style.display='flex';
-      strip.innerHTML=cats.map(c=>'<button type="button" data-cat="'+c[0]+'" class="'+(hgCat===c[0]?'active':'')+'">'+c[1]+'</button>').join('');
-      strip.querySelectorAll('[data-cat]').forEach(b=>b.onclick=()=>{hgCat=b.dataset.cat;loadHomeView()});
-      const u=hgCat?HUANGGUO_BASE+hgCat:HUANGGUO_BASE;
-      const r=await fetch(hgProxy(u));
-      if(!r.ok)throw new Error('黄果源 '+r.status+'：请在管理抽屉配置可用的 backendProxy 后端代理');
-      items=parseHuangguoHtml(await r.text());
-    }
-    if(!items.length){grid.innerHTML='<div class="loading">暂无内容</div>';return}
-    renderGrid(items);
-    if(mode==='public'&&categoryTab==='1')renderHero(items[0]);
-  }catch(e){grid.innerHTML='<div class="loading">加载失败: '+e.message+'</div>'}
+    const cats=[['','推荐'],['ai-duanju/','成人短剧'],['ai-manju/','成人漫剧'],['ai-huanlian/','AI换脸'],['ai-mogai/','AI魔改']];
+    strip.style.display='flex';strip.innerHTML=cats.map(c=>'<button type="button" data-cat="'+c[0]+'" class="'+(hgCat===c[0]?'active':'')+'">'+c[1]+'</button>').join('');
+    strip.querySelectorAll('[data-cat]').forEach(b=>b.onclick=()=>{hgCat=b.dataset.cat;loadHomeView()});
+    const u=hgCat?HUANGGUO_BASE+hgCat:HUANGGUO_BASE,r=await fetch(hgProxy(u));
+    if(!r.ok)throw new Error('黄果源 '+r.status+'：请在管理抽屉配置可用的 backendProxy 后端代理');
+    const items=parseHuangguoHtml(await r.text());renderGrid(items);
+  }catch(e){grid.innerHTML='<div class="loading">加载失败: '+escapeHtml(e.message)+'</div>'}
 }
-function renderHero(item){
-  const hero=document.getElementById('hero-wrap');
-  hero.style.display='block';
-  const src=item.cover?(mode==='public'?coverSrc(item.cover):proxyUrl(item.cover)):'';
-  hero.innerHTML='<div class="hero-card" data-hero="0"><img src="'+src+'" alt="" onerror="fallbackCover(this)"'+(src?'':' style="background:#1a1e26"')+'><div class="hero-copy"><h2>'+escapeHtml(item.title)+'</h2><span>立即播放 ▸</span></div></div>';
-  hero.querySelector('.hero-card').onclick=()=>openDetail(0);
+function renderHeroSlides(items){
+  clearHero();heroSlides=(items||[]).slice(0,5);if(!heroSlides.length)return;
+  const hero=document.getElementById('hero-wrap');hero.style.display='block';
+  const draw=()=>{
+    const item=heroSlides[heroIndex],src=item.cover?coverSrc(item.cover):'';
+    hero.innerHTML='<div class="hero-card"><img src="'+src+'" alt="" onerror="fallbackCover(this)"><div class="hero-copy"><h2>'+escapeHtml(item.title)+'</h2><span>查看作品 ▸</span></div></div><div class="hero-dots">'+heroSlides.map((_,i)=>'<button type="button" aria-label="第 '+(i+1)+' 项" data-hero-index="'+i+'" class="'+(i===heroIndex?'active':'')+'"></button>').join('')+'</div>';
+    hero.querySelector('.hero-card').onclick=()=>{_items=heroSlides;openDetail(heroIndex)};
+    hero.querySelectorAll('[data-hero-index]').forEach(b=>b.onclick=()=>{heroIndex=Number(b.dataset.heroIndex);draw()});
+  };
+  draw();if(heroSlides.length>1)heroTimer=setInterval(()=>{heroIndex=(heroIndex+1)%heroSlides.length;draw()},4500);
 }
-
+function publicCatalogQuery(){
+  if(view==='listing'){const m=publicSlug.match(/^(short|comic):/);return{type:m?m[1]:'short',slug:publicSlug}}
+  return{type:view==='ai'?'comic':'short',slug:''}
+}
+async function loadPublicCatalog(append){
+  if(mode!=='public'||catalogLoading||(!append&&view!=='adult'&&view!=='ai'&&view!=='listing')||(append&&!catalogNextPage))return;
+  const query=publicCatalogQuery(),requestView=view,epoch=append?catalogEpoch:++catalogEpoch,page=append?catalogNextPage:1;
+  if(!append){catalogItems=[];catalogNextPage=null;clearHero();grid.innerHTML='<div class="loading">加载中…</div>'}
+  catalogLoading=true;sentinel.hidden=false;sentinel.innerHTML='<span>正在加载更多…</span>';
+  try{
+    const r=await fetch('/api/web/hongguo/category?type='+query.type+'&slug='+encodeURIComponent(query.slug)+'&page='+page),d=await r.json();if(!r.ok)throw new Error(d.error||('HTTP '+r.status));
+    if(epoch!==catalogEpoch||view!==requestView||mode!=='public')return;
+    const seen=new Set(catalogItems.map(x=>String(x.id)));catalogItems=catalogItems.concat((d.items||[]).filter(x=>x.id&&!seen.has(String(x.id))&&seen.add(String(x.id))));
+    catalogNextPage=d.nextPage||null;catalogLoading=false;
+    grid.classList.add('app-grid');grid.style.display='grid';renderGrid(catalogItems);
+    if(requestView==='adult'||requestView==='ai')renderHeroSlides(catalogItems.slice(0,5));
+    const subtitle=document.getElementById('view-subtitle');if(requestView==='listing')subtitle.innerHTML='<button class="back-link" id="listing-back">‹ 返回首页</button><span style="margin-left:10px">已显示 '+catalogItems.length+' 部</span>',document.getElementById('listing-back').onclick=()=>setView('home');
+    updateCatalogSentinel();
+  }catch(e){
+    if(epoch!==catalogEpoch)return;catalogLoading=false;
+    if(append){toast('加载更多失败：'+e.message);updateCatalogSentinel()}else grid.innerHTML='<div class="loading">加载失败: '+escapeHtml(e.message)+'</div>';sentinel.hidden=true;
+  }
+}
+function updateCatalogSentinel(){
+  catalogObserver.disconnect();sentinel.hidden=!catalogItems.length;
+  if(catalogLoading)sentinel.innerHTML='<span>正在加载更多…</span>';
+  else if(catalogNextPage){sentinel.innerHTML='<span aria-hidden="true">继续下拉加载更多</span>';catalogObserver.observe(sentinel)}
+  else sentinel.innerHTML='<span>已经到底了</span>';
+}
 async function loadCategoryView(){
-  grid.innerHTML='<div class="loading">加载中…</div>';
+  if(mode==='public'){await loadPublicCatalog(false);return}
+  grid.classList.remove('app-grid');grid.innerHTML='<div class="loading">加载中…</div>';
   try{
-    if(mode==='public'){
-      const d=await fetch('/api/web/hongguo/category?tab=1').then(x=>x.json());
-      renderGrid(d.items||[]);
-    }else{
-      const id=PRIVATE_SUBS[view][subTab];
-      const r=await fetch(hgProxy(HUANGGUO_BASE+id+'/'));
-      if(!r.ok)throw new Error('黄果源 '+r.status+'：请在管理抽屉配置可用的 backendProxy 后端代理');
-      const items=parseHuangguoHtml(await r.text());
-      if(!items.length)grid.innerHTML='<div class="loading">该分类为空或页面结构变化</div>';
-      else renderGrid(items);
-    }
-  }catch(e){grid.innerHTML='<div class="loading">加载失败: '+e.message+'</div>'}
+    const id=PRIVATE_SUBS[view][subTab],r=await fetch(hgProxy(HUANGGUO_BASE+id+'/'));
+    if(!r.ok)throw new Error('黄果源 '+r.status+'：请在管理抽屉配置可用的 backendProxy 后端代理');
+    const items=parseHuangguoHtml(await r.text());renderGrid(items);
+  }catch(e){grid.innerHTML='<div class="loading">加载失败: '+escapeHtml(e.message)+'</div>'}
 }
 
 // ---- 私密播放通道（localStorage 持久化） ----
@@ -656,23 +696,25 @@ function fallbackCover(img){
   }
   img.style.background='#1a1e26';
 }
-function renderGrid(items){
-  _items=items||[];
-  if(!_items.length){grid.innerHTML='<div class="loading">暂无内容</div>';return}
-  grid.innerHTML=_items.map((it,i)=>{
+function renderGrid(items,target){
+  const host=target||grid,rows=items||[];
+  if(host===grid)_items=rows;
+  if(!rows.length){host.innerHTML='<div class="loading">暂无内容</div>';return}
+  host.innerHTML=rows.map((it,i)=>{
     const src=it.cover?(mode==='public'?coverSrc(it.cover):proxyUrl(it.cover)):'';
     return '<div class="card-poster" data-i="'+i+'">'+
       '<img class="poster-img" src="'+src+'" loading="lazy" onerror="fallbackCover(this)"'+(src?'':' style="background:#1a1e26"')+'>'+
       '<div class="poster-title">'+escapeHtml(it.title)+'</div>'+
+      (it.score?'<div class="poster-badge">'+escapeHtml(it.score)+'</div>':'')+
       (it.badge?'<div class="poster-badge">'+escapeHtml(it.badge)+'</div>':'')+'</div>';
   }).join('');
-  grid.querySelectorAll('.card-poster').forEach(el=>el.onclick=()=>openDetail(+el.dataset.i));
+  host.querySelectorAll('.card-poster').forEach(el=>el.onclick=()=>{_items=rows;openDetail(+el.dataset.i)});
 }
 
 async function doSearch(){
   const q=document.getElementById('search-input').value.trim();
-  if(!q){loadView();return}
-  grid.innerHTML='<div class="loading">搜索中…</div>';
+  if(!q){setView(view);return}
+  resetCatalog();grid.classList.add('app-grid');grid.style.display='grid';grid.innerHTML='<div class="loading">搜索中…</div>';
   try{
     if(mode==='public'){
       const r=await fetch('/api/web/hongguo/search?q='+encodeURIComponent(q)).then(x=>x.json());

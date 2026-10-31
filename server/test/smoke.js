@@ -33,11 +33,11 @@ function request(method, url, body, token) {
   });
 }
 
-const assert = (cond, msg) => { if (!cond) { console.error('FAIL:', msg); process.exit(1); } };
+const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
 
 (async () => {
   const child = spawn(process.execPath, ['index.js'], {
-    env: { ...process.env, PORT: String(PORT), DATA_DIR }, stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, PORT: String(PORT), DATA_DIR, ADMIN_PASSWORD: 'smoke-admin-pass' }, stdio: ['ignore', 'pipe', 'pipe'],
   });
   child.stdout.pipe(process.stdout);
   child.stderr.pipe(process.stderr);
@@ -47,16 +47,22 @@ const assert = (cond, msg) => { if (!cond) { console.error('FAIL:', msg); proces
 
   try {
     const health = await request('GET', '/api/health');
-    assert(health.status === 200 && health.json.service === 'chengzi-backend', `health (got ${health.status} ${JSON.stringify(health.json)})`);
+    assert(health.status === 200 && health.json.service === 'veyra-backend', `health (got ${health.status} ${JSON.stringify(health.json)})`);
 
-    const bad = await request('POST', '/api/register', { username: '中文名', password: '12345678' });
+    const admin = await request('POST', '/api/admin/login', { password: 'smoke-admin-pass' });
+    assert(admin.status === 200 && admin.json.token, '管理员登录');
+    const otp = await request('GET', '/api/otp', null, admin.json.token);
+    assert(otp.status === 200 && otp.json.code, '获取注册动态码');
+    const code = otp.json.code;
+
+    const bad = await request('POST', '/api/register', { username: '中文名', password: '12345678', code });
     assert(bad.status === 400, '用户名格式拒绝');
 
-    const reg = await request('POST', '/api/register', { username: 'chengzi_user', password: 'passw0rd123' });
+    const reg = await request('POST', '/api/register', { username: 'chengzi_user', password: 'passw0rd123', code });
     assert(reg.status === 201 && reg.json.token && reg.json.user.username === 'chengzi_user', '注册');
     const token = reg.json.token;
 
-    const dup = await request('POST', '/api/register', { username: 'chengzi_user', password: 'passw0rd123' });
+    const dup = await request('POST', '/api/register', { username: 'chengzi_user', password: 'passw0rd123', code });
     assert(dup.status === 409, '重复注册拒绝');
 
     const login = await request('POST', '/api/login', { username: 'chengzi_user', password: 'passw0rd123' });
