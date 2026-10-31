@@ -202,7 +202,120 @@ function parseComicRank(html, normalized) {
   throw new Error('漫剧榜单延期数据尚未解析，请重试');
 }
 
+/* ---------------- 搜索：与 APK HongguoSearch 同策略 ----------------
+ * 单次 /api/search/result 只回 10 条，且常常只给"100 集版"。APK 的做法是：
+ *   1) 剥离"第N季/部"后缀拿剧名主体；
+ *   2) 联想接口 exhaustive 查询（主体、主体+第、主体+季、主体+第N季、主体：N季）合并；
+ *   3) 搜索接口再按"主体第N季"穷举，把 341 集这类全集版并进来。
+ * WebUI 之前只打一次搜索接口，所以"搜不全"。这里把同一套策略搬到服务端。 */
+const CN_NUM = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+const SEASON_SUFFIX = /第\s*([0-9零〇一二两兩三四五六七八九十百]+)\s*[季部][\p{P}\s]*$/u;
+
+function seasonBase(query) {
+  const match = SEASON_SUFFIX.exec(query);
+  if (!match) return query;
+  let base = query.slice(0, match.index).trim();
+  while (base) {
+    const ch = base[base.length - 1];
+    if (!/[\s\p{P}]/u.test(ch)) break;
+    base = base.slice(0, -1).trim();
+  }
+  return base || query;
+}
+
+function loose(value) { return String(value == null ? '' : value).replace(/\s+/g, '').toLowerCase(); }
+
+function suggestionQueries(base) {
+  const queries = [base];
+  if (base.length <= 8) queries.push(base + '第', base + '季');
+  for (const n of CN_NUM) {
+    if (base.length + n.length + 3 <= 12) queries.push(base + '第' + n + '季', base + '：' + n + '季');
+  }
+  return [...new Set(queries)];
+}
+
+function seasonVariants(base) {
+  const variants = [];
+  for (const n of CN_NUM) {
+    if (base.length + n.length + 3 <= 12) variants.push(base + '第' + n + '季');
+  }
+  return variants;
+}
+
+function searchType(genre) {
+  if (String(genre) === '203') return 'short';
+  if (String(genre) === '205') return 'comic';
+  return '';
+}
+
+function searchItemFromRow(row, fallbackTitle) {
+  const video = (row && row.video_data) || {};
+  const id = text(video.series_id);
+  if (!/^\d{1,30}$/.test(id)) return null;
+  const title = text(video.series_title || (row && row.name) || fallbackTitle);
+  if (!title) return null;
+  const count = Number(video.episode_cnt) || 0;
+  return {
+    id, title, cover: cleanUrl(video.series_cover || video.cover),
+    description: text(video.series_intro), type: searchType(video.genre),
+    badge: text(video.episode_right_text) || (count > 0 ? `全 ${count} 集` : ''),
+    episodeCount: count,
+    tags: tagTextList(video.category_list || video.tags),
+  };
+}
+
+/** 并发闸门：上游对同一 IP 的并发有限，一次搜索最多 6 个请求同时飞。 */
+async function runLimited(tasks, limit) {
+  const results = new Array(tasks.length);
+  let next = 0;
+  async function worker() {
+    while (next < tasks.length) {
+      const index = next++;
+      try { results[index] = await tasks[index](); } catch { results[index] = null; }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker));
+  return results;
+}
+
 function createHongguoContent(fetchText) {
+  async function search(query) {
+    const keyword = text(query);
+    if (!keyword) return { items: [], query: '', base: '' };
+    if (keyword.length > 80) { const error = new Error('搜索词过长'); error.statusCode = 400; throw error; }
+    const base = seasonBase(keyword);
+    const needle = loose(base);
+    const seen = new Map();
+    const add = (item) => {
+      if (!item || seen.has(item.id)) return;
+      if (!loose(item.title).includes(needle)) return;
+      seen.set(item.id, item);
+    };
+    const parseRows = (body, fallbackTitle) => {
+      let json;
+      try { json = JSON.parse(body); } catch { return []; }
+      if (json && json.isSuccess === false) return [];
+      const rows = json.searchList || json.suggestionList || [];
+      return rows.filter(row => !row || !row.word_type || row.word_type === 'short_play_name')
+        .map(row => searchItemFromRow(row, fallbackTitle)).filter(Boolean);
+    };
+
+    // 1) 主查询：最相关的结果排在最前
+    const mainBody = await fetchText(`${SITE}/api/search/result?query=${encodeURIComponent(keyword)}&page=1&page_size=20`, 10000).catch(() => '');
+    mainBody && parseRows(mainBody).forEach(add);
+    // 2) 联想接口穷举（全集版常只在这里出现）
+    const suggestions = await runLimited(suggestionQueries(base).map(q => () =>
+      fetchText(`${SITE}/api/search/suggestion?query=${encodeURIComponent(q)}&count=50`, 8000)), 6);
+    suggestions.forEach(body => body && parseRows(body).forEach(add));
+    // 3) 按季穷举搜索（"第N季"变体才能带出 341 集版）
+    const variants = await runLimited(seasonVariants(base).map(q => () =>
+      fetchText(`${SITE}/api/search/result?query=${encodeURIComponent(q)}&page=1&page_size=20`, 8000)), 6);
+    variants.forEach(body => body && parseRows(body).forEach(add));
+
+    const items = [...seen.values()];
+    return { items, query: keyword, base, counts: { total: items.length } };
+  }
+
   async function category(query) {
     const normalized = normalizeQuery(query);
     const html = await fetchText(categoryUrl(normalized), 10000);
@@ -225,7 +338,7 @@ function createHongguoContent(fetchText) {
     if (!items.length) throw new Error('暂无可用大类');
     return { items };
   }
-  return { category, home, tags };
+  return { category, home, tags, search };
 }
 
-module.exports = { SITE, extractRouterData, parseSeriesCard, parseCategory, parseComicRank, parseTags, normalizeQuery, categoryUrl, createHongguoContent };
+module.exports = { SITE, extractRouterData, parseSeriesCard, parseCategory, parseComicRank, parseTags, normalizeQuery, categoryUrl, seasonBase, createHongguoContent };

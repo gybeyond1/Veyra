@@ -109,6 +109,11 @@ public final class MainActivity extends Activity {
     private float backLeadPx;
     private volatile float statusBarInsetDp;
     private boolean detailSystemBars;
+    // Web 管理台「下载到手机」：设备心跳 + 指令领取（前台每 40 秒一次）
+    private DeviceLink deviceLink;
+    private final Handler deviceHandler = new Handler(Looper.getMainLooper());
+    private boolean deviceLoopRunning;
+    private volatile boolean deviceRegistered;
 
     /** 全局崩溃日志：任何未捕获 Throwable（含 native 崩前能到 Java 层的 Error）都写入 filesDir/crash.log，
      *  app.js 启动时经 "crash-log" bridge 读取展示，便于排查闪退。每次启动先清空并写版本头：日志永远只属于当前版本。 */
@@ -469,6 +474,7 @@ public final class MainActivity extends Activity {
                 runOnUiThread(() -> webView.evaluateJavascript("window.hgCloudSynced && window.hgCloudSynced()", null));
             } catch (Exception error) { Log.w(TAG, "云端同步稍后重试", error); }
         });
+        startDeviceLoop();
         if (pendingUpdateApk != null) {
             File apk = pendingUpdateApk;
             pendingUpdateApk = null;
@@ -480,7 +486,95 @@ public final class MainActivity extends Activity {
 
     @Override protected void onPause() {
         super.onPause();
+        stopDeviceLoop();
         if (bingeEngine != null) bingeEngine.onPause();
+    }
+
+    // ---- Web 管理台「下载到手机」：设备上报 + 指令轮询 ----
+    /** 前台才轮询：后台不拉起网络，避免耗电；回到前台立即补一次。 */
+    private void startDeviceLoop() {
+        if (deviceLoopRunning || account == null || !account.isLoggedIn()) return;
+        deviceLoopRunning = true;
+        deviceHandler.post(deviceTick);
+    }
+
+    private void stopDeviceLoop() {
+        deviceLoopRunning = false;
+        deviceHandler.removeCallbacks(deviceTick);
+    }
+
+    private final Runnable deviceTick = new Runnable() {
+        @Override public void run() {
+            if (!deviceLoopRunning) return;
+            pollDeviceCommands();
+            if (deviceLoopRunning) deviceHandler.postDelayed(this, 40_000);
+        }
+    };
+
+    private void pollDeviceCommands() {
+        if (account == null || !account.isLoggedIn()) return;
+        if (deviceLink == null) deviceLink = new DeviceLink(this, account);
+        final DeviceLink link = deviceLink;
+        requests.execute(() -> {
+            try {
+                if (!deviceRegistered) {
+                    link.register();
+                    deviceRegistered = true;
+                }
+                JSONArray commands = link.poll();
+                for (int i = 0; i < commands.length(); i++) {
+                    JSONObject command = commands.optJSONObject(i);
+                    if (command == null) continue;
+                    String id = command.optString("id");
+                    try {
+                        JSONObject task = startPushedDownload(command.optJSONObject("payload"));
+                        link.ack(id, true, "");
+                        toast("网页推送的下载已加入：" + task.optString("title", "")
+                                + (ContentMode.PRIVATE.equals(ContentMode.get(this).active())
+                                ? "（切回公开模式可在「我的-下载」看到）" : ""));
+                    } catch (Exception error) {
+                        String message = error.getMessage() == null ? "下载失败" : error.getMessage();
+                        link.ack(id, false, message);
+                        toast("网页推送的下载失败：" + message);
+                    }
+                }
+            } catch (Exception error) {
+                // 设备未注册（后端数据被清）时下轮重新上报
+                deviceRegistered = false;
+                Log.d(TAG, "设备心跳稍后重试", error);
+            }
+        });
+    }
+
+    /** 按指令里的剧集号在本机取流，再交给本地 DownloadManager（合并逻辑与手动下载一致）。 */
+    private JSONObject startPushedDownload(JSONObject payload) throws Exception {
+        if (payload == null) throw new IllegalArgumentException("指令内容为空");
+        if ("huangguo".equals(payload.optString("source"))) throw new IllegalArgumentException("私密内容暂不支持网页推送");
+        String seriesId = payload.optString("seriesId").trim();
+        String title = payload.optString("title").trim();
+        JSONArray numbers = payload.optJSONArray("episodes");
+        if (seriesId.isEmpty() || numbers == null || numbers.length() == 0)
+            throw new IllegalArgumentException("指令缺少剧集信息");
+        HongguoRepository repository = new HongguoRepository();
+        JSONArray episodes = new JSONArray();
+        for (int i = 0; i < numbers.length(); i++) {
+            int number = numbers.optInt(i, 0);
+            if (number < 1 || number > 999) continue;
+            JSONObject episode = repository.episode(seriesId, number);
+            String url = episode.optString("source");
+            if (url == null || !url.startsWith("http")) throw new IllegalStateException("第 " + number + " 集取流失败");
+            episodes.put(new JSONObject().put("index", number).put("url", url).put("key", episode.optString("key")));
+        }
+        if (episodes.length() == 0) throw new IllegalArgumentException("没有可下载的分集");
+        return DownloadManager.get(this).start("hongguo", title.isEmpty() ? seriesId : title,
+                episodes, false, payload.optString("cover"));
+    }
+
+    private void toast(String message) {
+        runOnUiThread(() -> {
+            if (isDestroyed()) return;
+            android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show();
+        });
     }
 
     @Override public void onWindowFocusChanged(boolean hasFocus) {
@@ -1080,6 +1174,9 @@ public final class MainActivity extends Activity {
     }
 
     private void refreshAccountAfterAuth(String userId) {
+        // 登录/注册成功后立刻上报设备，Web 管理台才能看到这台手机
+        deviceRegistered = false;
+        runOnUiThread(this::startDeviceLoop);
         requests.execute(() -> {
             try {
                 account.sync();

@@ -165,17 +165,29 @@ video{width:100%;border-radius:10px;background:#000}
   .mine-view{padding:12px 14px 84px}
   .mine-avatar{width:48px;height:48px;font-size:20px}
 }
+/* ---- 下载目标：NAS / 手机（账号 → 设备） ---- */
+.dl-target{display:flex;gap:8px;margin-bottom:12px}
+.dl-target button{flex:1;background:#f0f2f6;border:1px solid var(--line);color:var(--mut);border-radius:10px;padding:10px 0;font-size:13px;font-weight:600;cursor:pointer;transition:.2s}
+.dl-target button.active{background:var(--acc);color:#1a1e26;border-color:var(--acc)}
+.dl-device{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
+.dl-device select{width:100%;background:#f0f2f6;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:13px;color:var(--fg);outline:none}
+.dl-device select:focus{border-color:var(--acc2)}
+.dl-device-hint{font-size:12px;color:var(--mut);min-height:16px;line-height:1.5}
+.dl-device-hint.warn{color:#d98b2b}
+#btn-refresh{transition:transform .3s}
+#btn-refresh.spin{transform:rotate(360deg);color:var(--acc);border-color:var(--acc)}
+.cache-note{font-size:12px;color:var(--mut);margin-left:8px}
 </style>
 </head>
 <body>
 <div class="header">
   <div class="logo">Veyra</div>
   <nav class="pc-nav" id="pc-nav" aria-label="主导航">
-    <button type="button" data-view="home" class="active">首页</button>
-    <button type="button" data-view="adult">短剧</button>
+    <button type="button" data-view="adult" class="active">短剧</button>
     <button type="button" data-view="ai">漫剧</button>
   </nav>
-  <input class="search" id="search-input" placeholder="搜索短剧…">
+  <input class="search" id="search-input" placeholder="搜索短剧、漫剧…">
+  <button class="gear" id="btn-refresh" title="刷新当前分类">⟳</button>
   <div class="mode-toggle">
     <button id="mode-public" class="active">公开</button>
     <button id="mode-private">私密</button>
@@ -212,8 +224,7 @@ video{width:100%;border-radius:10px;background:#000}
 </div>
 
 <nav class="mobile-dock" id="mobile-dock" aria-label="主导航">
-  <button type="button" data-view="home" class="active"><span class="dock-icon">⌂</span><span>首页</span></button>
-  <button type="button" data-view="adult"><span class="dock-icon">▶</span><span>短剧</span></button>
+  <button type="button" data-view="adult" class="active"><span class="dock-icon">▶</span><span>短剧</span></button>
   <button type="button" data-view="ai"><span class="dock-icon">✦</span><span>漫剧</span></button>
   <button type="button" id="dock-settings"><span class="dock-icon">☰</span><span>我的</span></button>
 </nav>
@@ -229,7 +240,7 @@ video{width:100%;border-radius:10px;background:#000}
         <p id="d-badge" style="color:var(--mut);font-size:12px;margin-top:6px"></p>
         <div class="modal-actions">
           <button class="btn-main" id="btn-play">▶ 播放</button>
-          <button class="btn-main" id="btn-download">⬇ 下载到NAS</button>
+          <button class="btn-main" id="btn-download">⬇ 下载</button>
           <span id="dl-status" style="font-size:12px;color:var(--mut)"></span>
         </div>
       </div>
@@ -246,6 +257,15 @@ video{width:100%;border-radius:10px;background:#000}
     <button class="modal-close" id="btn-close-dl">✕</button>
     <h3 id="dl-title" style="margin-bottom:4px"></h3>
     <p id="dl-hint" style="font-size:12px;color:var(--mut);margin-bottom:12px">勾选要下载的集数，默认全选</p>
+    <div class="dl-target" id="dl-target">
+      <button type="button" data-dl-target="nas" class="active">下载到 NAS</button>
+      <button type="button" data-dl-target="phone">下载到手机</button>
+    </div>
+    <div class="dl-device" id="dl-device" style="display:none">
+      <select id="dl-account" aria-label="选择账号"><option value="">加载账号…</option></select>
+      <select id="dl-device-sel" aria-label="选择设备"><option value="">选择设备…</option></select>
+      <div class="dl-device-hint" id="dl-device-hint"></div>
+    </div>
     <div class="ep-toolbar" id="dl-toolbar" style="display:none">
       <label class="chk-all"><input type="checkbox" id="dl-chk-all" checked> 全选</label>
       <span id="dl-selected" class="ep-count"></span>
@@ -355,6 +375,18 @@ function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t
 document.getElementById('mode-public').onclick=()=>setMode('public');
 document.getElementById('mode-private').onclick=()=>setMode('private');
 document.getElementById('search-input').addEventListener('keydown',e=>{if(e.key==='Enter')doSearch()});
+// 刷新当前分类：丢掉缓存重新拉一次（私密源抓取慢时可手动重试）
+document.getElementById('btn-refresh').onclick=async()=>{
+  const btn=document.getElementById('btn-refresh');
+  if(btn.classList.contains('spin'))return;
+  btn.classList.add('spin');
+  try{
+    if(searching){await doSearch();toast('已刷新搜索结果')}
+    else if(view==='mine'){renderMine();toast('已刷新')}
+    else{cacheDrop(cacheKey());resetCatalog();await loadView({force:true});toast('已刷新')}
+  }catch(e){toast('刷新失败: '+e.message)}
+  setTimeout(()=>btn.classList.remove('spin'),500);
+};
 
 // ---- 抽屉：打开/关闭 + 遮罩收回 ----
 const drawer=document.getElementById('drawer');
@@ -375,7 +407,8 @@ document.getElementById('btn-close-detail').onclick=closeDetail;
 document.getElementById('detail-overlay').addEventListener('click',e=>{if(e.target.id==='detail-overlay')closeDetail()});
 
 function setMode(m){
-  mode=m;view='home';subTab=0;hgCat='';resetCatalog();
+  mode=m;view='adult';subTab=0;hgCat='';resetCatalog();
+  document.getElementById('search-input').value='';searching=false;
   document.getElementById('mode-public').classList.toggle('active',m==='public');
   document.getElementById('mode-private').classList.toggle('active',m==='private');
   document.querySelectorAll('.pc-nav [data-view="adult"]').forEach(b=>b.textContent=m==='public'?'短剧':'剧场');
@@ -385,8 +418,8 @@ function setMode(m){
   loadView();
 }
 
-// ---- 分区视图：公开首页/短剧/漫剧，私密剧场/AI；接口与 APK 同源 ----
-let view='home', subTab=0, hgCat='', publicSlug='', publicName='';
+// ---- 分区视图：公开「短剧/漫剧」、私密「剧场/AI」；首页已移除，接口与 APK 同源 ----
+let view='adult', subTab=0, hgCat='', publicSlug='', publicName='', searching=false;
 const PRIVATE_SUBS={adult:['ai-duanju','ai-manju'],ai:['ai-huanlian','ai-mogai']};
 const PRIVATE_SUB_NAMES={adult:['成人短剧','成人漫剧'],ai:['AI换脸','AI魔改']};
 const PUBLIC_POPULAR=[['short:romance','爱情'],['short:period','年代'],['short:comeback','逆袭'],['short:suspense','悬疑'],['comic:creative','脑洞'],['comic:fantasy','玄幻'],['comic:apocalypse','末世'],['comic:adventure','冒险']];
@@ -402,8 +435,47 @@ function clearHero(){
   clearInterval(heroTimer);heroTimer=null;heroSlides=[];
   const hero=document.getElementById('hero-wrap');hero.style.display='none';hero.innerHTML='';
 }
+// ---- 页面数据缓存：私密源每次点开都要重新抓（还要经后端代理），先用上次结果秒开再后台换新 ----
+const CACHE_PREFIX='veyraCacheV1:';
+const CACHE_LIMIT=28;
+function cacheKey(v,m){
+  v=v||view;m=m||mode;
+  if(v==='adult'||v==='ai') return CACHE_PREFIX+m+':'+v+(m==='private'?':'+subTab:'');
+  if(v==='listing'||v==='search') return CACHE_PREFIX+m+':'+v+':'+(v==='listing'?publicSlug:document.getElementById('search-input').value.trim());
+  return '';
+}
+function cacheGet(key){
+  if(!key)return null;
+  try{
+    const d=JSON.parse(localStorage.getItem(key)||'null');
+    return d&&Array.isArray(d.items)&&d.items.length?d:null;
+  }catch{return null}
+}
+function cachePut(key,items,nextPage){
+  if(!key||!items||!items.length)return;
+  try{
+    localStorage.setItem(key,JSON.stringify({items:items.slice(0,300),nextPage:nextPage||null,ts:Date.now()}));
+    trimCache();
+  }catch(e){/* 配额满：放弃缓存，不影响使用 */}
+}
+function cacheDrop(key){if(key)try{localStorage.removeItem(key)}catch(e){}}
+function trimCache(){
+  try{
+    const keys=[];
+    for(let i=0;i<localStorage.length;i++){
+      const k=localStorage.key(i);
+      if(k&&k.indexOf(CACHE_PREFIX)===0)keys.push(k);
+    }
+    if(keys.length<=CACHE_LIMIT)return;
+    keys.map(k=>{let ts=0;try{ts=JSON.parse(localStorage.getItem(k)).ts||0}catch(e){}return{k,ts}})
+      .sort((a,b)=>a.ts-b.ts)
+      .slice(0,keys.length-CACHE_LIMIT)
+      .forEach(x=>localStorage.removeItem(x.k));
+  }catch(e){}
+}
+
 function setView(v){
-  resetCatalog();view=v;subTab=0;hgCat='';
+  resetCatalog();view=v;subTab=0;hgCat='';searching=false;
   document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
   document.getElementById('dock-settings').classList.toggle('active',v==='mine');
   loadView();
@@ -412,22 +484,25 @@ function openPublicListing(slug,name){publicSlug=slug;publicName=name;setView('l
 document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>setView(b.dataset.view));
 document.getElementById('dock-settings').onclick=()=>setView('mine');
 
-async function loadView(){
+async function loadView(options){
+  const force=!!(options&&options.force);
   const head=document.getElementById('view-head'),title=document.getElementById('view-title'),subtitle=document.getElementById('view-subtitle');
   const st=document.getElementById('sub-tabs'),strip=document.getElementById('cat-strip');
-  clearHero();catalogObserver.disconnect();sentinel.hidden=true;
+  clearHero();catalogObserver.disconnect();sentinel.hidden=true;searching=false;
   if(view==='mine'){
     head.style.display='none';st.style.display='none';strip.style.display='none';grid.style.display='none';renderMine();return;
   }
-  grid.style.display='grid';strip.style.display='none';st.style.display='none';head.style.display='none';
-  if(view==='home'){await loadHomeView();return}
-  head.style.display='block';subtitle.innerHTML='';
+  grid.style.display='grid';strip.style.display='none';st.style.display='none';head.style.display='block';
   if(view==='tags'){
-    title.textContent='全部类型';subtitle.textContent='按短剧、漫剧大类，发现相关作品';await loadPublicTags();return;
+    subtitle.textContent='按短剧、漫剧大类，发现相关作品';title.textContent='全部类型';await loadPublicTags();return;
   }
   if(view==='listing'){
-    title.textContent=publicName||'分类作品';subtitle.innerHTML='<button class="back-link" id="listing-back">‹ 返回首页</button>';
-    document.getElementById('listing-back').onclick=()=>setView('home');await loadPublicCatalog(false);return;
+    const comic=/^comic:/.test(publicSlug);
+    title.textContent=publicName||'分类作品';
+    subtitle.innerHTML='<button class="back-link" id="listing-back">‹ 返回'+(comic?'漫剧':'短剧')+'</button>';
+    document.getElementById('listing-back').onclick=()=>setView(comic?'ai':'adult');
+    renderPublicTagStrip();
+    await loadPublicCatalog(false,force);return;
   }
   const adult=view==='adult';
   title.textContent=mode==='public'?(adult?'短剧':'漫剧'):(adult?'剧场':'AI专区');
@@ -436,31 +511,23 @@ async function loadView(){
     st.style.display='flex';
     st.innerHTML=PRIVATE_SUB_NAMES[view].map((n,i)=>'<button type="button" class="'+(i===subTab?'active':'')+'" data-sub="'+i+'">'+n+'</button>').join('');
     st.querySelectorAll('[data-sub]').forEach(b=>b.onclick=()=>{subTab=Number(b.dataset.sub);loadView()});
+  }else{
+    renderPublicTagStrip();
   }
-  await loadCategoryView();
+  await loadCategoryView(force);
 }
 
 function renderPublicTagStrip(){
-  const strip=document.getElementById('cat-strip');strip.style.display='flex';
-  strip.innerHTML='<button type="button" data-all-tags="1">全部类型</button>'+PUBLIC_POPULAR.map(t=>'<button type="button" data-public-tag="'+t[0]+'">'+t[1]+'</button>').join('');
+  const strip=document.getElementById('cat-strip');
+  if(mode!=='public'||!/^(adult|ai|listing)$/.test(view)){strip.style.display='none';strip.innerHTML='';return}
+  strip.style.display='flex';
+  const header='<button type="button" data-all-tags="1">全部类型</button>';
+  strip.innerHTML=header+PUBLIC_POPULAR.map(t=>'<button type="button" data-public-tag="'+t[0]+'">'+t[1]+'</button>').join('');
   strip.querySelector('[data-all-tags]').onclick=()=>setView('tags');
   strip.querySelectorAll('[data-public-tag]').forEach(b=>{const tag=PUBLIC_POPULAR.find(t=>t[0]===b.dataset.publicTag);b.onclick=()=>openPublicListing(tag[0],tag[1])});
 }
-async function loadPublicHome(){
-  const epoch=catalogEpoch;grid.classList.remove('app-grid');grid.innerHTML='<div class="loading">加载中…</div>';renderPublicTagStrip();
-  try{
-    const r=await fetch('/api/web/hongguo/home'),d=await r.json();if(!r.ok)throw new Error(d.error||('HTTP '+r.status));
-    if(epoch!==catalogEpoch||view!=='home'||mode!=='public')return;
-    const recommend=d.homepageRecommend||[],newest=d.homepageNewest||[];
-    grid.style.display='block';
-    grid.innerHTML='<section class="home-section"><div class="section-heading"><h2>精选推荐</h2><span>'+recommend.length+' 部</span></div><div class="section-grid" id="home-recommend"></div></section>'+
-      '<section class="home-section"><div class="section-heading"><h2>热门漫剧</h2><span>'+newest.length+' 部</span></div><div class="section-grid" id="home-newest"></div></section>';
-    renderGrid(recommend,document.getElementById('home-recommend'));renderGrid(newest,document.getElementById('home-newest'));
-    renderHeroSlides((d.slides&&d.slides.length?d.slides:recommend).slice(0,5));
-  }catch(e){if(epoch===catalogEpoch)grid.innerHTML='<div class="loading">加载失败: '+escapeHtml(e.message)+'</div>'}
-}
 async function loadPublicTags(){
-  const epoch=catalogEpoch;grid.classList.remove('app-grid');grid.style.display='block';grid.innerHTML='<div class="loading">加载中…</div>';
+  const epoch=++catalogEpoch;grid.classList.remove('app-grid');grid.style.display='block';grid.innerHTML='<div class="loading">加载中…</div>';
   try{
     const r=await fetch('/api/web/hongguo/tags'),d=await r.json();if(!r.ok)throw new Error(d.error||('HTTP '+r.status));
     if(epoch!==catalogEpoch||view!=='tags')return;
@@ -470,18 +537,6 @@ async function loadPublicTags(){
     }).join('')+'</div>';
     grid.querySelectorAll('[data-tag-slug]').forEach(b=>b.onclick=()=>openPublicListing(b.dataset.tagSlug,b.dataset.tagName));
   }catch(e){if(epoch===catalogEpoch)grid.innerHTML='<div class="loading">加载失败: '+escapeHtml(e.message)+'</div>'}
-}
-async function loadHomeView(){
-  if(mode==='public'){await loadPublicHome();return}
-  const strip=document.getElementById('cat-strip');grid.classList.remove('app-grid');grid.innerHTML='<div class="loading">加载中…</div>';
-  try{
-    const cats=[['','推荐'],['ai-duanju/','成人短剧'],['ai-manju/','成人漫剧'],['ai-huanlian/','AI换脸'],['ai-mogai/','AI魔改']];
-    strip.style.display='flex';strip.innerHTML=cats.map(c=>'<button type="button" data-cat="'+c[0]+'" class="'+(hgCat===c[0]?'active':'')+'">'+c[1]+'</button>').join('');
-    strip.querySelectorAll('[data-cat]').forEach(b=>b.onclick=()=>{hgCat=b.dataset.cat;loadHomeView()});
-    const u=hgCat?HUANGGUO_BASE+hgCat:HUANGGUO_BASE,r=await fetch(hgProxy(u));
-    if(!r.ok)throw new Error('黄果源 '+r.status+'：请在管理抽屉配置可用的 backendProxy 后端代理');
-    const items=parseHuangguoHtml(await r.text());renderGrid(items);
-  }catch(e){grid.innerHTML='<div class="loading">加载失败: '+escapeHtml(e.message)+'</div>'}
 }
 function renderHeroSlides(items){
   clearHero();heroSlides=(items||[]).slice(0,5);if(!heroSlides.length)return;
@@ -498,10 +553,23 @@ function publicCatalogQuery(){
   if(view==='listing'){const m=publicSlug.match(/^(short|comic):/);return{type:m?m[1]:'short',slug:publicSlug}}
   return{type:view==='ai'?'comic':'short',slug:''}
 }
-async function loadPublicCatalog(append){
+async function loadPublicCatalog(append,force){
   if(mode!=='public'||catalogLoading||(!append&&view!=='adult'&&view!=='ai'&&view!=='listing')||(append&&!catalogNextPage))return;
-  const query=publicCatalogQuery(),requestView=view,epoch=append?catalogEpoch:++catalogEpoch,page=append?catalogNextPage:1;
-  if(!append){catalogItems=[];catalogNextPage=null;clearHero();grid.innerHTML='<div class="loading">加载中…</div>'}
+  const query=publicCatalogQuery(),requestView=view,key=cacheKey();
+  let epoch;
+  if(!append){
+    const cached=force?null:cacheGet(key);
+    catalogItems=[];catalogNextPage=null;clearHero();epoch=++catalogEpoch;
+    if(cached){
+      // 先渲染上次结果：切分类/回退时不再出现"加载中"
+      catalogItems=cached.items.slice();catalogNextPage=cached.nextPage||null;
+      grid.classList.add('app-grid');grid.style.display='grid';renderGrid(catalogItems);
+      renderHeroSlides(catalogItems.slice(0,5));updateCatalogSentinel();
+    }else{
+      grid.innerHTML='<div class="loading">加载中…</div>';
+    }
+  }else epoch=catalogEpoch;
+  const page=append?catalogNextPage:1;
   catalogLoading=true;sentinel.hidden=false;sentinel.innerHTML='<span>正在加载更多…</span>';
   try{
     const r=await fetch('/api/web/hongguo/category?type='+query.type+'&slug='+encodeURIComponent(query.slug)+'&page='+page),d=await r.json();if(!r.ok)throw new Error(d.error||('HTTP '+r.status));
@@ -510,11 +578,16 @@ async function loadPublicCatalog(append){
     catalogNextPage=d.nextPage||null;catalogLoading=false;
     grid.classList.add('app-grid');grid.style.display='grid';renderGrid(catalogItems);
     if(requestView==='adult'||requestView==='ai')renderHeroSlides(catalogItems.slice(0,5));
-    const subtitle=document.getElementById('view-subtitle');if(requestView==='listing')subtitle.innerHTML='<button class="back-link" id="listing-back">‹ 返回首页</button><span style="margin-left:10px">已显示 '+catalogItems.length+' 部</span>',document.getElementById('listing-back').onclick=()=>setView('home');
+    if(!append)cachePut(key,catalogItems,catalogNextPage);
+    const subtitle=document.getElementById('view-subtitle');
+    if(requestView==='listing')subtitle.innerHTML='<button class="back-link" id="listing-back">‹ 返回'+(/^comic:/.test(publicSlug)?'漫剧':'短剧')+'</button><span style="margin-left:10px">已显示 '+catalogItems.length+' 部</span>',document.getElementById('listing-back').onclick=()=>setView(/^comic:/.test(publicSlug)?'ai':'adult');
     updateCatalogSentinel();
   }catch(e){
     if(epoch!==catalogEpoch)return;catalogLoading=false;
-    if(append){toast('加载更多失败：'+e.message);updateCatalogSentinel()}else grid.innerHTML='<div class="loading">加载失败: '+escapeHtml(e.message)+'</div>';sentinel.hidden=true;
+    if(append){toast('加载更多失败：'+e.message);updateCatalogSentinel()}
+    else if(catalogItems.length){toast('刷新失败，显示的是上次缓存');updateCatalogSentinel()}
+    else grid.innerHTML='<div class="loading">加载失败: '+escapeHtml(e.message)+'</div>';
+    sentinel.hidden=!catalogItems.length;
   }
 }
 function updateCatalogSentinel(){
@@ -523,14 +596,28 @@ function updateCatalogSentinel(){
   else if(catalogNextPage){sentinel.innerHTML='<span aria-hidden="true">继续下拉加载更多</span>';catalogObserver.observe(sentinel)}
   else sentinel.innerHTML='<span>已经到底了</span>';
 }
-async function loadCategoryView(){
-  if(mode==='public'){await loadPublicCatalog(false);return}
-  grid.classList.remove('app-grid');grid.innerHTML='<div class="loading">加载中…</div>';
+async function loadCategoryView(force){
+  if(mode==='public'){await loadPublicCatalog(false,force);return}
+  const key=cacheKey();
+  const cached=force?null:cacheGet(key);
+  if(cached){
+    grid.classList.remove('app-grid');grid.style.display='grid';renderGrid(cached.items);
+  }else{
+    grid.classList.remove('app-grid');grid.innerHTML='<div class="loading">加载中…</div>';
+  }
+  const epoch=++catalogEpoch;
   try{
     const id=PRIVATE_SUBS[view][subTab],r=await fetch(hgProxy(HUANGGUO_BASE+id+'/'));
     if(!r.ok)throw new Error('黄果源 '+r.status+'：请在管理抽屉配置可用的 backendProxy 后端代理');
-    const items=parseHuangguoHtml(await r.text());renderGrid(items);
-  }catch(e){grid.innerHTML='<div class="loading">加载失败: '+escapeHtml(e.message)+'</div>'}
+    const items=parseHuangguoHtml(await r.text());
+    if(epoch!==catalogEpoch)return;
+    cachePut(key,items,null);
+    grid.classList.remove('app-grid');grid.style.display='grid';renderGrid(items);
+  }catch(e){
+    if(epoch!==catalogEpoch)return;
+    if(cached){toast('刷新失败，显示的是上次缓存')}
+    else grid.innerHTML='<div class="loading">加载失败: '+escapeHtml(e.message)+'</div>';
+  }
 }
 
 // ---- 私密播放通道（localStorage 持久化） ----
@@ -705,31 +792,46 @@ function renderGrid(items,target){
     return '<div class="card-poster" data-i="'+i+'">'+
       '<img class="poster-img" src="'+src+'" loading="lazy" onerror="fallbackCover(this)"'+(src?'':' style="background:#1a1e26"')+'>'+
       '<div class="poster-title">'+escapeHtml(it.title)+'</div>'+
+      (it.typeLabel?'<div class="poster-badge">'+escapeHtml(it.typeLabel)+'</div>':'')+
       (it.score?'<div class="poster-badge">'+escapeHtml(it.score)+'</div>':'')+
       (it.badge?'<div class="poster-badge">'+escapeHtml(it.badge)+'</div>':'')+'</div>';
   }).join('');
   host.querySelectorAll('.card-poster').forEach(el=>el.onclick=()=>{_items=rows;openDetail(+el.dataset.i)});
 }
 
+// 搜索：公开源与 APK 同策略（联想穷举 + 按季合并），私密源仍解析站点搜索页
 async function doSearch(){
   const q=document.getElementById('search-input').value.trim();
   if(!q){setView(view);return}
-  resetCatalog();grid.classList.add('app-grid');grid.style.display='grid';grid.innerHTML='<div class="loading">搜索中…</div>';
+  resetCatalog();searching=true;
+  const head=document.getElementById('view-head'),title=document.getElementById('view-title'),subtitle=document.getElementById('view-subtitle');
+  head.style.display='block';title.textContent='搜索「'+q+'」';subtitle.innerHTML='<button class="back-link" id="search-back">‹ 返回</button>';
+  document.getElementById('search-back').onclick=()=>{document.getElementById('search-input').value='';setView(view)};
+  grid.classList.add('app-grid');grid.style.display='grid';grid.innerHTML='<div class="loading">搜索中…</div>';
+  const epoch=++catalogEpoch;
   try{
     if(mode==='public'){
       const r=await fetch('/api/web/hongguo/search?q='+encodeURIComponent(q)).then(x=>x.json());
-      renderGrid(r.items||[]);
+      if(epoch!==catalogEpoch)return;
+      const items=(r.items||[]).map(it=>Object.assign({},it,{typeLabel:it.type==='comic'?'漫剧':it.type==='short'?'短剧':''}));
+      cachePut(cacheKey('search'),items,null);
+      renderGrid(items);
+      subtitle.innerHTML='<button class="back-link" id="search-back">‹ 返回</button><span style="margin-left:10px">共 '+items.length+' 部</span>';
+      document.getElementById('search-back').onclick=()=>{document.getElementById('search-input').value='';setView(view)};
     }else{
       const r=await fetch(hgProxy(HUANGGUO_BASE+'search?keyword='+encodeURIComponent(q)));
-      renderGrid(parseHuangguoHtml(await r.text()));
+      if(epoch!==catalogEpoch)return;
+      const items=parseHuangguoHtml(await r.text());
+      cachePut(cacheKey('search'),items,null);
+      renderGrid(items);
     }
-  }catch(e){grid.innerHTML='<div class="loading">搜索失败: '+e.message+'</div>'}
+  }catch(e){if(epoch===catalogEpoch)grid.innerHTML='<div class="loading">搜索失败: '+escapeHtml(e.message)+'</div>'}
 }
 
 function openDetail(i){
   const it=_items[i];if(!it)return;
   currentItem=it;
-  _detail={id:it.id,title:it.title,seriesId:it.seriesId||it.id,eps:[],vids:[]};
+  _detail={id:it.id,title:it.title,seriesId:it.seriesId||it.id,eps:[],vids:[],cover:it.cover||''};
   document.getElementById('d-title').textContent=it.title;
   document.getElementById('d-desc').textContent=it.description||'';
   document.getElementById('d-badge').textContent=it.badge||'';
@@ -999,12 +1101,13 @@ function closeDetail(){
   _detail=null;_playingEp=-1;
 }
 
-// ---- 下载到 NAS：点击后弹出选集弹层（默认全选），确认后提交 ----
+// ---- 下载：可选下载到 NAS，或推送到手机（账号 → 设备 → 手机本地下载） ----
 let _dlSelected=new Set();
+let dlEps=[], dlTarget='nas', dlAccounts=null, dlDevices=[], dlAccountId='', dlDeviceId='';
 document.getElementById('btn-download').onclick=()=>{
   const st=document.getElementById('dl-status');
   st.textContent='';
-  if(mode!=='public'){toast('私密模式暂不支持 NAS 下载');return}
+  if(mode!=='public'){toast('私密模式暂不支持下载');return}
   if(!_detail||!_detail.seriesId){st.textContent='缺少 seriesId';return}
   const eps=_detail.eps||[];
   if(!eps.length){st.textContent='选集未就绪';return}
@@ -1012,6 +1115,7 @@ document.getElementById('btn-download').onclick=()=>{
 };
 
 function openDownloadLayer(eps){
+  dlEps=eps.slice();dlTarget='nas';dlDevices=[];dlDeviceId='';
   document.getElementById('dl-title').textContent=_detail.title+'（共 '+eps.length+' 集）';
   const list=document.getElementById('dl-ep-list');
   const bar=document.getElementById('dl-toolbar');
@@ -1036,12 +1140,100 @@ function openDownloadLayer(eps){
     updateDlCount(eps);
   });
   bar.style.display='flex';
+  setDlTarget('nas');
   updateDlCount(eps);
   document.getElementById('download-overlay').classList.add('open');
 }
 function updateDlCount(eps){
+  eps=eps||dlEps;
   document.getElementById('dl-selected').textContent='已选 '+_dlSelected.size+' / '+eps.length+' 集';
-  document.getElementById('btn-dl-confirm').textContent='开始下载（'+_dlSelected.size+'集）';
+  document.getElementById('btn-dl-confirm').textContent=dlTarget==='phone'
+    ? '推送到手机（'+_dlSelected.size+'集）'
+    : '开始下载（'+_dlSelected.size+'集）';
+}
+function setDlTarget(t){
+  dlTarget=t;
+  document.querySelectorAll('[data-dl-target]').forEach(b=>b.classList.toggle('active',b.dataset.dlTarget===t));
+  const box=document.getElementById('dl-device');
+  box.style.display=t==='phone'?'flex':'none';
+  const hint=document.getElementById('dl-device-hint');
+  if(t!=='phone'){hint.textContent='';hint.classList.remove('warn')}
+  updateDlCount();
+  if(t==='phone')loadDlAccounts();
+}
+document.querySelectorAll('[data-dl-target]').forEach(b=>b.onclick=()=>setDlTarget(b.dataset.dlTarget));
+
+// 账号 → 设备（设备由 APK 登录后自动上报，90 秒内有心跳即在线）
+async function loadDlAccounts(){
+  const sel=document.getElementById('dl-account');
+  const devSel=document.getElementById('dl-device-sel');
+  const hint=document.getElementById('dl-device-hint');
+  if(!dlAccounts){
+    sel.innerHTML='<option value="">加载账号…</option>';
+    try{
+      const r=await fetch('/api/admin/users',{headers:AUTH()});
+      const d=await r.json().catch(()=>({}));
+      if(!r.ok)throw new Error(d.error||('HTTP '+r.status));
+      dlAccounts=(d.users||[]).slice().sort((a,b)=>(b.role==='admin')-(a.role==='admin')||String(a.username).localeCompare(String(b.username)));
+    }catch(e){
+      sel.innerHTML='<option value="">账号加载失败</option>';
+      devSel.innerHTML='<option value="">选择设备…</option>';
+      hint.textContent='账号加载失败：'+e.message;hint.classList.add('warn');return;
+    }
+  }
+  if(!dlAccounts.length){
+    sel.innerHTML='<option value="">暂无账号</option>';
+    devSel.innerHTML='<option value="">选择设备…</option>';
+    hint.textContent='还没有账号。让手机在 App 里注册/登录后，这里就会出现。';hint.classList.add('warn');return;
+  }
+  const raw=JSON.parse(localStorage.getItem('veyraDlAccount')||'null');
+  const keep=dlAccounts.find(u=>u.id===dlAccountId)||dlAccounts.find(u=>u.id===raw)||dlAccounts[0];
+  sel.innerHTML=dlAccounts.map(u=>'<option value="'+u.id+'">'+escapeHtml(u.username)+'（'+(u.role==='admin'?'管理员':u.role==='vip'?'特权组':'普通用户')+'）</option>').join('');
+  sel.value=keep.id;dlAccountId=keep.id;
+  sel.onchange=()=>{
+    dlAccountId=sel.value;try{localStorage.setItem('veyraDlAccount',JSON.stringify(dlAccountId))}catch(e){}
+    loadDlDevices(dlAccountId);
+  };
+  await loadDlDevices(dlAccountId);
+  // 默认选择：优先选当前账号里有在线设备的；当前账号只有离线设备时，找第一个有在线设备的账号
+  const online=()=>dlDevices.some(d=>d.online);
+  if(!online()){
+    const original=dlAccountId;
+    let switched=false;
+    for(const u of dlAccounts){
+      if(u.id===original)continue;
+      await loadDlDevices(u.id);
+      if(online()){dlAccountId=u.id;sel.value=u.id;switched=true;break}
+    }
+    if(!switched)await loadDlDevices(original);
+  }
+}
+async function loadDlDevices(userId){
+  const sel=document.getElementById('dl-device-sel');
+  const hint=document.getElementById('dl-device-hint');
+  sel.innerHTML='<option value="">加载设备…</option>';dlDeviceId='';
+  try{
+    const r=await fetch('/api/admin/devices?userId='+encodeURIComponent(userId),{headers:AUTH()});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.error||('HTTP '+r.status));
+    dlDevices=d.devices||[];
+  }catch(e){dlDevices=[];hint.textContent='设备列表加载失败：'+e.message;hint.classList.add('warn');sel.innerHTML='<option value="">选择设备…</option>';return}
+  if(!dlDevices.length){
+    sel.innerHTML='<option value="">该账号暂无设备</option>';
+    hint.textContent='让这个账号在手机上登录 App，设备信息会自动上报；之后就能在这里选设备推送下载。';
+    hint.classList.add('warn');return;
+  }
+  sel.innerHTML=dlDevices.map(v=>'<option value="'+v.id+'">'+escapeHtml(v.name)+(v.online?' · 在线':' · 离线')+'</option>').join('');
+  dlDeviceId=dlDevices[0].id;
+  sel.onchange=()=>{
+    dlDeviceId=sel.value;
+    const hit=dlDevices.find(v=>v.id===dlDeviceId);
+    hint.textContent=hit&&hit.online?'在线，指令会立即下发。':'当前离线，指令会保留，等设备上线后自动下发。';
+    hint.classList.toggle('warn',!!hit&&!hit.online);
+  };
+  const first=dlDevices[0];
+  hint.textContent=first.online?'在线，指令会立即下发。':'当前离线，指令会保留，等设备上线后自动下发。';
+  hint.classList.toggle('warn',!first.online);
 }
 function closeDownloadLayer(){document.getElementById('download-overlay').classList.remove('open')}
 document.getElementById('btn-close-dl').onclick=closeDownloadLayer;
@@ -1052,17 +1244,28 @@ document.getElementById('btn-dl-confirm').onclick=async()=>{
   const btn=document.getElementById('btn-dl-confirm');
   const episodes=[..._dlSelected].filter(n=>n>0).sort((a,b)=>a-b);
   if(!episodes.length){toast('请至少勾选 1 集');return}
+  if(dlTarget==='phone'&&!dlDeviceId){toast('请先选择账号与设备');return}
   btn.disabled=true;btn.textContent='提交中…';
   try{
-    const r=await fetch('/api/download/tasks',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},AUTH()),
-      body:JSON.stringify({source:'hongguo',title:_detail.title,seriesId:String(_detail.seriesId),episodes})});
-    const d=await r.json().catch(()=>({}));
-    if(!r.ok)throw new Error(d.error||('HTTP '+r.status));
-    st.textContent='已提交，共 '+episodes.length+' 集（NAS 自主取流下载）';
-    toast('NAS 下载任务已创建');
-    closeDownloadLayer();
+    if(dlTarget==='phone'){
+      const r=await fetch('/api/admin/device-tasks',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},AUTH()),
+        body:JSON.stringify({deviceId:dlDeviceId,source:'hongguo',title:_detail.title,seriesId:String(_detail.seriesId),episodes,cover:_detail.cover||''})});
+      const d=await r.json().catch(()=>({}));
+      if(!r.ok)throw new Error(d.error||('HTTP '+r.status));
+      st.textContent='已推送到手机，共 '+episodes.length+' 集（手机本地下载并合并）';
+      toast('已推送到手机，等待设备领取');
+      closeDownloadLayer();
+    }else{
+      const r=await fetch('/api/download/tasks',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},AUTH()),
+        body:JSON.stringify({source:'hongguo',title:_detail.title,seriesId:String(_detail.seriesId),episodes})});
+      const d=await r.json().catch(()=>({}));
+      if(!r.ok)throw new Error(d.error||('HTTP '+r.status));
+      st.textContent='已提交，共 '+episodes.length+' 集（NAS 自主取流下载）';
+      toast('NAS 下载任务已创建');
+      closeDownloadLayer();
+    }
   }catch(e){st.textContent=e.message;toast('提交失败: '+e.message)}
-  btn.disabled=false;btn.textContent='开始下载（'+_dlSelected.size+'集）';
+  btn.disabled=false;updateDlCount();
 };
 
 // ---- NAS 下载管理页：任务列表 / 进度 / 合并 / 重试 / 删除 ----

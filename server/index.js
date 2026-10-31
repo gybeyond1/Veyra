@@ -31,6 +31,7 @@ const https = require('https');
 const downloader = require('./downloader');
 const hgApp = require('./hongguo-app');
 const { createHongguoContent } = require('./hongguo-content');
+const { createDeviceHub } = require('./device-hub');
 
 const PORT = parseInt(process.env.PORT || '8080', 10);
 // 数据目录：环境变量指定，默认 /data（docker-compose volume 挂载）。
@@ -44,6 +45,8 @@ let DATA_DIR = process.env.DATA_DIR || '/data';
   }
   console.warn(`[veyra] 数据目录均不可写，继续使用 ${DATA_DIR}（配置将无法持久化）`);
 })();
+// 设备中继（Web「下载到手机」）：账号 → 设备 → 指令，落盘到 DATA_DIR/devices.json
+const deviceHub = createDeviceHub({ dataDir: DATA_DIR });
 const TOKEN_TTL_MS = 90 * 24 * 3600 * 1000; // 90 天
 const MAX_AVATAR_BYTES = 512 * 1024;
 const MAX_PAYLOAD_BYTES = 2 * 1024 * 1024;
@@ -299,30 +302,21 @@ app.get('/api/web/hongguo/home', async (_req, res) => {
   try { res.json(await hgCatalog.home()); } catch (e) { sendHongguoError(res, e); }
 });
 
-app.get('/api/web/hongguo/search', (req, res) => {
+// 搜索缓存：一次搜索后端要打十几次上游（联想 + 按季穷举），5 分钟内重复搜索直接复用。
+const searchCache = new Map(); // q -> { at, data }
+const SEARCH_TTL_MS = 5 * 60 * 1000;
+app.get('/api/web/hongguo/search', async (req, res) => {
   const q = String(req.query.q || '').trim();
   if (!q) return res.json({ items: [] });
-  curlGet('https://hongguoduanju.com/api/search/result?query=' + encodeURIComponent(q) + '&page=1&page_size=20', 10000, (err, html) => {
-    if (err) return res.status(502).json({ error: '搜索失败: ' + err.message });
-    try {
-      const json = JSON.parse(html);
-      const list = json.searchList || [];
-      res.json({ items: list.map(parseSearchCard) });
-    } catch (e) { res.status(502).json({ error: '解析失败: ' + e.message }); }
-  });
+  const hit = searchCache.get(q);
+  if (hit && Date.now() - hit.at < SEARCH_TTL_MS) return res.json(hit.data);
+  try {
+    const data = await hgCatalog.search(q);
+    searchCache.set(q, { at: Date.now(), data });
+    while (searchCache.size > 60) searchCache.delete(searchCache.keys().next().value);
+    res.json(data);
+  } catch (e) { sendHongguoError(res, e); }
 });
-
-function parseSearchCard(o) {
-  const vd = o.video_data || {};
-  return {
-    id: String(vd.series_id || o.keyword || ''),
-    title: vd.series_title || o.name || '',
-    cover: vd.series_cover || '',
-    badge: vd.episode_right_text || (vd.episode_cnt ? vd.episode_cnt + '集' : ''),
-    tags: (vd.category_list || []).map(c => c.name).filter(Boolean),
-    description: vd.series_intro || '',
-  };
-}
 
 app.get('/api/web/hongguo/detail', async (req, res) => {
   const id = String(req.query.id || '').trim();
@@ -951,6 +945,59 @@ app.post('/api/download/retry-failed', requireAdminOrAccountAdmin, (req, res) =>
 app.get('/api/health', (_req, res) => {
   res.json({ code: 200, service: 'veyra-backend', status: 'ok', time: Date.now(), download: downloader.status() });
 });
+
+// ---- 设备中继：Web「下载到手机」 ----
+// 设备侧（APK，账号 token 鉴权）
+app.post('/api/devices/register', auth, (req, res) => {
+  try { res.json(deviceHub.register(req.user, req.body || {})); }
+  catch (e) { res.status(e.statusCode || 400).json({ error: e.message }); }
+});
+app.post('/api/devices/poll', auth, (req, res) => {
+  const id = String((req.body && req.body.id) || '').trim();
+  const result = deviceHub.poll(id, req.user.id);
+  if (!result) return res.status(404).json({ error: '设备未注册，请重新打开 App' });
+  res.json(result);
+});
+app.post('/api/devices/ack', auth, (req, res) => {
+  try {
+    res.json(deviceHub.ack(String(req.body.deviceId || ''), req.user.id,
+      String(req.body.id || ''), !!req.body.ok, String(req.body.error || '')));
+  } catch (e) { res.status(e.statusCode || 400).json({ error: e.message }); }
+});
+
+// 管理台侧（WebUI 管理员会话鉴权）
+app.get('/api/admin/devices', requireAdmin, (req, res) => {
+  const userId = String(req.query.userId || '').trim();
+  res.json({ devices: deviceHub.list(userId) });
+});
+app.delete('/api/admin/devices/:id', requireAdmin, (req, res) => {
+  res.json({ ok: deviceHub.remove(String(req.params.id || '')) });
+});
+app.get('/api/admin/device-tasks', requireAdmin, (req, res) => {
+  res.json({ tasks: deviceHub.commands({ deviceId: String(req.query.deviceId || '').trim() }) });
+});
+// 创建「下载到手机」指令：只推剧名/剧 id/集数，播放地址由手机本地解析，合并也在手机本地完成
+app.post('/api/admin/device-tasks', requireAdmin, (req, res) => {
+  const body = req.body || {};
+  const deviceId = String(body.deviceId || '').trim();
+  const title = String(body.title || '').trim().slice(0, 120);
+  const seriesId = String(body.seriesId || '').trim();
+  const episodes = (Array.isArray(body.episodes) ? body.episodes : [])
+    .map(n => Number(n)).filter(n => Number.isInteger(n) && n > 0 && n <= 999);
+  if (!deviceId) return res.status(400).json({ error: '请选择设备' });
+  if (!seriesId) return res.status(400).json({ error: '缺少剧集 id' });
+  if (!episodes.length) return res.status(400).json({ error: '请至少选择 1 集' });
+  if (episodes.length > 500) return res.status(400).json({ error: '单次最多 500 集' });
+  try {
+    const command = deviceHub.createCommand(deviceId, {
+      source: String(body.source || 'hongguo') === 'huangguo' ? 'huangguo' : 'hongguo',
+      title, seriesId, episodes: [...new Set(episodes)].sort((a, b) => a - b),
+      cover: String(body.cover || '').slice(0, 500),
+    });
+    res.json({ ok: true, id: command.id, createdAt: command.createdAt });
+  } catch (e) { res.status(e.statusCode || 400).json({ error: e.message }); }
+});
+
 
 // 注册（密码不限长度：1 位即可；开关在 WebUI 管理台实时控制，持久化到 settings.json）
 app.post('/api/register', (req, res) => {
