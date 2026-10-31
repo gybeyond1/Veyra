@@ -125,6 +125,9 @@ public class BingeEngine {
         return Math.round(activity().getResources().getDisplayMetrics().density * v);
     }
 
+    /** CSS px(=dp) -> 物理 px。JS 的 touch 坐标与 View 的 translation 不是一个单位。 */
+    private float toPx(float css) { return css * activity().getResources().getDisplayMetrics().density; }
+
     private void buildVideoLayer() {
         /* 图层顺序（下 → 上）：海报底图 → 播放器 → 完整海报 → 拖拽用的下一部 → 错误提示。
            海报必须在播放器【下面】：它是「垫底」，不是「盖住」。盖在上面时，封面一到位就把
@@ -549,8 +552,10 @@ public class BingeEngine {
         }
     }
 
-    public void dragMove(float dy) {
+    public void dragMove(float dyCss) {
         if (!dragging) return;
+        // JS 传进来的是 CSS px，View 的位移是物理 px，不换算就只走了 1/density
+        float dy = toPx(dyCss);
         int direction = dy < 0 ? 1 : -1;
         boolean blocked = !hasNeighbor(direction);
         // 照抄 PlayerActivity.handleGesture：位移 1:1 跟手，边界也不做阻尼
@@ -578,19 +583,20 @@ public class BingeEngine {
         }
     }
 
-    public void dragEnd(float dy, float velocity) {
+    public void dragEnd(float dyCss, float velocityCss) {
         if (!dragging) return;
         dragging = false;
+        // 同样换算：不换的话位移阈值被放大 density 倍（10% 屏高变成 30%），
+        // 速度阈值被缩小 density 倍 —— 两头都错，怎么划都不顺。
+        float dy = toPx(dyCss);
+        float velocity = toPx(velocityCss);
         float height = Math.max(1f, videoLayer.getHeight());
         int direction = dy < 0 ? 1 : -1;
         boolean blocked = !hasNeighbor(direction);
         float moved = Math.abs(dy);
-        // 阈值照抄 PlayerActivity：Math.max(dp(76), height * 0.12f)。
-        // 原来用 22%，要拖过五分之一屏才切，正常手一划根本够不着 —— 就是「滑不动」。
-        // 阈值再放低一档：红果那种「轻轻一划就翻」的手感来自低阈值 + 速度优先。
-        // 12%/76dp 是播放页切集的参数，刷剧是整屏翻页，手指行程本来就短，照搬偏重。
+        // 物理单位下直接对齐播放页 PlayerActivity.handleGesture 的判定
         boolean far = moved > Math.max(dp(64), height * 0.10f);
-        boolean fling = Math.abs(velocity) > 600f && moved > dp(14);
+        boolean fling = Math.abs(velocity) > 780f && moved > dp(14);
         boolean commit = !blocked && (far || fling);
 
         if (!commit) {
