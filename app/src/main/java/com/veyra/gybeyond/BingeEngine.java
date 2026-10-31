@@ -57,6 +57,8 @@ public class BingeEngine {
         void onShowLoaded(String title, String description, String cover, String id, int index);
         /** 加载失败：把提示交给 WebView 显示 */
         void onShowFailed(String message);
+        /** 海报（垫底那张）已经真的画到屏幕上了 —— 冷启动时 WebView 的占位海报可以撤了 */
+        default void onPosterReady() { }
     }
 
     private final Callback cb;
@@ -797,6 +799,9 @@ public class BingeEngine {
         } else {
             posterFit.setVisibility(View.GONE);
         }
+        // 冷启动那张垫底海报（WebView 里的 #binge-boot-cover）等的就是这一刻：
+        // 真海报上屏之后才能撤，早撤一帧就会露出下面还没上图的黑视频层。
+        if (cb != null) cb.onPosterReady();
     }
 
     private Bitmap gaussianBlur(Bitmap source, int radius) {

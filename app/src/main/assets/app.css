@@ -573,6 +573,15 @@ html[data-binge-drag] #app.binge #binge-fab{
   backdrop-filter:none!important;
 }
 #app.binge #scroll,#app.binge .app-top,#app.binge #search-suggest{display:none}
+/* ===== 冷启动记忆恢复（app.html 里的 boot 脚本打的标记） =====
+   上次停在刷剧页 → 进 app.js 之前先垫上那部剧的海报、把首页内容藏掉，
+   不让传统首页有机会露出来。z-index 7：在 #binge(8) 与 #dock(9) 之下 ——
+   底栏和卡片照常压在海报上，撤掉海报时画面不会跳。 */
+#binge-boot-cover{
+  position:fixed;inset:0;z-index:7;pointer-events:none;
+  background:#000 var(--binge-boot-cover,none) center/cover no-repeat;
+}
+html[data-binge-boot] #scroll{visibility:hidden}
 .binge-card{
   margin:0 76px 92px 14px;
   padding:14px 15px;

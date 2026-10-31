@@ -9,6 +9,29 @@
        app.css 只消费，不定义。顺序反了材质和配色就不生效。 -->
   <link rel="stylesheet" href="sunny-theme.css">
   <link rel="stylesheet" href="app.css">
+  <!-- 冷启动记忆：上次退出时停在刷剧页 → 在 app.js 还没跑起来之前就把首页内容藏掉、
+       垫上上次那部剧的海报。否则第一帧是传统首页（骨架 → 内容），等首页数据回来
+       再跳刷剧页 —— 看着就是「闪一下传统首页」。撤掉的时机在 app.js 里
+       （原生海报真正画出来之后），撤不掉也有 4s 兜底。 -->
+  <script>
+  (function () {
+    try {
+      var raw = JSON.parse(localStorage.getItem('veyra.binge.v2') || 'null');
+      if (!raw || !raw.on || !raw.items || !raw.items.length) return;
+      var i = Math.max(0, Math.min(raw.index || 0, raw.items.length - 1));
+      var cover = raw.items[i] && raw.items[i].cover;
+      var root = document.documentElement;
+      root.setAttribute('data-binge-boot', '1');
+      if (cover) root.style.setProperty('--binge-boot-cover', 'url("' + String(cover).replace(/["\\]/g, '') + '")');
+      var el = document.createElement('div');
+      el.id = 'binge-boot-cover';
+      el.setAttribute('aria-hidden', 'true');
+      document.addEventListener('DOMContentLoaded', function () {
+        document.body.insertBefore(el, document.body.firstChild);
+      });
+    } catch (e) { }
+  })();
+  </script>
 </head>
 <body>
   <!-- Dock 的「折射」已经改成纯 CSS 的边缘光带（只在靠近边框的 6~8px 内有明暗，中心保持干净），

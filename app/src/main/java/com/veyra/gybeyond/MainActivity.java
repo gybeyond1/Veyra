@@ -80,6 +80,13 @@ public final class MainActivity extends Activity {
                         + JSONObject.quote(message) + ")", null);
             });
         }
+        // 冷启动记忆恢复：真海报上屏 → 让 WebView 撤掉它自己垫的那张占位海报
+        @Override public void onPosterReady() {
+            runOnUiThread(() -> {
+                if (isDestroyed() || webView == null) return;
+                webView.evaluateJavascript("window.hgBingePosterReady && window.hgBingePosterReady()", null);
+            });
+        }
     };
     private DualContentRepository repository;
     private AppStore store;

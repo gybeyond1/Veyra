@@ -3536,10 +3536,16 @@ api('app-version').then(version => {
   setAvailableUpdate(updateAvailable);
 }).catch(() => {});
 api('cached-update').then(result => { if (result.status === 'available') setAvailableUpdate(result); }).catch(() => {});
-// 冷启动：首页数据回来后再判断是否恢复刷剧形态（route 已经是 home，池子/剧单都就绪）
+// 冷启动：**先**恢复刷剧形态，再去拉首页数据。
+// 顺序反过来的话，goHome() 已经把传统首页画出来了（哪怕只有一帧），
+// 之后才切刷剧 —— 表现就是「打开先闪一下传统首页」。
+// 首页数据只是给「退出刷剧」时用的，刷剧本身吃的是记忆里的剧单，不依赖它。
 function startHome() {
+  window.__bingeRestore && window.__bingeRestore();
+  // 记忆没恢复成（内容源换了 / 私密模式 / 剧单失效）：立刻把首页还给传统形态
+  if (state.binge) armBingeBootFallback(); else clearBingeBoot();
   goHome().then(() => {
-    window.__bingeRestore && window.__bingeRestore();
+    window.__bingeRestore && window.__bingeRestore();   // 兜底：万一第一次没恢复成
   }).catch(() => { });
   setTimeout(() => checkUpdate(false), 3000);
 }
@@ -3727,6 +3733,25 @@ function updateBingeChrome() {
 }
 window.__bingeUpdateChrome = updateBingeChrome;
 
+/* 冷启动垫底的那张海报（app.html 的 boot 脚本插的 #binge-boot-cover）。
+   它一直盖在 WebView 里，直到原生把真海报画出来 —— 提前撤就会露出下面那层
+   还没上图的视频层（黑屏一闪）。撤除条件三选一：原生海报就位 / 退回传统首页 / 超时。 */
+let bingeBootTimer = 0;
+function clearBingeBoot() {
+  clearTimeout(bingeBootTimer);
+  bingeBootTimer = 0;
+  document.documentElement.removeAttribute('data-binge-boot');
+  const cover = document.getElementById('binge-boot-cover');
+  if (cover && cover.parentNode) cover.parentNode.removeChild(cover);
+}
+// 海报迟迟出不来（封面挂了、引擎没起来）也不能把首页永久盖住
+function armBingeBootFallback() {
+  clearTimeout(bingeBootTimer);
+  bingeBootTimer = setTimeout(clearBingeBoot, 4000);
+}
+window.__bingeBootClear = clearBingeBoot;
+window.hgBingePosterReady = () => clearBingeBoot();
+
 // 唯一的状态同步出口：形态 → 浮层可见性 → 原生引擎的 start/pause/resume
 function syncBinge() {
   const app = document.getElementById('app');
@@ -3746,6 +3771,7 @@ function syncBinge() {
     // 只是暂停：保留播放器与位置，回来 resume 就能接着播，不用重新 loadShow
     api('binge-pause').catch(() => { });
   }
+  if (!visible) clearBingeBoot();   // 退回传统首页：垫底海报必须撤，否则首页被永久盖住
 }
 window.__bingeSync = syncBinge;
 
@@ -3830,6 +3856,7 @@ window.hgBingeUpdate = (info) => {
   if (typeof info.index === 'number') bingeCurrentIndex = info.index;
   const card = document.getElementById('binge-card');
   if (card) card.hidden = false;
+  if (document.documentElement.hasAttribute('data-binge-boot')) armBingeBootFallback();
   saveBingePref();   // 换一部就记一部，冷启动能停在同一部
 };
 window.hgBingeFailed = (message) => {
