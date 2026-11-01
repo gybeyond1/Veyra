@@ -39,7 +39,7 @@ html[data-device="tablet"] .film-title { font-size: 14px; }
 html[data-device="tablet"] .search-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 html[data-device="tablet"] .tags-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 html[data-device="tablet"] .episode-grid { grid-template-columns: repeat(8, 1fr); }
-html[data-device="tablet"] .download-sheet-grid { grid-template-columns: repeat(8, 1fr); max-height: 52dvh; }
+html[data-device="tablet"] .download-sheet-grid { grid-template-columns: repeat(8, 1fr); max-height: 52vh;max-height: 52dvh; }
 html[data-device="tablet"] .detail-episode-grid { grid-template-columns: repeat(8, 1fr); }
 
 /* 底栏收窄居中，两侧留白，避免在 800dp 宽度上被拉成四根柱 */
@@ -175,3 +175,91 @@ html[data-device="tv"] .download-sheet-grid button.tv-focus {
 /* 电视上不显示滚动条，避免静止时右侧一直挂一条 */
 html[data-device="tv"] #scroll::-webkit-scrollbar,
 html[data-device="tablet"] #scroll::-webkit-scrollbar { width: 0; height: 0; }
+
+/* ---------------- 平板平行视界：左列表 / 右详情 ----------------
+ *
+ * 只在视口 ≥900px 的平板生效（JS 打 html[data-split="1"]）。左栏保留列表原样、
+ * 右栏独立滚动详情，两栏都不重建，所以点卡片是「右边换内容」而不是整页跳转。
+ */
+html[data-split="1"] #scroll { width: 44%; right: auto; }
+
+/* 分栏时左栏仍是列表页，顶栏和底栏都必须留着；详情路由原本会把它们藏掉 */
+html[data-split="1"] #app.route-detail > .app-top { display: flex; }
+html[data-split="1"] #app.route-detail > #scroll {
+  top: calc(-2px + var(--status-bar-height));
+  padding-top: 60px;
+  z-index: auto;
+  background: var(--bg);
+}
+html[data-split="1"] #app.route-detail > #dock { visibility: visible; pointer-events: auto; }
+
+/* 底栏只压在左栏下面，不横穿到详情那一侧 */
+html[data-split="1"] #dock {
+  left: 14px;
+  right: calc(56% + 14px);
+  width: auto;
+  margin: 0;
+}
+
+/* 左栏变窄，网格列数要跟着降，否则 6 列会挤成一条条 */
+html[data-split="1"] .home-page .film-row,
+html[data-split="1"] .category-page .film-row,
+html[data-split="1"] .search-page .film-row,
+html[data-split="1"] .library-page .film-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+html[data-split="1"] .search-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+html[data-split="1"] .episode-grid,
+html[data-split="1"] .detail-episode-grid { grid-template-columns: repeat(5, 1fr); }
+
+#split-pane {
+  position: absolute;
+  left: 44%;
+  right: 0;
+  top: var(--status-bar-height);
+  bottom: 0;
+  display: none;
+  background: var(--bg);
+  border-left: 1px solid var(--line);
+  box-shadow: -20px 0 46px rgba(20, 24, 32, .10);
+  z-index: 13;
+}
+html[data-split="1"] #split-pane { display: block; }
+
+#split-body {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+#split-body::-webkit-scrollbar { width: 0; height: 0; }
+
+/* 右栏比整页窄，头图压低、文案收紧，让选集按钮尽量在第一屏 */
+#split-body .detail-art { height: calc(280px + var(--status-bar-height)); }
+#split-body .detail-back { top: 15px; left: 16px; }
+#split-body .detail-copy { margin: -44px 22px 0; }
+#split-body .detail-copy h1 { font-size: 26px; }
+#split-body .detail-description {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+#split-body .detail-page { padding-bottom: 26px; }
+
+/* 电视首屏密度：540 高的视口里，顶栏 72 + 250 的 hero 会把第一行卡片整个挤到折叠线以下，
+   打开就只剩一张大图和底栏。hero 压到 200，标签栏和标题收紧，保证首屏能露出第一行片子。 */
+html[data-device="tv"] #scroll { padding-top: calc(64px + var(--status-bar-height)); }
+html[data-device="tv"] .hero { height: 150px; margin: 2px 40px 0; }
+html[data-device="tv"] .hero-copy { left: 24px; bottom: 14px; }
+html[data-device="tv"] .hero-copy h2 { font-size: 24px; max-width: 300px; margin: 4px 0 6px; }
+html[data-device="tv"] .hero-copy p { max-width: 300px; font-size: 12px; margin-bottom: 10px; -webkit-line-clamp: 1; }
+html[data-device="tv"] .hero-action { padding: 8px 12px; font-size: 12px; }
+html[data-device="tv"] .hero-dots { height: 16px; }
+html[data-device="tv"] .home-tag-scroll { padding: 6px 40px 4px; }
+html[data-device="tv"] .home-tag-scroll button { height: 32px; font-size: 13px; }
+html[data-device="tv"] .section-heading { padding: 8px 40px 6px; margin-bottom: 8px; }
+html[data-device="tv"] .section-heading h2 { font-size: 23px; }
+html[data-device="tv"] .film-section { margin: 10px 0 14px; }
+html[data-device="tv"] #content { padding: 0 0 120px; }
+html[data-device="tv"] #dock { height: 64px; bottom: 12px; width: min(560px, calc(100% - 96px)); }
+html[data-device="tv"] #dock button { height: 50px; }

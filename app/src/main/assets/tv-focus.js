@@ -54,10 +54,16 @@
     return list;
   }
 
-  /** 首屏落焦优先内容区：搜索框在最顶上，一进电视就选中它没有意义。 */
+  /** 首屏落焦优先内容区：搜索框在最顶上，一进电视就选中它没有意义。
+   *  再优先「卡片」——hero 的整块透明覆盖层虽然可聚焦，但焦点环会被 hero 的 overflow 裁掉，
+   *  用户按下确认还会误触播放；直接落在第一张片子上，打开就能选。 */
   function contentFirst() {
     var content = document.getElementById('content');
     if (!content) return null;
+    var cards = content.querySelectorAll('.film-card');
+    for (var c = 0; c < cards.length; c++) {
+      if (visible(cards[c])) return cards[c];
+    }
     var nodes = content.querySelectorAll(FOCUSABLE);
     for (var i = 0; i < nodes.length; i++) {
       if (visible(nodes[i])) return nodes[i];
