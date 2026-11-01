@@ -51,6 +51,8 @@ final class UpdateManager {
         String digest;
         long size;
         String notes;
+        /** 包从哪儿来：server（自己的后端，国内满速）/ github（兜底）。 */
+        String source = "github";
     }
 
     UpdateManager(Context context) {
@@ -83,6 +85,11 @@ final class UpdateManager {
             JSONObject manifest = new JSONObject(saved);
             // 老缓存没有渠道字段（或来自另一渠道）：直接作废，免得手机继续拿电视包
             if (!channel().equals(manifest.optString("channel"))) {
+                clearCandidate();
+                return status("none");
+            }
+            // 换过服务器：缓存的地址还指着旧机器，作废重查（否则会去旧地址下、或者一直下不动）
+            if ("server".equals(manifest.optString("source")) && !isAllowedUrl(manifest.optString("url"))) {
                 clearCandidate();
                 return status("none");
             }
@@ -141,8 +148,11 @@ final class UpdateManager {
         }
         Candidate result = new Candidate();
         result.version = version;
-        // 直连 GitHub 下载（跟随 302 到 objects CDN）
-        result.url = RELEASE_BASE + tag + "/" + apk;
+        result.source = manifest.optString("source", "github");
+        // server 来源：manifest 里存的是后端的绝对地址（同一台机器，速度取决于内网/上行）
+        // github 来源：直连 GitHub（跟随 302 到 objects CDN）
+        String saved = manifest.optString("url", "");
+        result.url = isAllowedUrl(saved) ? saved : RELEASE_BASE + tag + "/" + apk;
         result.digest = sha256.matches("[0-9a-fA-F]{64}") ? "sha256:" + sha256 : "";
         result.size = manifest.optLong("size");
         result.notes = manifest.optString("notes", "");
@@ -164,10 +174,31 @@ final class UpdateManager {
             preferences.edit().putLong("last_auto_check", now).apply();
         }
 
-        JSONObject release = fetchRelease();
-        if (manual) preferences.edit().putLong("last_auto_check", now).apply();
         PackageInfo installed = context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
         String localVersion = installed.versionName;
+
+        // 先问自己的后端：它已经把 APK 缓存在本地了，从它那里下比让手机直连 GitHub 稳得多。
+        // 后端没配置 / 连不上 / 还没拉到包，都安静地回退 GitHub —— 行为跟以前一样。
+        JSONObject viaServer = tryServer(localVersion);
+        if (viaServer != null) {
+            String serverState = viaServer.optString("status");
+            if ("current".equals(serverState)) {
+                clearCandidate();
+                return status("current").put("version", localVersion);
+            }
+            if ("available".equals(serverState)) {
+                JSONObject manifest = manifestOfServer(viaServer);
+                if (manifest != null) {
+                    candidate = candidateFrom(manifest);
+                    preferences.edit().putString("available_manifest", manifest.toString()).apply();
+                    return availableStatus(candidate, localVersion);
+                }
+            }
+            // none / preparing：后端还没有包，落下去走 GitHub
+        }
+
+        JSONObject release = fetchRelease();
+        if (manual) preferences.edit().putLong("last_auto_check", now).apply();
         if (release == null) {
             clearCandidate();
             return status("unpublished");
@@ -193,10 +224,8 @@ final class UpdateManager {
     synchronized File download(Progress progress) throws Exception {
         if (downloading) throw new IllegalStateException("更新包正在下载");
         if (candidate == null) throw new IllegalStateException("请先检查更新");
-        if (!candidate.url.startsWith(RELEASE_BASE + "download/")
-                && !candidate.url.startsWith(RELEASE_BASE)) {
-            throw new IllegalStateException("更新包地址无效");
-        }
+        // 只允许 GitHub 官方和当前后端两种来源，别的地址一律不认
+        if (!isAllowedUrl(candidate.url)) throw new IllegalStateException("更新包地址无效");
         downloading = true;
         try {
             File directory = new File(context.getCacheDir(), "updates");
@@ -204,12 +233,16 @@ final class UpdateManager {
             dropOtherChannelFiles(directory);
             String name = candidate.url.substring(candidate.url.lastIndexOf('/') + 1);
             File apk = new File(directory, name);
-            if (apk.isFile() && (!candidate.digest.isEmpty() && matchesDigest(apk, candidate.digest))) {
+            // 已经下好的包直接复用：有 sha256 就比 sha256，没有（后端没给）就比大小
+            if (apk.isFile() && (candidate.digest.isEmpty()
+                    ? (candidate.size <= 0 || apk.length() == candidate.size)
+                    : matchesDigest(apk, candidate.digest))) {
                 verifyPackage(apk);
                 progress.onPercent(100);
                 return apk;
             }
-            File partial = new File(directory, name + ".part");
+            // .part 按来源分开：GitHub 下了一半再换后端，两边不会互相污染
+            File partial = new File(directory, name + "." + candidate.source + ".part");
             // 最多两次尝试：第一次中断后保留 .part，第二次走 Range 续传；仍失败则保留 .part，
             // 下次点「重试下载」可从断点继续，不再每次从头下。
             Exception lastError = null;
@@ -225,6 +258,13 @@ final class UpdateManager {
                     if (error instanceof IllegalStateException && error.getMessage() != null
                             && error.getMessage().contains("校验失败")) {
                         if (partial.exists()) partial.delete();
+                    }
+                    // 后端这条腿断了（重启 / 被别的设备占满上行）：换 GitHub 再试一次，
+                    // 别让用户只能干瞪眼点重试。两边 .part 各自独立，互不污染。
+                    if (attempt == 0 && "server".equals(candidate.source)) {
+                        candidate.source = "github";
+                        candidate.url = RELEASE_BASE + "v" + candidate.version + "/" + name;
+                        partial = new File(directory, name + ".github.part");
                     }
                     progress.onPercent(0);
                 }
@@ -255,7 +295,7 @@ final class UpdateManager {
         if (files == null) return;
         for (File file : files) {
             String name = file.getName();
-            if (!name.endsWith(".apk") && !name.endsWith(".apk.part")) continue;
+            if (!name.endsWith(".apk") && !name.endsWith(".part")) continue;
             if (!matchesChannel(name)) file.delete();
         }
     }
@@ -333,6 +373,83 @@ final class UpdateManager {
         return null;
     }
 
+    /**
+     * 后端地址是否可信：只认「GitHub 官方」和「当前配置的后端」两种前缀。
+     * 这样即使用户把服务器地址改成别人分享的机器，也只会去那台机器下包，不会被执行任意 URL。
+     */
+    private boolean isAllowedUrl(String url) {
+        if (url == null || url.isEmpty()) return false;
+        if (url.startsWith(RELEASE_BASE)) return true;
+        String base = ServerConfig.get(context);
+        return !base.isEmpty() && url.startsWith(base);
+    }
+
+    /**
+     * 问后端有没有新版本。返回 null = 没配置/连不上（交给 GitHub 兜底）。
+     *
+     * 超时压得很短（连 4s / 读 6s）：后端通常就在身边，慢到这个程度说明它不可用，
+     * 与其让用户干等，不如立刻回退。真正下包时用的是 15s/60s。
+     */
+    private JSONObject tryServer(String localVersion) {
+        String base = ServerConfig.get(context);
+        if (base == null || base.isEmpty()) return null;
+        HttpURLConnection connection = null;
+        try {
+            String query = base + "api/app-update?channel=" + channel()
+                    + "&current=" + java.net.URLEncoder.encode(localVersion == null ? "" : localVersion, "UTF-8");
+            connection = (HttpURLConnection) new URL(query).openConnection();
+            connection.setConnectTimeout(4_000);
+            connection.setReadTimeout(6_000);
+            connection.setRequestProperty("User-Agent", "ChengZi-Android-Updater");
+            connection.setRequestProperty("Accept", "application/json");
+            int code = connection.getResponseCode();
+            if (code < 200 || code >= 300) return null;
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            try (InputStream stream = connection.getInputStream()) {
+                byte[] buffer = new byte[16 * 1024];
+                int count;
+                while ((count = stream.read(buffer)) != -1) {
+                    out.write(buffer, 0, count);
+                    if (out.size() > 256 * 1024) return null;
+                }
+            }
+            return new JSONObject(new String(out.toByteArray(), java.nio.charset.StandardCharsets.UTF_8));
+        } catch (Exception ignored) {
+            return null;
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    /** 把后端返回的清单转成内部格式；字段不对就返回 null，落回 GitHub。 */
+    private JSONObject manifestOfServer(JSONObject payload) {
+        try {
+            String version = payload.optString("version", "").trim();
+            if (!VERSION.matcher(version).matches()) return null;
+            String path = payload.optString("url", "");
+            if (path.isEmpty()) return null;
+            String apk = path.substring(path.lastIndexOf('/') + 1);
+            if (!apk.toLowerCase(Locale.ROOT).endsWith(".apk") || !matchesChannel(apk)) return null;
+            String absolute = path.startsWith("http")
+                    ? path
+                    : ServerConfig.get(context) + path.replaceFirst("^/", "");
+            if (!isAllowedUrl(absolute)) return null;
+            JSONObject manifest = new JSONObject();
+            manifest.put("versionName", version);
+            manifest.put("tag", "v" + version);
+            manifest.put("apk", apk);
+            manifest.put("sha256", payload.optString("sha256", ""));
+            manifest.put("size", payload.optLong("size", 0));
+            manifest.put("notes", payload.optString("notes", ""));
+            manifest.put("channel", channel());
+            manifest.put("source", "server");
+            manifest.put("url", absolute);
+            return manifest;
+        } catch (Exception error) {
+            return null;
+        }
+    }
+
     private JSONObject manifestOf(JSONObject release, JSONObject asset) throws Exception {
         String tag = release.optString("tag_name", "");
         String digest = asset.optString("digest", "").replaceFirst("^sha256:", "").trim();
@@ -344,6 +461,7 @@ final class UpdateManager {
         manifest.put("notes", release.optString("body", ""));
         manifest.put("sha256", digest);
         manifest.put("channel", channel());
+        manifest.put("source", "github");
         return manifest;
     }
 

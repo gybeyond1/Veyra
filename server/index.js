@@ -32,6 +32,7 @@ const downloader = require('./downloader');
 const hgApp = require('./hongguo-app');
 const { createHongguoContent } = require('./hongguo-content');
 const { createDeviceHub } = require('./device-hub');
+const { createAppUpdater } = require('./app-updater');
 
 const PORT = parseInt(process.env.PORT || '8080', 10);
 // 数据目录：环境变量指定，默认 /data（docker-compose volume 挂载）。
@@ -47,6 +48,13 @@ let DATA_DIR = process.env.DATA_DIR || '/data';
 })();
 // 设备中继（Web「下载到手机」）：账号 → 设备 → 指令，落盘到 DATA_DIR/devices.json
 const deviceHub = createDeviceHub({ dataDir: DATA_DIR });
+// 更新包缓存：后端在后台把本仓库的 APK 拉一份到本地，客户端从本机下载（国内直连 GitHub 不稳）。
+// 定时任务在 app.listen 之后启动，避免启动阶段和迁移/首屏抢带宽。
+const appUpdater = createAppUpdater({
+  dataDir: DATA_DIR,
+  getProxy: () => backendProxy,
+  log: (message) => console.log(message),
+});
 const TOKEN_TTL_MS = 90 * 24 * 3600 * 1000; // 90 天
 const MAX_AVATAR_BYTES = 512 * 1024;
 const MAX_PAYLOAD_BYTES = 2 * 1024 * 1024;
@@ -942,8 +950,33 @@ app.post('/api/download/retry-failed', requireAdminOrAccountAdmin, (req, res) =>
   } catch (e) { res.status(400).json({ error: e && e.message ? e.message : '重试失败' }); }
 });
 
+// ---- 客户端更新（后端缓存优先）----
+// 客户端先问这里：有新版直接给本机下载地址，比让它去连 GitHub 稳得多。
+// 后端还没拉到包时回 preparing，客户端据此回退 GitHub，不会卡住。
+app.get('/api/app-update', (req, res) => {
+  const channel = req.query.channel === 'tv' ? 'tv' : 'mobile';
+  const current = String(req.query.current || '').trim();
+  try { res.json(appUpdater.status(channel, current)); }
+  catch (e) { res.status(500).json({ status: 'none', error: e.message }); }
+});
+
+// 更新包下载：只发清单里登记过的文件（fileOf 做白名单 + 路径校验），支持 Range 续传。
+app.get('/api/app-download/:channel/:file', (req, res) => {
+  const file = appUpdater.fileOf(req.params.channel, req.params.file);
+  if (!file) return res.status(404).json({ error: '更新包不存在或还没准备好' });
+  res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+  res.setHeader('Content-Disposition', `attachment; filename="${path.basename(file)}"`);
+  res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+  res.sendFile(file);
+});
+
 app.get('/api/health', (_req, res) => {
-  res.json({ code: 200, service: 'veyra-backend', status: 'ok', time: Date.now(), download: downloader.status() });
+  const update = appUpdater.manifest;
+  res.json({
+    code: 200, service: 'veyra-backend', status: 'ok', time: Date.now(),
+    download: downloader.status(),
+    update: update ? { version: update.version, channels: Object.keys(update.channels || {}) } : null,
+  });
 });
 
 // ---- 设备中继：Web「下载到手机」 ----
@@ -1127,8 +1160,24 @@ app.put('/api/library', auth, (req, res) => {
   if (changed) flush();
 })();
 
-// 最新 APK 下载：WebUI 一键获取（手机弱网/国内访问 GitHub 不稳定时，经 NAS 后端中转拉取再转发）
+// 最新 APK 下载：WebUI 一键获取。
+// 先发后端已缓存的包（app-updater 在后台拉好的，国内满速）；缓存还没就绪时退回实时转发，
+// 保证「刚发布、后端还没拉到」时 WebUI 仍然能用。
+// 另外修了老毛病：原来取 assets 里第一个 .apk，而附件按名字排序、电视包排在前面，
+// 手机点下载会拿到电视包。现在按 channel 挑。
 app.get('/api/update/apk', (req, res) => {
+  const channel = req.query.channel === 'tv' ? 'tv' : 'mobile';
+  const manifest = appUpdater.manifest;
+  const entry = manifest && manifest.channels && manifest.channels[channel];
+  if (entry && entry.file) {
+    const file = appUpdater.fileOf(channel, entry.file);
+    if (file) {
+      res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+      res.setHeader('Content-Disposition', `attachment; filename="${entry.file}"`);
+      return res.sendFile(file);
+    }
+  }
+
   const fetchLatest = () => new Promise((resolve, reject) => {
     proxyFetch.requestThroughProxy('https://api.github.com/repos/gybeyond1/Veyra/releases/latest', backendProxy, {
       headers: { 'User-Agent': 'Veyra-Backend', 'Accept': 'application/vnd.github+json' },
@@ -1138,8 +1187,9 @@ app.get('/api/update/apk', (req, res) => {
       if (!result || result.status < 200 || result.status >= 300) return reject(new Error('查询最新版本失败（HTTP ' + (result && result.status) + '）'));
       try {
         const release = JSON.parse(result.body.toString('utf8'));
-        const apk = (release.assets || []).find(a => String(a.name || '').endsWith('.apk'));
-        if (!apk) return reject(new Error('发布中没有 APK 资产'));
+        const apk = (release.assets || []).find(a => String(a.name || '').endsWith('.apk')
+          && /(^|[-_.])tv([-_.]|$)/i.test(String(a.name || '')) === (channel === 'tv'));
+        if (!apk) return reject(new Error('发布中没有该渠道的 APK 资产'));
         resolve({ tag: release.tag_name, url: apk.browser_download_url, name: apk.name, size: apk.size });
       } catch (e) { reject(new Error('查询最新版本响应异常')); }
     });
@@ -1168,4 +1218,6 @@ app.get('/api/update/apk', (req, res) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`veyra-backend listening on 0.0.0.0:${PORT}, data dir: ${DATA_DIR}`);
+  // 更新包缓存：启动 20 秒后跑第一轮，之后每 10 分钟一次（都发生在后台，不挡请求）
+  appUpdater.start();
 });
