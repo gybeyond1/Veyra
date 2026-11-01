@@ -242,9 +242,15 @@ public final class MainActivity extends Activity {
         installCrashLogger();
         deviceType = DeviceProfile.type(this);
         // 电视只有横屏一种形态：manifest 里的 portrait 是为了锁住手机，这里对 TV 运行期覆盖，
-        // 手机/平板不会走到这段，方向行为与改动前完全一致。
+        // 手机不会走到这段，方向行为与改动前完全一致。
         if (DeviceProfile.TV.equals(deviceType)) {
             try { setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE); } catch (Exception ignored) { }
+        }
+        // 平板跟随重力：竖屏还是原来那套单栏，横屏才够宽走平行视界双栏。
+        // 用 FULL_SENSOR 而不是 USER —— 后者会被系统的「自动旋转」开关挡住，
+        // 用户关了自动旋转就永远横不过来，双栏也就永远触发不了。只放开平板，手机继续锁竖屏。
+        if (DeviceProfile.TABLET.equals(deviceType)) {
+            try { setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR); } catch (Exception ignored) { }
         }
         ContentMode.get(this).startPublic();
         hotUpdates = HotUpdateManager.get(this);
