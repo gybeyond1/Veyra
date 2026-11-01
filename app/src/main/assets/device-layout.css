@@ -265,7 +265,7 @@ html[data-device="tv"] #dock {
 html[data-device="tv"] #dock button { font-size: 15px; }
 html[data-device="tv"] #dock .nav-icon svg { width: 24px; height: 24px; }
 
-html[data-device="tv"] #app { --detail-art-height: calc(330px + var(--status-bar-height)); }
+html[data-device="tv"] #app { --detail-art-height: calc(210px + var(--status-bar-height)); }
 html[data-device="tv"] .detail-copy h1 { font-size: 34px; }
 html[data-device="tv"] .detail-description { font-size: 15px; }
 html[data-device="tv"] .detail-buttons button,
