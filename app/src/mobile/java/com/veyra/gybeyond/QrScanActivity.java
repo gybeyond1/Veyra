@@ -24,7 +24,6 @@ import android.view.Gravity;
 import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
-import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.TextView;
 
@@ -43,7 +42,6 @@ import java.net.URL;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**

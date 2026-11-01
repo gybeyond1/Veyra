@@ -625,6 +625,13 @@ public final class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_QR_LOGIN) {
+            if (webView == null) return;
+            String message = data == null ? null : data.getStringExtra("message");
+            webView.evaluateJavascript("window.hgQrScan && window.hgQrScan(" + (resultCode == RESULT_OK) + ","
+                    + JSONObject.quote(message == null ? "" : message) + ")", null);
+            return;
+        }
         if (requestCode != AVATAR_PICKER || resultCode != RESULT_OK || data == null || data.getData() == null) return;
         Uri selected = data.getData();
         requests.execute(() -> {
@@ -821,15 +828,6 @@ public final class MainActivity extends Activity {
             webView.evaluateJavascript("window.veyraTvKey && window.veyraTvKey(" + code + ")", null);
         }
         return true;
-    }
-
-    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode != REQUEST_QR_LOGIN || webView == null) return;
-        String message = data == null ? null : data.getStringExtra("message");
-        boolean ok = resultCode == RESULT_OK;
-        webView.evaluateJavascript("window.hgQrScan && window.hgQrScan(" + ok + ","
-                + JSONObject.quote(message == null ? "" : message) + ")", null);
     }
 
     @Override public void onBackPressed() {
