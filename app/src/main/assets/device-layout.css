@@ -1,80 +1,202 @@
 /* 大屏适配：平板 / 电视。
  *
- * 全部规则都以 html[data-device="tablet|tv"] 开头，手机（data-device="phone"）一条都不命中，
- * 手机布局、手势、玻璃参数保持原样。选择器特异性也高于 app.css 里的同名规则，
- * 所以本文件放在 app.css 之后加载即可覆盖，不需要改原表。
+ * 平板部分**不再依赖 html[data-device="tablet"]**——判定一旦失准（smallestScreenWidthDp
+ * 恰好落在 600 以下、系统改了显示密度），整套规则就静默失效，页面看起来和手机一模一样。
+ * 现在改用视口尺寸断点：宽度够就铺满，与设备判定无关。
+ *
+ *   竖屏 / 中等宽度  ≥600px            → 4 列栅格，底栏定宽居中
+ *   横屏平板        ≥960px 且 ≥560 高   → 完全铺满：内容通栏、卡片自动填满整行、详情页左右双栏
+ *
+ * 手机竖屏 412px、手机横屏 ~915×412 都不命中（高度不足 560），行为与改动前完全一致。
+ * 电视走 html[data-device="tv"] 那一段，且在横屏规则里被 :not() 显式排除。
  */
 
-/* ---------------- 平板 ---------------- */
-html[data-device="tablet"] .app-top {
-  height: calc(64px + var(--status-bar-height));
-  padding-left: max(24px, calc((100% - 1180px) / 2 + 24px));
-  padding-right: max(24px, calc((100% - 1180px) / 2 + 24px));
-}
-html[data-device="tablet"] .search-form { max-width: 620px; }
-
-/* 首页与分类页：把横向滑动的长条换成多列网格，一屏能看到更多海报 */
-html[data-device="tablet"] .home-page .film-row,
-html[data-device="tablet"] .category-page .film-row,
-html[data-device="tablet"] .search-page .film-row,
-html[data-device="tablet"] .library-page .film-row {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  grid-auto-flow: row;
-  column-gap: 14px;
-  row-gap: 22px;
-  padding: 0 24px 18px;
-  overflow: visible;
-}
-html[data-device="tablet"] .film-card { width: 100%; min-width: 0; }
-html[data-device="tablet"] .home-page .poster,
-html[data-device="tablet"] .category-page .poster,
-html[data-device="tablet"] .search-page .poster,
-html[data-device="tablet"] .library-page .poster {
-  height: auto;
-  aspect-ratio: 114 / 153;
-}
-html[data-device="tablet"] .film-title { font-size: 14px; }
-
-html[data-device="tablet"] .search-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-html[data-device="tablet"] .tags-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
-html[data-device="tablet"] .episode-grid { grid-template-columns: repeat(8, 1fr); }
-html[data-device="tablet"] .download-sheet-grid { grid-template-columns: repeat(8, 1fr); max-height: 52vh;max-height: 52dvh; }
-html[data-device="tablet"] .detail-episode-grid { grid-template-columns: repeat(8, 1fr); }
-
-/* 底栏收窄居中，两侧留白，避免在 800dp 宽度上被拉成四根柱 */
-html[data-device="tablet"] #dock {
-  left: 0;
-  right: 0;
-  margin: 0 auto;
-  width: min(560px, calc(100% - 64px));
-  height: 72px;
-  bottom: 16px;
-}
-
-html[data-device="tablet"] #app { --detail-art-height: calc(460px + var(--status-bar-height)); }
-html[data-device="tablet"] .detail-copy h1 { font-size: 30px; }
-html[data-device="tablet"] .category-head h1,
-html[data-device="tablet"] .library-page h1,
-html[data-device="tablet"] .search-page h1 { font-size: 30px; }
-
-/* 平板横屏再放宽一档 */
-@media (min-width: 1000px) {
-  html[data-device="tablet"] .home-page .film-row,
-  html[data-device="tablet"] .category-page .film-row,
-  html[data-device="tablet"] .search-page .film-row,
-  html[data-device="tablet"] .library-page .film-row {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
+/* ---------------- 平板 / 宽屏：竖屏与中等宽度 ---------------- */
+@media (min-width: 600px) and (orientation: portrait) {
+  html:not([data-device="tv"]) .app-top {
+    height: calc(64px + var(--status-bar-height));
+    padding: calc(8px + var(--status-bar-height)) 28px 9px;
+    gap: 14px;
   }
-  html[data-device="tablet"] .search-grid { grid-template-columns: repeat(7, minmax(0, 1fr)); }
-  html[data-device="tablet"] .episode-grid,
-  html[data-device="tablet"] .download-sheet-grid,
-  html[data-device="tablet"] .detail-episode-grid { grid-template-columns: repeat(11, 1fr); }
-  html[data-device="tablet"] #app { --detail-art-height: calc(560px + var(--status-bar-height)); }
+  html:not([data-device="tv"]) .search-form { max-width: 620px; }
+
+  /* 横向滑动的长条换成多列网格，一屏能看到更多海报 */
+  html:not([data-device="tv"]) .home-page .film-row,
+  html:not([data-device="tv"]) .category-page .film-row,
+  html:not([data-device="tv"]) .search-page .film-row,
+  html:not([data-device="tv"]) .library-page .film-row {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-auto-flow: row;
+    column-gap: 16px;
+    row-gap: 24px;
+    padding: 0 28px 20px;
+    overflow: visible;
+  }
+  html:not([data-device="tv"]) .film-card { width: 100%; min-width: 0; }
+  html:not([data-device="tv"]) .home-page .poster,
+  html:not([data-device="tv"]) .category-page .poster,
+  html:not([data-device="tv"]) .search-page .poster,
+  html:not([data-device="tv"]) .library-page .poster {
+    height: auto;
+    aspect-ratio: 114 / 153;
+  }
+  html:not([data-device="tv"]) .film-title { font-size: 14px; }
+  html:not([data-device="tv"]) .section-heading { padding: 0 28px; }
+
+  html:not([data-device="tv"]) .search-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  html:not([data-device="tv"]) .tags-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  html:not([data-device="tv"]) .episode-grid { grid-template-columns: repeat(8, 1fr); }
+  html:not([data-device="tv"]) .download-sheet-grid { grid-template-columns: repeat(8, 1fr); max-height: 52vh; max-height: 52dvh; }
+  html:not([data-device="tv"]) .detail-episode-grid { grid-template-columns: repeat(8, 1fr); }
+
+  /* 底栏定宽居中，避免在 800dp 宽度上被拉成四根柱 */
+  html:not([data-device="tv"]) #dock {
+    left: 0;
+    right: 0;
+    margin: 0 auto;
+    width: min(560px, calc(100% - 64px));
+    height: 72px;
+    bottom: 16px;
+  }
+
+  html:not([data-device="tv"]) #app { --detail-art-height: calc(460px + var(--status-bar-height)); }
+  html:not([data-device="tv"]) .detail-copy h1 { font-size: 30px; }
+  html:not([data-device="tv"]) .category-head h1,
+  html:not([data-device="tv"]) .library-page h1,
+  html:not([data-device="tv"]) .search-page h1 { font-size: 30px; }
+}
+
+@media (min-width: 900px) and (orientation: portrait) {
+  html:not([data-device="tv"]) .home-page .film-row,
+  html:not([data-device="tv"]) .category-page .film-row,
+  html:not([data-device="tv"]) .search-page .film-row,
+  html:not([data-device="tv"]) .library-page .film-row { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
+
+/* ---------------- 平板横屏：完全铺满 ----------------
+ *
+ * 断点取 960×560：1280×800、1200×1920 转横、1024×600 全部命中；手机转横只有 ~915×412，
+ * 高度不够，命中不了，手机行为不变。
+ */
+@media (min-width: 960px) and (min-height: 560px) and (orientation: landscape) {
+
+  /* --- 顶栏：左右留白固定，搜索框吃掉全部剩余宽度 --- */
+  html:not([data-device="tv"]) .app-top {
+    height: calc(70px + var(--status-bar-height));
+    padding: calc(12px + var(--status-bar-height)) 44px 11px;
+    gap: 18px;
+  }
+  html:not([data-device="tv"]) .search-form { max-width: none; height: 46px; }
+  html:not([data-device="tv"]) .search-input { font-size: 15px; }
+  html:not([data-device="tv"]) #scroll { padding-top: calc(70px + var(--status-bar-height)); }
+
+  /* --- 首页 hero：横向拉满，文字区不再挤在左下角一小块 --- */
+  html:not([data-device="tv"]) .hero {
+    height: 212px;
+    margin: 0 44px;
+    border-radius: calc(20px * var(--corner-scale, 1));
+  }
+  html:not([data-device="tv"]) .hero-copy { left: 34px; bottom: 30px; }
+  html:not([data-device="tv"]) .hero-copy h2 { font-size: 38px; max-width: 420px; margin: 10px 0 10px; }
+  html:not([data-device="tv"]) .hero-copy p { font-size: 14px; max-width: 420px; margin-bottom: 20px; -webkit-line-clamp: 2; }
+  html:not([data-device="tv"]) .hero-action { padding: 11px 18px; font-size: 14px; }
+  html:not([data-device="tv"]) .hero-index { right: 30px; bottom: 28px; }
+  html:not([data-device="tv"]) .hero-dots { height: 30px; }
+  html:not([data-device="tv"]) .home-tag-scroll { padding-top: 4px; padding-bottom: 4px; }
+  html:not([data-device="tv"]) #content { padding: 0 0 142px; }
+
+  /* --- 卡片：auto-fill 让列数跟着宽度长，两端顶到边距，不留白 --- */
+  html:not([data-device="tv"]) .home-page .film-row,
+  html:not([data-device="tv"]) .category-page .film-row,
+  html:not([data-device="tv"]) .search-page .film-row,
+  html:not([data-device="tv"]) .library-page .film-row {
+    grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+    column-gap: 20px;
+    row-gap: 30px;
+    padding: 0 44px 24px;
+  }
+  html:not([data-device="tv"]) .film-card { width: 100%; min-width: 0; }
+  html:not([data-device="tv"]) .home-page .poster,
+  html:not([data-device="tv"]) .category-page .poster,
+  html:not([data-device="tv"]) .search-page .poster,
+  html:not([data-device="tv"]) .library-page .poster {
+    height: auto;
+    aspect-ratio: 114 / 153;
+  }
+  html:not([data-device="tv"]) .film-title { font-size: 15px; margin-top: 9px; }
+  html:not([data-device="tv"]) .film-info { font-size: 12px; }
+  html:not([data-device="tv"]) .section-heading { padding: 0 44px; margin-bottom: 12px; }
+  html:not([data-device="tv"]) .section-heading h2 { font-size: 26px; }
+  html:not([data-device="tv"]) .film-section { margin: 24px 0 34px; }
+
+  html:not([data-device="tv"]) .search-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+  html:not([data-device="tv"]) .tags-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
+  html:not([data-device="tv"]) .category-head h1,
+  html:not([data-device="tv"]) .library-page h1,
+  html:not([data-device="tv"]) .search-page h1 { font-size: 34px; }
+  html:not([data-device="tv"]) .category-head,
+  html:not([data-device="tv"]) .library-page > h1,
+  html:not([data-device="tv"]) .search-page > h1 { padding-left: 44px; padding-right: 44px; }
+
+  /* --- 底栏：跟着内容一起变宽，不再是一条 560 的窄条飘在 1280 中间 --- */
+  html:not([data-device="tv"]) #dock {
+    left: 0;
+    right: 0;
+    margin: 0 auto;
+    width: min(880px, calc(100% - 88px));
+    height: 76px;
+    bottom: 18px;
+  }
+  html:not([data-device="tv"]) #dock button { font-size: 13px; }
+
+  /* --- 详情页：左海报 + 右信息，横向空间全部用起来 --- */
+  html:not([data-device="tv"]) .detail-page {
+    display: grid;
+    grid-template-columns: clamp(300px, 32%, 420px) minmax(0, 1fr);
+    gap: 0 44px;
+    align-content: start;
+    min-height: 100%;
+    padding: calc(58px + var(--status-bar-height)) 44px 56px;
+  }
+  html:not([data-device="tv"]) .detail-back {
+    top: calc(14px + var(--status-bar-height));
+    left: 44px;
+  }
+  html:not([data-device="tv"]) .detail-art {
+    grid-column: 1;
+    grid-row: 1;
+    height: auto;
+    aspect-ratio: 114 / 153;
+    max-height: calc(100vh - 160px);
+    border-radius: calc(20px * var(--corner-scale, 1));
+  }
+  /* 底部渐变是给全屏头图做文字压暗的，左栏海报不需要 */
+  html:not([data-device="tv"]) .detail-art::after { display: none; }
+  html:not([data-device="tv"]) .detail-copy {
+    grid-column: 2;
+    grid-row: 1;
+    margin: 0;
+    min-width: 0;
+  }
+  html:not([data-device="tv"]) .detail-copy h1 { font-size: 40px; line-height: 1.14; margin-bottom: 10px; }
+  html:not([data-device="tv"]) .detail-copy p { font-size: 14px; margin-bottom: 18px; }
+  html:not([data-device="tv"]) .detail-description { font-size: 14px; line-height: 1.85; max-width: 940px; }
+  html:not([data-device="tv"]) .detail-buttons { max-width: 520px; margin: 20px 0 30px; }
+  html:not([data-device="tv"]) .detail-play { height: 52px; font-size: 16px; }
+  html:not([data-device="tv"]) .bookmark-button { height: 52px; }
+  html:not([data-device="tv"]) .detail-download { height: 52px; }
+  html:not([data-device="tv"]) .detail-copy h2 { font-size: 22px; margin: 0 0 16px; }
+  html:not([data-device="tv"]) .episode-grid {
+    grid-template-columns: repeat(auto-fill, minmax(58px, 1fr));
+    gap: 11px;
+    padding-bottom: 24px;
+  }
+  html:not([data-device="tv"]) .episode-grid button { height: 46px; font-size: 14px; }
 }
 
 /* ---------------- 电视 ---------------- */
-/* 电视的 CSS 视口一般在 960×540 左右，且观看距离远：字号、控件、间距整体放大，列数减少到 5 列 */
+/* 电视的 CSS 视口一般在 960×540 左右，且观看距离远：字号、控件、间距整体放大，列数减少到 6 列 */
 html[data-device="tv"] {
   --tv-accent: var(--accent, #c89b3c);
 }
@@ -172,82 +294,12 @@ html[data-device="tv"] .download-sheet-grid button.tv-focus {
   outline-offset: 2px;
 }
 
-/* 电视上不显示滚动条，避免静止时右侧一直挂一条 */
+/* 大屏上不显示滚动条，避免静止时右侧一直挂一条 */
 html[data-device="tv"] #scroll::-webkit-scrollbar,
-html[data-device="tablet"] #scroll::-webkit-scrollbar { width: 0; height: 0; }
-
-/* ---------------- 平板平行视界：左列表 / 右详情 ----------------
- *
- * 只在视口 ≥900px 的平板生效（JS 打 html[data-split="1"]）。左栏保留列表原样、
- * 右栏独立滚动详情，两栏都不重建，所以点卡片是「右边换内容」而不是整页跳转。
- */
-html[data-split="1"] #scroll { width: 44%; right: auto; }
-
-/* 分栏时左栏仍是列表页，顶栏和底栏都必须留着；详情路由原本会把它们藏掉 */
-html[data-split="1"] #app.route-detail > .app-top { display: flex; }
-html[data-split="1"] #app.route-detail > #scroll {
-  top: calc(-2px + var(--status-bar-height));
-  padding-top: 60px;
-  z-index: auto;
-  background: var(--bg);
-}
-html[data-split="1"] #app.route-detail > #dock { visibility: visible; pointer-events: auto; }
-
-/* 底栏只压在左栏下面，不横穿到详情那一侧 */
-html[data-split="1"] #dock {
-  left: 14px;
-  right: calc(56% + 14px);
-  width: auto;
-  margin: 0;
-}
-
-/* 左栏变窄，网格列数要跟着降，否则 6 列会挤成一条条 */
-html[data-split="1"] .home-page .film-row,
-html[data-split="1"] .category-page .film-row,
-html[data-split="1"] .search-page .film-row,
-html[data-split="1"] .library-page .film-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-html[data-split="1"] .search-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-html[data-split="1"] .episode-grid,
-html[data-split="1"] .detail-episode-grid { grid-template-columns: repeat(5, 1fr); }
-
-#split-pane {
-  position: absolute;
-  left: 44%;
-  right: 0;
-  top: var(--status-bar-height);
-  bottom: 0;
-  display: none;
-  background: var(--bg);
-  border-left: 1px solid var(--line);
-  box-shadow: -20px 0 46px rgba(20, 24, 32, .10);
-  z-index: 13;
-}
-html[data-split="1"] #split-pane { display: block; }
-
-#split-body {
-  position: absolute;
-  inset: 0;
-  overflow: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: none;
-}
-#split-body::-webkit-scrollbar { width: 0; height: 0; }
-
-/* 右栏比整页窄，头图压低、文案收紧，让选集按钮尽量在第一屏 */
-#split-body .detail-art { height: calc(280px + var(--status-bar-height)); }
-#split-body .detail-back { top: 15px; left: 16px; }
-#split-body .detail-copy { margin: -44px 22px 0; }
-#split-body .detail-copy h1 { font-size: 26px; }
-#split-body .detail-description {
-  display: -webkit-box;
-  -webkit-line-clamp: 4;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-#split-body .detail-page { padding-bottom: 26px; }
+html:not([data-device="phone"]) #scroll::-webkit-scrollbar { width: 0; height: 0; }
 
 /* 电视首屏密度：540 高的视口里，顶栏 72 + 250 的 hero 会把第一行卡片整个挤到折叠线以下，
-   打开就只剩一张大图和底栏。hero 压到 200，标签栏和标题收紧，保证首屏能露出第一行片子。 */
+   打开就只剩一张大图和底栏。hero 压到 150，标签栏和标题收紧，保证首屏能露出第一行片子。 */
 html[data-device="tv"] #scroll { padding-top: calc(64px + var(--status-bar-height)); }
 html[data-device="tv"] .hero { height: 150px; margin: 2px 40px 0; }
 html[data-device="tv"] .hero-copy { left: 24px; bottom: 14px; }

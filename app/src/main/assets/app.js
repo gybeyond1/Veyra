@@ -23,11 +23,7 @@ function api(action, args = {}) {
 }
 
 const scroll = document.getElementById('scroll');
-/* 平板平行视界：content 会在「左栏列表」和「右栏详情」之间切换，listContent 永远指向左栏那个 #content 节点。
-   手机 / 电视上 splitActive 恒为 false，content 不会变，行为和原来完全一致。 */
-let content = document.getElementById('content');
-const listContent = content;
-let splitActive = false;
+const content = document.getElementById('content');
 const avatarButton = document.getElementById('account-avatar');
 const avatarImage = document.getElementById('account-avatar-image');
 const authOverlay = document.getElementById('auth-overlay');
@@ -1835,8 +1831,6 @@ function clearPredictivePreview() {
 window.hgPredictiveBackStart = fromRight => {
   clearPredictivePreview();
   if (!downloadOverlay.hidden || (window.__veyraAppearanceOpen && window.__veyraAppearanceOpen()) || (window.__veyraAccountOpen && window.__veyraAccountOpen()) || (window.__veyraProxyOpen && window.__veyraProxyOpen()) || (window.__veyraAboutOpen && window.__veyraAboutOpen())) return false;
-  // 分栏详情没有整页位移动画：返回就是把右栏收起来，交给普通返回路径
-  if (splitActive) return false;
   if (state.route === 'detail' && detailCard && authOverlay.hidden && confirmOverlay.hidden && updateOverlay.hidden && unlockOverlay.hidden) {
     detailCard.fromRight = fromRight;
     return detailCard.begin();
@@ -1971,7 +1965,6 @@ function setNav(tab) {
 }
 
 async function goHome() {
-  if (splitActive) exitSplit();
   const token = ++routeToken;
   const adopted = swipeAdopting; swipeAdopting = false;   // 滑动已把首页真实 DOM 放好了就别再画一遍
   stopBannerAuto();
@@ -2271,36 +2264,27 @@ async function goDetail(id, trigger) {
     return;
   }
   const token = ++routeToken;
-  const split = splitReady();
-  // 已经在分栏详情里换片：左栏一个字都不能动，state.previous 也不能被详情页覆盖
-  const inPane = splitActive && state.route === 'detail';
-  let entrySource = null;
-  if (!inPane && !split) entrySource = bannerChanging && trigger?.closest('.hero') ? null : HGCardTransition.capture(trigger);
-  if (!inPane) {
-    rememberScreen();
-    state.previous = {
-      route: state.route, tab: state.tab, sub: state.sub[state.tab], query: state.query,
-      filter: state.filter, scrollTop: scroll.scrollTop, compactHeld: state.compactHeld,
-      horizontalScroll: [...content.querySelectorAll('.film-row,.filter-row,.home-tag-scroll')].map(row => row.scrollLeft),
-      pageNode: content.firstElementChild
-    };
-    if (state.route === 'listing' && state.listing) state.listing.refreshing = false;
-    listingObserver?.disconnect();
-    categoryObserver?.disconnect();
-  }
+  const entrySource = bannerChanging && trigger?.closest('.hero') ? null : HGCardTransition.capture(trigger);
+  rememberScreen();
+  state.previous = {
+    route: state.route, tab: state.tab, sub: state.sub[state.tab], query: state.query,
+    filter: state.filter, scrollTop: scroll.scrollTop, compactHeld: state.compactHeld,
+    horizontalScroll: [...content.querySelectorAll('.film-row,.filter-row,.home-tag-scroll')].map(row => row.scrollLeft),
+    pageNode: content.firstElementChild
+  };
+  if (state.route === 'listing' && state.listing) state.listing.refreshing = false;
+  listingObserver?.disconnect();
+  categoryObserver?.disconnect();
   state.sourceItem = sourceItem(id);
-  state.sourceGroup = (!inPane && state.route === 'category') ? categoryId() : state.sourceItem.category || '';
-  if (!inPane) {
-    const aiGroup = state.sourceGroup === 'ai-huanlian' || state.sourceGroup === 'ai-mogai';
-    const candidates = state.route === 'category' ? asArray(state.category?.items) : state.route === 'search' ? asArray(state.search?.items) : state.route === 'listing' ? asArray(state.listing?.items) :
-      [...asArray(state.home?.recommend?.items), ...asArray(state.home?.newest?.items)];
-    state.sourceQueue = aiGroup ? candidates.filter(item => item.category === state.sourceGroup) : [];
-  }
-  if (split) enterSplit();
+  state.sourceGroup = state.route === 'category' ? categoryId() : state.sourceItem.category || '';
+  const aiGroup = state.sourceGroup === 'ai-huanlian' || state.sourceGroup === 'ai-mogai';
+  const candidates = state.route === 'category' ? asArray(state.category?.items) : state.route === 'search' ? asArray(state.search?.items) : state.route === 'listing' ? asArray(state.listing?.items) :
+    [...asArray(state.home?.recommend?.items), ...asArray(state.home?.newest?.items)];
+  state.sourceQueue = aiGroup ? candidates.filter(item => item.category === state.sourceGroup) : [];
   setRoute('detail'); state.detail = { ...state.sourceItem }; state.detailLoading = true; state.bookmarked = false;
   // title→cover 记录：NAS 老任务后端没存封面，下载列表渲染时按剧名兜底
   if (state.detail && state.detail.title) rememberTitleCover(state.detail.title, state.detail.cover || '');
-  if (!split) scroll.scrollTop = 0;
+  scroll.scrollTop = 0;
   updateCompact();
   renderDetail();
   if (entrySource) {
@@ -2323,18 +2307,15 @@ async function goDetail(id, trigger) {
 
 function returnFromDetail() {
   const previous = state.previous || { route: 'home', tab: 'home' };
-  if (!previous.pageNode) { if (splitActive) exitSplit(); goHome(); return; }
+  if (!previous.pageNode) { goHome(); return; }
   ++routeToken;
-  // 分栏模式：左栏 DOM 一直原封不动留在 #content 里，只把右栏收起来，不需要重建列表
-  const inPane = splitActive;
-  if (inPane) exitSplit();
   setRoute(previous.route);
   state.tab = previous.tab;
   if (previous.route === 'category') state.sub[previous.tab] = previous.sub;
   state.query = previous.query || '';
   state.filter = previous.filter || 'all';
   state.compactHeld = previous.compactHeld;
-  if (!inPane) content.replaceChildren(previous.pageNode);
+  content.replaceChildren(previous.pageNode);
   state.previous = null;
   content.querySelectorAll('.film-row,.filter-row,.home-tag-scroll').forEach((row, index) => {
     row.scrollLeft = previous.horizontalScroll?.[index] || 0;
@@ -2344,7 +2325,7 @@ function returnFromDetail() {
   scroll.scrollTop = previous.scrollTop || 0;
   if (previous.route === 'category') compact.innerHTML = compactMarkup();
   updateCompact();
-  if (!inPane) hydrateImages();
+  hydrateImages();
   if (previous.route === 'home') refreshHomeHistory();
   if (previous.route === 'category') observeCategoryEnd();
   if (previous.route === 'listing') observeListingEnd();
@@ -3189,7 +3170,6 @@ scroll.addEventListener('touchcancel', () => {
 
 function navigateDock(tab) {
   try { swipeSaveCurrent(); } catch (ignore) { }   // 点底栏离开时也存一份，滑动回来能直接秒出
-  if (splitActive) exitSplit();
   if (state.route === 'detail') state.previous = null;
   if (tab === 'home') goHome();
   else if (tab === 'library') goLibrary();
@@ -4104,55 +4084,4 @@ window.hgBingeAction = (type, id) => {
   window.addEventListener('pointerup', e => { if (e.pointerType === 'mouse') finish(false); }, { passive: true, capture: true });
 })();
 
-/* ============================================================
- * 平板平行视界（左列表 / 右详情）
- *
- * 只对 tablet 且视口 ≥ 900px 生效；手机与电视 splitReady() 恒为 false，
- * content 永远是原来的 #content，整套逻辑等于不存在。
- *
- * 实现方式：进入详情时把 content 指针切到右栏容器，renderDetail() 照常写 content，
- * 于是右栏画详情、左栏的列表 DOM 原封不动留在 #content 里 —— 左右两栏各自滚动、互不重建。
- * 返回时只是把指针切回来、收起右栏，没有重排、没有骨架屏、没有整页转场。
- * ============================================================ */
-const SPLIT_MIN_WIDTH = 900;
-let splitPane = null;
-let splitBody = null;
 
-function splitReady() {
-  return window.VEYRA_DEVICE === 'tablet' && window.innerWidth >= SPLIT_MIN_WIDTH;
-}
-
-function ensureSplitDom() {
-  if (splitPane) return;
-  const app = document.getElementById('app');
-  splitPane = document.createElement('section');
-  splitPane.id = 'split-pane';
-  splitPane.setAttribute('aria-label', '作品详情');
-  splitBody = document.createElement('div');
-  splitBody.id = 'split-body';
-  splitPane.appendChild(splitBody);
-  app.appendChild(splitPane);
-}
-
-function enterSplit() {
-  if (splitActive || !splitReady()) return;
-  ensureSplitDom();
-  splitActive = true;
-  document.documentElement.setAttribute('data-split', '1');
-  content = splitBody;
-}
-
-function exitSplit() {
-  if (!splitActive) return;
-  splitActive = false;
-  document.documentElement.removeAttribute('data-split');
-  content = listContent;
-  if (splitBody) splitBody.replaceChildren();
-}
-
-// 视口缩到 900 以下（分屏、自由窗口、旋转）：退回单栏详情，不能留一个半截的右栏
-window.addEventListener('resize', () => {
-  if (!splitActive || splitReady()) return;
-  exitSplit();
-  if (state.route === 'detail') renderDetail();
-});
