@@ -106,6 +106,7 @@ img{display:block}
    高度永远跟着走，1290/1920 各种分辨率都不会被拉成瘦条 */
 .card .art{
   position:relative;display:block;height:0;padding-top:140%;
+  transition:transform .12s ease-out;
   border-radius:calc(8 * var(--s));
   overflow:hidden;background:var(--panel);
 }
@@ -123,13 +124,12 @@ img{display:block}
   font-size:calc(19 * var(--s));line-height:1.35;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
-.card.is-focused{
-  transform:scale(1.06);
-  z-index:5;
-}
+/* 焦点只作用在海报上：整卡放大会把剧名一起糊掉，描边也会框住文字 */
+.card.is-focused{z-index:5}
 .card.is-focused .art{
   outline:calc(3 * var(--s)) solid var(--focus);
-  outline-offset:calc(2 * var(--s));
+  outline-offset:calc(3 * var(--s));
+  transform:scale(1.03);
 }
 
 /* 剧场分类条 */
