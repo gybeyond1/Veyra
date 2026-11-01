@@ -68,28 +68,31 @@ jobs:
           echo "${{ secrets.VEYRA_KEYSTORE_B64 }}" | base64 -d > "$RUNNER_TEMP/veyra-release.keystore"
           test -s "$RUNNER_TEMP/veyra-release.keystore" || { echo "keystore 解出为空文件" >&2; exit 1; }
           ./gradlew :app:assembleRelease --no-daemon
-          cp app/build/outputs/apk/release/app-release.apk "Veyra-v${VERSION_NAME}-fix.apk"
-          echo "APK=app/build/outputs/apk/release/app-release.apk" >> $GITHUB_ENV
+          # 两个 flavor：mobile（手机/平板）、tv（电视轻量）。产物名带 flavor，路径也跟着变。
+          cp app/build/outputs/apk/release/app-mobile-release.apk "Veyra-v${VERSION_NAME}-fix.apk"
+          cp app/build/outputs/apk/release/app-tv-release.apk "Veyra-TV-v${VERSION_NAME}-fix.apk"
+          echo "APK=app/build/outputs/apk/release/app-mobile-release.apk" >> $GITHUB_ENV
 
       - name: Build debug APK
         if: github.event.inputs.build_type == 'debug'
         run: |
           ./gradlew :app:assembleDebug --no-daemon
-          cp app/build/outputs/apk/debug/app-debug.apk "Veyra-v${VERSION_NAME}-debug.apk"
-          echo "APK=app/build/outputs/apk/debug/app-debug.apk" >> $GITHUB_ENV
+          cp app/build/outputs/apk/debug/app-mobile-debug.apk "Veyra-v${VERSION_NAME}-debug.apk"
+          cp app/build/outputs/apk/debug/app-tv-debug.apk "Veyra-TV-v${VERSION_NAME}-debug.apk"
+          echo "APK=app/build/outputs/apk/debug/app-mobile-debug.apk" >> $GITHUB_ENV
 
       - name: Show apk info
         run: |
           find app/build/outputs/apk -name '*.apk' -printf '%p %s bytes\n'
           sha256sum "$APK"
-          ls -la Veyra-v*.apk
+          ls -la Veyra-*.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: veyra-apk-v${{ env.VERSION_NAME }}-${{ github.event.inputs.build_type || 'release' }}
           path: |
-            Veyra-v*-fix.apk
-            Veyra-v*-debug.apk
+            Veyra-*-fix.apk
+            Veyra-*-debug.apk
           if-no-files-found: error
           retention-days: 30

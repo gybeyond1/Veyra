@@ -1,0 +1,186 @@
+/* 电视轻量版样式（只在 ?lite=1 的电视构建里加载）
+ *
+ * 两件事：
+ *   ① 把玻璃、模糊、阴影、动画全关掉 —— 电视盒子的 GPU 撑不住 backdrop-filter 和
+ *      大面积 box-shadow，滚动会掉帧；这些效果在 3 米外也看不出来。
+ *   ② 给不支持新属性的老 WebView 补兜底。电视上的 System WebView 通常停在 Chrome 60 上下，
+ *      而 app.css 用了 aspect-ratio(88)、inset(87)、flex gap(84)、min()(79)、color-mix(111)，
+ *      这些整条声明会被直接丢弃：海报高度会变成 0、图片不定位、底栏拉满屏。
+ *
+ * 只做这两件事，不改布局本身 —— 列数、间距、字号仍由 device-layout.css 的电视段决定。
+ */
+
+/* ---------------- ① 关特效 ---------------- */
+html[data-device="tv"] *,
+html[data-device="tv"] *::before,
+html[data-device="tv"] *::after {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  filter: none !important;
+  box-shadow: none !important;
+  animation: none !important;
+  transition: none !important;
+  text-shadow: none !important;
+}
+/* 噪点纹理是一张 SVG turbulence，静态也要逐像素算，电视上纯属浪费 */
+html[data-device="tv"] {
+  --grain: none;
+  --raised: none;
+  --raised-sm: none;
+  --recessed: none;
+}
+html[data-device="tv"] body { background-image: none !important; }
+
+/* ---------------- ② 老属性兜底 ---------------- */
+
+/* aspect-ratio 不支持 → 海报高度塌成 0。用 padding-top 撑出 114:153 的比例，
+   图片改成四边贴住（inset 同样不被支持，写全四个方向）。 */
+html[data-device="tv"] .poster {
+  height: 0;
+  padding-top: 134.2%;
+  overflow: hidden;
+}
+html[data-device="tv"] .poster.fallback {
+  height: auto;
+  padding-top: 0;
+  min-height: 150px;
+  display: grid;
+  place-items: center;
+}
+html[data-device="tv"] .poster img,
+html[data-device="tv"] .hero img,
+html[data-device="tv"] .detail-art img,
+html[data-device="tv"] .category-spotlight > img {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+html[data-device="tv"] .poster-score {
+  top: auto;
+  right: auto;
+}
+html[data-device="tv"] .binge-card,
+html[data-device="tv"] #binge {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+}
+
+/* flex gap 不支持（Chrome 84 前）→ 元素会全部贴在一起，改用相邻兄弟 margin。
+   先把 gap 归零，避免新 WebView 上两者叠加成双倍间距。 */
+html[data-device="tv"] .app-top { gap: 0 !important; }
+html[data-device="tv"] .app-top > * + * { margin-left: 16px; }
+html[data-device="tv"] .detail-buttons { gap: 0 !important; }
+html[data-device="tv"] .detail-buttons > * + * { margin-left: 10px; }
+html[data-device="tv"] .binge-actions { gap: 0 !important; }
+html[data-device="tv"] .binge-actions > * + * { margin-left: 10px; }
+html[data-device="tv"] .segmented { gap: 0 !important; }
+html[data-device="tv"] .segmented > * + * { margin-left: 6px; }
+html[data-device="tv"] .auth-tabs { gap: 0 !important; }
+html[data-device="tv"] .auth-tabs > * + * { margin-left: 8px; }
+html[data-device="tv"] .confirm-buttons { gap: 0 !important; }
+html[data-device="tv"] .confirm-buttons > * + * { margin-left: 10px; }
+html[data-device="tv"] .update-buttons { gap: 0 !important; }
+html[data-device="tv"] .update-buttons > * + * { margin-left: 10px; }
+html[data-device="tv"] #dock { gap: 0 !important; }
+html[data-device="tv"] #dock > button + button { margin-left: 4px; }
+
+/* grid 的 gap 简写要 Chrome 66；61 只认 grid-gap */
+html[data-device="tv"] .film-row { grid-gap: 26px 18px; }
+html[data-device="tv"] .episode-grid { grid-gap: 9px; }
+html[data-device="tv"] .detail-episode-grid,
+html[data-device="tv"] .download-sheet-grid,
+html[data-device="tv"] .search-grid,
+html[data-device="tv"] .tags-grid { grid-gap: 10px; }
+
+/* min()/calc() 里的 min() 不支持 → 底栏会被 left:0;right:0 拉成整条。
+   电视视口宽度基本固定，直接给固定宽度 + 居中偏移。 */
+html[data-device="tv"] #dock {
+  left: 50%;
+  right: auto;
+  width: 560px;
+  margin-left: -280px;
+  margin-right: 0;
+}
+
+/* clamp()/min() 不支持时搜索框会拉满顶栏，这里给个上限 */
+html[data-device="tv"] .search-form {
+  width: 640px;
+  max-width: 640px;
+  flex: 0 0 640px;
+}
+
+/* color-mix 不被支持 → 玻璃底色的兜底纯色。这些容器在电视上统一用实底，看得清也省一次合成 */
+html[data-device="tv"] .search-form,
+html[data-device="tv"] #dock,
+html[data-device="tv"] #binge-fab,
+html[data-device="tv"] .download-panel,
+html[data-device="tv"] .auth-panel,
+html[data-device="tv"] .confirm-panel,
+html[data-device="tv"] .update-panel {
+  background: var(--surface, #fff) !important;
+  border: 1px solid var(--line, #e1e6ee);
+}
+
+/* 焦点环：不能靠 filter/box-shadow（都被上面关了），用 outline 保证遥控时看得见位置 */
+html[data-device="tv"] .tv-focus {
+  outline: 3px solid var(--accent, #c89b3c) !important;
+  outline-offset: 3px !important;
+}
+html[data-device="tv"] #dock .tv-focus,
+html[data-device="tv"] .ep-btn.tv-focus,
+html[data-device="tv"] .download-sheet-grid button.tv-focus,
+html[data-device="tv"] .search-input.tv-focus,
+html[data-device="tv"] .search-form.tv-focus {
+  outline: 3px solid var(--accent, #c89b3c) !important;
+  outline-offset: 2px !important;
+}
+
+/* 老 WebView 不支持 :focus-visible，键盘 focus 的默认描边会跟焦点环打架 */
+html[data-device="tv"] :focus { outline: none; }
+html[data-device="tv"] .tv-focus { outline: 3px solid var(--accent, #c89b3c) !important; }
+
+/* ---------------- ③ 固定配色 ----------------
+ *
+ * sunny-theme 的 --bg/--surface/--mat-* 都是 color-mix(…) 算出来的，Chrome 111 才有。
+ * 老 WebView 拿到一个算不出来的变量值，等于没有这个变量：背景变透明、面板全白、文字看不清。
+ * 电视不做主题切换，直接把一套浅色固化成字面量，任何版本都认。
+ */
+html[data-device="tv"] {
+  --bg: #eef0f4;
+  --surface: #ffffff;
+  --surface-2: #f7f8fb;
+  --soft-base: #f3f5f9;
+  --text: #18212e;
+  --text-2: #465468;
+  --muted: #6c7a8d;
+  --line: #dfe4ec;
+  --line-strong: #ccd4e0;
+  --accent: #376bd8;
+  --accent-2: #18a0a6;
+  --accent-3: #8a5cc7;
+  --accent-ink: #ffffff;
+  --panel: #ffffff;
+  --dock: #ffffff;
+  --mat-page: #eef0f4;
+  --mat-fill: #ffffff;
+  --mat-raised: #ffffff;
+  --mat-sunken: #f3f5f9;
+  background: #eef0f4;
+  color: #18212e;
+}
+html[data-device="tv"] body { background: #eef0f4; color: #18212e; }
+html[data-device="tv"] .poster,
+html[data-device="tv"] .film-card,
+html[data-device="tv"] .episode-grid button,
+html[data-device="tv"] .download-sheet-grid button {
+  background: #ffffff;
+}
+html[data-device="tv"] .hero {
+  background: #d9dde6;
+}

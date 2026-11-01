@@ -337,7 +337,7 @@ public final class MainActivity extends Activity {
                         } catch (Exception ignored) { }
                         migratingOrigin = false;
                         view.getSettings().setAllowFileAccess(false);
-                        view.loadUrl(HotUpdateManager.UI_URL);
+                        view.loadUrl(uiUrl());
                     });
                     return;
                 }
@@ -375,9 +375,16 @@ public final class MainActivity extends Activity {
             }
         });
         webView.addJavascriptInterface(new Bridge(), "AndroidHost");
-        webView.loadUrl(migratingOrigin ? "file:///android_asset/app.html" : HotUpdateManager.UI_URL);
+        webView.loadUrl(migratingOrigin ? "file:///android_asset/app.html" : uiUrl());
         checkHotUpdates();
         checkLastCrash();
+    }
+
+    /** 电视构建走 ?lite=1：页面据此只加载降级脚本和轻量样式，手机 / 平板不带这个参数。 */
+    private String uiUrl() {
+        return getResources().getBoolean(R.bool.veyra_lite)
+                ? HotUpdateManager.UI_URL + "?lite=1"
+                : HotUpdateManager.UI_URL;
     }
 
     private void checkHotUpdates() {
@@ -402,7 +409,7 @@ public final class MainActivity extends Activity {
             store.clearCache();
             getSharedPreferences("hot-updates", MODE_PRIVATE).edit()
                     .putString("siteFingerprint", hotSession.site.fingerprint).apply();
-            webView.loadUrl(HotUpdateManager.UI_URL);
+            webView.loadUrl(uiUrl());
             Log.w(TAG, "资源包启动异常，已回退至可用版本");
         } catch (Exception error) { Log.e(TAG, "资源回退失败", error); }
     }

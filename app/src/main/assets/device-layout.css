@@ -11,6 +11,15 @@
  * 电视走 html[data-device="tv"] 那一段，且在横屏规则里被 :not() 显式排除。
  */
 
+/* ---------------- 详情页铺满（所有设备） ----------------
+ *
+ * #content 平时有 110px 底部内边距给底栏让位，详情路由下底栏是隐藏的，这段留白会把
+ * 详情页压成「上半截有内容、下半截空着」，从刷剧页进来尤其明显（那一屏背后是原生视频）。
+ * .detail-page 的 min-height:100% 又因为 #content 高度是 auto 而解析失败，所以这里直接用视口高度。
+ */
+html:not([data-device="tv"]) #app.route-detail > #scroll > #content { padding-bottom: 0; }
+html:not([data-device="tv"]) #app.route-detail .detail-page { min-height: 100vh; }
+
 /* ---------------- 平板 / 宽屏：竖屏与中等宽度 ---------------- */
 @media (min-width: 600px) and (orientation: portrait) {
   html:not([data-device="tv"]) .app-top {
@@ -90,6 +99,7 @@
   html:not([data-device="tv"]) .search-form { max-width: none; height: 46px; }
   html:not([data-device="tv"]) .search-input { font-size: 15px; }
   html:not([data-device="tv"]) #scroll { padding-top: calc(70px + var(--status-bar-height)); }
+  html:not([data-device="tv"]) .home-tag-scroll { padding-top: 14px; }
 
   /* --- 首页 hero：横向拉满，文字区不再挤在左下角一小块 --- */
   html:not([data-device="tv"]) .hero {
@@ -156,7 +166,7 @@
     grid-template-columns: clamp(300px, 32%, 420px) minmax(0, 1fr);
     gap: 0 44px;
     align-content: start;
-    min-height: 100%;
+    min-height: 100vh;
     padding: calc(58px + var(--status-bar-height)) 44px 56px;
   }
   html:not([data-device="tv"]) .detail-back {
@@ -315,3 +325,14 @@ html[data-device="tv"] .film-section { margin: 10px 0 14px; }
 html[data-device="tv"] #content { padding: 0 0 120px; }
 html[data-device="tv"] #dock { height: 64px; bottom: 12px; width: min(560px, calc(100% - 96px)); }
 html[data-device="tv"] #dock button { height: 50px; }
+
+/* ---------------- 平板不要轮播图 ----------------
+ *
+ * 只按「够宽」判定，不区分横竖屏：上一版只写在竖屏媒体查询里，横屏仍旧在轮播。
+ * 电视不在此列 —— 它保留自己的首屏大图，遥控在那一层也还有用。
+ */
+@media (min-width: 600px) {
+  html:not([data-device="tv"]) .hero,
+  html:not([data-device="tv"]) .hero-dots { display: none !important; }
+  html:not([data-device="tv"]) .home-tag-scroll { padding-top: 14px; }
+}

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 电视轻量构建：页面用 ?lite=1 打开，只加载降级脚本和轻量样式。 -->
+<resources>
+    <bool name="veyra_lite">true</bool>
+</resources>

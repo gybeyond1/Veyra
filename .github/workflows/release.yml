@@ -72,13 +72,14 @@ jobs:
             if [ -n "$VER" ]; then TAG="v$VER"; else TAG="v$(date +%Y%m%d-%H%M)"; fi
           fi
           echo "TAG=$TAG" >> $GITHUB_ENV
-          # APK 改名：Veyra-<tag>.apk（CI 正式签名 keystore 构建）
-          cp app/build/outputs/apk/release/app-release.apk Veyra-$TAG.apk
+          # APK 改名：Veyra-<tag>.apk 给手机/平板，Veyra-TV-<tag>.apk 给电视（轻量构建）
+          cp app/build/outputs/apk/release/app-mobile-release.apk Veyra-$TAG.apk
+          cp app/build/outputs/apk/release/app-tv-release.apk Veyra-TV-$TAG.apk
           # 后端最新镜像同步进 release（gzip 压缩，NAS 可 docker load 离线部署）
           docker pull gybeyond/veyra-backend:latest
           docker save gybeyond/veyra-backend:latest | gzip -9 > veyra-backend-latest.tar.gz
-          ls -la Veyra-$TAG.apk veyra-backend-latest.tar.gz
-          sha256sum Veyra-$TAG.apk
+          ls -la Veyra-$TAG.apk Veyra-TV-$TAG.apk veyra-backend-latest.tar.gz
+          sha256sum Veyra-$TAG.apk Veyra-TV-$TAG.apk
 
       - name: Create Release
         env:
@@ -103,6 +104,7 @@ jobs:
           if [ -n "$NOTES" ]; then
             gh release create "$TAG" \
               "Veyra-$TAG.apk" \
+              "Veyra-TV-$TAG.apk" \
               veyra-backend-latest.tar.gz \
               --title "Veyra $TAG" \
               --notes "$NOTES" \
@@ -110,6 +112,7 @@ jobs:
           else
             gh release create "$TAG" \
               "Veyra-$TAG.apk" \
+              "Veyra-TV-$TAG.apk" \
               veyra-backend-latest.tar.gz \
               --title "Veyra $TAG" \
               --generate-notes \

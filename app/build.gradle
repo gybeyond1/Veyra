@@ -10,9 +10,22 @@ android {
         applicationId 'com.veyra.gybeyond'
         minSdk 26
         targetSdk 36
-        versionCode 345
-        versionName "0.23.25"
+        versionCode 346
+        versionName "0.23.26"
         testInstrumentationRunner 'com.veyra.gybeyond.PlaybackTestRunner'
+    }
+
+    // 两个形状：mobile（手机 + 平板）与 tv（电视轻量大屏）。
+    // 共用同一份 Java 代码和 assets，只在打包产物和 R.bool.veyra_lite 上分开 ——
+    // 电视端不加载玻璃/转场/主题那几套脚本，页面用 ?lite=1 打开。
+    flavorDimensions 'form'
+    productFlavors {
+        mobile {
+            dimension 'form'
+        }
+        tv {
+            dimension 'form'
+        }
     }
 
     signingConfigs {

@@ -14,6 +14,16 @@
   <script src="device-mode.js"></script>
   <link rel="stylesheet" href="device-layout.css">
   <link rel="stylesheet" href="relay-input.css">
+  <!-- 电视构建走 ?lite=1：追加轻量样式表（关玻璃/模糊/阴影/动画 + 老 WebView 属性兜底）。
+       手机与平板不带这个参数，__VEYRA_LITE 为 false，下面这条 link 根本不会写进文档。 -->
+  <script>
+  (function () {
+    var lite = false;
+    try { lite = /[?&]lite=1/.test(location.search); } catch (e) { }
+    window.__VEYRA_LITE = lite;
+    if (lite) document.write('<link rel="stylesheet" href="tv-lite.css">');
+  })();
+  </script>
   <!-- 冷启动记忆：上次退出时停在刷剧页 → 在 app.js 还没跑起来之前就把首页内容藏掉、
        垫上上次那部剧的海报。否则第一帧是传统首页（骨架 → 内容），等首页数据回来
        再跳刷剧页 —— 看着就是「闪一下传统首页」。撤掉的时机在 app.js 里
@@ -153,18 +163,36 @@
       <button id="age-exit" type="button">退出应用</button>
     </div>
   </div>
-  <script src="vendor/rematrix-0.2.2.js"></script>
-  <script src="vendor/flip-toolkit-7.2.6.js"></script>
-  <script src="card-transition.js"></script>
-  <script src="runtime.js"></script>
-  <script src="hot-runtime.js"></script>
-  <script src="appearance.js"></script>
-  <script src="app.js"></script>
-  <script src="vendor/qrcode.js"></script>
-  <script src="relay-input.js"></script>
-  <script src="tv-focus.js"></script>
-  <script src="dock-glass.js"></script>
-  <script src="dock-refract.js"></script>
-  <script src="seg-glass.js"></script>
+  <!-- 脚本分流：
+       普通构建（手机/平板）—— 与原来完全一致，逐条加载。
+       电视构建（?lite=1）  —— 只加载跑得动、用得上的：先补 ES5 兜底，再跑降级后的 app.es5.js。
+                              卡片转场、玻璃透镜、外观主题这四套特效脚本整体不进电视端。 -->
+  <script>
+  (function () {
+    function load(src) { document.write('<script src="' + src + '"><\/script>'); }
+    if (window.__VEYRA_LITE) {
+      load('runtime.js');
+      load('tv-polyfill.js');
+      load('app.es5.js');
+      load('vendor/qrcode.js');
+      load('relay-input.js');
+      load('tv-focus.js');
+      return;
+    }
+    load('vendor/rematrix-0.2.2.js');
+    load('vendor/flip-toolkit-7.2.6.js');
+    load('card-transition.js');
+    load('runtime.js');
+    load('hot-runtime.js');
+    load('appearance.js');
+    load('app.js');
+    load('vendor/qrcode.js');
+    load('relay-input.js');
+    load('tv-focus.js');
+    load('dock-glass.js');
+    load('dock-refract.js');
+    load('seg-glass.js');
+  })();
+  </script>
 </body>
 </html>

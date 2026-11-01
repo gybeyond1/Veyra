@@ -357,17 +357,22 @@ updateLaterButton.addEventListener('click', () => {
   if (updateDownloading) toast('已转入后台下载，完成后会自动弹出安装', true);
 });
 
-window.hgTheme = dark => {
+window.hgTheme = info => {
   // 外观（明暗/质感/配色/圆角）现在由 appearance.js 管理并存在 localStorage：
   // 用户在本机选过就以本地为准，否则跟随原生传来的系统主题，并把结果记下来当初始值。
+  //
+  // 原生回的是 { dark: false } 这种对象，不是布尔值。以前这个对象被直接当条件用，
+  // 对象恒为真 → 永远判成深色；只是外观模块一直在，这条路径从没走到，才没暴露。
+  // 电视版不加载 appearance.js，必须自己把字段取出来。
+  const isDark = !!(info && typeof info === 'object' ? info.dark : info);
   const A = window.VeyraAppearance;
   if (A) {
     let saved = null;
     try { saved = localStorage.getItem('veyra.appearance.v1'); } catch (e) {}
-    if (!saved) A.set({ theme: dark ? 'dark' : 'light' });
+    if (!saved) A.set({ theme: isDark ? 'dark' : 'light' });
     return;
   }
-  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  document.documentElement.dataset.theme = isDark ? 'dark' : 'light';
 };
 api('theme').then(window.hgTheme).catch(() => {});
 
@@ -614,9 +619,17 @@ function stopBannerAuto() {
   clearTimeout(bannerTimer);
   bannerTimer = null;
 }
+/* 平板 / 桌面宽度下首页不展示轮播（device-layout.css 里已隐藏），定时器也就没必要空转，
+   每 3 秒切一张看不见的图纯属浪费。电视保留自己的轮播。 */
+function bannerHiddenByLayout() {
+  try {
+    return window.matchMedia('(min-width: 600px)').matches && window.VEYRA_DEVICE !== 'tv';
+  } catch (error) { return false; }
+}
 function scheduleBannerAuto() {
   stopBannerAuto();
   if (!isBannerRoute() || document.hidden || bannerSlides().length < 2 || !content.querySelector('.hero')) return;
+  if (bannerHiddenByLayout()) return;
   bannerTimer = setTimeout(() => {
     bannerTimer = null;
     if (!isBannerRoute() || document.hidden) return;
@@ -2264,7 +2277,7 @@ async function goDetail(id, trigger) {
     return;
   }
   const token = ++routeToken;
-  const entrySource = bannerChanging && trigger?.closest('.hero') ? null : HGCardTransition.capture(trigger);
+  const entrySource = bannerChanging && trigger?.closest('.hero') ? null : (window.HGCardTransition ? HGCardTransition.capture(trigger) : null);
   rememberScreen();
   state.previous = {
     route: state.route, tab: state.tab, sub: state.sub[state.tab], query: state.query,
