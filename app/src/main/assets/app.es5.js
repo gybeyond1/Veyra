@@ -1,5 +1,5 @@
 "use strict";
-var _a, _b, _c;
+var _a, _b, _c, _d;
 window.__veyraBooted = true;
 const callbacks = /* @__PURE__ */ new Map();
 let requestNumber = 0;
@@ -258,11 +258,96 @@ function setAuthPending(pending, mode = authMode) {
     button.disabled = pending;
   });
 }
+function tvDevice() {
+  return window.VEYRA_DEVICE === "tv" || document.documentElement.dataset.device === "tv";
+}
+function showTvLoginPanel() {
+  const panel = authOverlay.querySelector(".auth-panel");
+  const tabs = panel == null ? void 0 : panel.querySelector(".auth-tabs");
+  const form = document.getElementById("auth-form");
+  const footnote = panel == null ? void 0 : panel.querySelector(".auth-footnote");
+  if (tabs) tabs.hidden = true;
+  if (form) form.hidden = true;
+  if (footnote) footnote.hidden = true;
+  document.getElementById("auth-title").textContent = "登录电视";
+  document.getElementById("auth-subtitle").textContent = "用手机上的 Veyra 扫一下，账号直接同步过来";
+  document.getElementById("tv-login").hidden = false;
+  requestTvLoginQr();
+}
+function requestTvLoginQr() {
+  var _a2, _b2;
+  const code = document.getElementById("tv-login-code");
+  const note = document.getElementById("tv-login-note");
+  const start = document.getElementById("tv-login-start");
+  let info = null;
+  try {
+    info = JSON.parse(((_b2 = (_a2 = window.AndroidHost) == null ? void 0 : _a2.tvLoginInfo) == null ? void 0 : _b2.call(_a2)) || "null");
+  } catch (error) {
+  }
+  if (!info || !info.ready) {
+    if (code) {
+      code.hidden = true;
+      code.innerHTML = "";
+    }
+    if (start) {
+      start.hidden = false;
+      start.textContent = "重试";
+    }
+    if (note) {
+      note.textContent = "局域网没起来，确认电视和手机连同一个 Wi-Fi 后再试";
+      note.hidden = false;
+    }
+    return;
+  }
+  if (!window.qrcode) {
+    if (note) {
+      note.textContent = "二维码组件没加载，请更新应用";
+      note.hidden = false;
+    }
+    return;
+  }
+  try {
+    const qr = window.qrcode(0, "M");
+    qr.addData(info.url);
+    qr.make();
+    code.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+    code.hidden = false;
+    if (start) start.hidden = true;
+    if (note) {
+      note.textContent = "手机 Veyra → 设置 → 扫码登录电视（" + info.host + ":" + info.port + "）";
+      note.hidden = false;
+    }
+  } catch (error) {
+    if (note) {
+      note.textContent = "二维码生成失败，请重试";
+      note.hidden = false;
+    }
+  }
+}
+window.hgTvLogin = (ok) => {
+  if (!ok) {
+    toast("登录没成功，重新扫一次", true);
+    requestTvLoginQr();
+    return;
+  }
+  api("account").then((profile) => {
+    setAccount(profile);
+    if (profile == null ? void 0 : profile.loggedIn) {
+      hideAuth();
+      toast("已登录");
+    }
+  }).catch(() => {
+  });
+};
 function showAuth(mode = "login") {
   if (authPending) mode = authMode;
   authMode = mode;
   authOverlay.hidden = false;
   updateBackEnabled();
+  if (tvDevice()) {
+    showTvLoginPanel();
+    return;
+  }
   document.getElementById("auth-title").textContent = mode === "login" ? "登录应用账号" : "注册应用账号";
   setAuthPending(authPending, mode);
   document.getElementById("auth-password").autocomplete = mode === "login" ? "current-password" : "new-password";
@@ -288,6 +373,22 @@ avatarButton.addEventListener("click", () => {
 });
 headerSettings.addEventListener("click", goSettings);
 document.querySelectorAll("[data-auth-mode]").forEach((button) => button.addEventListener("click", () => showAuth(button.dataset.authMode)));
+(_a = document.getElementById("tv-login-start")) == null ? void 0 : _a.addEventListener("click", requestTvLoginQr);
+function startQrScan() {
+  var _a2;
+  if (!((_a2 = window.AndroidHost) == null ? void 0 : _a2.startQrScan)) {
+    toast("当前版本不支持扫码，请更新应用", true);
+    return;
+  }
+  try {
+    window.AndroidHost.startQrScan();
+  } catch (error) {
+    toast(error.message || "打不开扫码页", true);
+  }
+}
+window.hgQrScan = (ok, message) => {
+  toast(message || (ok ? "已登录电视" : "扫码失败"), !ok);
+};
 document.getElementById("auth-form").addEventListener("submit", async (event) => {
   var _a2, _b2;
   event.preventDefault();
@@ -549,7 +650,7 @@ function getCover(url) {
   return request;
 }
 async function loadCoverInto(image) {
-  var _a2, _b2, _c2, _d, _e;
+  var _a2, _b2, _c2, _d2, _e;
   const url = image.dataset.cover;
   if (image.dataset.loading === "1") return;
   if (image.getAttribute("src")) return;
@@ -597,7 +698,7 @@ async function loadCoverInto(image) {
       poster == null ? void 0 : poster.classList.add("fallback");
       image.dataset.retryAfter = String(Date.now() + (error.message === "图片无法解码" ? 3e5 : 3e4));
     }
-    const id = ((_c2 = image.closest("[data-open-id]")) == null ? void 0 : _c2.dataset.openId) || ((_e = (_d = image.closest(".hero-slide,.category-spotlight")) == null ? void 0 : _d.querySelector("[data-open-id]")) == null ? void 0 : _e.dataset.openId) || "unknown";
+    const id = ((_c2 = image.closest("[data-open-id]")) == null ? void 0 : _c2.dataset.openId) || ((_e = (_d2 = image.closest(".hero-slide,.category-spotlight")) == null ? void 0 : _d2.querySelector("[data-open-id]")) == null ? void 0 : _e.dataset.openId) || "unknown";
     console.warn("封面加载失败", id, (() => {
       try {
         return new URL(url).host;
@@ -1402,7 +1503,7 @@ async function submitDownloadTo(target) {
   }
 }
 function renderSettings() {
-  content.innerHTML = '<div class="settings-page"><button type="button" class="listing-back" data-back="1">'.concat(icon("back"), " 返回我的</button><h1>设置</h1>\n    ").concat(window.renderAppearance ? window.renderAppearance() : "", '\n    <section><button type="button" class="settings-link" data-account-management="1"><span><strong>账号管理</strong><small>').concat(state.account.loggedIn ? esc(state.account.username) : "登录或注册账号", "</small></span>").concat(icon("arrow"), '</button></section>\n    <section><button type="button" class="settings-link" data-proxy-open><span><strong>黄果网络通道</strong><small data-proxy-summary>').concat(esc(proxySummaryText()), "</small></span>").concat(icon("arrow"), '</button></section>\n    <section><button type="button" class="settings-link" data-about-open><span><strong>关于 Veyra</strong><small>项目地址 · GPL-3.0 开源</small></span>').concat(icon("arrow"), "</button></section></div>");
+  content.innerHTML = '<div class="settings-page"><button type="button" class="listing-back" data-back="1">'.concat(icon("back"), " 返回我的</button><h1>设置</h1>\n    ").concat(window.renderAppearance ? window.renderAppearance() : "", '\n    <section><button type="button" class="settings-link" data-account-management="1"><span><strong>账号管理</strong><small>').concat(state.account.loggedIn ? esc(state.account.username) : "登录或注册账号", "</small></span>").concat(icon("arrow"), "</button></section>\n    ").concat(tvDevice() ? "" : '<section><button type="button" class="settings-link" data-qr-login><span><strong>扫码登录电视</strong><small>扫一下电视上的二维码，把账号同步过去</small></span>' + icon("arrow") + "</button></section>", '\n    <section><button type="button" class="settings-link" data-proxy-open><span><strong>黄果网络通道</strong><small data-proxy-summary>').concat(esc(proxySummaryText()), "</small></span>").concat(icon("arrow"), '</button></section>\n    <section><button type="button" class="settings-link" data-about-open><span><strong>关于 Veyra</strong><small>项目地址 · GPL-3.0 开源</small></span>').concat(icon("arrow"), "</button></section></div>");
   if (window.bindAppearance) window.bindAppearance();
   api("hot-update-status").then(window.hgHotUpdateStatus).catch(() => {
   });
@@ -1847,7 +1948,7 @@ function updateBackEnabled() {
   (_a2 = window.AndroidHost) == null ? void 0 : _a2.setBackEnabled(modalOpen || !isRootColumn());
 }
 function setRoute(route) {
-  var _a2, _b2, _c2, _d;
+  var _a2, _b2, _c2, _d2;
   stopBannerAuto();
   if (route !== "downloads") stopDownloadsTimer();
   if (state.route === "detail" && route !== "detail") {
@@ -1861,7 +1962,7 @@ function setRoute(route) {
   document.getElementById("app").dataset.route = route;
   (_b2 = window.hgThemeRefresh) == null ? void 0 : _b2.call(window);
   document.getElementById("app").classList.toggle("route-detail", route === "detail");
-  (_d = (_c2 = window.AndroidHost) == null ? void 0 : _c2.setDetailMode) == null ? void 0 : _d.call(_c2, route === "detail");
+  (_d2 = (_c2 = window.AndroidHost) == null ? void 0 : _c2.setDetailMode) == null ? void 0 : _d2.call(_c2, route === "detail");
   headerSettings.hidden = route !== "library";
   window.__bingeSync && window.__bingeSync();
   searchInput.placeholder = libraryArea ? "搜索观看历史和收藏" : privateMode() ? "搜索剧名或 #标签" : "搜索剧名";
@@ -1883,12 +1984,12 @@ function isRootColumn() {
   return ["home", "category", "library"].includes(state.route);
 }
 function backDestination() {
-  var _a2, _b2, _c2, _d, _e, _f, _g, _h;
+  var _a2, _b2, _c2, _d2, _e, _f, _g, _h;
   if (isRootColumn()) return null;
   if (state.route === "campaign") return ((_a2 = state.campaignReturn) == null ? void 0 : _a2.route) || "home";
   if (state.route === "detail") return ((_b2 = state.previous) == null ? void 0 : _b2.route) || "home";
   if (state.route === "account-management") return ((_c2 = state.accountReturn) == null ? void 0 : _c2.route) || "settings";
-  if (state.route === "downloads") return ((_d = state.settingsReturn) == null ? void 0 : _d.route) || "settings";
+  if (state.route === "downloads") return ((_d2 = state.settingsReturn) == null ? void 0 : _d2.route) || "settings";
   if (state.route === "settings") return ((_e = state.settingsReturn) == null ? void 0 : _e.route) || "library";
   if (state.route === "tags") return ((_f = state.tagsReturn) == null ? void 0 : _f.route) || "home";
   if (state.route === "listing" && ((_g = state.listing) == null ? void 0 : _g.kind) === "tag-list") return ((_h = state.listingReturn) == null ? void 0 : _h.route) || "home";
@@ -1914,7 +2015,7 @@ function clearPredictivePreview() {
   scroll.style.removeProperty("transform");
 }
 window.hgPredictiveBackStart = (fromRight) => {
-  var _a2, _b2, _c2, _d;
+  var _a2, _b2, _c2, _d2;
   clearPredictivePreview();
   if (!downloadOverlay.hidden || window.__veyraAppearanceOpen && window.__veyraAppearanceOpen() || window.__veyraAccountOpen && window.__veyraAccountOpen() || window.__veyraProxyOpen && window.__veyraProxyOpen() || window.__veyraAboutOpen && window.__veyraAboutOpen()) return false;
   if (state.route === "detail" && detailCard && authOverlay.hidden && confirmOverlay.hidden && updateOverlay.hidden && unlockOverlay.hidden) {
@@ -1951,7 +2052,7 @@ window.hgPredictiveBackStart = (fromRight) => {
     predictivePreview.fromRight = fromRight;
     return true;
   }
-  const fromDetail = state.route === "detail" && ((_d = state.previous) == null ? void 0 : _d.route) === destination && state.previous.pageNode;
+  const fromDetail = state.route === "detail" && ((_d2 = state.previous) == null ? void 0 : _d2.route) === destination && state.previous.pageNode;
   const snapshot = fromDetail ? state.previous : screenSnapshots[destination];
   if (!snapshot) return false;
   const preview = document.createElement("div");
@@ -2419,12 +2520,12 @@ async function goSearch(query) {
   }
 }
 function sourceItem(id) {
-  var _a2, _b2, _c2, _d, _e, _f, _g, _h, _i, _j, _k, _l;
-  const candidates = [(_a2 = state.listing) == null ? void 0 : _a2.items, (_b2 = state.home) == null ? void 0 : _b2.featured, (_c2 = state.home) == null ? void 0 : _c2.homepageRecommend, (_d = state.home) == null ? void 0 : _d.homepageNewest, (_f = (_e = state.home) == null ? void 0 : _e.recommend) == null ? void 0 : _f.items, (_h = (_g = state.home) == null ? void 0 : _g.newest) == null ? void 0 : _h.items, (_i = state.category) == null ? void 0 : _i.items, (_j = state.search) == null ? void 0 : _j.items, (_k = state.library) == null ? void 0 : _k.bookmarks, (_l = state.library) == null ? void 0 : _l.progress].flatMap(asArray);
+  var _a2, _b2, _c2, _d2, _e, _f, _g, _h, _i, _j, _k, _l;
+  const candidates = [(_a2 = state.listing) == null ? void 0 : _a2.items, (_b2 = state.home) == null ? void 0 : _b2.featured, (_c2 = state.home) == null ? void 0 : _c2.homepageRecommend, (_d2 = state.home) == null ? void 0 : _d2.homepageNewest, (_f = (_e = state.home) == null ? void 0 : _e.recommend) == null ? void 0 : _f.items, (_h = (_g = state.home) == null ? void 0 : _g.newest) == null ? void 0 : _h.items, (_i = state.category) == null ? void 0 : _i.items, (_j = state.search) == null ? void 0 : _j.items, (_k = state.library) == null ? void 0 : _k.bookmarks, (_l = state.library) == null ? void 0 : _l.progress].flatMap(asArray);
   return candidates.find((item) => item.id === id) || { id, title: "剧集 ".concat(id) };
 }
 async function goDetail(id, trigger) {
-  var _a2, _b2, _c2, _d, _e, _f, _g, _h;
+  var _a2, _b2, _c2, _d2, _e, _f, _g, _h;
   if (state.route === "detail" && ((_a2 = state.sourceItem) == null ? void 0 : _a2.id) === id) {
     state.detailLoading = true;
     renderDetail();
@@ -2465,7 +2566,7 @@ async function goDetail(id, trigger) {
   state.sourceItem = sourceItem(id);
   state.sourceGroup = state.route === "category" ? categoryId() : state.sourceItem.category || "";
   const aiGroup = state.sourceGroup === "ai-huanlian" || state.sourceGroup === "ai-mogai";
-  const candidates = state.route === "category" ? asArray((_b2 = state.category) == null ? void 0 : _b2.items) : state.route === "search" ? asArray((_c2 = state.search) == null ? void 0 : _c2.items) : state.route === "listing" ? asArray((_d = state.listing) == null ? void 0 : _d.items) : [...asArray((_f = (_e = state.home) == null ? void 0 : _e.recommend) == null ? void 0 : _f.items), ...asArray((_h = (_g = state.home) == null ? void 0 : _g.newest) == null ? void 0 : _h.items)];
+  const candidates = state.route === "category" ? asArray((_b2 = state.category) == null ? void 0 : _b2.items) : state.route === "search" ? asArray((_c2 = state.search) == null ? void 0 : _c2.items) : state.route === "listing" ? asArray((_d2 = state.listing) == null ? void 0 : _d2.items) : [...asArray((_f = (_e = state.home) == null ? void 0 : _e.recommend) == null ? void 0 : _f.items), ...asArray((_h = (_g = state.home) == null ? void 0 : _g.newest) == null ? void 0 : _h.items)];
   state.sourceQueue = aiGroup ? candidates.filter((item) => item.category === state.sourceGroup) : [];
   setRoute("detail");
   state.detail = { ...state.sourceItem };
@@ -3576,6 +3677,10 @@ document.addEventListener("click", async (event) => {
     openAccountPop();
     return;
   }
+  if (event.target.closest("[data-qr-login]")) {
+    startQrScan();
+    return;
+  }
   if (event.target.closest("[data-proxy-open]")) {
     openProxyPop();
     return;
@@ -4189,7 +4294,7 @@ document.addEventListener("visibilitychange", () => {
 });
 api("hot-update-status").then(window.hgHotUpdateStatus).catch(() => {
 });
-(_a = window.hgBootReady) == null ? void 0 : _a.call(window);
+(_b = window.hgBootReady) == null ? void 0 : _b.call(window);
 function closeUnlock() {
   unlockOverlay.hidden = true;
   updateBackEnabled();
@@ -4447,11 +4552,18 @@ window.hgBingeFailed = (message) => {
 };
 function openBingeDetail(id) {
   if (id == null) return;
+  const app = document.getElementById("app");
+  const layer = document.getElementById("binge");
+  if (app) app.classList.remove("binge");
+  document.body.classList.remove("binge");
+  if (layer) layer.hidden = true;
+  const scrollEl = document.getElementById("scroll");
+  if (scrollEl) scrollEl.style.removeProperty("display");
   goDetail(String(id)).catch(() => {
   });
 }
-(_b = document.getElementById("binge-detail-btn")) == null ? void 0 : _b.addEventListener("click", () => openBingeDetail(bingeCurrentId));
-(_c = document.getElementById("binge-full-btn")) == null ? void 0 : _c.addEventListener("click", () => {
+(_c = document.getElementById("binge-detail-btn")) == null ? void 0 : _c.addEventListener("click", () => openBingeDetail(bingeCurrentId));
+(_d = document.getElementById("binge-full-btn")) == null ? void 0 : _d.addEventListener("click", () => {
   if (window.api) api("binge-full", { episode: 1 }).catch(() => {
   });
 });

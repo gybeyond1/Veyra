@@ -168,8 +168,32 @@ final class AccountService {
         return profile(false);
     }
 
-    /** 设置后端服务器地址（登录/注册页填写，持久化；传空表示沿用当前已配置地址）。 */
-    private void applyServerBase(String server) {
+    /** 扫码登录用：导出当前会话（服务器 + token + 用户），交给对端设备。 */
+    synchronized JSONObject session() throws Exception {
+        if (!isLoggedIn()) throw new IllegalStateException("请先登录账号");
+        JSONObject user = new JSONObject()
+                .put("id", prefs.getString("userId", ""))
+                .put("username", prefs.getString("username", ""))
+                .put("role", prefs.getString("role", "user"))
+                .put("huangguoUnlocked", prefs.getBoolean("huangguoUnlocked", false));
+        return new JSONObject().put("token", prefs.getString("token", ""))
+                .put("server", baseUrl()).put("user", user);
+    }
+
+    /** 接收另一台设备扫码授权过来的会话：落盘后立即可用，不用再走一次登录接口。 */
+    synchronized JSONObject adoptSession(String token, String server, JSONObject user) throws Exception {
+        if (token == null || token.trim().isEmpty()) throw new IllegalArgumentException("凭据为空，请重新扫码");
+        if (user == null || user.optString("id", "").isEmpty()) throw new IllegalArgumentException("凭据不完整，请重新扫码");
+        String normalized = server == null || server.trim().isEmpty() ? baseUrl() : ServerConfig.normalize(server);
+        if (normalized == null || normalized.isEmpty()) throw new IllegalArgumentException("缺少服务器地址，请先在手机上确认账号");
+        ServerConfig.set(context, normalized);
+        this.baseUrl = normalized;
+        applyAuth(new JSONObject().put("token", token.trim()).put("user", user));
+        lastProfileRefresh = 0;   // 换号了，资料必须重新拉一次
+        try { return profile(true); } catch (Exception ignored) { return profile(false); }
+    }
+
+    /** 设置后端服务器地址（登录/注册页填写，持久化；传空表示沿用当前已配置地址）。 */    private void applyServerBase(String server) {
         if (server == null || server.trim().isEmpty()) {
             if (baseUrl.isEmpty()) throw new IllegalArgumentException("请填写服务器地址");
             return;

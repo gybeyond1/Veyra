@@ -32,11 +32,17 @@ final class LanTextRelay {
         void onText(String text);
     }
 
+    /** 扫码登录：另一台设备把会话推过来（任意线程回调）。 */
+    interface LoginListener {
+        void onLogin(String server, String token, org.json.JSONObject user);
+    }
+
     private static final int FIRST_PORT = 8765;
     private static final int LAST_PORT = 8784;
     private static final int MAX_TEXT = 4000;
 
     private final Listener listener;
+    private final LoginListener loginListener;
     private final String token;
     private final ExecutorService pool = Executors.newFixedThreadPool(4, runnable -> {
         Thread thread = new Thread(runnable, "veyra-relay");
@@ -49,9 +55,17 @@ final class LanTextRelay {
     private volatile boolean running;
     private volatile String address = "";
     private volatile long receivedAt;
+    /** 二维码里的一次性登录码：过了有效期或已用掉就作废。 */
+    private volatile String loginCode = "";
+    private volatile long loginCodeExpiresAt;
 
     LanTextRelay(Listener listener) {
+        this(listener, null);
+    }
+
+    LanTextRelay(Listener listener, LoginListener loginListener) {
         this.listener = listener;
+        this.loginListener = loginListener;
         this.token = String.format("%06x", (int) (Math.random() * 0xFFFFFF));
     }
 
@@ -84,6 +98,24 @@ final class LanTextRelay {
     int port() { return port; }
 
     long lastReceivedAt() { return receivedAt; }
+
+    /** 局域网地址里的会话口令（也是 /login 的鉴权参数）。 */
+    String token() { return token; }
+
+    /** 下发一个一次性登录码，写进二维码；ttlMillis 之后自动失效。 */
+    void issueLoginCode(String code, long ttlMillis) {
+        loginCode = code == null ? "" : code;
+        loginCodeExpiresAt = System.currentTimeMillis() + Math.max(30_000L, ttlMillis);
+    }
+
+    void clearLoginCode() {
+        loginCode = "";
+        loginCodeExpiresAt = 0;
+    }
+
+    boolean loginCodeUsable() {
+        return !loginCode.isEmpty() && System.currentTimeMillis() < loginCodeExpiresAt;
+    }
 
     private void serve() {
         for (int candidate = FIRST_PORT; candidate <= LAST_PORT && running; candidate++) {
@@ -162,6 +194,40 @@ final class LanTextRelay {
                 respond(socket, 200, "application/json; charset=utf-8", "{\"ok\":true}");
                 return;
             }
+            // 扫码登录：另一台设备（手机）把它的会话推给这台机器（电视）。
+            // 走同一条局域网通道，不依赖后端新增接口；凭据只在本网内、且窗口很短。
+            if ("POST".equals(method) && "/login".equals(path)) {
+                if (!tokenMatches(query)) {
+                    respond(socket, 403, "application/json; charset=utf-8", "{\"ok\":false,\"error\":\"token\"}");
+                    return;
+                }
+                if (loginListener == null || !loginCodeUsable()) {
+                    respond(socket, 410, "application/json; charset=utf-8", "{\"ok\":false,\"error\":\"expired\"}");
+                    return;
+                }
+                org.json.JSONObject payload = null;
+                try {
+                    payload = new org.json.JSONObject(new String(readBody(input, contentLength), StandardCharsets.UTF_8));
+                } catch (Exception ignored) { }
+                if (payload == null) {
+                    respond(socket, 400, "application/json; charset=utf-8", "{\"ok\":false,\"error\":\"json\"}");
+                    return;
+                }
+                if (!loginCode.equals(payload.optString("code", ""))) {
+                    respond(socket, 403, "application/json; charset=utf-8", "{\"ok\":false,\"error\":\"code\"}");
+                    return;
+                }
+                String accountToken = payload.optString("token", "");
+                org.json.JSONObject user = payload.optJSONObject("user");
+                if (accountToken.isEmpty() || user == null || user.optString("id", "").isEmpty()) {
+                    respond(socket, 400, "application/json; charset=utf-8", "{\"ok\":false,\"error\":\"payload\"}");
+                    return;
+                }
+                clearLoginCode();
+                respond(socket, 200, "application/json; charset=utf-8", "{\"ok\":true}");
+                loginListener.onLogin(payload.optString("server", ""), accountToken, user);
+                return;
+            }
             if ("GET".equals(method) && "/favicon.ico".equals(path)) {
                 respond(socket, 204, "text/plain", "");
                 return;
@@ -212,7 +278,7 @@ final class LanTextRelay {
 
     private static void respond(Socket socket, int status, String type, String body) throws IOException {
         byte[] payload = body.getBytes(StandardCharsets.UTF_8);
-        String header = "HTTP/1.1 " + status + " " + (status == 200 ? "OK" : status == 204 ? "No Content" : status == 403 ? "Forbidden" : status == 400 ? "Bad Request" : "Not Found") + "\r\n"
+        String header = "HTTP/1.1 " + status + " " + statusText(status) + "\r\n"
                 + "Content-Type: " + type + "\r\n"
                 + "Content-Length: " + payload.length + "\r\n"
                 + "Cache-Control: no-store\r\n"
@@ -221,6 +287,20 @@ final class LanTextRelay {
         output.write(header.getBytes(StandardCharsets.ISO_8859_1));
         output.write(payload);
         output.flush();
+    }
+
+    private static String statusText(int status) {
+        switch (status) {
+            case 200: return "OK";
+            case 204: return "No Content";
+            case 400: return "Bad Request";
+            case 403: return "Forbidden";
+            case 404: return "Not Found";
+            case 405: return "Method Not Allowed";
+            case 410: return "Gone";
+            case 500: return "Internal Server Error";
+            default: return "OK";
+        }
     }
 
     static String resolveLanAddress() {

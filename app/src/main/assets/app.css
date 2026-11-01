@@ -61,6 +61,10 @@ button,a,input,[role=tab]{-webkit-tap-highlight-color:transparent}button{transit
 
 /* The fullscreen detail and its return target form one card transition. */
 #app.route-detail>#scroll{position:relative;z-index:12;background:var(--bg)}
+/* 详情页自己保证铺满：从刷剧形态进来时父级 #scroll 刚从 display:none 恢复，
+   min-height:100% 可能有一帧算成 0；这里用 vh 兜底，并自带不透明底色 ——
+   WebView 本身是透明的，缺了这层就会露出后面那层原生视频。 */
+#app.route-detail .detail-page{min-height:100vh;background:var(--bg)}
 #app.route-detail>#dock{visibility:hidden;pointer-events:none}
 #app.route-detail.card-transition-active>#dock{visibility:visible}
 #app.card-transition-active>#scroll{visibility:hidden;pointer-events:none}
@@ -859,3 +863,8 @@ html[data-theme=dark] .ap-preview-dock button.active{color:var(--accent)}
 html[data-nav-text=off] .ap-preview-dock button>span:not(.nav-icon){display:none}
 html[data-nav-text=off] .ap-preview-dock button{justify-content:center;gap:0}
 html[data-motion=off] .ap-preview-dock > i{transition:none}
+
+/* 电视扫码登录：一块白底二维码 + 一行说明，不加任何特效 */
+.tv-login-code{width:196px;height:196px;margin:16px auto 10px;padding:8px;background:#fff;border-radius:10px;overflow:hidden}
+.tv-login-code svg{display:block;width:100%;height:100%}
+.tv-login-note{margin:8px 0 0;font-size:12px;line-height:1.6;color:var(--muted);text-align:center}

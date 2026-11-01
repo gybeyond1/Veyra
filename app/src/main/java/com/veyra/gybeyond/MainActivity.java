@@ -121,6 +121,10 @@ public final class MainActivity extends Activity {
     private String deviceType = DeviceProfile.PHONE;
     private volatile boolean tvCapture = true;
     private LanTextRelay textRelay;
+    /** 扫码登录：电视这边二维码里的一次性码（4 分钟内复用，避免重渲染就换码）。 */
+    private volatile String activeLoginCode = "";
+    private volatile long activeLoginCodeAt;
+    private static final int REQUEST_QR_LOGIN = 0x51;
 
     /** 全局崩溃日志：任何未捕获 Throwable（含 native 崩前能到 Java 层的 Error）都写入 filesDir/crash.log，
      *  app.js 启动时经 "crash-log" bridge 读取展示，便于排查闪退。每次启动先清空并写版本头：日志永远只属于当前版本。 */
@@ -764,16 +768,39 @@ public final class MainActivity extends Activity {
         if (!DeviceProfile.TV.equals(deviceType)) return;
         if (textRelay != null) return;
         try {
-            textRelay = new LanTextRelay(text -> runOnUiThread(() -> {
-                if (isDestroyed() || webView == null) return;
-                webView.evaluateJavascript("window.veyraRelayFill && window.veyraRelayFill("
-                        + JSONObject.quote(text) + ")", null);
-            }));
+            textRelay = new LanTextRelay(
+                    text -> runOnUiThread(() -> {
+                        if (isDestroyed() || webView == null) return;
+                        webView.evaluateJavascript("window.veyraRelayFill && window.veyraRelayFill("
+                                + JSONObject.quote(text) + ")", null);
+                    }),
+                    // 扫码登录：手机把会话推过来，这边落盘后通知页面。
+                    (server, tokenValue, user) -> runOnUiThread(() -> adoptScannedSession(server, tokenValue, user)));
             textRelay.start();
         } catch (Exception error) {
             Log.w(TAG, "扫码输入服务启动失败", error);
             textRelay = null;
         }
+    }
+
+    /** 把手机扫码授权过来的账号写进本机，并通知页面刷新登录态。 */
+    private void adoptScannedSession(String server, String tokenValue, org.json.JSONObject user) {
+        if (account == null) return;
+        requests.execute(() -> {
+            boolean ok;
+            try {
+                account.adoptSession(tokenValue, server, user);
+                ok = true;
+            } catch (Exception error) {
+                Log.w(TAG, "扫码登录失败", error);
+                ok = false;
+            }
+            boolean result = ok;
+            runOnUiThread(() -> {
+                if (isDestroyed() || webView == null) return;
+                webView.evaluateJavascript("window.hgTvLogin && window.hgTvLogin(" + result + ")", null);
+            });
+        });
     }
 
     /**
@@ -794,6 +821,15 @@ public final class MainActivity extends Activity {
             webView.evaluateJavascript("window.veyraTvKey && window.veyraTvKey(" + code + ")", null);
         }
         return true;
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_QR_LOGIN || webView == null) return;
+        String message = data == null ? null : data.getStringExtra("message");
+        boolean ok = resultCode == RESULT_OK;
+        webView.evaluateJavascript("window.hgQrScan && window.hgQrScan(" + ok + ","
+                + JSONObject.quote(message == null ? "" : message) + ")", null);
     }
 
     @Override public void onBackPressed() {
@@ -1172,7 +1208,9 @@ public final class MainActivity extends Activity {
 
         @JavascriptInterface public void setDetailMode(boolean enabled) {
             runOnUiThread(() -> {
-                if (detailSystemBars == enabled) return;
+                // 这里不能做 detailSystemBars == enabled 的早退：从刷剧形态（沉浸全屏、
+                // 视频层垫底）回详情时，字段值可能已经是 true，但系统栏实际状态已被
+                // 其他路径改过 —— 跳过 apply 就会在详情页顶部留一条状态栏。
                 detailSystemBars = enabled;
                 applySystemBars();
             });
@@ -1203,6 +1241,59 @@ public final class MainActivity extends Activity {
                 info.put("port", relay == null ? 0 : relay.port());
             } catch (Exception ignored) { }
             return info.toString();
+        }
+
+        /**
+         * 电视端登录二维码：返回局域网地址 + 一次性码（5 分钟）。
+         * 手机扫这个码之后，把会话 POST 回 http://host:port/login?t=...
+         * 4 分钟内重复调用复用同一个码，避免页面重渲染就让二维码跳变。
+         */
+        @JavascriptInterface public String tvLoginInfo() {
+            JSONObject info = new JSONObject();
+            try {
+                info.put("ready", false);
+                LanTextRelay relay = textRelay;
+                if (relay == null || relay.port() == 0 || relay.address().isEmpty()) {
+                    info.put("reason", "relay-offline");
+                    return info.toString();
+                }
+                long now = System.currentTimeMillis();
+                if (activeLoginCode.isEmpty() || now - activeLoginCodeAt > 4 * 60_000L || !relay.loginCodeUsable()) {
+                    activeLoginCode = String.format("%06d", (int) (Math.random() * 1000000));
+                    activeLoginCodeAt = now;
+                    relay.issueLoginCode(activeLoginCode, 5 * 60_000L);
+                }
+                info.put("ready", true)
+                        .put("url", "veyra://tv-login?h=" + relay.address() + "&p=" + relay.port()
+                                + "&t=" + relay.token() + "&c=" + activeLoginCode)
+                        .put("code", activeLoginCode)
+                        .put("host", relay.address())
+                        .put("port", relay.port())
+                        .put("expiresIn", Math.max(0, 300 - (now - activeLoginCodeAt) / 1000));
+            } catch (Exception ignored) { }
+            return info.toString();
+        }
+
+        /** 手机端：打开扫码页，扫电视上的登录二维码，把本机账号授权过去。 */
+        @JavascriptInterface public void startQrScan() {
+            runOnUiThread(() -> {
+                if (isDestroyed() || webView == null) return;
+                if (account == null || !account.isLoggedIn()) {
+                    webView.evaluateJavascript("window.hgQrScan && window.hgQrScan(false,"
+                            + JSONObject.quote("请先登录手机端账号") + ")", null);
+                    return;
+                }
+                try {
+                    Intent intent = new Intent();
+                    intent.setClassName(MainActivity.this, "com.veyra.gybeyond.QrScanActivity");
+                    intent.putExtra("session", account.session().toString());
+                    startActivityForResult(intent, REQUEST_QR_LOGIN);
+                } catch (Exception error) {
+                    String message = error.getMessage() == null ? "打不开扫码页" : error.getMessage();
+                    webView.evaluateJavascript("window.hgQrScan && window.hgQrScan(false,"
+                            + JSONObject.quote(message) + ")", null);
+                }
+            });
         }
 
         /** 页面接管/交还方向键：输入框聚焦时交还给系统，避免吃掉软键盘里的方向键。 */

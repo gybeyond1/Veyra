@@ -191,11 +191,73 @@ function setAuthPending(pending, mode = authMode) {
   submit.textContent = pending ? (mode === 'login' ? '正在登录…' : '正在注册…') : (mode === 'login' ? '登录' : '注册并登录');
   document.querySelectorAll('[data-auth-mode]').forEach(button => { button.disabled = pending; });
 }
+function tvDevice() {
+  return window.VEYRA_DEVICE === 'tv' || document.documentElement.dataset.device === 'tv';
+}
+
+/** 电视登录页：只有二维码。遥控器敲账号密码不现实，注册也只在手机上做。 */
+function showTvLoginPanel() {
+  const panel = authOverlay.querySelector('.auth-panel');
+  const tabs = panel?.querySelector('.auth-tabs');
+  const form = document.getElementById('auth-form');
+  const footnote = panel?.querySelector('.auth-footnote');
+  if (tabs) tabs.hidden = true;
+  if (form) form.hidden = true;
+  if (footnote) footnote.hidden = true;
+  document.getElementById('auth-title').textContent = '登录电视';
+  document.getElementById('auth-subtitle').textContent = '用手机上的 Veyra 扫一下，账号直接同步过来';
+  document.getElementById('tv-login').hidden = false;
+  requestTvLoginQr();
+}
+
+/** 拉一次电视端登录码并画成二维码；relay 没起来时给重试入口。 */
+function requestTvLoginQr() {
+  const code = document.getElementById('tv-login-code');
+  const note = document.getElementById('tv-login-note');
+  const start = document.getElementById('tv-login-start');
+  let info = null;
+  try { info = JSON.parse(window.AndroidHost?.tvLoginInfo?.() || 'null'); } catch (error) { }
+  if (!info || !info.ready) {
+    if (code) { code.hidden = true; code.innerHTML = ''; }
+    if (start) { start.hidden = false; start.textContent = '重试'; }
+    if (note) { note.textContent = '局域网没起来，确认电视和手机连同一个 Wi-Fi 后再试'; note.hidden = false; }
+    return;
+  }
+  if (!window.qrcode) {
+    if (note) { note.textContent = '二维码组件没加载，请更新应用'; note.hidden = false; }
+    return;
+  }
+  try {
+    const qr = window.qrcode(0, 'M');
+    qr.addData(info.url);
+    qr.make();
+    code.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+    code.hidden = false;
+    if (start) start.hidden = true;
+    if (note) {
+      note.textContent = '手机 Veyra → 设置 → 扫码登录电视（' + info.host + ':' + info.port + '）';
+      note.hidden = false;
+    }
+  } catch (error) {
+    if (note) { note.textContent = '二维码生成失败，请重试'; note.hidden = false; }
+  }
+}
+
+// 手机扫码授权完成后，电视这边收尾
+window.hgTvLogin = (ok) => {
+  if (!ok) { toast('登录没成功，重新扫一次', true); requestTvLoginQr(); return; }
+  api('account').then(profile => {
+    setAccount(profile);
+    if (profile?.loggedIn) { hideAuth(); toast('已登录'); }
+  }).catch(() => { });
+};
+
 function showAuth(mode = 'login') {
   if (authPending) mode = authMode;
   authMode = mode;
   authOverlay.hidden = false;
   updateBackEnabled();
+  if (tvDevice()) { showTvLoginPanel(); return; }
   document.getElementById('auth-title').textContent = mode === 'login' ? '登录应用账号' : '注册应用账号';
   setAuthPending(authPending, mode);
   document.getElementById('auth-password').autocomplete = mode === 'login' ? 'current-password' : 'new-password';
@@ -217,6 +279,17 @@ avatarButton.addEventListener('click', () => {
 });
 headerSettings.addEventListener('click', goSettings);
 document.querySelectorAll('[data-auth-mode]').forEach(button => button.addEventListener('click', () => showAuth(button.dataset.authMode)));
+document.getElementById('tv-login-start')?.addEventListener('click', requestTvLoginQr);
+
+/** 手机端：打开扫码页去扫电视上的登录码，结果异步回到这里。 */
+function startQrScan() {
+  if (!window.AndroidHost?.startQrScan) { toast('当前版本不支持扫码，请更新应用', true); return; }
+  try { window.AndroidHost.startQrScan(); }
+  catch (error) { toast(error.message || '打不开扫码页', true); }
+}
+window.hgQrScan = (ok, message) => {
+  toast(message || (ok ? '已登录电视' : '扫码失败'), !ok);
+};
 document.getElementById('auth-form').addEventListener('submit', async event => {
   event.preventDefault();
   if (authPending) return;
@@ -1323,6 +1396,7 @@ function renderSettings() {
   content.innerHTML = `<div class="settings-page"><button type="button" class="listing-back" data-back="1">${icon('back')} 返回我的</button><h1>设置</h1>
     ${window.renderAppearance ? window.renderAppearance() : ''}
     <section><button type="button" class="settings-link" data-account-management="1"><span><strong>账号管理</strong><small>${state.account.loggedIn ? esc(state.account.username) : '登录或注册账号'}</small></span>${icon('arrow')}</button></section>
+    ${tvDevice() ? '' : '<section><button type="button" class="settings-link" data-qr-login><span><strong>扫码登录电视</strong><small>扫一下电视上的二维码，把账号同步过去</small></span>' + icon('arrow') + '</button></section>'}
     <section><button type="button" class="settings-link" data-proxy-open><span><strong>黄果网络通道</strong><small data-proxy-summary>${esc(proxySummaryText())}</small></span>${icon('arrow')}</button></section>
     <section><button type="button" class="settings-link" data-about-open><span><strong>关于 Veyra</strong><small>项目地址 · GPL-3.0 开源</small></span>${icon('arrow')}</button></section></div>`;
   if (window.bindAppearance) window.bindAppearance();
@@ -3259,6 +3333,7 @@ document.addEventListener('click', async event => {
   }
   if (event.target.closest('[data-apply-resources]')) { api('apply-hot-update').catch(error => toast(error.message, true)); return; }
   if (event.target.closest('[data-account-management]')) { openAccountPop(); return; }
+  if (event.target.closest('[data-qr-login]')) { startQrScan(); return; }
   if (event.target.closest('[data-proxy-open]')) { openProxyPop(); return; }
   if (event.target.closest('[data-about-open]')) { openAboutPop(); return; }
   const openUrl = event.target.closest('[data-open-url]');
@@ -3962,6 +4037,18 @@ window.hgBingeFailed = (message) => {
 // 从详情返回时 route 回到 home，syncBinge 自动 resume，全程不经过传统首页。
 function openBingeDetail(id) {
   if (id == null) return;
+  // 先把刷剧形态的 UI 同步收起，再跳详情。
+  // 刷剧态 #scroll 是 display:none，等 syncBinge 在 setRoute 里收尾的话，
+  // 详情页第一帧要和「视频层隐藏 + #scroll 恢复布局」抢同一帧 —— 真机上
+  // 就是顶部/底部露一条视频，看着像详情没铺满。这里提前一帧解决。
+  // state.binge 不动：返回时 syncBinge 看到 route 回到 home 会自动 resume。
+  const app = document.getElementById('app');
+  const layer = document.getElementById('binge');
+  if (app) app.classList.remove('binge');
+  document.body.classList.remove('binge');
+  if (layer) layer.hidden = true;
+  const scrollEl = document.getElementById('scroll');
+  if (scrollEl) scrollEl.style.removeProperty('display');
   goDetail(String(id)).catch(() => { });
 }
 document.getElementById('binge-detail-btn')?.addEventListener('click', () => openBingeDetail(bingeCurrentId));

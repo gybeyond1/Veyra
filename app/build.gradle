@@ -10,8 +10,8 @@ android {
         applicationId 'com.veyra.gybeyond'
         minSdk 26
         targetSdk 36
-        versionCode 348
-        versionName "0.23.28"
+        versionCode 349
+        versionName "0.23.29"
         testInstrumentationRunner 'com.veyra.gybeyond.PlaybackTestRunner'
     }
 
@@ -103,5 +103,8 @@ dependencies {
     implementation 'androidx.media3:media3-exoplayer:1.11.1'
     implementation 'androidx.media3:media3-exoplayer-hls:1.11.1'
     implementation 'androidx.media3:media3-ui:1.11.1'
+    // 扫码登录电视：只用 zxing 的纯 Java 解码核心（约 600KB），不拖 appcompat。
+    // 电视包没有相机，这个依赖只进手机/平板。
+    mobileImplementation 'com.google.zxing:core:3.5.3'
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs_nio:2.0.1'
 }
