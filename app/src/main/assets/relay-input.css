@@ -1,0 +1,119 @@
+/* 扫码输入：浮标 + 二维码面板。所有设备共用，电视上只换尺寸和字号。 */
+
+#relay-fab {
+  position: fixed;
+  right: 14px;
+  top: calc(64px + env(safe-area-inset-top, 0px));
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  padding: 0 13px 0 10px;
+  border-radius: 19px;
+  border: 1px solid color-mix(in srgb, var(--accent, #c89b3c) 58%, transparent);
+  background: var(--surface, #fff);
+  color: var(--text, #20242c);
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: 0 8px 24px rgba(8, 14, 24, .18);
+  -webkit-tap-highlight-color: transparent;
+}
+#relay-fab[hidden] { display: none !important; }
+#relay-fab svg { width: 18px; height: 18px; }
+#relay-fab:active { transform: scale(.96); }
+
+#relay-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(10, 12, 16, .58);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+#relay-overlay[hidden] { display: none !important; }
+
+.relay-panel {
+  position: relative;
+  width: min(360px, 86vw);
+  max-height: 88dvh;
+  overflow: auto;
+  padding: 22px 20px 18px;
+  border-radius: 24px;
+  background: var(--surface, #fff);
+  color: var(--text, #20242c);
+  box-shadow: 0 26px 70px rgba(0, 0, 0, .38);
+}
+.relay-panel h2 { margin: 0 0 6px; font-size: 17px; letter-spacing: -.01em; }
+.relay-sub { margin: 0 0 14px; font-size: 12px; line-height: 1.6; color: var(--muted, #858c99); }
+
+.relay-qr {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  box-sizing: border-box;
+  padding: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 二维码必须白底黑码，深色主题下也不跟随 */
+  background: #fff;
+  border-radius: 16px;
+  border: 1px solid rgba(20, 24, 32, .08);
+}
+.relay-qr svg { width: 100%; height: 100%; display: block; }
+.relay-qr-empty { font-size: 13px; color: #6b7280; }
+
+.relay-addr {
+  margin: 10px 0 0;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  text-align: center;
+  color: var(--muted, #858c99);
+  word-break: break-all;
+}
+.relay-status { margin: 6px 0 0; font-size: 12px; text-align: center; color: var(--accent, #c89b3c); }
+
+.relay-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted, #858c99);
+  font-size: 22px;
+  line-height: 1;
+}
+
+.relay-keyboard {
+  width: 100%;
+  height: 44px;
+  margin-top: 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line, #e3e7ee);
+  background: transparent;
+  color: inherit;
+  font-size: 14px;
+  font-weight: 600;
+}
+.relay-keyboard[hidden] { display: none !important; }
+
+html[data-theme="dark"] .relay-panel { background: #1b1e26; color: #f3efe4; }
+html[data-theme="dark"] .relay-qr { border-color: rgba(255, 255, 255, .12); }
+html[data-theme="dark"] .relay-keyboard { border-color: #2c313c; }
+
+/* 电视：面板放大，遥控焦点环沿用 .tv-focus */
+html[data-device="tv"] #relay-fab { display: none !important; }
+html[data-device="tv"] .relay-panel { width: min(460px, 62vw); padding: 28px 26px 22px; border-radius: 28px; }
+html[data-device="tv"] .relay-panel h2 { font-size: 22px; }
+html[data-device="tv"] .relay-sub { font-size: 14px; }
+html[data-device="tv"] .relay-addr { font-size: 13px; }
+html[data-device="tv"] .relay-status { font-size: 14px; }
+html[data-device="tv"] .relay-keyboard { height: 52px; font-size: 16px; margin-top: 18px; }
+html[data-device="tv"] .relay-close { width: 40px; height: 40px; font-size: 26px; }

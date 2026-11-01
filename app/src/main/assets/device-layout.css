@@ -1,0 +1,177 @@
+/* 大屏适配：平板 / 电视。
+ *
+ * 全部规则都以 html[data-device="tablet|tv"] 开头，手机（data-device="phone"）一条都不命中，
+ * 手机布局、手势、玻璃参数保持原样。选择器特异性也高于 app.css 里的同名规则，
+ * 所以本文件放在 app.css 之后加载即可覆盖，不需要改原表。
+ */
+
+/* ---------------- 平板 ---------------- */
+html[data-device="tablet"] .app-top {
+  height: calc(64px + var(--status-bar-height));
+  padding-left: max(24px, calc((100% - 1180px) / 2 + 24px));
+  padding-right: max(24px, calc((100% - 1180px) / 2 + 24px));
+}
+html[data-device="tablet"] .search-form { max-width: 620px; }
+
+/* 首页与分类页：把横向滑动的长条换成多列网格，一屏能看到更多海报 */
+html[data-device="tablet"] .home-page .film-row,
+html[data-device="tablet"] .category-page .film-row,
+html[data-device="tablet"] .search-page .film-row,
+html[data-device="tablet"] .library-page .film-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-flow: row;
+  column-gap: 14px;
+  row-gap: 22px;
+  padding: 0 24px 18px;
+  overflow: visible;
+}
+html[data-device="tablet"] .film-card { width: 100%; min-width: 0; }
+html[data-device="tablet"] .home-page .poster,
+html[data-device="tablet"] .category-page .poster,
+html[data-device="tablet"] .search-page .poster,
+html[data-device="tablet"] .library-page .poster {
+  height: auto;
+  aspect-ratio: 114 / 153;
+}
+html[data-device="tablet"] .film-title { font-size: 14px; }
+
+html[data-device="tablet"] .search-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+html[data-device="tablet"] .tags-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+html[data-device="tablet"] .episode-grid { grid-template-columns: repeat(8, 1fr); }
+html[data-device="tablet"] .download-sheet-grid { grid-template-columns: repeat(8, 1fr); max-height: 52dvh; }
+html[data-device="tablet"] .detail-episode-grid { grid-template-columns: repeat(8, 1fr); }
+
+/* 底栏收窄居中，两侧留白，避免在 800dp 宽度上被拉成四根柱 */
+html[data-device="tablet"] #dock {
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: min(560px, calc(100% - 64px));
+  height: 72px;
+  bottom: 16px;
+}
+
+html[data-device="tablet"] #app { --detail-art-height: calc(460px + var(--status-bar-height)); }
+html[data-device="tablet"] .detail-copy h1 { font-size: 30px; }
+html[data-device="tablet"] .category-head h1,
+html[data-device="tablet"] .library-page h1,
+html[data-device="tablet"] .search-page h1 { font-size: 30px; }
+
+/* 平板横屏再放宽一档 */
+@media (min-width: 1000px) {
+  html[data-device="tablet"] .home-page .film-row,
+  html[data-device="tablet"] .category-page .film-row,
+  html[data-device="tablet"] .search-page .film-row,
+  html[data-device="tablet"] .library-page .film-row {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+  html[data-device="tablet"] .search-grid { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+  html[data-device="tablet"] .episode-grid,
+  html[data-device="tablet"] .download-sheet-grid,
+  html[data-device="tablet"] .detail-episode-grid { grid-template-columns: repeat(11, 1fr); }
+  html[data-device="tablet"] #app { --detail-art-height: calc(560px + var(--status-bar-height)); }
+}
+
+/* ---------------- 电视 ---------------- */
+/* 电视的 CSS 视口一般在 960×540 左右，且观看距离远：字号、控件、间距整体放大，列数减少到 5 列 */
+html[data-device="tv"] {
+  --tv-accent: var(--accent, #c89b3c);
+}
+html[data-device="tv"] .app-top {
+  height: calc(72px + var(--status-bar-height));
+  padding-left: 40px;
+  padding-right: 40px;
+  gap: 16px;
+}
+html[data-device="tv"] .search-form { max-width: 640px; height: 48px; }
+html[data-device="tv"] .search-input { font-size: 17px; }
+
+html[data-device="tv"] .home-page .film-row,
+html[data-device="tv"] .category-page .film-row,
+html[data-device="tv"] .search-page .film-row,
+html[data-device="tv"] .library-page .film-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-auto-flow: row;
+  column-gap: 18px;
+  row-gap: 26px;
+  padding: 0 40px 24px;
+  overflow: visible;
+}
+html[data-device="tv"] .film-card { width: 100%; min-width: 0; }
+html[data-device="tv"] .home-page .poster,
+html[data-device="tv"] .category-page .poster,
+html[data-device="tv"] .search-page .poster,
+html[data-device="tv"] .library-page .poster {
+  height: auto;
+  aspect-ratio: 114 / 153;
+}
+html[data-device="tv"] .film-title { font-size: 16px; margin-top: 8px; }
+html[data-device="tv"] .film-info { font-size: 13px; }
+
+html[data-device="tv"] .section-heading h2,
+html[data-device="tv"] .category-head h1,
+html[data-device="tv"] .library-page h1,
+html[data-device="tv"] .search-page h1 { font-size: 28px; }
+html[data-device="tv"] .section-heading { padding: 18px 40px 10px; }
+
+html[data-device="tv"] .search-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+html[data-device="tv"] .tags-grid { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+html[data-device="tv"] .episode-grid { grid-template-columns: repeat(9, 1fr); }
+html[data-device="tv"] .download-sheet-grid { grid-template-columns: repeat(9, 1fr); }
+html[data-device="tv"] .detail-episode-grid { grid-template-columns: repeat(9, 1fr); }
+
+html[data-device="tv"] #dock {
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: min(680px, calc(100% - 96px));
+  height: 80px;
+  bottom: 24px;
+}
+html[data-device="tv"] #dock button { font-size: 15px; }
+html[data-device="tv"] #dock .nav-icon svg { width: 24px; height: 24px; }
+
+html[data-device="tv"] #app { --detail-art-height: calc(330px + var(--status-bar-height)); }
+html[data-device="tv"] .detail-copy h1 { font-size: 34px; }
+html[data-device="tv"] .detail-description { font-size: 15px; }
+html[data-device="tv"] .detail-buttons button,
+html[data-device="tv"] .binge-actions button { min-height: 48px; font-size: 16px; }
+
+html[data-device="tv"] .segmented { height: 56px; }
+html[data-device="tv"] .segmented button { font-size: 16px; }
+
+/* 焦点环：遥控导航时唯一的位置指示。只画描边和光晕，不碰 transform，
+   避免与卡片转场、底栏透镜的位移互相干扰。 */
+html[data-device="tv"] .tv-focus {
+  outline: 3px solid var(--tv-accent);
+  outline-offset: 3px;
+  border-radius: 14px;
+  box-shadow: 0 0 0 8px color-mix(in srgb, var(--tv-accent) 22%, transparent),
+              0 10px 34px rgba(0, 0, 0, .45);
+  filter: brightness(1.05);
+}
+html[data-device="tv"] .tv-focus.poster,
+html[data-device="tv"] .tv-focus .poster { outline-offset: 2px; }
+html[data-device="tv"] #dock .tv-focus {
+  outline: 3px solid var(--tv-accent);
+  outline-offset: 2px;
+  box-shadow: none;
+  filter: none;
+  border-radius: 18px;
+}
+html[data-device="tv"] .search-input.tv-focus,
+html[data-device="tv"] .search-form.tv-focus {
+  outline: 3px solid var(--tv-accent);
+  outline-offset: 2px;
+}
+html[data-device="tv"] .ep-btn.tv-focus,
+html[data-device="tv"] .download-sheet-grid button.tv-focus {
+  outline: 3px solid var(--tv-accent);
+  outline-offset: 2px;
+}
+
+/* 电视上不显示滚动条，避免静止时右侧一直挂一条 */
+html[data-device="tv"] #scroll::-webkit-scrollbar,
+html[data-device="tablet"] #scroll::-webkit-scrollbar { width: 0; height: 0; }

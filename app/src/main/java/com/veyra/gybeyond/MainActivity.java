@@ -5,6 +5,7 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.ActivityNotFoundException;
+import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.os.Build;
@@ -13,6 +14,7 @@ import android.net.Uri;
 import android.provider.Settings;
 import android.util.Log;
 import android.view.View;
+import android.view.KeyEvent;
 import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.view.RoundedCorner;
@@ -114,6 +116,11 @@ public final class MainActivity extends Activity {
     private final Handler deviceHandler = new Handler(Looper.getMainLooper());
     private boolean deviceLoopRunning;
     private volatile boolean deviceRegistered;
+    // 大屏适配：phone/tablet/tv 由 DeviceProfile 判定，页面据此加载对应布局与遥控焦点。
+    // tvCapture 为 true 时方向键/确认键由页面接管（遥控导航），输入框聚焦时页面会临时关掉。
+    private String deviceType = DeviceProfile.PHONE;
+    private volatile boolean tvCapture = true;
+    private LanTextRelay textRelay;
 
     /** 全局崩溃日志：任何未捕获 Throwable（含 native 崩前能到 Java 层的 Error）都写入 filesDir/crash.log，
      *  app.js 启动时经 "crash-log" bridge 读取展示，便于排查闪退。每次启动先清空并写版本头：日志永远只属于当前版本。 */
@@ -233,6 +240,12 @@ public final class MainActivity extends Activity {
         super.onCreate(state);
         com.hongguotv.core.AppContext.init(this);
         installCrashLogger();
+        deviceType = DeviceProfile.type(this);
+        // 电视只有横屏一种形态：manifest 里的 portrait 是为了锁住手机，这里对 TV 运行期覆盖，
+        // 手机/平板不会走到这段，方向行为与改动前完全一致。
+        if (DeviceProfile.TV.equals(deviceType)) {
+            try { setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE); } catch (Exception ignored) { }
+        }
         ContentMode.get(this).startPublic();
         hotUpdates = HotUpdateManager.get(this);
         hotSession = hotUpdates.beginSession();
@@ -259,6 +272,7 @@ public final class MainActivity extends Activity {
         webView.setBackgroundColor(Color.TRANSPARENT);
         root.addView(webView, new FrameLayout.LayoutParams(-1, -1));
         setContentView(root);
+        startTextRelay();
         UiRefreshRate.apply(this, webView);
         if (Build.VERSION.SDK_INT >= 30) getWindow().setDecorFitsSystemWindows(false);
         if (Build.VERSION.SDK_INT >= 28) {
@@ -719,6 +733,42 @@ public final class MainActivity extends Activity {
         });
     }
 
+    /** 扫码输入：起一个只读本机的局域网 HTTP 服务，收到文字就填进页面当前输入框。 */
+    private void startTextRelay() {
+        if (textRelay != null) return;
+        try {
+            textRelay = new LanTextRelay(text -> runOnUiThread(() -> {
+                if (isDestroyed() || webView == null) return;
+                webView.evaluateJavascript("window.veyraRelayFill && window.veyraRelayFill("
+                        + JSONObject.quote(text) + ")", null);
+            }));
+            textRelay.start();
+        } catch (Exception error) {
+            Log.w(TAG, "扫码输入服务启动失败", error);
+            textRelay = null;
+        }
+    }
+
+    /**
+     * 电视遥控：方向键与确认键转给页面做焦点导航（页面的 veyraTvKey 负责移动高亮、滚动、触发点击）。
+     * 只拦这几颗键，音量、菜单、返回等仍按系统默认走；手机/平板完全不进这个分支。
+     */
+    @Override public boolean dispatchKeyEvent(KeyEvent event) {
+        if (!DeviceProfile.TV.equals(deviceType) || !tvCapture || webView == null) {
+            return super.dispatchKeyEvent(event);
+        }
+        int code = event.getKeyCode();
+        boolean navigational = code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN
+                || code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT
+                || code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER
+                || code == KeyEvent.KEYCODE_NUMPAD_ENTER;
+        if (!navigational) return super.dispatchKeyEvent(event);
+        if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+            webView.evaluateJavascript("window.veyraTvKey && window.veyraTvKey(" + code + ")", null);
+        }
+        return true;
+    }
+
     @Override public void onBackPressed() {
         handleBack(false);
     }
@@ -728,6 +778,7 @@ public final class MainActivity extends Activity {
             getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(backCallback);
         }
         hotHandler.removeCallbacksAndMessages(null);
+        if (textRelay != null) { textRelay.stop(); textRelay = null; }
         requests.shutdownNow();
         localRequests.shutdownNow();
         coverRequests.shutdownNow();
@@ -1101,6 +1152,35 @@ public final class MainActivity extends Activity {
         }
         @JavascriptInterface public void setBackEnabled(boolean enabled) {
             runOnUiThread(() -> updateBackRegistration(enabled));
+        }
+
+        /** 设备形态：phone / tablet / tv。同步返回，页面首帧就能拿到，不用等异步桥。 */
+        @JavascriptInterface public String deviceProfile() {
+            JSONObject profile = new JSONObject();
+            try {
+                profile.put("type", deviceType);
+                profile.put("tv", DeviceProfile.TV.equals(deviceType));
+                profile.put("tablet", DeviceProfile.TABLET.equals(deviceType));
+                profile.put("model", Build.MODEL == null ? "" : Build.MODEL);
+            } catch (Exception ignored) { }
+            return profile.toString();
+        }
+
+        /** 扫码输入的局域网地址；服务还没绑上端口时 url 为空，前端会重试。 */
+        @JavascriptInterface public String relayInfo() {
+            LanTextRelay relay = textRelay;
+            JSONObject info = new JSONObject();
+            try {
+                info.put("url", relay == null ? "" : relay.url());
+                info.put("address", relay == null ? "" : relay.address());
+                info.put("port", relay == null ? 0 : relay.port());
+            } catch (Exception ignored) { }
+            return info.toString();
+        }
+
+        /** 页面接管/交还方向键：输入框聚焦时交还给系统，避免吃掉软键盘里的方向键。 */
+        @JavascriptInterface public void setTvCapture(boolean enabled) {
+            tvCapture = enabled;
         }
 
         /** 跟手拖拽：phase = start/move/end，dy 为手指纵向位移（CSS px，向上为负）。 */

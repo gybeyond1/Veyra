@@ -1761,6 +1761,25 @@ public final class PlayerActivity extends Activity {
         else finish();
     }
 
+    /**
+     * 电视遥控：控制条收起时，确认键直接切换播放/暂停（不必先把控制条叫出来、再用方向键找按钮）。
+     * 控制条展开时完全交给系统，按钮照常可以用方向键走焦点、确认键点击 —— 手机永远不会进这个分支。
+     */
+    @Override public boolean dispatchKeyEvent(android.view.KeyEvent event) {
+        if (DeviceProfile.isTv(this) && !controlsShown && player != null) {
+            int code = event.getKeyCode();
+            if (code == android.view.KeyEvent.KEYCODE_DPAD_CENTER
+                    || code == android.view.KeyEvent.KEYCODE_ENTER
+                    || code == android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE) {
+                if (event.getAction() == android.view.KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+                    player.setPlayWhenReady(!player.getPlayWhenReady());
+                }
+                return true;
+            }
+        }
+        return super.dispatchKeyEvent(event);
+    }
+
     @Override public void onBackPressed() {
         handlePlayerBack();
     }
