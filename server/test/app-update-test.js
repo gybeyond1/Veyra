@@ -42,6 +42,16 @@ ok(parsed && /修复下载速度/.test(parsed.notes) && /后端缓存/.test(pars
 ok(!/<p>/.test(parsed.notes), '说明里没有残留 HTML 标签');
 ok(parseAtom('<feed><entry><title>nightly</title></entry></feed>') === null, '不是语义化版本就返回 null');
 
+// GitHub 用 --generate-notes 生成的发布说明会列出几十条历史 commit，
+// 整坨塞给客户端弹窗没法看 —— 只保留开头几行。
+const LONG = '<?xml version="1.0"?><feed><entry><title>v0.24.6</title><content type="html">'
+  + '&lt;p&gt;修复下载&lt;/p&gt;' + Array.from({ length: 40 }, (_, i) => `&lt;li&gt;feat: 第 ${i} 条历史提交，内容还挺长的&lt;/li&gt;`).join('')
+  + '</content></entry></feed>';
+const longNotes = parseAtom(LONG).notes;
+ok(longNotes.split('\n').length <= 4, '发布说明最多 4 行（实际 ' + longNotes.split('\n').length + '）');
+ok(longNotes.length <= 241, '发布说明不超过 240 字（实际 ' + longNotes.length + '）');
+ok(/修复下载/.test(longNotes), '开头那句还在');
+
 /* ---------- 手动投递的包也能识别 ---------- */
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'veyra-upd-'));
 const updater = createAppUpdater({ dataDir: dir, log: () => { } });

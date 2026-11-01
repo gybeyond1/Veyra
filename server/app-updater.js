@@ -121,12 +121,15 @@ function decodeEntities(text) {
 }
 
 function htmlToText(html) {
-  return String(html)
+  const text = String(html)
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/(p|li|h\d|div)>/gi, '\n')
     .replace(/<[^>]+>/g, '')
-    .split('\n').map(line => line.trim()).filter(Boolean).join('\n')
-    .slice(0, 1200);
+    .split('\n').map(line => line.trim()).filter(Boolean);
+  // GitHub 用 --generate-notes 生成的 release 会把历史 commit 全列上（几十行），
+  // 整坨塞进手机弹窗没人看。只留开头几行：真正想说的那两句都在最前面。
+  const head = text.slice(0, 4).join('\n');
+  return head.length > 240 ? head.slice(0, 240) + '…' : head;
 }
 
 async function sha256OfFile(file) {
