@@ -1,27 +1,4 @@
-/* 扫码输入：浮标 + 二维码面板。所有设备共用，电视上只换尺寸和字号。 */
-
-#relay-fab {
-  position: fixed;
-  right: 14px;
-  top: calc(64px + env(safe-area-inset-top, 0px));
-  z-index: 70;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  height: 38px;
-  padding: 0 13px 0 10px;
-  border-radius: 19px;
-  border: 1px solid color-mix(in srgb, var(--accent, #c89b3c) 58%, transparent);
-  background: var(--surface, #fff);
-  color: var(--text, #20242c);
-  font-size: 12px;
-  font-weight: 600;
-  box-shadow: 0 8px 24px rgba(8, 14, 24, .18);
-  -webkit-tap-highlight-color: transparent;
-}
-#relay-fab[hidden] { display: none !important; }
-#relay-fab svg { width: 18px; height: 18px; }
-#relay-fab:active { transform: scale(.96); }
+/* 扫码输入：仅电视使用的二维码面板（手机 / 平板没有任何入口，样式也就不必存在）。 */
 
 #relay-overlay {
   position: fixed;
@@ -110,7 +87,6 @@ html[data-theme="dark"] .relay-qr { border-color: rgba(255, 255, 255, .12); }
 html[data-theme="dark"] .relay-keyboard { border-color: #2c313c; }
 
 /* 电视：面板放大，遥控焦点环沿用 .tv-focus */
-html[data-device="tv"] #relay-fab { display: none !important; }
 html[data-device="tv"] .relay-panel { width: min(440px, 56vw); padding: 20px 24px 18px; border-radius: 26px; }
 html[data-device="tv"] .relay-qr { width: min(100%, 216px); }
 html[data-device="tv"] .relay-panel h2 { font-size: 20px; margin-bottom: 4px; }

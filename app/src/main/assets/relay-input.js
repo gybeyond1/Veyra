@@ -1,10 +1,9 @@
-/* 扫码输入
+/* 扫码输入（仅电视）
  *
- * 任何输入框聚焦时：
- *   · 手机 / 平板 → 右上角出现「扫码输入」浮标，点开是二维码面板（不打断正在进行的输入）；
- *   · 电视 → 遥控选中输入框按确认，直接弹出面板（电视上打字本来就不现实）。
+ * 只有 data-device=tv 时才存在这个入口：遥控选中输入框按确认，弹出二维码面板。
+ * 手机 / 平板本来就能打字，不出现任何浮标、不弹面板，点输入框的行为和改动前完全一致。
  *
- * 二维码指向手机自己在局域网起的服务（原生 LanTextRelay），扫码后在手机浏览器里打字，
+ * 二维码指向这台设备自己在局域网起的服务（原生 LanTextRelay），扫码后在手机浏览器里打字，
  * 文字由 window.veyraRelayFill 回填到当前输入框，并派发 input 事件，页面原有逻辑（联想、校验）照常走。
  */
 (function () {
@@ -18,12 +17,10 @@
   var qrHost = null;
   var statusEl = null;
   var addrEl = null;
-  var fab = null;
   var target = null;
   var link = '';
   var pollTimer = 0;
   var pollCount = 0;
-  var hideTimer = 0;
 
   function isField(el) {
     return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && el.type !== 'checkbox' && el.type !== 'radio';
@@ -53,23 +50,6 @@
 
   function build() {
     if (overlay) return;
-
-    fab = document.createElement('button');
-    fab.id = 'relay-fab';
-    fab.type = 'button';
-    fab.hidden = true;
-    fab.setAttribute('aria-label', '扫码输入');
-    fab.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
-      + '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/>'
-      + '<rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M14 14h3v3h-3zM19 14h2M14 19h2M19 19h2v2h-2z"/></svg>'
-      + '<span>扫码输入</span>';
-    fab.addEventListener('pointerdown', function (event) { event.preventDefault(); });
-    fab.addEventListener('click', function (event) {
-      event.preventDefault();
-      event.stopPropagation();
-      open(target || document.activeElement);
-    });
-    document.body.appendChild(fab);
 
     overlay = document.createElement('div');
     overlay.id = 'relay-overlay';
@@ -148,18 +128,15 @@
   }
 
   function open(field) {
+    if (!isTv) return; // 手机 / 平板不提供扫码入口，调用也无效
     build();
     if (isField(field)) target = field;
-    clearTimeout(hideTimer);
-    if (fab) fab.hidden = true;
     overlay.hidden = false;
     pollCount = 0;
     refresh();
-    // 电视要靠遥控操作，焦点必须落在面板里；手机是触屏，不抢焦点（免得弹出一圈 outline）
-    if (isTv) {
-      var closeButton = overlay.querySelector('#relay-close');
-      if (closeButton) { try { closeButton.focus({ preventScroll: true }); } catch (error) { } }
-    }
+    // 电视要靠遥控操作，焦点必须落在面板里
+    var closeButton = overlay.querySelector('#relay-close');
+    if (closeButton) { try { closeButton.focus({ preventScroll: true }); } catch (error) { } }
   }
 
   function close() {
@@ -172,36 +149,18 @@
     }
   }
 
-  function showFab() {
-    if (isTv || !fab) return;
-    clearTimeout(hideTimer);
-    fab.hidden = false;
-  }
-
-  function hideFabSoon() {
-    if (isTv || !fab) return;
-    clearTimeout(hideTimer);
-    hideTimer = setTimeout(function () { if (fab) fab.hidden = true; }, 1200);
-  }
-
   document.addEventListener('focusin', function (event) {
     var field = event.target;
     if (!isField(field)) return;
     if (overlay && overlay.contains(field)) return;
-    target = field;
-    if (isTv) return; // 电视由遥控确认时打开，避免弹出软键盘后又被面板挡住
-    build();
-    showFab();
-  });
-
-  document.addEventListener('focusout', function (event) {
-    if (!isField(event.target)) return;
-    hideFabSoon();
+    target = field; // 记录当前输入框，扫码文字回来后填这里
   });
 
   window.veyraRelayOpen = function (field) {
+    if (!isTv) return false;
     build();
     open(field || document.activeElement);
+    return true;
   };
 
   window.veyraRelayClose = close;

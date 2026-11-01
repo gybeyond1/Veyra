@@ -733,8 +733,12 @@ public final class MainActivity extends Activity {
         });
     }
 
-    /** 扫码输入：起一个只读本机的局域网 HTTP 服务，收到文字就填进页面当前输入框。 */
+    /**
+     * 扫码输入：起一个只读本机的局域网 HTTP 服务，收到文字就填进页面当前输入框。
+     * 只有电视才需要（遥控器打字不现实）；手机和平板能直接打字，不开端口、不占线程。
+     */
     private void startTextRelay() {
+        if (!DeviceProfile.TV.equals(deviceType)) return;
         if (textRelay != null) return;
         try {
             textRelay = new LanTextRelay(text -> runOnUiThread(() -> {
