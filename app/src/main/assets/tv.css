@@ -24,6 +24,9 @@
 }
 
 [hidden]{display:none !important}
+/* 浏览器默认的 :focus 环会套在整张卡上（连剧名一起框住），
+   焦点样式统一由 .is-focused 负责，这里把默认环关掉 */
+[data-focusable]:focus{outline:none}
 *{box-sizing:border-box}
 
 html{font-size:10px;height:100%}
@@ -125,7 +128,8 @@ img{display:block;border:0}
 }
 /* 焦点只作用在海报上：整卡放大会把剧名糊掉，描边也会框住文字 */
 .card.is-focused .art{
-  outline:.4rem solid var(--focus);outline-offset:.3rem;
+  /* 描边画在海报内侧：往外画会压到下面那行剧名上 */
+  outline:.4rem solid var(--focus);outline-offset:-.4rem;
   transform:scale(1.04);
 }
 
