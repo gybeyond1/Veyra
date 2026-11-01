@@ -382,9 +382,19 @@ public final class MainActivity extends Activity {
 
     /** 电视构建走 ?lite=1：页面据此只加载降级脚本和轻量样式，手机 / 平板不带这个参数。 */
     private String uiUrl() {
-        return getResources().getBoolean(R.bool.veyra_lite)
-                ? HotUpdateManager.UI_URL + "?lite=1"
-                : HotUpdateManager.UI_URL;
+        return liteBuild() ? HotUpdateManager.UI_URL + "?lite=1" : HotUpdateManager.UI_URL;
+    }
+
+    /**
+     * 是否走轻量页面。
+     *
+     * 第一判据是 flavor 打进来的 R.bool.veyra_lite；再按设备形态兜一次底。
+     * 电视上跑手机那套 UI 一定会白屏（老 WebView 不认可选链），所以宁可多判一次，
+     * 也不能因为 flavor 打错、或者用户把手机包装到电视上，就让整台电视打不开。
+     */
+    private boolean liteBuild() {
+        if (getResources().getBoolean(R.bool.veyra_lite)) return true;
+        return DeviceProfile.TV.equals(DeviceProfile.type(this));
     }
 
     private void checkHotUpdates() {
