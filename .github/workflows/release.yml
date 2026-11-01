@@ -72,15 +72,23 @@ jobs:
             if [ -n "$VER" ]; then TAG="v$VER"; else TAG="v$(date +%Y%m%d-%H%M)"; fi
           fi
           echo "TAG=$TAG" >> $GITHUB_ENV
-          # APK 改名：Veyra-<tag>.apk 给手机/平板，Veyra-TV-<tag>.apk 给电视（轻量构建）
+          # APK 改名：Veyra-<版本>.apk 给手机/平板，Veyra-TV-<版本>.apk 给电视（轻量构建）。
+          # 名字里的版本号不带 v：GitHub 的 assets 是**按名字排序**返回的，
+          # 老版本 App 直接取「第一个 .apk」——Veyra-v0.24.2.apk 排在 Veyra-TV-v0.24.2.apk 后面，
+          # 于是手机端把电视包下走，装出个 TV App、版本号还不涨，下次启动继续提示更新。
+          # 去掉 v 之后 '0.24.3' < 'tv-0.24.3'，手机包稳定排第一，老客户端也能自己修好。
           # 有 flavor 之后产物会多一层 flavor 目录（outputs/apk/<flavor>/release/），用 find 兜住两种结构
-          cp "$(find app/build/outputs/apk -name 'app-mobile-release.apk' | head -1)" Veyra-$TAG.apk
-          cp "$(find app/build/outputs/apk -name 'app-tv-release.apk' | head -1)" Veyra-TV-$TAG.apk
+          PHONE_APK="Veyra-${TAG#v}.apk"
+          TV_APK="Veyra-TV-${TAG#v}.apk"
+          cp "$(find app/build/outputs/apk -name 'app-mobile-release.apk' | head -1)" "$PHONE_APK"
+          cp "$(find app/build/outputs/apk -name 'app-tv-release.apk' | head -1)" "$TV_APK"
+          echo "PHONE_APK=$PHONE_APK" >> $GITHUB_ENV
+          echo "TV_APK=$TV_APK" >> $GITHUB_ENV
           # 后端最新镜像同步进 release（gzip 压缩，NAS 可 docker load 离线部署）
           docker pull gybeyond/veyra-backend:latest
           docker save gybeyond/veyra-backend:latest | gzip -9 > veyra-backend-latest.tar.gz
-          ls -la Veyra-$TAG.apk Veyra-TV-$TAG.apk veyra-backend-latest.tar.gz
-          sha256sum Veyra-$TAG.apk Veyra-TV-$TAG.apk
+          ls -la "$PHONE_APK" "$TV_APK" veyra-backend-latest.tar.gz
+          sha256sum "$PHONE_APK" "$TV_APK"
 
       - name: Create Release
         env:
@@ -104,16 +112,16 @@ jobs:
           fi
           if [ -n "$NOTES" ]; then
             gh release create "$TAG" \
-              "Veyra-$TAG.apk" \
-              "Veyra-TV-$TAG.apk" \
+              "$PHONE_APK" \
+              "$TV_APK" \
               veyra-backend-latest.tar.gz \
               --title "Veyra $TAG" \
               --notes "$NOTES" \
               --latest
           else
             gh release create "$TAG" \
-              "Veyra-$TAG.apk" \
-              "Veyra-TV-$TAG.apk" \
+              "$PHONE_APK" \
+              "$TV_APK" \
               veyra-backend-latest.tar.gz \
               --title "Veyra $TAG" \
               --generate-notes \

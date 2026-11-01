@@ -18,12 +18,14 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
+import android.util.DisplayMetrics;
 import android.util.Log;
 import android.util.Size;
 import android.view.Gravity;
 import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
+import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.TextView;
 
@@ -69,6 +71,9 @@ public class QrScanActivity extends Activity implements SurfaceHolder.Callback {
     private final MultiFormatReader decoder = new MultiFormatReader();
     private String sessionJson = "";
     private boolean surfaceReady;
+    /** 相机会把画面等比铺进 SurfaceView：尺寸比例不对就会被拉伸（左右压扁）。 */
+    private Size previewSize;
+    private String appliedLayout = "";
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -82,8 +87,20 @@ public class QrScanActivity extends Activity implements SurfaceHolder.Callback {
         preview.getHolder().addCallback(this);
         root.addView(preview, new FrameLayout.LayoutParams(-1, -1));
 
+        /* 取景方框只是视觉参考：解码用的是整帧，框外照样能认出来。
+           有了它才知道该把电视上的码怼到画面中间。 */
+        View frame = new View(this);
+        android.graphics.drawable.GradientDrawable border = new android.graphics.drawable.GradientDrawable();
+        border.setColor(0x00000000);
+        border.setStroke(dp(2), 0x99FFD277);
+        border.setCornerRadius(dp(18));
+        frame.setBackground(border);
+        FrameLayout.LayoutParams frameParams = new FrameLayout.LayoutParams(dp(240), dp(240));
+        frameParams.gravity = Gravity.CENTER;
+        root.addView(frame, frameParams);
+
         hint = new TextView(this);
-        hint.setText("对准电视上的二维码");
+        hint.setText("对准电视上的二维码，让码落在方框内");
         hint.setTextColor(0xFFF3EFE4);
         hint.setTextSize(15f);
         hint.setGravity(Gravity.CENTER);
@@ -133,7 +150,10 @@ public class QrScanActivity extends Activity implements SurfaceHolder.Callback {
         openCamera();
     }
 
-    @Override public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) { }
+    @Override public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
+        // 尺寸被改过之后 surface 会重建，重建完再开相机，避免用旧比例的画面
+        if (camera == null) openCamera();
+    }
 
     @Override public void surfaceDestroyed(SurfaceHolder holder) {
         surfaceReady = false;
@@ -162,6 +182,12 @@ public class QrScanActivity extends Activity implements SurfaceHolder.Callback {
                 Size[] sizes = map.getOutputSizes(ImageFormat.YUV_420_888);
                 if (sizes != null && sizes.length > 0) size = pickSize(sizes);
             }
+            previewSize = size;
+
+            /* 先把预览画面按相机比例摆好，比例不对就等 surface 重建再来一次。
+               之前直接把 SurfaceView 铺满整屏，竖屏下相机画面（9:16）被拉成
+               屏幕比例（约 9:20），看起来就是左右被压扁。 */
+            if (!applyPreviewLayout(size)) return;
 
             cameraThread = new HandlerThread("veyra-scan");
             cameraThread.start();
@@ -204,6 +230,47 @@ public class QrScanActivity extends Activity implements SurfaceHolder.Callback {
             if (diff < delta) { delta = diff; best = size; }
         }
         return best;
+    }
+
+    /**
+     * 把预览画面摆成相机的真实比例（中心裁剪铺满）。
+     *
+     * 相机只会把画面等比塞进 SurfaceView，所以 surface 比例必须跟画面一致，
+     * 否则就是拉伸 —— 竖屏把 9:16 的画面铺到约 9:20 的整屏上，结果就是左右压扁。
+     * 返回 true 表示当前 surface 已经是目标尺寸，可以开相机；false 表示刚改过布局，
+     * surface 会重建，等 surfaceCreated / surfaceChanged 再进这里一次。
+     */
+    private boolean applyPreviewLayout(Size size) {
+        if (preview == null || size == null) return false;
+        DisplayMetrics screen = getResources().getDisplayMetrics();
+        int screenW = screen.widthPixels;
+        int screenH = screen.heightPixels;
+        View parent = (View) preview.getParent();
+        if (parent != null && parent.getWidth() > 0 && parent.getHeight() > 0) {
+            screenW = parent.getWidth();
+            screenH = parent.getHeight();
+        }
+        int rotation = getWindowManager().getDefaultDisplay().getRotation();
+        boolean portrait = rotation == Surface.ROTATION_0 || rotation == Surface.ROTATION_180;
+        int streamW = portrait ? size.getHeight() : size.getWidth();
+        int streamH = portrait ? size.getWidth() : size.getHeight();
+        float fill = Math.max(screenW / (float) streamW, screenH / (float) streamH);
+        int width = Math.max(1, Math.round(streamW * fill));
+        int height = Math.max(1, Math.round(streamH * fill));
+        String key = width + "x" + height;
+        if (key.equals(appliedLayout)) return true;
+        appliedLayout = key;
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(width, height);
+        params.gravity = Gravity.CENTER;
+        preview.setLayoutParams(params);
+        return false;
+    }
+
+    @Override public void onConfigurationChanged(android.content.res.Configuration configuration) {
+        super.onConfigurationChanged(configuration);
+        appliedLayout = "";
+        closeCamera();
+        if (preview != null) preview.post(this::openCamera);
     }
 
     private void startPreview(Surface previewSurface) {

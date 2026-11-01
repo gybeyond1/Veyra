@@ -3,7 +3,7 @@ package com.veyra.gybeyond;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
-import android.os.Build;
+import android.content.pm.PackageManager;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -14,26 +14,34 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.security.MessageDigest;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Locale;
 import java.util.regex.Pattern;
 
 /**
- * 更新检测：直连 GitHub Releases API（gybeyond1/Veyra），
- * 读取 latest release 的 tag_name / body / assets[0].browser_download_url 作为新版 APK。
- * 版本比较用语义化版本号（v0.16.0 vs 本地 versionName 0.16.0）。
+ * 更新检测：直连 GitHub Releases API（gybeyond1/Veyra），读 latest release 的
+ * tag_name / body / assets[]，按渠道挑本设备能装的那个 APK。
+ *
+ * 渠道隔离：同一个 release 里既有 Veyra-x.y.z.apk（手机/平板）也有 Veyra-TV-x.y.z.apk（电视），
+ * 两个包名不同、可以装在同一台设备上。以前这里取「assets 里第一个 .apk」，
+ * 而 release 附件是按名字排序返回的，Veyra-TV-… 排在 Veyra-… 前面 ——
+ * 结果手机端下下来的是电视包，本机版本号一直不涨，于是每次启动都提示更新，
+ * 还凭空多出一个电视 App。现在三处一起卡：按包名判渠道挑附件、缓存记住渠道、
+ * 下载完再校验 APK 的 packageName，装错直接丢弃。
  */
 final class UpdateManager {
     private static final String RELEASE_API = "https://api.github.com/repos/gybeyond1/Veyra/releases/latest";
     private static final String RELEASE_BASE = "https://github.com/gybeyond1/Veyra/releases/download/";
     private static final Pattern VERSION = Pattern.compile("\\d+\\.\\d+\\.\\d+");
+    /** 附件名里单独出现的 tv 记号：Veyra-TV-0.24.3.apk / veyra.tv.apk / veyra_tv_x.apk 都算。 */
+    private static final Pattern TV_MARK = Pattern.compile("(?i)(^|[-_.])tv([-_.]|$)");
     private static final long AUTO_INTERVAL_MS = 12 * 60 * 60 * 1000L;
 
     interface Progress { void onPercent(int percent); }
 
     private final Context context;
     private final SharedPreferences preferences;
+    /** 电视轻量包为 true，手机/平板包为 false；共用这份代码，只在这里分道。 */
+    private final boolean tvBuild;
     private Candidate candidate;
     private boolean downloading;
 
@@ -48,6 +56,24 @@ final class UpdateManager {
     UpdateManager(Context context) {
         this.context = context.getApplicationContext();
         preferences = this.context.getSharedPreferences("updates", Context.MODE_PRIVATE);
+        boolean lite = false;
+        try {
+            lite = this.context.getResources().getBoolean(R.bool.veyra_lite);
+        } catch (Exception ignored) { }
+        // 兜底：就算资源没读到，电视包包名一定带 .tv 后缀
+        tvBuild = lite || this.context.getPackageName().endsWith(".tv");
+    }
+
+    private String channel() { return tvBuild ? "tv" : "mobile"; }
+
+    /** 附件名是不是电视包：名字里单独出现 tv 记号才算。 */
+    static boolean isTvAsset(String assetName) {
+        return TV_MARK.matcher(assetName).find();
+    }
+
+    /** 附件名是否属于本渠道：带 tv 记号的只给电视，不带的只给手机。 */
+    private boolean matchesChannel(String assetName) {
+        return isTvAsset(assetName) == tvBuild;
     }
 
     synchronized JSONObject cached() throws Exception {
@@ -55,6 +81,11 @@ final class UpdateManager {
         if (saved == null) return status("none");
         try {
             JSONObject manifest = new JSONObject(saved);
+            // 老缓存没有渠道字段（或来自另一渠道）：直接作废，免得手机继续拿电视包
+            if (!channel().equals(manifest.optString("channel"))) {
+                clearCandidate();
+                return status("none");
+            }
             PackageInfo installed = context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
             if (isNewer(manifest.optString("versionName"), installed.versionName)) {
                 candidate = candidateFrom(manifest);
@@ -99,13 +130,13 @@ final class UpdateManager {
         }
     }
 
-    private static Candidate candidateFrom(JSONObject manifest) throws Exception {
+    private Candidate candidateFrom(JSONObject manifest) throws Exception {
         String version = manifest.optString("versionName");
         String tag = manifest.optString("tag");
         String apk = manifest.optString("apk");
         String sha256 = manifest.optString("sha256");
         if (!VERSION.matcher(version).matches() || !tag.equals("v" + version)
-                || !apk.endsWith(".apk")) {
+                || !apk.endsWith(".apk") || !matchesChannel(apk)) {
             throw new IllegalStateException("发布信息格式有误");
         }
         Candidate result = new Candidate();
@@ -114,7 +145,7 @@ final class UpdateManager {
         result.url = RELEASE_BASE + tag + "/" + apk;
         result.digest = sha256.matches("[0-9a-fA-F]{64}") ? "sha256:" + sha256 : "";
         result.size = manifest.optLong("size");
-        result.notes = manifest.optString("notes");
+        result.notes = manifest.optString("notes", "");
         return result;
     }
 
@@ -133,18 +164,27 @@ final class UpdateManager {
             preferences.edit().putLong("last_auto_check", now).apply();
         }
 
-        JSONObject manifest = fetchManifest();
+        JSONObject release = fetchRelease();
         if (manual) preferences.edit().putLong("last_auto_check", now).apply();
         PackageInfo installed = context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
         String localVersion = installed.versionName;
-        if (manifest == null) {
+        if (release == null) {
             clearCandidate();
             return status("unpublished");
         }
-        if (!isNewer(manifest.optString("versionName"), localVersion)) {
+        String tag = release.optString("tag_name", "");
+        String version = tag.replaceFirst("^[vV]", "");
+        JSONObject asset = pickAsset(release);
+        if (asset == null) {
+            // 新版发布了但还没打本渠道的包：不能说「已经是最新」，得让界面讲清楚
+            clearCandidate();
+            return status("channel-missing").put("channel", channel()).put("version", version);
+        }
+        if (!isNewer(version, localVersion)) {
             clearCandidate();
             return status("current").put("version", localVersion);
         }
+        JSONObject manifest = manifestOf(release, asset);
         candidate = candidateFrom(manifest);
         preferences.edit().putString("available_manifest", manifest.toString()).apply();
         return availableStatus(candidate, localVersion);
@@ -161,9 +201,11 @@ final class UpdateManager {
         try {
             File directory = new File(context.getCacheDir(), "updates");
             if (!directory.exists() && !directory.mkdirs()) throw new IllegalStateException("无法创建下载目录");
+            dropOtherChannelFiles(directory);
             String name = candidate.url.substring(candidate.url.lastIndexOf('/') + 1);
             File apk = new File(directory, name);
             if (apk.isFile() && (!candidate.digest.isEmpty() && matchesDigest(apk, candidate.digest))) {
+                verifyPackage(apk);
                 progress.onPercent(100);
                 return apk;
             }
@@ -173,7 +215,9 @@ final class UpdateManager {
             Exception lastError = null;
             for (int attempt = 0; attempt < 2; attempt++) {
                 try {
-                    return downloadAttempt(candidate.url, candidate.size, candidate.digest, partial, apk, progress);
+                    File done = downloadAttempt(candidate.url, candidate.size, candidate.digest, partial, apk, progress);
+                    verifyPackage(done);
+                    return done;
                 } catch (Exception error) {
                     lastError = error;
                     // 校验失败说明已下载内容本身就是坏的，续传无意义，清掉从头下；
@@ -188,6 +232,31 @@ final class UpdateManager {
             throw lastError != null ? lastError : new IllegalStateException("下载失败，请重试");
         } finally {
             downloading = false;
+        }
+    }
+
+    /** 装之前先看包里的 packageName：手机不装电视包，电视不装手机包。 */
+    private void verifyPackage(File apk) {
+        String expected = context.getPackageName();
+        PackageInfo info = context.getPackageManager().getPackageArchiveInfo(apk.getAbsolutePath(), 0);
+        if (info == null) {
+            apk.delete();
+            throw new IllegalStateException("安装包无法解析，请重新下载");
+        }
+        if (!expected.equals(info.packageName)) {
+            apk.delete();
+            throw new IllegalStateException(tvBuild ? "下载到的是手机版安装包，已丢弃" : "下载到的是电视版安装包，已丢弃");
+        }
+    }
+
+    /** 清掉缓存目录里另一个渠道的旧包（换包名后残留的电视包很占地方）。 */
+    private void dropOtherChannelFiles(File directory) {
+        File[] files = directory.listFiles();
+        if (files == null) return;
+        for (File file : files) {
+            String name = file.getName();
+            if (!name.endsWith(".apk") && !name.endsWith(".apk.part")) continue;
+            if (!matchesChannel(name)) file.delete();
         }
     }
 
@@ -241,8 +310,45 @@ final class UpdateManager {
 
     private static JSONObject status(String value) throws Exception { return new JSONObject().put("status", value); }
 
-    /** 拉取 GitHub Releases API latest：tag_name / body / 第一个 APK asset。 */
-    private static JSONObject fetchManifest() throws Exception {
+    /** 从 release 的 assets 里挑本渠道的 APK；没有就返回 null。 */
+    private JSONObject pickAsset(JSONObject release) {
+        return pickAsset(release.optJSONArray("assets"), tvBuild);
+    }
+
+    /**
+     * 附件挑拣的唯一实现：只认 .apk，且名字的 tv 记号要和渠道一致。
+     * release 的 assets 是按名字排序返回的（Veyra-TV-… 排在 Veyra-… 前面），
+     * 所以绝不能「取第一个」；这里逐个比对，谁也不许串台。
+     */
+    static JSONObject pickAsset(JSONArray assets, boolean tvBuild) {
+        if (assets == null) return null;
+        for (int i = 0; i < assets.length(); i++) {
+            JSONObject asset = assets.optJSONObject(i);
+            if (asset == null) continue;
+            String name = asset.optString("name", "");
+            if (!name.toLowerCase(Locale.ROOT).endsWith(".apk")) continue;
+            if (isTvAsset(name) != tvBuild) continue;
+            return asset;
+        }
+        return null;
+    }
+
+    private JSONObject manifestOf(JSONObject release, JSONObject asset) throws Exception {
+        String tag = release.optString("tag_name", "");
+        String digest = asset.optString("digest", "").replaceFirst("^sha256:", "").trim();
+        JSONObject manifest = new JSONObject();
+        manifest.put("versionName", tag.replaceFirst("^[vV]", ""));
+        manifest.put("tag", tag);
+        manifest.put("apk", asset.optString("name", ""));
+        manifest.put("size", asset.optLong("size", 0));
+        manifest.put("notes", release.optString("body", ""));
+        manifest.put("sha256", digest);
+        manifest.put("channel", channel());
+        return manifest;
+    }
+
+    /** 拉取 GitHub Releases API latest；404 表示还没发过版。 */
+    private static JSONObject fetchRelease() throws Exception {
         HttpURLConnection connection = (HttpURLConnection) new URL(RELEASE_API).openConnection();
         connection.setConnectTimeout(15_000);
         connection.setReadTimeout(30_000);
@@ -263,31 +369,7 @@ final class UpdateManager {
                 length += count;
                 if (length == bytes.length) throw new IllegalStateException("发布列表过大");
             }
-            JSONObject release = new JSONObject(new String(bytes, 0, length, java.nio.charset.StandardCharsets.UTF_8));
-            String tag = release.optString("tag_name", "");
-            String version = tag.replaceFirst("^[vV]", "");
-            String notes = release.optString("body", "");
-            JSONArray assets = release.optJSONArray("assets");
-            if (assets == null || assets.length() == 0) throw new IllegalStateException("Release 无 APK 附件");
-            // 在 assets 里找 APK 文件（release 可能同时带镜像 tar，按名字区分）
-            JSONObject asset = null;
-            for (int i = 0; i < assets.length(); i++) {
-                JSONObject a = assets.optJSONObject(i);
-                if (a != null && a.optString("name", "").endsWith(".apk")) { asset = a; break; }
-            }
-            if (asset == null) throw new IllegalStateException("Release 无 APK 附件");
-            JSONObject manifest = new JSONObject();
-            manifest.put("versionName", version);
-            manifest.put("tag", tag);
-            manifest.put("apk", asset.optString("name", ""));
-            manifest.put("browser_download_url", asset.optString("browser_download_url", ""));
-            manifest.put("size", asset.optLong("size", 0));
-            manifest.put("notes", notes);
-            // GitHub API 返回 digest（如 sha256:...），去掉前缀只留 hex
-            String digest = asset.optString("digest", "");
-            digest = digest.replaceFirst("^sha256:", "").trim();
-            manifest.put("sha256", digest);
-            return manifest;
+            return new JSONObject(new String(bytes, 0, length, java.nio.charset.StandardCharsets.UTF_8));
         } finally {
             connection.disconnect();
         }

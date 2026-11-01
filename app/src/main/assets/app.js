@@ -93,6 +93,8 @@ let lastDockTap = { tab: '', at: 0, navigated: false };
 let updateChecking = false;
 let updateDownloading = false;
 let updateAvailable = null;
+// 当前弹窗对应的版本号：用户点「取消」后记下来，同一个版本不再每次冷启动都弹
+let updatePendingVersion = '';
 let appVersion = '';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
@@ -330,8 +332,20 @@ window.hgCloudSynced = () => {
   }
 };
 
+const UPDATE_DISMISS_KEY = 'veyra.update.dismissed';
+function dismissedUpdateVersion() {
+  try { return localStorage.getItem(UPDATE_DISMISS_KEY) || ''; } catch (error) { return ''; }
+}
+function rememberDismissedUpdate(version) {
+  try {
+    if (version) localStorage.setItem(UPDATE_DISMISS_KEY, String(version));
+    else localStorage.removeItem(UPDATE_DISMISS_KEY);
+  } catch (error) { /* 隐私模式写不了就每次都弹，不致命 */ }
+}
+
 function setAvailableUpdate(result) {
   updateAvailable = result?.status === 'available' ? result : null;
+  updatePendingVersion = updateAvailable ? String(updateAvailable.version || '') : '';
   headerSettings.classList.toggle('has-update', Boolean(updateAvailable));
   const versionButton = content.querySelector('.app-version');
   if (versionButton) {
@@ -368,6 +382,8 @@ async function checkUpdate(manual) {
     if (result.status === 'available') {
       setAvailableUpdate(result);
       if (manual) { showUpdate(result); return; }
+      // 这个版本用户已经点过「取消」：只留角标，别再每次冷启动都静默下 10MB 再弹窗
+      if (dismissedUpdateVersion() === String(result.version || '')) return;
       // 启动自动模式：静默下载更新包，完成后弹窗提示安装（无需手动点检测）
       try {
         await api('download-update');
@@ -379,6 +395,11 @@ async function checkUpdate(manual) {
       setAvailableUpdate(null);
       if (manual && result.status === 'current') toast(`已是最新版本 ${result.version}`);
       if (manual && result.status === 'unpublished') toast('暂未发布更新包', true);
+    }
+    else if (result.status === 'channel-missing') {
+      // 新版发了但这个渠道还没打包：不能说「已是最新」，也不能把别的渠道的包装上去
+      setAvailableUpdate(null);
+      if (manual) toast('这个版本还没发布手机版安装包，等打包后再试', true);
     }
     else if (manual && result.status === 'unconfigured') toast('暂未发布更新包', true);
     else if (manual && result.status === 'throttled') toast('一小时内最多手动检查 5 次，请稍后再试', true);
@@ -409,6 +430,7 @@ updateDownloadButton.addEventListener('click', async () => {
     // 原生侧 download-update 返回前已自动拉起系统安装页（缺权限时先跳授权页），
     // 这里收起弹窗，避免 WebView 盖在系统安装界面下面。
     updateOverlay.hidden = true;
+    rememberDismissedUpdate('');   // 用户是真想更新：清掉「已取消」记录，装失败下轮还能提示
     updateDownloadButton.textContent = '立即下载';
     updateLaterButton.textContent = '取消';
     toast('下载完成，正在打开安装程序');
@@ -428,6 +450,8 @@ updateLaterButton.addEventListener('click', () => {
   updateOverlay.hidden = true;
   updateBackEnabled();
   if (updateDownloading) toast('已转入后台下载，完成后会自动弹出安装', true);
+  // 没在下载就说明用户这次不想更新：记下版本，下次冷启动不再自动弹同一个版本
+  else rememberDismissedUpdate(updatePendingVersion);
 });
 
 window.hgTheme = info => {

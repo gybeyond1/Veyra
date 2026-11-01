@@ -1,6 +1,7 @@
 package com.veyra.gybeyond;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Intent;
@@ -121,6 +122,8 @@ public final class MainActivity extends Activity {
     private String deviceType = DeviceProfile.PHONE;
     private volatile boolean tvCapture = true;
     private LanTextRelay textRelay;
+    /** 电视端退出确认弹窗（只在返回键落到首页时出现）。 */
+    private AlertDialog exitDialog;
     /** 扫码登录：电视这边二维码里的一次性码（4 分钟内复用，避免重渲染就换码）。 */
     private volatile String activeLoginCode = "";
     private volatile long activeLoginCodeAt;
@@ -772,8 +775,33 @@ public final class MainActivity extends Activity {
                 ? "window.hgPredictiveBackCommit ? window.hgPredictiveBackCommit() : (window.hgBack ? window.hgBack() : false)"
                 : "window.hgBack ? window.hgBack() : false";
         webView.evaluateJavascript(script, result -> {
-            if (!"true".equals(result) && !moveTaskToBack(true)) finish();
+            if ("true".equals(result)) return;
+            // 电视端返回不该直接掉到桌面：先弹确认，确认后连进程一起收掉，
+            // 否则盒子会留一个后台进程占内存，再打开还得重新加载一遍。
+            if (DeviceProfile.TV.equals(deviceType)) { showExitConfirm(); return; }
+            if (!moveTaskToBack(true)) finish();
         });
+    }
+
+    /** 电视端退出确认：遥控器方向键 + 确定键就能选，不需要触摸。 */
+    private void showExitConfirm() {
+        if (exitDialog != null && exitDialog.isShowing()) return;
+        exitDialog = new AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+                .setTitle("退出 Veyra")
+                .setMessage("确定要退出应用吗？")
+                .setPositiveButton("退出", (dialog, which) -> exitApplication())
+                .setNegativeButton("取消", null)
+                .setOnDismissListener(dialog -> exitDialog = null)
+                .create();
+        exitDialog.show();
+    }
+
+    private void exitApplication() {
+        try { finishAndRemoveTask(); } catch (Exception ignored) { finish(); }
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            android.os.Process.killProcess(android.os.Process.myPid());
+            System.exit(0);
+        }, 150);
     }
 
     /**

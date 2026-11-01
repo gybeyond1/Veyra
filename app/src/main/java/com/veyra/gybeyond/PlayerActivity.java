@@ -1,6 +1,7 @@
 package com.veyra.gybeyond;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.animation.ValueAnimator;
 import android.os.Build;
 import android.content.pm.ActivityInfo;
@@ -209,6 +210,16 @@ public final class PlayerActivity extends Activity {
     private int navigationInsetBottom;
     private OnBackInvokedCallback backCallback;
 
+    /* ---- 电视端：没有触摸、没有焦点导航，只有遥控器按键和一个常显的进度条 ---- */
+    private boolean tvMode;
+    private boolean tvInfoShown;
+    private AlertDialog exitDialog;
+    private final Runnable hideTvInfo = () -> {
+        if (!tvInfoShown) return;
+        tvInfoShown = false;
+        updateTitleVisibility();
+    };
+
     private final Runnable tick = new Runnable() {
         @Override public void run() {
             if (player != null && player.getDuration() > 0) {
@@ -236,6 +247,7 @@ public final class PlayerActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        tvMode = DeviceProfile.isTv(this);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
                 WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
@@ -496,9 +508,12 @@ public final class PlayerActivity extends Activity {
         titleBar = top;
         top.setGravity(Gravity.CENTER_VERTICAL);
         top.setPadding(dp(4), dp(12), dp(16), dp(10));
-        ImageButton back = icon(R.drawable.player_back, "返回详情");
-        back.setOnClickListener(v -> handlePlayerBack());
-        top.addView(back, new LinearLayout.LayoutParams(dp(38), dp(38)));
+        // 电视端的返回靠遥控器返回键，标题栏里那颗按钮既用不上、又会被焦点框选中
+        if (!tvMode) {
+            ImageButton back = icon(R.drawable.player_back, "返回详情");
+            back.setOnClickListener(v -> handlePlayerBack());
+            top.addView(back, new LinearLayout.LayoutParams(dp(38), dp(38)));
+        }
         title = label("", 16, Color.WHITE);
         title.setTypeface(null, Typeface.BOLD);
         title.setSingleLine(true);
@@ -648,15 +663,18 @@ public final class PlayerActivity extends Activity {
         buttons.addView(bookmarkButton, new LinearLayout.LayoutParams(dp(36), dp(38)));
         controls.addView(buttons, new LinearLayout.LayoutParams(-2, dp(52)));
         root.addView(controls, new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM));
+        // 电视端整条控件栏都不要：遥控器上左右是拖进度、确定是暂停，没有用鼠标去点按钮的场景
+        if (tvMode) controls.setVisibility(View.GONE);
         buildSeekPreview();
         miniProgress = new FrameLayout(this);
         miniProgress.setVisibility(View.GONE);
         miniProgressFill = new View(this);
         miniProgressFill.setBackgroundColor(YELLOW);
         miniProgress.addView(miniProgressFill, new FrameLayout.LayoutParams(0, -1, Gravity.LEFT));
-        FrameLayout.LayoutParams miniParams = new FrameLayout.LayoutParams(-1, dp(3), Gravity.BOTTOM);
-        miniParams.leftMargin = dp(5);
-        miniParams.rightMargin = dp(5);
+        // 电视端这条黄条是常显的（也是唯一保留的进度反馈），做粗一点、通栏
+        FrameLayout.LayoutParams miniParams = new FrameLayout.LayoutParams(-1, dp(tvMode ? 5 : 3), Gravity.BOTTOM);
+        miniParams.leftMargin = dp(tvMode ? 0 : 5);
+        miniParams.rightMargin = dp(tvMode ? 0 : 5);
         miniParams.bottomMargin = collapsedProgressBottomMargin(0);
         root.addView(miniProgress, miniParams);
         root.setOnApplyWindowInsetsListener((viewRoot, insets) -> {
@@ -688,6 +706,13 @@ public final class PlayerActivity extends Activity {
         root.requestApplyInsets();
         updateSystemBars();
         updateControlLayout();
+        if (tvMode) {
+            /* 起播先露 4 秒标题，之后自动收掉；想再看按一下确定键 */
+            tvInfoShown = true;
+            updateTitleVisibility();
+            handler.postDelayed(hideTvInfo, 4000);
+            miniProgress.setVisibility(View.VISIBLE);
+        }
     }
 
     private static String speedLabel(float speed) {
@@ -1535,7 +1560,13 @@ public final class PlayerActivity extends Activity {
     }
 
     private void updateTitleVisibility() {
-        if (titleBar != null) titleBar.setVisibility(isLandscapeFullscreen() && !controlsShown ? View.INVISIBLE : View.VISIBLE);
+        if (titleBar == null) return;
+        if (tvMode) {
+            // 电视端标题只在按下确定键后短暂出现，平时不占画面
+            titleBar.setVisibility(tvInfoShown ? View.VISIBLE : View.INVISIBLE);
+            return;
+        }
+        titleBar.setVisibility(isLandscapeFullscreen() && !controlsShown ? View.INVISIBLE : View.VISIBLE);
     }
 
     @Override public void onConfigurationChanged(Configuration configuration) {
@@ -1622,6 +1653,7 @@ public final class PlayerActivity extends Activity {
     }
 
     private void concealControls() {
+        if (tvMode) return;
         if (seasonEnded) return;
         if (!controlsShown) return;
         controlsShown = false;
@@ -1665,6 +1697,7 @@ public final class PlayerActivity extends Activity {
 
     private void revealControls() {
         if (controls == null) return;
+        if (tvMode) { showTvInfo(); return; }
         if (!controlsShown) showControlsTransition();
         else controls.setVisibility(View.VISIBLE);
         updateTitleVisibility();
@@ -1680,6 +1713,7 @@ public final class PlayerActivity extends Activity {
     }
 
     private final Runnable hideControls = () -> {
+        if (tvMode) return;
         if (controls != null && !seasonEnded && !seeking && gestureMode != GESTURE_HOLD && speedPanel == null)
             concealControls();
     };
@@ -1754,6 +1788,7 @@ public final class PlayerActivity extends Activity {
     }
 
     private void handlePlayerBack() {
+        if (tvMode) { confirmExitPlayback(); return; }
         if (fullscreenMode) {
             if (speedPanel != null) closeSpeedPanel();
             if (episodesOpen) closeEpisodes();
@@ -1763,19 +1798,101 @@ public final class PlayerActivity extends Activity {
         else finish();
     }
 
-    /**
-     * 电视遥控：控制条收起时，确认键直接切换播放/暂停（不必先把控制条叫出来、再用方向键找按钮）。
-     * 控制条展开时完全交给系统，按钮照常可以用方向键走焦点、确认键点击 —— 手机永远不会进这个分支。
-     */
+    /* ================= 电视端：只有遥控器 =================
+       上 / 下 = 上一集 / 下一集
+       左 / 右 = 后退 / 前进 10 秒（按住连发）
+       确定    = 播放/暂停，顺便把标题浮现 3 秒
+       返回    = 弹确认，确认后才退出
+       画面里只常显底部那条黄进度条，没有控件栏、没有可聚焦的按钮。 */
+
+    private void showTvInfo() {
+        if (!tvMode) return;
+        tvInfoShown = true;
+        updateTitleVisibility();
+        handler.removeCallbacks(hideTvInfo);
+        handler.postDelayed(hideTvInfo, 3200);
+    }
+
+    private void tvTogglePlay() {
+        if (player == null) return;
+        player.setPlayWhenReady(!player.getPlayWhenReady());
+        showTvInfo();
+    }
+
+    private void tvSwitchEpisode(int direction) {
+        if (switching) return;
+        Selection item = adjacent(direction);
+        if (item == null) {
+            toast(direction > 0 ? "已经是最后一集" : "已经是第一集");
+            return;
+        }
+        animateSwitch(item, direction);
+        showTvInfo();
+    }
+
+    private void tvSeekBy(long delta) {
+        if (player == null || player.getDuration() <= 0) return;
+        long target = Math.max(0, Math.min(player.getDuration() - 1000, player.getCurrentPosition() + delta));
+        player.seekTo(target);
+        showTvInfo();
+    }
+
+    private void tvAnnouncePosition() {
+        if (player == null || player.getDuration() <= 0) return;
+        toast(clock(player.getCurrentPosition()) + " / " + clock(player.getDuration()));
+    }
+
+    private void confirmExitPlayback() {
+        if (exitDialog != null && exitDialog.isShowing()) return;
+        exitDialog = new AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+                .setTitle("退出播放")
+                .setMessage("确定要退出当前剧集吗？")
+                .setPositiveButton("退出", (dialog, which) -> finish())
+                .setNegativeButton("继续观看", null)
+                .setOnDismissListener(dialog -> exitDialog = null)
+                .create();
+        exitDialog.show();
+    }
+
     @Override public boolean dispatchKeyEvent(android.view.KeyEvent event) {
-        if (DeviceProfile.isTv(this) && !controlsShown && player != null) {
-            int code = event.getKeyCode();
-            if (code == android.view.KeyEvent.KEYCODE_DPAD_CENTER
-                    || code == android.view.KeyEvent.KEYCODE_ENTER
-                    || code == android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE) {
-                if (event.getAction() == android.view.KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
-                    player.setPlayWhenReady(!player.getPlayWhenReady());
-                }
+        if (tvMode) return dispatchTvKey(event);
+        return super.dispatchKeyEvent(event);
+    }
+
+    private boolean dispatchTvKey(android.view.KeyEvent event) {
+        int code = event.getKeyCode();
+        int action = event.getAction();
+
+        if (action == android.view.KeyEvent.ACTION_DOWN) {
+            switch (code) {
+                case android.view.KeyEvent.KEYCODE_DPAD_CENTER:
+                case android.view.KeyEvent.KEYCODE_ENTER:
+                case android.view.KeyEvent.KEYCODE_NUMPAD_ENTER:
+                case android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
+                    if (event.getRepeatCount() == 0) tvTogglePlay();
+                    return true;
+                case android.view.KeyEvent.KEYCODE_DPAD_UP:
+                case android.view.KeyEvent.KEYCODE_CHANNEL_UP:
+                case android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS:
+                    if (event.getRepeatCount() == 0) tvSwitchEpisode(-1);
+                    return true;
+                case android.view.KeyEvent.KEYCODE_DPAD_DOWN:
+                case android.view.KeyEvent.KEYCODE_CHANNEL_DOWN:
+                case android.view.KeyEvent.KEYCODE_MEDIA_NEXT:
+                    if (event.getRepeatCount() == 0) tvSwitchEpisode(1);
+                    return true;
+                case android.view.KeyEvent.KEYCODE_DPAD_LEFT:
+                    tvSeekBy(-10_000L);
+                    return true;
+                case android.view.KeyEvent.KEYCODE_DPAD_RIGHT:
+                    tvSeekBy(10_000L);
+                    return true;
+                default:
+                    break;
+            }
+        } else if (action == android.view.KeyEvent.ACTION_UP) {
+            if (code == android.view.KeyEvent.KEYCODE_DPAD_LEFT || code == android.view.KeyEvent.KEYCODE_DPAD_RIGHT) {
+                tvAnnouncePosition();
                 return true;
             }
         }

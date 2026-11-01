@@ -5,9 +5,9 @@
    独立实现，不复用 app.js：那套里 60% 是手势、玻璃、转场、下载、主题，
    电视上一个都用不上，还会拖帧。这里只有四件事：
      1) 遥控器焦点（几何找最近邻，不依赖 DOM 顺序）
-     2) 四个页面：首页 / 剧场 / 搜索 / 我的
-     3) 详情 + 起播
-     4) 未登录时手机扫码登录
+     2) 四个页面：首页 / 剧场 / 搜索 / 我的 + 左下角账号面板
+     3) 详情（海报固定、剧集分组）+ 起播
+     4) 未登录时手机扫码登录，搜索页常显扫码输入
 
    兼容目标：电视盒子上的老 WebView（Chrome 61 上下）。
    不用可选链、不用 ??、不用 replaceChildren / replaceAll / flat / Object.fromEntries。
@@ -38,6 +38,7 @@ function api(action, args) {
 var state = {
   route: 'home',
   source: 'hongguo',
+  unlocked: false,
   home: null,
   homeError: '',
   category: null,       /* { id, items, nextPage, loading } */
@@ -48,16 +49,24 @@ var state = {
   detail: null,
   detailFrom: 'home',
   detailLoading: false,
+  epGroup: 0,           /* 剧集分组：每 20 集一组 */
   account: { loggedIn: false },
+  version: '',
+  update: null,         /* 检查更新查到的可更新版本 */
   focusKey: '',
   lastRailKey: 'nav:home'
 };
 
+var EP_PAGE = 20;
+
 var view = document.getElementById('view');
 var stage = document.getElementById('stage');
 var loginLayer = document.getElementById('login');
+var accountPanel = document.getElementById('account');
+var updateLayer = document.getElementById('tv-update');
 var toastEl = document.getElementById('toast');
 var railAccount = document.getElementById('rail-account');
+var railWho = document.getElementById('rail-who');
 
 function esc(value) {
   return String(value == null ? '' : value)
@@ -100,9 +109,16 @@ function paintCovers(root) {
 /* ---------------- 焦点 ---------------- */
 function inRail(el) { return !!(el && el.closest && el.closest('#rail')); }
 
+/* 有浮层盖着时，焦点只在浮层里转，别跑到背后的卡片上 */
+function activeOverlay() {
+  if (updateLayer && !updateLayer.hidden) return updateLayer;
+  if (loginLayer && !loginLayer.hidden) return loginLayer;
+  if (accountPanel && !accountPanel.hidden) return accountPanel;
+  return null;
+}
+
 function focusables() {
-  /* 登录层盖着时只让焦点在层里转，别跑到背后的卡片上 */
-  var scope = loginLayer.hidden ? document : loginLayer;
+  var scope = activeOverlay() || document;
   var nodes = scope.querySelectorAll('[data-focusable]');
   var out = [];
   for (var i = 0; i < nodes.length; i++) {
@@ -229,7 +245,7 @@ function renderHome() {
   }
   html += '<section class="section"><div class="section-head"><h2>为你推荐</h2><span>' + recommend.length + ' 部</span></div>'
     + gridMarkup(recommend, '推荐列表是空的') + '</section>'
-    + '<section class="section"><div class="section-head"><h2>' + (state.source === 'huangguo' ? '最近上新' : '热门漫剧') + '</h2><span>' + newest.length + ' 部</span></div>'
+    + '<section class="section"><div class="section-head"><h2>' + (state.source === 'huangguo' ? '最近上新' : '热门短剧') + '</h2><span>' + newest.length + ' 部</span></div>'
     + gridMarkup(newest, '暂时没有新内容') + '</section>';
   view.innerHTML = html;
   paintCovers(view);
@@ -341,6 +357,29 @@ function filteredSearchItems() {
   return out;
 }
 
+/* 扫码输入二维码：电视打字太难受，直接常显在搜索框旁边 */
+var qrCache = { url: '', html: '' };
+function searchQrMarkup() {
+  var info = null;
+  try { info = JSON.parse(window.AndroidHost.relayInfo()); } catch (error) { }
+  var url = info && info.url ? info.url : '';
+  if (!url) {
+    return '<div class="qr empty-qr">电视没连上局域网<br>手机端「扫码输入」仍可用</div>';
+  }
+  if (qrCache.url !== url) {
+    try {
+      var qr = window.qrcode(0, 'M');
+      qr.addData(url);
+      qr.make();
+      qrCache = { url: url, html: qr.createSvgTag({ cellSize: 4, margin: 1, scalable: true }) };
+    } catch (error) {
+      return '<div class="qr empty-qr">二维码生成失败</div>';
+    }
+  }
+  return '<div class="qr">' + qrCache.html + '</div>'
+    + '<p class="cap">手机扫码 → 输入剧名<br>文字直接推到电视搜索</p>';
+}
+
 function renderSearch() {
   var filters = filterList();
   var query = state.search.query;
@@ -348,10 +387,15 @@ function renderSearch() {
   var loading = state.search.items === null;
 
   var html = '<h1 class="page-title">搜索</h1>'
+    + '<div class="search-head">'
+    + '<div class="search-main">'
     + '<div class="search-box" data-focusable data-key="search-box" tabindex="0">'
     + '<input id="search-input" type="text" value="' + esc(query) + '" placeholder="输入剧名，或手机扫码输入" autocomplete="off">'
     + '</div>'
-    + '<p class="search-hint">按 OK 调出键盘；也可以用手机端的「扫码输入」把字传过来</p>';
+    + '<p class="search-hint">按 OK 调出键盘；也可以扫右边的二维码，用手机把字推过来</p>'
+    + '</div>'
+    + '<div class="search-qr">' + searchQrMarkup() + '</div>'
+    + '</div>';
 
   if (query) {
     var chips = '<div class="chips">';
@@ -434,15 +478,37 @@ function renderDetail() {
   }
   var data = state.detail;
   var episodes = list(data.episodes);
+  var total = episodes.length;
+
+  var groups = total ? Math.ceil(total / EP_PAGE) : 0;
+  var gi = state.epGroup || 0;
+  if (gi > groups - 1) gi = groups - 1;
+  if (gi < 0) gi = 0;
+  state.epGroup = gi;
+  var start = gi * EP_PAGE;
+  var end = Math.min(total, start + EP_PAGE);
+
   var eps = '';
-  if (episodes.length) {
-    eps = '<h2 class="eps-title">选集</h2><div class="eps">';
-    for (var i = 0; i < episodes.length; i++) {
+  if (total) {
+    var groupHtml = '';
+    if (groups > 1) {
+      groupHtml = '<div class="ep-groups"><div class="chips">';
+      for (var g = 0; g < groups; g++) {
+        var from = g * EP_PAGE + 1;
+        var to = Math.min(total, (g + 1) * EP_PAGE);
+        groupHtml += '<button type="button" class="chip' + (g === gi ? ' is-active' : '') + '" data-focusable data-key="epg:' + g + '" data-epgroup="' + g + '">' + from + '-' + to + '</button>';
+      }
+      groupHtml += '</div></div>';
+    }
+    eps = '<h2 class="eps-title">选集<span>' + (start + 1) + '-' + end + ' / 共 ' + total + ' 集</span></h2>'
+      + groupHtml + '<div class="eps">';
+    for (var i = start; i < end; i++) {
       var number = episodes[i].number || (i + 1);
       eps += '<button type="button" data-focusable data-key="ep:' + number + '" data-episode="' + number + '">' + number + '</button>';
     }
     eps += '</div>';
   }
+
   view.innerHTML = '<div class="detail">'
     + '<div class="detail-art"><img data-cover="' + esc(data.cover || '') + '" alt=""></div>'
     + '<div class="detail-info">'
@@ -463,6 +529,7 @@ function openDetail(id) {
   state.route = 'detail';
   state.detail = null;
   state.detailLoading = true;
+  state.epGroup = 0;
   state.focusKey = 'play';
   stage.scrollTop = 0;
   renderDetail();
@@ -591,7 +658,9 @@ window.veyraTvKey = function (code) {
 };
 
 window.hgBack = function () {
+  if (updateLayer && !updateLayer.hidden) { closeUpdatePanel(); return true; }
   if (!loginLayer.hidden) { loginLayer.hidden = true; return true; }
+  if (accountPanel && !accountPanel.hidden) { accountPanel.hidden = true; state.focusKey = 'nav:account'; restoreFocus(); return true; }
   var active = document.activeElement;
   if (active && active.tagName === 'INPUT') {
     active.blur();
@@ -620,6 +689,17 @@ document.addEventListener('click', function (event) {
   var chip = target.closest('[data-chip]');
   if (chip) { loadCategory(chip.dataset.chip, false); return; }
 
+  var epGroup = target.closest('[data-epgroup]');
+  if (epGroup) {
+    var gi = Number(epGroup.dataset.epgroup) || 0;
+    state.epGroup = gi;
+    var eps = list(state.detail && state.detail.episodes);
+    var first = eps[gi * EP_PAGE];
+    state.focusKey = first ? 'ep:' + (first.number || (gi * EP_PAGE + 1)) : 'epg:' + gi;
+    renderDetail();
+    return;
+  }
+
   var filter = target.closest('[data-filter]');
   if (filter) {
     state.search.filter = filter.dataset.filter;
@@ -629,7 +709,7 @@ document.addEventListener('click', function (event) {
   }
 
   var tab = target.closest('[data-tab]');
-  if (tab) { state.libraryTab = tab.dataset.tab; renderLibrary(); return; }
+  if (tab) { state.libraryTab = tab.dataset.tab; state.focusKey = 'tab:' + state.libraryTab; renderLibrary(); return; }
 
   var playButton = target.closest('[data-play]');
   if (playButton) { play(state.detail, 1); return; }
@@ -639,6 +719,14 @@ document.addEventListener('click', function (event) {
 
   var episode = target.closest('[data-episode]');
   if (episode) { play(state.detail, Number(episode.dataset.episode)); return; }
+
+  if (target.closest('[data-account]')) { openAccount(); return; }
+  if (target.closest('#account-close')) { closeAccount(); return; }
+  if (target.closest('#account-mode')) { switchMode(); return; }
+  if (target.closest('#account-logout')) { logout(); return; }
+  if (target.closest('#account-update')) { checkTvUpdate(); return; }
+  if (target.closest('#tv-update-install')) { startTvUpdate(); return; }
+  if (target.closest('#tv-update-later')) { closeUpdatePanel(); return; }
 
   if (target.closest('#login-retry')) { showLoginQr(); return; }
   if (target.closest('#login-guest')) { loginLayer.hidden = true; restoreFocus(); return; }
@@ -650,7 +738,8 @@ document.addEventListener('click', function (event) {
 /* ---------------- 登录 ---------------- */
 function setAccount(profile) {
   state.account = profile || { loggedIn: false };
-  railAccount.textContent = state.account.loggedIn ? (state.account.username || '已登录') : '未登录';
+  var name = state.account.loggedIn ? (state.account.username || '已登录') : '未登录';
+  if (railWho) railWho.textContent = name;
 }
 
 function showLoginQr() {
@@ -694,6 +783,198 @@ window.hgTvLogin = function (ok) {
   }).catch(function () { });
 };
 
+/* ---------------- 账号面板：退出登录 / 切换私密模式 ---------------- */
+function openAccount() {
+  var logged = !!(state.account && state.account.loggedIn);
+  var nameEl = document.getElementById('account-name');
+  var subEl = document.getElementById('account-sub');
+  var logoutBtn = document.getElementById('account-logout');
+  var modeBtn = document.getElementById('account-mode');
+
+  if (nameEl) nameEl.textContent = logged ? (state.account.username || '已登录') : '未登录';
+  if (subEl) {
+    if (!logged) subEl.textContent = '没登录也能看，登录后可同步收藏与观看记录';
+    else if (state.source === 'huangguo') subEl.textContent = '当前：私密内容';
+    else subEl.textContent = '当前：公开内容';
+  }
+  if (logoutBtn) logoutBtn.hidden = !logged;
+  var versionEl = document.getElementById('account-version');
+  if (versionEl) versionEl.textContent = state.version ? ('版本 v' + state.version) : '版本 —';
+  if (modeBtn) {
+    modeBtn.hidden = !logged;
+    if (state.source === 'huangguo') modeBtn.textContent = '返回公开内容';
+    else modeBtn.textContent = state.unlocked ? '进入私密模式' : '进入私密模式（需手机端解锁）';
+  }
+  accountPanel.hidden = false;
+  state.focusKey = logged ? 'acct:logout' : 'acct:close';
+  restoreFocus();
+}
+
+function closeAccount() {
+  accountPanel.hidden = true;
+  state.focusKey = 'nav:account';
+  restoreFocus();
+}
+
+/* ---------------- 检查更新 ----------------
+   电视端不自动检查：只有「我的 → 检查更新」会去打接口。
+   原生侧按渠道挑附件（电视只认名字带 tv 的包）并在下载后校验 packageName，
+   所以这里不会装上手机包。 */
+var updateBusy = false;
+
+function setUpdateProgress(percent) {
+  var bar = document.getElementById('tv-update-progress');
+  var fill = document.getElementById('tv-update-fill');
+  var label = document.getElementById('tv-update-percent');
+  if (bar) bar.hidden = false;
+  if (fill) fill.style.transform = 'scaleX(' + (Math.max(0, Math.min(100, percent)) / 100) + ')';
+  if (label) label.textContent = percent + '%';
+}
+
+window.hgUpdateProgress = function (percent) {
+  setUpdateProgress(Number(percent) || 0);
+};
+window.hgUpdateInstallPermissionDenied = function () {
+  toast('请允许 Veyra 安装应用后再试', true);
+};
+window.hgUpdateInstallError = function () {
+  toast('打不开系统安装程序，请用 U 盘安装', true);
+};
+
+function showUpdatePanel(result) {
+  state.update = result;
+  var title = document.getElementById('tv-update-title');
+  var sub = document.getElementById('tv-update-sub');
+  var go = document.getElementById('tv-update-install');
+  var later = document.getElementById('tv-update-later');
+  if (title) title.textContent = '发现新版本 v' + (result.version || '');
+  if (sub) {
+    var notes = String(result.notes || '').replace(/\s+/g, ' ').trim();
+    if (notes.length > 160) notes = notes.slice(0, 160) + '…';
+    var parts = ['当前 v' + (result.currentVersion || state.version || '?')];
+    if (notes) parts.push(notes);
+    if (Number(result.size) > 0) parts.push('更新包 ' + Math.max(1, Math.round(Number(result.size) / 1048576)) + 'MB');
+    sub.textContent = parts.join(' · ');
+  }
+  setUpdateProgress(0);
+  var bar = document.getElementById('tv-update-progress');
+  if (bar) bar.hidden = true;
+  if (go) { go.disabled = false; go.textContent = '立即更新'; }
+  if (later) later.textContent = '稍后';
+  if (accountPanel) accountPanel.hidden = true;
+  updateLayer.hidden = false;
+  state.focusKey = 'upd:install';
+  restoreFocus();
+}
+
+function closeUpdatePanel() {
+  updateLayer.hidden = true;
+  if (updateBusy) {
+    toast('已转入后台下载，下完会弹出安装', true);
+    return;
+  }
+  state.focusKey = 'acct:update';
+  if (accountPanel) accountPanel.hidden = false;
+  restoreFocus();
+}
+
+function checkTvUpdate() {
+  if (updateBusy) return;
+  updateBusy = true;
+  var button = document.getElementById('account-update');
+  if (button) { button.disabled = true; button.textContent = '正在检查…'; }
+  api('check-update', { manual: true }).then(function (result) {
+    var status = result && result.status;
+    if (status === 'available') showUpdatePanel(result);
+    else if (status === 'current') toast('已是最新版本 v' + (result.version || state.version));
+    else if (status === 'channel-missing') toast('这个版本还没发布电视版安装包，等打包后再试', true);
+    else if (status === 'unpublished') toast('暂未发布更新包', true);
+    else toast('没查到更新信息，稍后再试', true);
+  }).catch(function (error) {
+    toast((error && error.message) || '检查更新失败，请稍后重试', true);
+  }).then(function () {
+    updateBusy = false;
+    if (button) { button.disabled = false; button.textContent = '检查更新'; }
+  });
+}
+
+function startTvUpdate() {
+  if (updateBusy) return;
+  updateBusy = true;
+  var go = document.getElementById('tv-update-install');
+  var later = document.getElementById('tv-update-later');
+  if (go) { go.disabled = true; go.textContent = '正在下载…'; }
+  if (later) later.textContent = '后台下载';
+  setUpdateProgress(0);
+  api('download-update').then(function () {
+    /* 原生侧下载完就直接拉起系统安装页，这里把浮层收掉别挡着 */
+    updateLayer.hidden = true;
+    toast('下载完成，正在打开安装程序');
+    state.focusKey = 'acct:update';
+    restoreFocus();
+  }).catch(function (error) {
+    if (go) { go.disabled = false; go.textContent = '重试下载'; }
+    if (later) later.textContent = '稍后';
+    toast((error && error.message) || '下载失败，请重试', true);
+  }).then(function () {
+    updateBusy = false;
+  });
+}
+
+function applyMode(status, fallback) {
+  state.source = (status && status.source) || fallback;
+  if (typeof (status && status.unlocked) === 'boolean') state.unlocked = status.unlocked;
+  state.home = null;
+  state.category = null;
+  state.library = null;
+  state.detail = null;
+  if (accountPanel) accountPanel.hidden = true;
+  toast(state.source === 'huangguo' ? '已进入私密内容' : '已返回公开内容');
+  state.route = 'home';
+  state.focusKey = 'nav:home';
+  setActiveNav('home');
+  renderHome();
+  loadHome();
+}
+
+function switchMode() {
+  var leaving = state.source === 'huangguo';
+  var job = leaving
+    ? api('leave-private')
+    : api('enter-private').then(function (result) {
+      if (result && result.needsAgeConfirmation) return api('confirm-private-age');
+      return result;
+    });
+  job.then(function (status) {
+    applyMode(status, leaving ? 'hongguo' : 'huangguo');
+  }).catch(function (error) {
+    var message = error && error.message ? error.message : '切换失败';
+    if (/动态码|验证|otp/i.test(message)) message = '私密内容需要先在手机端解锁，再回来试';
+    toast(message, true);
+  });
+}
+
+function logout() {
+  api('logout').then(function (profile) {
+    setAccount(profile);
+    if (accountPanel) accountPanel.hidden = true;
+    state.home = null;
+    state.library = null;
+    state.category = null;
+    state.detail = null;
+    toast('已退出登录');
+    state.route = 'home';
+    state.focusKey = 'nav:home';
+    setActiveNav('home');
+    renderHome();
+    loadHome();
+    loginLayer.hidden = false;
+    showLoginQr();
+    state.focusKey = 'login:guest';
+    restoreFocus();
+  }).catch(function (error) { toast(error.message || '退出失败', true); });
+}
+
 /* 手机「扫码输入」传过来的文字：直接填进搜索框并搜 */
 window.veyraRelayFill = function (text) {
   if (state.route !== 'search') go('search');
@@ -707,6 +988,10 @@ function boot() {
   view.innerHTML = '<p class="empty">正在启动…</p>';
   try { window.AndroidHost.setTvCapture(true); } catch (error) { }
   if (window.__tvApplyScale) window.__tvApplyScale();
+  /* 版本号：账号面板里显示，检查更新时也拿它兜底显示「当前版本」 */
+  api('app-version').then(function (version) {
+    state.version = String(version || '');
+  }).catch(function () { });
 
   Promise.all([
     api('content-status').catch(function () { return null; }),
@@ -714,11 +999,14 @@ function boot() {
   ]).then(function (results) {
     var status = results[0];
     if (status && status.source) state.source = status.source;
+    if (status && typeof status.unlocked === 'boolean') state.unlocked = status.unlocked;
     setAccount(results[1]);
     go('home');
     if (!results[1] || !results[1].loggedIn) {
       loginLayer.hidden = false;
       showLoginQr();
+      state.focusKey = 'login:guest';
+      restoreFocus();
     } else {
       loadLibrary();
     }

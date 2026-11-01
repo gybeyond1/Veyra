@@ -149,6 +149,7 @@ let lastDockTap = { tab: "", at: 0, navigated: false };
 let updateChecking = false;
 let updateDownloading = false;
 let updateAvailable = null;
+let updatePendingVersion = "";
 let appVersion = "";
 const esc = (value) => String(value != null ? value : "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
 const asArray = (value) => Array.isArray(value) ? value : [];
@@ -443,8 +444,24 @@ window.hgCloudSynced = () => {
     });
   }
 };
+const UPDATE_DISMISS_KEY = "veyra.update.dismissed";
+function dismissedUpdateVersion() {
+  try {
+    return localStorage.getItem(UPDATE_DISMISS_KEY) || "";
+  } catch (error) {
+    return "";
+  }
+}
+function rememberDismissedUpdate(version) {
+  try {
+    if (version) localStorage.setItem(UPDATE_DISMISS_KEY, String(version));
+    else localStorage.removeItem(UPDATE_DISMISS_KEY);
+  } catch (error) {
+  }
+}
 function setAvailableUpdate(result) {
   updateAvailable = (result == null ? void 0 : result.status) === "available" ? result : null;
+  updatePendingVersion = updateAvailable ? String(updateAvailable.version || "") : "";
   headerSettings.classList.toggle("has-update", Boolean(updateAvailable));
   const versionButton = content.querySelector(".app-version");
   if (versionButton) {
@@ -485,6 +502,7 @@ async function checkUpdate(manual) {
         showUpdate(result);
         return;
       }
+      if (dismissedUpdateVersion() === String(result.version || "")) return;
       try {
         await api("download-update");
         showUpdate(result);
@@ -495,6 +513,9 @@ async function checkUpdate(manual) {
       setAvailableUpdate(null);
       if (manual && result.status === "current") toast("已是最新版本 ".concat(result.version));
       if (manual && result.status === "unpublished") toast("暂未发布更新包", true);
+    } else if (result.status === "channel-missing") {
+      setAvailableUpdate(null);
+      if (manual) toast("这个版本还没发布手机版安装包，等打包后再试", true);
     } else if (manual && result.status === "unconfigured") toast("暂未发布更新包", true);
     else if (manual && result.status === "throttled") toast("一小时内最多手动检查 5 次，请稍后再试", true);
   } catch (error) {
@@ -520,6 +541,7 @@ updateDownloadButton.addEventListener("click", async () => {
   try {
     await api("download-update");
     updateOverlay.hidden = true;
+    rememberDismissedUpdate("");
     updateDownloadButton.textContent = "立即下载";
     updateLaterButton.textContent = "取消";
     toast("下载完成，正在打开安装程序");
@@ -538,6 +560,7 @@ updateLaterButton.addEventListener("click", () => {
   updateOverlay.hidden = true;
   updateBackEnabled();
   if (updateDownloading) toast("已转入后台下载，完成后会自动弹出安装", true);
+  else rememberDismissedUpdate(updatePendingVersion);
 });
 window.hgTheme = (info) => {
   const isDark = !!(info && typeof info === "object" ? info.dark : info);

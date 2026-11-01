@@ -1,15 +1,14 @@
 /* ===================================================================
    Veyra 电视端样式
    -------------------------------------------------------------------
-   ⚠ 这里刻意只用 rem，不用 vw / vh / min() / clamp()：
-   电视盒子的 WebView 常年停在 Chrome 61 左右，既不认 min()，也会让
-   calc(N * var(--s)) 整条失效（上一版就是这么糊成一团的）。
-   现在 1rem = 10px @1920 设计稿，页面 head 里那段内联脚本按实际视口
-   宽高算出缩放，写进 html 的 font-size，整个布局等比放大缩小。
-   即使脚本没跑，rem 也只会按 10px 排，不会崩。
-
-   没有 backdrop-filter / filter / 大阴影 / 复杂动画，焦点反馈只有
-   outline + transform，电视盒子跑得动。
+   ⚠ 老内核禁区（电视盒子常年停在 Chrome 61 上下）：
+     · 不用 vw / vh / min() / clamp() —— 会让整条 calc 失效
+     · 不用 gap / row-gap / column-gap —— 这三个是 Chrome 66 才加的别名，
+       老内核只认 grid-gap / grid-row-gap / grid-column-gap。
+       上一版就是踩了这个：海报墙、详情左右栏、选集按钮全部没有间距，
+       剧集糊成一坨、海报贴着简介。凡是间距一律写 grid-*。
+     · 不用 backdrop-filter / filter / 大阴影
+   1rem = 10px @1920 设计稿，html 的 font-size 由 head 脚本按视口算。
    =================================================================== */
 
 :root{
@@ -67,10 +66,25 @@ img{display:block;border:0}
   color:var(--text);background:var(--panel-2);
   outline:.3rem solid var(--focus);outline-offset:-.3rem;
 }
-.rail-foot{
-  margin-top:auto;padding:0 1.4rem;
-  font-size:1.7rem;color:var(--muted);
+
+/* 左下角账号：做成按钮，遥控器能选中，点开账号面板 */
+.rail-account{
+  margin-top:auto;width:100%;text-align:left;
+  padding:1.4rem 1.6rem;border-radius:1rem;
+  background:var(--panel);
+  display:block;
+}
+.rail-account .who{
+  display:block;font-size:2rem;color:var(--text);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.rail-account .hint{
+  display:block;margin-top:.6rem;
+  font-size:1.6rem;color:var(--muted);
+}
+.rail-account.is-focused{
+  background:var(--panel-2);
+  outline:.3rem solid var(--focus);outline-offset:-.3rem;
 }
 
 /* ---------------- 主区域 ---------------- */
@@ -102,11 +116,14 @@ img{display:block;border:0}
 .grid{
   display:grid;
   grid-template-columns:repeat(6,1fr);
-  column-gap:1.8rem;row-gap:3.2rem;
+  grid-column-gap:1.8rem;
+  grid-row-gap:3.2rem;
 }
+/* min-width:0 必须写：grid 的 1fr 等于 minmax(auto,1fr)，长剧名会把
+   自动最小宽度撑大，同一行里各列宽窄不一，就是“封面大小不一”的来源 */
 .card{
-  display:block;width:100%;text-align:left;
-  border-radius:.8rem;
+  display:block;width:100%;min-width:0;overflow:hidden;
+  text-align:left;border-radius:.8rem;
 }
 /* 1:1.4 的比例用 padding-top 撑：宽度随列自适应，高度永远跟着走 */
 .card .art{
@@ -147,8 +164,15 @@ img{display:block;border:0}
 .chip.is-focused{outline:.3rem solid var(--focus);outline-offset:.2rem}
 
 /* ---------------- 详情 ---------------- */
-.detail{display:grid;grid-template-columns:36rem 1fr;column-gap:4.4rem;align-items:start}
+.detail{
+  display:grid;grid-template-columns:36rem 1fr;
+  grid-column-gap:4.8rem;
+  align-items:start;
+}
+/* 海报钉在屏幕上：遥控器往下翻集数时，海报不跟着走 */
 .detail-art{
+  position:-webkit-sticky;position:sticky;top:1.6rem;
+  align-self:start;
   width:36rem;height:50.4rem;border-radius:1rem;
   overflow:hidden;background:var(--panel);
 }
@@ -158,10 +182,10 @@ img{display:block;border:0}
 .detail .meta{font-size:2rem;color:var(--muted);margin:0 0 2rem}
 .detail .desc{
   font-size:1.9rem;line-height:1.75;color:#c6ccd4;
-  margin:0 0 2.8rem;max-width:92rem;
+  margin:0 0 2.8rem;max-width:96rem;
   display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;
 }
-.actions{display:block;margin-bottom:3.2rem}
+.actions{display:block;margin-bottom:4rem}
 .btn{
   display:inline-block;
   height:6rem;line-height:6rem;
@@ -172,21 +196,37 @@ img{display:block;border:0}
 .btn.primary{background:var(--accent);color:var(--accent-ink);font-weight:700}
 .btn.ghost{background:transparent;border:1px solid #333c46;color:var(--muted)}
 .btn.is-focused{outline:.4rem solid var(--focus);outline-offset:.3rem}
+
 .eps-title{font-size:2.4rem;margin:0 0 1.6rem;font-weight:700}
-.eps{display:grid;grid-template-columns:repeat(8,1fr);column-gap:1.2rem;row-gap:1.2rem;max-width:112rem}
+.eps-title span{font-size:1.8rem;color:var(--muted);margin-left:1.4rem;font-weight:400}
+/* 分组条：1-20 / 21-40 … 几百集不用一条道拉到黑 */
+.ep-groups{margin-bottom:2rem}
+.ep-groups .chips{margin-bottom:0}
+.ep-groups .chip{height:4.6rem;line-height:4.6rem;padding:0 1.8rem;font-size:1.9rem}
+.eps{
+  display:grid;grid-template-columns:repeat(8,1fr);
+  grid-column-gap:1.4rem;grid-row-gap:1.4rem;
+  max-width:112rem;
+}
 .eps button{
-  height:5.4rem;line-height:5.4rem;
+  height:5.6rem;line-height:5.6rem;
   border-radius:.8rem;background:var(--panel);color:var(--text);
   font-size:2rem;text-align:center;white-space:nowrap;
 }
-.eps button.is-focused{outline:.4rem solid var(--focus);outline-offset:.2rem;background:var(--panel-2)}
+.eps button.is-focused{
+  outline:.4rem solid var(--focus);outline-offset:-.4rem;
+  background:var(--panel-2);font-weight:700;
+}
 
 /* ---------------- 搜索 ---------------- */
+/* 搜索框左边，扫码二维码常显在右边：电视打字太痛苦，直接手机扫码推文字 */
+.search-head{display:flex;align-items:flex-start;margin-bottom:2.4rem}
+.search-main{flex:1;min-width:0;margin-right:3.2rem}
 .search-box{
   display:block;position:relative;
-  height:6.8rem;max-width:98rem;
+  height:6.8rem;
   background:var(--panel);border-radius:1rem;
-  padding:0 2.4rem;margin-bottom:1.4rem;
+  padding:0 2.4rem;
 }
 .search-box input{
   display:block;width:100%;height:6.8rem;
@@ -195,13 +235,29 @@ img{display:block;border:0}
 }
 .search-box input::placeholder{color:var(--muted)}
 .search-box.is-focused{outline:.3rem solid var(--focus);outline-offset:.2rem}
-.search-hint{font-size:1.7rem;color:var(--muted);margin:0 0 2.6rem}
+.search-hint{font-size:1.7rem;color:var(--muted);margin:1.2rem 0 0}
+
+.search-qr{width:24rem;flex:0 0 24rem;text-align:center}
+.search-qr .qr{
+  width:24rem;height:24rem;padding:.8rem;
+  background:#fff;border-radius:1rem;
+}
+.search-qr .qr svg{display:block;width:100%;height:100%}
+.search-qr .qr.empty-qr{
+  background:var(--panel);color:var(--muted);
+  font-size:1.7rem;line-height:1.5;
+  display:flex;align-items:center;justify-content:center;
+}
+.search-qr .cap{
+  margin-top:1rem;font-size:1.7rem;color:var(--muted);line-height:1.45;
+}
+
 .search-count{font-size:2rem;color:var(--muted);margin:0 0 1.8rem}
 
 /* ---------------- 我的 ---------------- */
 .tabs{display:block;margin-bottom:2.6rem}
 
-/* ---------------- 提示与登录 ---------------- */
+/* ---------------- 提示 / 登录 / 账号面板 ---------------- */
 #toast{
   position:absolute;left:50%;bottom:6rem;
   margin-left:-20rem;width:40rem;
@@ -214,11 +270,12 @@ img{display:block;border:0}
 }
 #toast.show{opacity:1}
 
-#login{
+#login,#account{
   position:absolute;left:0;right:0;top:0;bottom:0;z-index:30;
   background:#080b0d;
   display:flex;align-items:center;justify-content:center;
 }
+#account{z-index:28;background:rgba(6,8,10,.96)}
 .login-box{width:76rem;text-align:center}
 .login-box h1{font-size:4rem;margin:0 0 1.4rem}
 .login-box p{font-size:2rem;color:var(--muted);margin:0 0 2.6rem;line-height:1.6}
@@ -229,3 +286,48 @@ img{display:block;border:0}
 }
 .login-qr svg{display:block;width:100%;height:100%}
 .login-box .btn{margin:0 .8rem}
+
+.account-box{
+  width:64rem;padding:4rem;
+  background:var(--panel);border-radius:1.4rem;
+  text-align:center;
+}
+.account-box h1{font-size:3.4rem;margin:0 0 1rem;word-break:break-all}
+.account-box p{font-size:1.9rem;color:var(--muted);margin:0 0 3rem;line-height:1.5}
+.account-actions .btn{display:block;margin:0 0 1.6rem;width:100%}
+/* 版本号单独一行，字小一点，别把按钮挤下去 */
+.account-box .account-version{
+  font-size:1.8rem;color:#6f7883;
+  margin:-1.4rem 0 2.4rem;
+}
+
+/* ---------------- 更新 ----------------
+   只在「我的」里手动触发：电视端不自动检查，也不自动下载。 */
+#tv-update{
+  position:absolute;left:0;right:0;top:0;bottom:0;z-index:40;
+  background:rgba(4,6,8,.96);
+  display:flex;align-items:center;justify-content:center;
+}
+.update-box{
+  width:70rem;padding:4rem;
+  background:var(--panel);border-radius:1.4rem;
+  text-align:center;
+}
+.update-box h1{font-size:3.4rem;margin:0 0 1.2rem}
+.update-box p{
+  font-size:1.9rem;color:var(--muted);
+  margin:0 0 2.6rem;line-height:1.6;
+  text-align:left;word-break:break-word;
+}
+.update-track{
+  position:relative;height:1.2rem;border-radius:.6rem;
+  background:var(--panel-2);overflow:hidden;
+  margin:0 0 1.4rem;
+}
+.update-track i{
+  position:absolute;left:0;top:0;bottom:0;width:100%;
+  background:var(--accent);
+  transform:scaleX(0);transform-origin:left center;
+}
+#tv-update-percent{display:block;font-size:1.8rem;color:var(--muted);margin:0 0 2.4rem}
+.update-actions .btn{margin:0 1rem}

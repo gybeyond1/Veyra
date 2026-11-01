@@ -36,7 +36,10 @@
     <button class="rail-item" type="button" data-nav="adult" data-key="nav:adult" data-focusable>剧场</button>
     <button class="rail-item" type="button" data-nav="search" data-key="nav:search" data-focusable>搜索</button>
     <button class="rail-item" type="button" data-nav="library" data-key="nav:library" data-focusable>我的</button>
-    <div class="rail-foot" id="rail-account">未登录</div>
+    <button class="rail-account" id="rail-account" type="button" data-account="1" data-key="nav:account" data-focusable>
+      <span class="who" id="rail-who">未登录</span>
+      <span class="hint">账号 / 私密模式</span>
+    </button>
   </nav>
   <main id="stage"><div id="view"></div></main>
   <div id="toast" role="status" aria-live="polite"></div>
@@ -46,8 +49,38 @@
       <h1>登录电视</h1>
       <p id="login-tip">用手机上的 Veyra 扫下面的二维码，账号直接同步过来</p>
       <div id="login-qr" class="login-qr" hidden></div>
-      <button id="login-retry" class="btn" type="button" data-focusable>显示二维码</button>
-      <button id="login-guest" class="btn ghost" type="button" data-focusable>先随便看看</button>
+      <button id="login-retry" class="btn" type="button" data-focusable data-key="login:retry">显示二维码</button>
+      <button id="login-guest" class="btn ghost" type="button" data-focusable data-key="login:guest">先随便看看</button>
+    </section>
+  </div>
+
+  <div id="account" hidden>
+    <section class="account-box">
+      <h1 id="account-name">未登录</h1>
+      <p id="account-sub">登录后可同步收藏与观看记录</p>
+      <p class="account-version" id="account-version">版本 —</p>
+      <div class="account-actions">
+        <button id="account-mode" class="btn" type="button" data-focusable data-key="acct:mode">进入私密模式</button>
+        <button id="account-logout" class="btn" type="button" data-focusable data-key="acct:logout">退出登录</button>
+        <button id="account-update" class="btn ghost" type="button" data-focusable data-key="acct:update">检查更新</button>
+        <button id="account-close" class="btn ghost" type="button" data-focusable data-key="acct:close">关闭</button>
+      </div>
+    </section>
+  </div>
+
+  <!-- 更新：只在「我的 → 检查更新」里出现，装的一定是电视包（原生按渠道挑附件并校验包名） -->
+  <div id="tv-update" hidden>
+    <section class="update-box">
+      <h1 id="tv-update-title">发现新版本</h1>
+      <p id="tv-update-sub"></p>
+      <div id="tv-update-progress" hidden>
+        <div class="update-track"><i id="tv-update-fill"></i></div>
+        <span id="tv-update-percent">0%</span>
+      </div>
+      <div class="update-actions">
+        <button id="tv-update-install" class="btn primary" type="button" data-focusable data-key="upd:install">立即更新</button>
+        <button id="tv-update-later" class="btn ghost" type="button" data-focusable data-key="upd:later">稍后</button>
+      </div>
     </section>
   </div>
 </div>

@@ -17,7 +17,7 @@
 .relay-panel {
   position: relative;
   width: min(360px, 86vw);
-  max-height: 88dvh;
+  max-height: 88vh;max-height: 88dvh;
   overflow: auto;
   padding: 22px 20px 18px;
   border-radius: 24px;
