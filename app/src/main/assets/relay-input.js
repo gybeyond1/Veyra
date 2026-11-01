@@ -155,8 +155,11 @@
     overlay.hidden = false;
     pollCount = 0;
     refresh();
-    var closeButton = overlay.querySelector('#relay-close');
-    if (closeButton) { try { closeButton.focus({ preventScroll: true }); } catch (error) { } }
+    // 电视要靠遥控操作，焦点必须落在面板里；手机是触屏，不抢焦点（免得弹出一圈 outline）
+    if (isTv) {
+      var closeButton = overlay.querySelector('#relay-close');
+      if (closeButton) { try { closeButton.focus({ preventScroll: true }); } catch (error) { } }
+    }
   }
 
   function close() {

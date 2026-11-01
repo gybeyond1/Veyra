@@ -52,8 +52,9 @@
 .relay-sub { margin: 0 0 14px; font-size: 12px; line-height: 1.6; color: var(--muted, #858c99); }
 
 .relay-qr {
-  width: 100%;
+  width: min(100%, 300px);
   aspect-ratio: 1 / 1;
+  margin: 0 auto;
   box-sizing: border-box;
   padding: 10px;
   display: flex;
@@ -110,10 +111,11 @@ html[data-theme="dark"] .relay-keyboard { border-color: #2c313c; }
 
 /* 电视：面板放大，遥控焦点环沿用 .tv-focus */
 html[data-device="tv"] #relay-fab { display: none !important; }
-html[data-device="tv"] .relay-panel { width: min(460px, 62vw); padding: 28px 26px 22px; border-radius: 28px; }
-html[data-device="tv"] .relay-panel h2 { font-size: 22px; }
-html[data-device="tv"] .relay-sub { font-size: 14px; }
+html[data-device="tv"] .relay-panel { width: min(440px, 56vw); padding: 20px 24px 18px; border-radius: 26px; }
+html[data-device="tv"] .relay-qr { width: min(100%, 216px); }
+html[data-device="tv"] .relay-panel h2 { font-size: 20px; margin-bottom: 4px; }
+html[data-device="tv"] .relay-sub { font-size: 13px; margin-bottom: 10px; }
 html[data-device="tv"] .relay-addr { font-size: 13px; }
 html[data-device="tv"] .relay-status { font-size: 14px; }
-html[data-device="tv"] .relay-keyboard { height: 52px; font-size: 16px; margin-top: 18px; }
+html[data-device="tv"] .relay-keyboard { height: 46px; font-size: 15px; margin-top: 12px; }
 html[data-device="tv"] .relay-close { width: 40px; height: 40px; font-size: 26px; }

@@ -92,7 +92,7 @@ html[data-device="tv"] .category-page .film-row,
 html[data-device="tv"] .search-page .film-row,
 html[data-device="tv"] .library-page .film-row {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   grid-auto-flow: row;
   column-gap: 18px;
   row-gap: 26px;
@@ -107,8 +107,8 @@ html[data-device="tv"] .library-page .poster {
   height: auto;
   aspect-ratio: 114 / 153;
 }
-html[data-device="tv"] .film-title { font-size: 16px; margin-top: 8px; }
-html[data-device="tv"] .film-info { font-size: 13px; }
+html[data-device="tv"] .film-title { font-size: 15px; margin-top: 8px; }
+html[data-device="tv"] .film-info { font-size: 12px; }
 
 html[data-device="tv"] .section-heading h2,
 html[data-device="tv"] .category-head h1,
