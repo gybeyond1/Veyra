@@ -73,8 +73,9 @@ jobs:
           fi
           echo "TAG=$TAG" >> $GITHUB_ENV
           # APK 改名：Veyra-<tag>.apk 给手机/平板，Veyra-TV-<tag>.apk 给电视（轻量构建）
-          cp app/build/outputs/apk/release/app-mobile-release.apk Veyra-$TAG.apk
-          cp app/build/outputs/apk/release/app-tv-release.apk Veyra-TV-$TAG.apk
+          # 有 flavor 之后产物会多一层 flavor 目录（outputs/apk/<flavor>/release/），用 find 兜住两种结构
+          cp "$(find app/build/outputs/apk -name 'app-mobile-release.apk' | head -1)" Veyra-$TAG.apk
+          cp "$(find app/build/outputs/apk -name 'app-tv-release.apk' | head -1)" Veyra-TV-$TAG.apk
           # 后端最新镜像同步进 release（gzip 压缩，NAS 可 docker load 离线部署）
           docker pull gybeyond/veyra-backend:latest
           docker save gybeyond/veyra-backend:latest | gzip -9 > veyra-backend-latest.tar.gz
