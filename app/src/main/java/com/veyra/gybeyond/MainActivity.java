@@ -248,16 +248,17 @@ public final class MainActivity extends Activity {
         // TV 独立包：装在什么设备上都按电视跑（横屏、焦点导航、扫码输入、tv.html），
         // 否则拿手机装 TV 包调试时会被判成 phone，遥控器逻辑和局域网服务全都不会起来。
         if (getResources().getBoolean(R.bool.veyra_lite)) deviceType = DeviceProfile.TV;
-        // 电视只有横屏一种形态：manifest 里的 portrait 是为了锁住手机，这里对 TV 运行期覆盖，
-        // 手机不会走到这段，方向行为与改动前完全一致。
+        // 手机 / 平板一律不再请求方向（manifest 里也不写 screenOrientation）。
+        //
+        // 这不是为了能转，恰恰相反 —— 是让横着用的平板别再被塞进一条竖框里。
+        // Android 12L 起，声明了固定方向的应用在大屏上会被降级成「兼容窗口」：
+        // 界面被压成一列竖条居中、两侧留黑边，看起来就像没适配。BingeEngine 进刷剧时
+        // 还会再调一次 PORTRAIT、退出时调 UNSPECIFIED，于是同一台机器会在「铺满」和
+        // 「一列」之间来回跳 —— 用户看到的就是切一次刷剧换一次版式。
+        // 现在把加锁的地方全部拆掉，窗口尺寸只由屏幕决定。
+        // 电视仍然锁横屏：盒子的输出就是横的，锁住能避免个别固件把画面转过来。
         if (DeviceProfile.TV.equals(deviceType)) {
             try { setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE); } catch (Exception ignored) { }
-        }
-        // 平板跟随重力：竖屏还是原来那套单栏，横屏才够宽走平行视界双栏。
-        // 用 FULL_SENSOR 而不是 USER —— 后者会被系统的「自动旋转」开关挡住，
-        // 用户关了自动旋转就永远横不过来，双栏也就永远触发不了。只放开平板，手机继续锁竖屏。
-        if (DeviceProfile.TABLET.equals(deviceType)) {
-            try { setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR); } catch (Exception ignored) { }
         }
         ContentMode.get(this).startPublic();
         hotUpdates = HotUpdateManager.get(this);

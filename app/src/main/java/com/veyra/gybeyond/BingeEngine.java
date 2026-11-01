@@ -2,7 +2,6 @@ package com.veyra.gybeyond;
 
 import android.app.Activity;
 import android.content.Intent;
-import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -245,7 +244,8 @@ public class BingeEngine {
         releasePlayer();
         videoLayer.setVisibility(View.GONE);
         showBars();
-        activity().setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+        // 这里原本会 setRequestedOrientation(UNSPECIFIED)，与 hideBars() 里的 PORTRAIT 一进一出，
+        // 正是平板版式来回跳的根源。方向现在完全交给系统，两处都不再碰。
     }
 
     public void onResume() {
@@ -309,11 +309,10 @@ public class BingeEngine {
         posterLoader.shutdown();
     }
 
-    // ---------- 沉浸状态栏 / 竖屏锁定 ----------
+    // ---------- 沉浸状态栏（不碰方向：方向交给系统，锁竖屏会让平板缩成一条） ----------
 
     private void hideBars() {
         try {
-            activity().setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
             if (Build.VERSION.SDK_INT >= 30) {
                 WindowInsetsController c = activity().getWindow().getInsetsController();
                 if (c != null) {

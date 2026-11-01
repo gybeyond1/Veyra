@@ -39,12 +39,14 @@
             android:enableOnBackInvokedCallback="true"
             android:exported="false"
             android:configChanges="orientation|screenSize|uiMode" />
+        <!-- 不写 screenOrientation：锁定方向会让大屏设备把界面塞进一条竖条（兼容窗口），
+             两侧留黑边。平板用户横着用，窗口就该等于屏幕。 -->
         <activity
             android:name=".MainActivity"
             android:enableOnBackInvokedCallback="true"
-            android:configChanges="uiMode|orientation|screenSize"
-            android:exported="true"
-            android:screenOrientation="portrait">
+            android:configChanges="uiMode|orientation|screenSize|screenLayout|smallestScreenSize|density|keyboardHidden|navigation"
+            android:resizeableActivity="true"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

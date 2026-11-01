@@ -243,7 +243,7 @@ public final class PlayerActivity extends Activity {
         getWindow().setNavigationBarColor(Color.TRANSPARENT);
         if (Build.VERSION.SDK_INT >= 29) getWindow().setNavigationBarContrastEnforced(false);
         if (Build.VERSION.SDK_INT >= 30) getWindow().setDecorFitsSystemWindows(false);
-        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+        // 不再一进来就锁竖屏：平板横着用的时候，播放页跟着横过来，别又缩成一列
         updateSystemBars();
         if (Build.VERSION.SDK_INT >= 33) {
             backCallback = this::handlePlayerBack;
@@ -397,8 +397,10 @@ public final class PlayerActivity extends Activity {
     }
 
     private void applyFullscreenOrientation() {
+        // 只有「全屏 + 横版视频」才明确要横屏；退出全屏就交还给系统，
+        // 平板本来横着用，不该被这一下翻回竖屏
         int target = fullscreenMode && videoLandscape ? ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                : ActivityInfo.SCREEN_ORIENTATION_PORTRAIT;
+                : ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
         if (getRequestedOrientation() != target) setRequestedOrientation(target);
     }
 
