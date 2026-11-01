@@ -93,7 +93,7 @@ public class BingeEngine {
     private int loadToken;
     private boolean destroyed;
     private boolean animating;
-    private boolean landscapeVideo;   // 当前视频是横屏：海报要一直垫底，不能撤
+    private boolean videoLandscape;   // 当前视频本身是横屏（只描述视频，不含屏幕方向）
     private boolean frameReady;       // 首帧已经画出来：完整海报到此为止，不许再冒出来盖视频
     private boolean active;
     // 刷剧形态被「挂起」（切到别的 tab / 进详情 / 看全集）。挂起期间不恢复播放、不抢沉浸态，
@@ -212,6 +212,14 @@ public class BingeEngine {
         // 这一层是纯透明的 —— 底下没有东西，屏幕上就是一片白，用户骂的就是这个。
         // 铺一层黑，中间态是黑场而不是白场，视觉上就是「正常起播」。
         videoLayer.setBackgroundColor(0xFF000000);
+
+        // 窗口尺寸变了（平板转屏、分屏、外接屏切换）要重算「铺满 / 保比例」，
+        // 否则方向判断还停在旧尺寸上，画面会缩在中间或糊边不更新。
+        videoLayer.addOnLayoutChangeListener((v, left, top, right, bottom,
+                                              oldLeft, oldTop, oldRight, oldBottom) -> {
+            if (right - left == oldRight - oldLeft && bottom - top == oldBottom - oldTop) return;
+            applyVideoFit();
+        });
     }
 
     // ---------- 生命周期 ----------
@@ -366,7 +374,7 @@ public class BingeEngine {
         currentTitle = entry.optString("title");
         currentEpisode = 1;
         episodeCount = 0;
-        landscapeVideo = false;
+        videoLandscape = false;
         frameReady = false;
         detail = null;
         currentSource = null;
@@ -471,16 +479,8 @@ public class BingeEngine {
                 }
 
                 @Override public void onVideoSizeChanged(VideoSize size) {
-                    landscapeVideo = size.width > 0 && size.width > size.height;
-                    playerView.setResizeMode(landscapeVideo
-                            ? AspectRatioFrameLayout.RESIZE_MODE_FIT
-                            : AspectRatioFrameLayout.RESIZE_MODE_ZOOM);
-                    if (landscapeVideo) {
-                        // 横屏视频上下是两条黑边，很秃 —— 海报垫底填满（用户明确要求）
-                        Bitmap bmp;
-                        synchronized (posterCache) { bmp = posterCache.get(currentCover); }
-                        if (bmp != null) applyPosterMode(bmp, true, false);
-                    }
+                    videoLandscape = size.width > 0 && size.width > size.height;
+                    applyVideoFit();
                     forceRepaint();
                     // 拿到尺寸说明解码器真的出画了，这时才排撤海报
                     scheduleHidePoster(420);
@@ -534,6 +534,43 @@ public class BingeEngine {
         playerView.invalidate();
         videoLayer.invalidate();
         videoLayer.postInvalidateOnAnimation();
+    }
+
+    /** 屏幕当前是不是横的。刷剧页铺满窗口，量视频层最准；还没布局时退回配置里的方向。 */
+    private boolean screenLandscape() {
+        int w = videoLayer.getWidth();
+        int h = videoLayer.getHeight();
+        if (w > 0 && h > 0 && w != h) return w > h;
+        return activity().getResources().getConfiguration().orientation
+                == Configuration.ORIENTATION_LANDSCAPE;
+    }
+
+    /** 视频方向与屏幕方向一致 → 铺满；相反 → 按原比例留黑边。单拎出来便于验证。 */
+    static boolean fillScreen(boolean videoLandscape, boolean screenLandscape) {
+        return videoLandscape == screenLandscape;
+    }
+
+    /**
+     * 视频是铺满，还是按原比例留黑边。
+     *
+     * 规则：<b>和屏幕同向的视频铺满，反向的视频保原比例</b>。
+     * 手机竖屏 → 竖屏视频铺满、横屏视频保比例（上下黑边）；
+     * 平板横屏 → 横屏视频铺满、竖屏视频保比例（左右黑边）。
+     *
+     * 之前写死成「横屏视频就 FIT、竖屏视频就 ZOOM」，只照顾了手机：
+     * 平板上看横屏短剧反倒被缩成中间一条、上下两条大黑边。
+     */
+    private void applyVideoFit() {
+        if (playerView == null) return;
+        boolean fill = fillScreen(videoLandscape, screenLandscape());
+        playerView.setResizeMode(fill
+                ? AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                : AspectRatioFrameLayout.RESIZE_MODE_FIT);
+        if (fill) return;
+        // 有黑边：封面模糊后垫在播放器下面填满，比大片纯黑好看
+        Bitmap bmp;
+        synchronized (posterCache) { bmp = posterCache.get(currentCover); }
+        if (bmp != null) applyPosterMode(bmp, true, false);
     }
 
     private void onEpisodeEnded() {
