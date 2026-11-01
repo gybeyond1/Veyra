@@ -61,10 +61,6 @@ button,a,input,[role=tab]{-webkit-tap-highlight-color:transparent}button{transit
 
 /* The fullscreen detail and its return target form one card transition. */
 #app.route-detail>#scroll{position:relative;z-index:12;background:var(--bg)}
-/* 详情页自己保证铺满：从刷剧形态进来时父级 #scroll 刚从 display:none 恢复，
-   min-height:100% 可能有一帧算成 0；这里用 vh 兜底，并自带不透明底色 ——
-   WebView 本身是透明的，缺了这层就会露出后面那层原生视频。 */
-#app.route-detail .detail-page{min-height:100vh;background:var(--bg)}
 #app.route-detail>#dock{visibility:hidden;pointer-events:none}
 #app.route-detail.card-transition-active>#dock{visibility:visible}
 #app.card-transition-active>#scroll{visibility:hidden;pointer-events:none}

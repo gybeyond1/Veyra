@@ -6,6 +6,27 @@
 <title>Veyra</title>
 <!-- 电视端独立页面：不加载 app.css / 玻璃 / 转场 / 主题那几套，只有这一个样式表。 -->
 <link rel="stylesheet" href="tv.css">
+<script>
+/* 等比缩放：1rem = 10px @ 1920×1080 设计稿。
+   放在 head 里、样式表之后立刻执行，避免首帧按 10px 排一次再跳。
+   只用老内核都认的 API（clientWidth / clientHeight / fontSize），
+   不依赖 vw、min()、clamp()。 */
+(function () {
+  function apply() {
+    var w = document.documentElement.clientWidth || window.innerWidth || 1920;
+    var h = document.documentElement.clientHeight || window.innerHeight || 1080;
+    var s = Math.min(w / 1920, h / 1040);
+    if (!isFinite(s) || !(s > 0)) s = 1;
+    s = Math.max(0.35, Math.min(3, s));
+    document.documentElement.style.fontSize = (10 * s) + 'px';
+    document.documentElement.setAttribute('data-scale', s.toFixed(2));
+  }
+  window.__tvApplyScale = apply;
+  apply();
+  window.addEventListener('resize', function () { setTimeout(apply, 60); });
+  window.addEventListener('orientationchange', function () { setTimeout(apply, 120); });
+})();
+</script>
 </head>
 <body>
 <div id="app">
@@ -23,9 +44,10 @@
   <div id="login" hidden>
     <section class="login-box">
       <h1>登录电视</h1>
-      <p id="login-tip">用手机上的 Veyra 扫下面的二维码</p>
+      <p id="login-tip">用手机上的 Veyra 扫下面的二维码，账号直接同步过来</p>
       <div id="login-qr" class="login-qr" hidden></div>
       <button id="login-retry" class="btn" type="button" data-focusable>显示二维码</button>
+      <button id="login-guest" class="btn ghost" type="button" data-focusable>先随便看看</button>
     </section>
   </div>
 </div>

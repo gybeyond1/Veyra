@@ -1503,7 +1503,7 @@ async function submitDownloadTo(target) {
   }
 }
 function renderSettings() {
-  content.innerHTML = '<div class="settings-page"><button type="button" class="listing-back" data-back="1">'.concat(icon("back"), " 返回我的</button><h1>设置</h1>\n    ").concat(window.renderAppearance ? window.renderAppearance() : "", '\n    <section><button type="button" class="settings-link" data-account-management="1"><span><strong>账号管理</strong><small>').concat(state.account.loggedIn ? esc(state.account.username) : "登录或注册账号", "</small></span>").concat(icon("arrow"), "</button></section>\n    ").concat(tvDevice() ? "" : '<section><button type="button" class="settings-link" data-qr-login><span><strong>扫码登录电视</strong><small>扫一下电视上的二维码，把账号同步过去</small></span>' + icon("arrow") + "</button></section>", '\n    <section><button type="button" class="settings-link" data-proxy-open><span><strong>黄果网络通道</strong><small data-proxy-summary>').concat(esc(proxySummaryText()), "</small></span>").concat(icon("arrow"), '</button></section>\n    <section><button type="button" class="settings-link" data-about-open><span><strong>关于 Veyra</strong><small>项目地址 · GPL-3.0 开源</small></span>').concat(icon("arrow"), "</button></section></div>");
+  content.innerHTML = '<div class="settings-page"><button type="button" class="listing-back" data-back="1">'.concat(icon("back"), " 返回我的</button><h1>设置</h1>\n    ").concat(window.renderAppearance ? window.renderAppearance() : "", '\n    <section><button type="button" class="settings-link" data-account-management="1"><span><strong>账号管理</strong><small>').concat(state.account.loggedIn ? esc(state.account.username) : "登录或注册账号", "</small></span>").concat(icon("arrow"), '</button></section>\n    <section><button type="button" class="settings-link" data-proxy-open><span><strong>黄果网络通道</strong><small data-proxy-summary>').concat(esc(proxySummaryText()), "</small></span>").concat(icon("arrow"), '</button></section>\n    <section><button type="button" class="settings-link" data-about-open><span><strong>关于 Veyra</strong><small>项目地址 · GPL-3.0 开源</small></span>').concat(icon("arrow"), "</button></section></div>");
   if (window.bindAppearance) window.bindAppearance();
   api("hot-update-status").then(window.hgHotUpdateStatus).catch(() => {
   });
@@ -1593,12 +1593,12 @@ function accountIdentityHtml() {
 }
 function renderAccountManagement() {
   const account = state.account;
-  content.innerHTML = '<div class="settings-page account-page"><button type="button" class="listing-back" data-back="1">'.concat(icon("back"), " 返回设置</button><h1>账号管理</h1>\n    ").concat(account.loggedIn ? "".concat(accountIdentityHtml(), '\n      <section class="settings-account"><h2>修改密码</h2><p>先验证旧密码，再设置新密码。</p>\n        <form id="password-form" class="password-form">\n          <label for="old-password">旧密码</label><input id="old-password" type="password" autocomplete="current-password" required>\n          <label for="new-password">新密码</label><input id="new-password" type="password" autocomplete="new-password" required>\n          <p id="password-error" class="auth-error" role="alert" hidden></p><button type="submit">确认修改</button>\n        </form></section>\n      <section class="settings-account"><h2>同步与登录</h2><button type="button" data-sync-now="1">立即同步片单</button><button type="button" data-logout="1" aria-live="polite">退出登录</button></section>') : '<section class="settings-account"><p>登录后可同步收藏和观看历史，并管理头像与密码。</p><button type="button" data-account-action="1">登录或注册</button></section>', "</div>");
+  content.innerHTML = '<div class="settings-page account-page"><button type="button" class="listing-back" data-back="1">'.concat(icon("back"), " 返回设置</button><h1>账号管理</h1>\n    ").concat(account.loggedIn ? "".concat(accountIdentityHtml(), '\n      <section class="settings-account"><h2>修改密码</h2><p>先验证旧密码，再设置新密码。</p>\n        <form id="password-form" class="password-form">\n          <label for="old-password">旧密码</label><input id="old-password" type="password" autocomplete="current-password" required>\n          <label for="new-password">新密码</label><input id="new-password" type="password" autocomplete="new-password" required>\n          <p id="password-error" class="auth-error" role="alert" hidden></p><button type="submit">确认修改</button>\n        </form></section>\n      <section class="settings-account"><h2>同步与登录</h2><button type="button" data-sync-now="1">立即同步片单</button><button type="button" data-logout="1" aria-live="polite">退出登录</button></section>\n      <section class="settings-account"><h2>电视端</h2><p>电视上用手机扫码登录：扫电视屏幕上的二维码，账号直接同步过去。</p><button type="button" data-qr-login="1">扫码登录电视</button></section>') : '<section class="settings-account"><p>登录后可同步收藏和观看历史，并管理头像与密码。</p><button type="button" data-account-action="1">登录或注册</button></section>\n      <section class="settings-account"><h2>电视端</h2><p>电视上用手机扫码登录：扫电视屏幕上的二维码，账号直接同步过去。</p><button type="button" data-qr-login="1">扫码登录电视</button></section>', "</div>");
 }
 var accountPop = null;
 function buildAccountPopHtml() {
   const account = state.account;
-  const body = account.loggedIn ? "".concat(accountIdentityHtml(), '\n      <section class="settings-account"><h2>修改密码</h2><p>先验证旧密码，再设置新密码。</p>\n        <form id="password-form" class="password-form">\n          <label for="old-password">旧密码</label><input id="old-password" type="password" autocomplete="current-password" required>\n          <label for="new-password">新密码</label><input id="new-password" type="password" autocomplete="new-password" required>\n          <p id="password-error" class="auth-error" role="alert" hidden></p><button type="submit">确认修改</button>\n        </form></section>\n      <section class="settings-account"><h2>同步与登录</h2><button type="button" data-sync-now="1">立即同步片单</button><button type="button" data-logout="1" aria-live="polite">退出登录</button></section>') : '<section class="settings-account"><p>登录后可同步收藏和观看历史，并管理头像与密码。</p><button type="button" data-account-action="1">登录或注册</button></section>';
+  const body = account.loggedIn ? "".concat(accountIdentityHtml(), '\n      <section class="settings-account"><h2>修改密码</h2><p>先验证旧密码，再设置新密码。</p>\n        <form id="password-form" class="password-form">\n          <label for="old-password">旧密码</label><input id="old-password" type="password" autocomplete="current-password" required>\n          <label for="new-password">新密码</label><input id="new-password" type="password" autocomplete="new-password" required>\n          <p id="password-error" class="auth-error" role="alert" hidden></p><button type="submit">确认修改</button>\n        </form></section>\n      <section class="settings-account"><h2>同步与登录</h2><button type="button" data-sync-now="1">立即同步片单</button><button type="button" data-logout="1" aria-live="polite">退出登录</button></section>\n      <section class="settings-account"><h2>电视端</h2><p>电视上用手机扫码登录：扫电视屏幕上的二维码，账号直接同步过去。</p><button type="button" data-qr-login="1">扫码登录电视</button></section>') : '<section class="settings-account"><p>登录后可同步收藏和观看历史，并管理头像与密码。</p><button type="button" data-account-action="1">登录或注册</button></section>\n      <section class="settings-account"><h2>电视端</h2><p>电视上用手机扫码登录：扫电视屏幕上的二维码，账号直接同步过去。</p><button type="button" data-qr-login="1">扫码登录电视</button></section>';
   return '<div class="appearance-pop account-pop" role="dialog" aria-modal="true" aria-labelledby="account-title">\n    <div class="appearance-head"><h2 id="account-title">账号管理</h2><button type="button" class="appearance-close" data-account-close aria-label="关闭">✕</button></div>\n    '.concat(body, "</div>");
 }
 function ensureAccountPop() {
@@ -1859,6 +1859,27 @@ function renderDetail() {
   const episodes = asArray(data.episodes);
   content.innerHTML = '<div class="detail-page"><button class="detail-back" type="button" data-back="1">'.concat(icon("back"), ' 返回</button>\n    <div class="detail-art"><img data-cover="').concat(esc(data.cover), '" alt=""></div><div class="detail-copy"><h1>').concat(esc(data.title), "</h1><p>").concat(loading ? "正在获取内容…" : "".concat(esc(data.score), " ").concat(esc(data.episodeLabel)), '</p><div class="detail-desc-wrap"><p class="detail-description">').concat(esc(data.description || ""), '</p></div>\n    <div class="detail-buttons"><button class="detail-play" type="button" data-play="1" ').concat(loading ? "disabled" : "", ">").concat(loading ? "正在加载…" : "立即播放", '</button><button class="bookmark-button" type="button" data-bookmark="1" aria-label="').concat(state.bookmarked ? "取消收藏" : "收藏", '" ').concat(loading ? "disabled" : "", ">").concat(state.bookmarked ? "★" : "☆", '</button><button class="detail-download" type="button" data-download="1" ').concat(loading ? "disabled" : "", ">下载</button></div>\n    ").concat(loading ? '<div class="detail-loading" role="status">正在获取选集…</div>' : episodes.length ? '<h2>选集</h2><div class="episode-grid">'.concat(episodes.map((item, index) => '<button type="button" data-episode="'.concat(item.number, '" class="').concat(index === 0 ? "active" : "", '">').concat(item.number, "</button>")).join(""), "</div>") : "", "</div></div>");
   hydrateImages();
+  ensureDetailFilled();
+}
+function ensureDetailFilled() {
+  const scrollEl = document.getElementById("scroll");
+  const page = content.querySelector(".detail-page");
+  if (!page) return;
+  if (scrollEl && getComputedStyle(scrollEl).display === "none") scrollEl.style.removeProperty("display");
+  const fit = () => {
+    if (!page.isConnected) return;
+    const need = window.innerHeight || document.documentElement.clientHeight || 0;
+    if (need <= 0) return;
+    if (page.getBoundingClientRect().height < need - 2) {
+      page.style.minHeight = need + "px";
+      if (getComputedStyle(page).backgroundColor === "rgba(0, 0, 0, 0)") page.style.backgroundColor = "var(--bg)";
+    } else if (page.style.minHeight) {
+      page.style.removeProperty("min-height");
+      page.style.removeProperty("background-color");
+    }
+  };
+  fit();
+  requestAnimationFrame(fit);
 }
 function searchFeedback() {
   if (state.searchPending) return '<div class="search-feedback" role="status" aria-live="polite"><span class="search-spinner" aria-hidden="true"></span><span>正在更新搜索结果…</span></div>';

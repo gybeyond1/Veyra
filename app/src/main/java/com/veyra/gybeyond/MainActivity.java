@@ -1214,9 +1214,7 @@ public final class MainActivity extends Activity {
 
         @JavascriptInterface public void setDetailMode(boolean enabled) {
             runOnUiThread(() -> {
-                // 这里不能做 detailSystemBars == enabled 的早退：从刷剧形态（沉浸全屏、
-                // 视频层垫底）回详情时，字段值可能已经是 true，但系统栏实际状态已被
-                // 其他路径改过 —— 跳过 apply 就会在详情页顶部留一条状态栏。
+                if (detailSystemBars == enabled) return;
                 detailSystemBars = enabled;
                 applySystemBars();
             });
