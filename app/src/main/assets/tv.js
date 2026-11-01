@@ -849,12 +849,16 @@ function showUpdatePanel(result) {
   var later = document.getElementById('tv-update-later');
   if (title) title.textContent = '发现新版本 v' + (result.version || '');
   if (sub) {
-    var notes = String(result.notes || '').replace(/\s+/g, ' ').trim();
-    if (notes.length > 160) notes = notes.slice(0, 160) + '…';
     var parts = ['当前 v' + (result.currentVersion || state.version || '?')];
-    if (notes) parts.push(notes);
     if (Number(result.size) > 0) parts.push('更新包 ' + Math.max(1, Math.round(Number(result.size) / 1048576)) + 'MB');
     sub.textContent = parts.join(' · ');
+  }
+  var notesEl = document.getElementById('tv-update-notes');
+  if (notesEl) {
+    var notes = String(result.notes || '').replace(/\s+/g, ' ').trim();
+    if (notes.length > 140) notes = notes.slice(0, 140) + '…';
+    notesEl.textContent = notes;
+    notesEl.hidden = !notes;
   }
   setUpdateProgress(0);
   var bar = document.getElementById('tv-update-progress');

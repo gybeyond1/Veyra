@@ -319,6 +319,13 @@ img{display:block;border:0}
   margin:0 0 2.6rem;line-height:1.6;
   text-align:left;word-break:break-word;
 }
+/* 版本/体积一行，更新说明单独一段，别在「更新包 10MB」中间折行 */
+.update-box #tv-update-sub{margin-bottom:1.2rem}
+.update-box #tv-update-notes{
+  font-size:1.7rem;color:#868f99;
+  margin:0 0 2.6rem;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;
+}
 .update-track{
   position:relative;height:1.2rem;border-radius:.6rem;
   background:var(--panel-2);overflow:hidden;
