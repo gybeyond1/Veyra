@@ -23,6 +23,8 @@
   --edge:#2a3038;
 }
 
+/* hidden 必须压过 #login{display:flex} 这类规则，否则登录层永远盖在首页上 */
+[hidden]{display:none !important}
 *{box-sizing:border-box}
 html,body{
   margin:0;height:100%;overflow:hidden;
@@ -92,8 +94,8 @@ img{display:block}
 /* 六列海报墙 */
 .grid{
   display:grid;
-  grid-template-columns:repeat(5,1fr);
-  gap:calc(22 * var(--s));
+  grid-template-columns:repeat(6,1fr);
+  gap:calc(18 * var(--s));
 }
 .card{
   text-align:left;
@@ -170,10 +172,11 @@ img{display:block}
   gap:calc(12 * var(--s));max-width:calc(1120 * var(--s));
 }
 .eps button{
-  height:calc(56 * var(--s));
+  height:calc(52 * var(--s));
   border-radius:calc(8 * var(--s));
   background:var(--panel);color:var(--text);
   font-size:calc(19 * var(--s));
+  white-space:nowrap;
 }
 .eps button.is-focused{outline:calc(3 * var(--s)) solid var(--focus);outline-offset:calc(2 * var(--s))}
 
@@ -216,7 +219,7 @@ img{display:block}
 
 #login{
   position:absolute;inset:0;z-index:30;
-  background:rgba(6,8,10,.96);
+  background:rgba(6,8,10,.985);
   display:flex;align-items:center;justify-content:center;
 }
 .login-box{text-align:center;max-width:calc(720 * var(--s))}

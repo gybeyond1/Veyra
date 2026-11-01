@@ -311,7 +311,7 @@ function renderDetail() {
     eps = '<h2 style="font-size:calc(24 * var(--s));margin:0 0 calc(14 * var(--s))">选集</h2><div class="eps">';
     for (let i = 0; i < episodes.length; i++) {
       const number = episodes[i].number || (i + 1);
-      eps += '<button type="button" data-focusable data-key="ep:' + number + '" data-episode="' + number + '">第 ' + number + ' 集</button>';
+      eps += '<button type="button" data-focusable data-key="ep:' + number + '" data-episode="' + number + '" aria-label="第 ' + number + ' 集">' + number + '</button>';
     }
     eps += '</div>';
   }
