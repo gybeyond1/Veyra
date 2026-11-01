@@ -1,0 +1,231 @@
+/* ===================================================================
+   Veyra 电视端样式
+   设计基准 1280×720（常见电视盒子视口 960×540 / 1280×720 / 1920×1080）。
+   --s 是缩放因子：1280 宽时 = 1px，960 宽时 = 0.75px，1920 宽时 = 1.5px。
+   所有尺寸都写 calc(N * var(--s))，因此换分辨率是整体等比缩放，不会走样。
+
+   这里**没有** backdrop-filter / filter / 大阴影 / 动画曲线 —— 电视盒子 GPU 弱，
+   一层毛玻璃就能把帧率打到 20。焦点反馈只用 outline + transform。
+   =================================================================== */
+
+:root{
+  --s:0.078125vw;                        /* 100 / 1280 */
+  --s:min(0.078125vw,0.138889vh);        /* 认 min() 的内核按短边缩，超宽屏不变形 */
+
+  --bg:#0d1013;
+  --panel:#171b1f;
+  --panel-2:#222831;
+  --text:#ece7db;
+  --muted:#98a1ab;
+  --accent:#c89b3c;
+  --accent-ink:#231a06;
+  --focus:#ffd277;
+  --edge:#2a3038;
+}
+
+*{box-sizing:border-box}
+html,body{
+  margin:0;height:100%;overflow:hidden;
+  background:var(--bg);color:var(--text);
+  font-family:"Noto Sans CJK SC","PingFang SC","Microsoft YaHei",sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+img{display:block}
+#app{position:relative;width:100%;height:100vh;overflow:hidden}
+
+/* ---------- 左侧竖导航 ---------- */
+#rail{
+  position:absolute;left:0;top:0;bottom:0;
+  width:calc(210 * var(--s));
+  background:#090c0e;
+  display:flex;flex-direction:column;
+  padding:calc(46 * var(--s)) calc(18 * var(--s)) calc(30 * var(--s));
+  gap:calc(8 * var(--s));
+}
+.brand{
+  font-size:calc(32 * var(--s));font-weight:800;color:var(--accent);
+  padding:0 calc(14 * var(--s));margin-bottom:calc(28 * var(--s));
+  letter-spacing:calc(0.6 * var(--s));
+}
+.rail-item{
+  height:calc(62 * var(--s));
+  border-radius:calc(10 * var(--s));
+  padding:0 calc(18 * var(--s));
+  text-align:left;
+  font-size:calc(24 * var(--s));
+  color:var(--muted);
+}
+.rail-item.is-active{color:var(--text);background:var(--panel)}
+.rail-item.is-focused{
+  outline:calc(3 * var(--s)) solid var(--focus);
+  outline-offset:calc(2 * var(--s));
+  color:var(--text);background:var(--panel-2);
+}
+.rail-foot{
+  margin-top:auto;padding:0 calc(14 * var(--s));
+  font-size:calc(17 * var(--s));color:var(--muted);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+
+/* ---------- 主区域 ---------- */
+#stage{
+  position:absolute;left:calc(210 * var(--s));right:0;top:0;bottom:0;
+  overflow-y:auto;overflow-x:hidden;
+  padding:calc(40 * var(--s)) calc(56 * var(--s)) calc(70 * var(--s));
+  scrollbar-width:none;
+}
+#stage::-webkit-scrollbar{display:none}
+
+.page-title{
+  font-size:calc(34 * var(--s));font-weight:700;
+  margin:0 0 calc(24 * var(--s));
+}
+.section{margin-bottom:calc(40 * var(--s))}
+.section-head{
+  display:flex;align-items:baseline;justify-content:space-between;
+  margin-bottom:calc(16 * var(--s));
+}
+.section-head h2{font-size:calc(26 * var(--s));margin:0;font-weight:700}
+.section-head span{font-size:calc(17 * var(--s));color:var(--muted)}
+
+/* 六列海报墙 */
+.grid{
+  display:grid;
+  grid-template-columns:repeat(5,1fr);
+  gap:calc(22 * var(--s));
+}
+.card{
+  text-align:left;
+  transition:transform .12s ease-out;
+  border-radius:calc(8 * var(--s));
+}
+/* 海报用 padding-top 撑出 1:1.4 的比例：宽度随列自适应，
+   高度永远跟着走，1290/1920 各种分辨率都不会被拉成瘦条 */
+.card .art{
+  position:relative;display:block;height:0;padding-top:140%;
+  border-radius:calc(8 * var(--s));
+  overflow:hidden;background:var(--panel);
+}
+.card .art img{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover}
+.card .art .badge{
+  position:absolute;left:calc(8 * var(--s));bottom:calc(8 * var(--s));
+  background:rgba(0,0,0,.68);color:#ffe08a;
+  font-size:calc(15 * var(--s));font-weight:700;
+  padding:calc(3 * var(--s)) calc(7 * var(--s));
+  border-radius:calc(5 * var(--s));
+}
+.card .name{
+  display:block;
+  margin-top:calc(10 * var(--s));
+  font-size:calc(19 * var(--s));line-height:1.35;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.card.is-focused{
+  transform:scale(1.06);
+  z-index:5;
+}
+.card.is-focused .art{
+  outline:calc(3 * var(--s)) solid var(--focus);
+  outline-offset:calc(2 * var(--s));
+}
+
+/* 剧场分类条 */
+.chips{display:flex;gap:calc(12 * var(--s));margin-bottom:calc(28 * var(--s));flex-wrap:wrap}
+.chip{
+  height:calc(52 * var(--s));
+  padding:0 calc(22 * var(--s));
+  border-radius:calc(26 * var(--s));
+  background:var(--panel);color:var(--muted);
+  font-size:calc(20 * var(--s));
+}
+.chip.is-active{background:var(--accent);color:var(--accent-ink);font-weight:700}
+.chip.is-focused{outline:calc(3 * var(--s)) solid var(--focus);outline-offset:calc(2 * var(--s))}
+
+/* ---------- 详情 ---------- */
+.detail{display:grid;grid-template-columns:calc(360 * var(--s)) 1fr;gap:calc(44 * var(--s))}
+.detail-art{
+  height:calc(510 * var(--s));border-radius:calc(10 * var(--s));
+  overflow:hidden;background:var(--panel);
+}
+.detail-art img{width:100%;height:100%;object-fit:cover}
+.detail h1{font-size:calc(42 * var(--s));margin:0 0 calc(12 * var(--s));line-height:1.2}
+.detail .meta{font-size:calc(19 * var(--s));color:var(--muted);margin:0 0 calc(18 * var(--s))}
+.detail .desc{
+  font-size:calc(19 * var(--s));line-height:1.7;color:#c8ced6;
+  margin:0 0 calc(26 * var(--s));max-width:calc(880 * var(--s));
+  display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;
+}
+.actions{display:flex;gap:calc(16 * var(--s));margin-bottom:calc(28 * var(--s))}
+.btn{
+  height:calc(58 * var(--s));
+  padding:0 calc(30 * var(--s));
+  border-radius:calc(10 * var(--s));
+  background:var(--panel-2);font-size:calc(21 * var(--s));
+}
+.btn.primary{background:var(--accent);color:var(--accent-ink);font-weight:700}
+.btn.is-focused{outline:calc(3 * var(--s)) solid var(--focus);outline-offset:calc(2 * var(--s))}
+.eps{
+  display:grid;grid-template-columns:repeat(8,1fr);
+  gap:calc(12 * var(--s));max-width:calc(1120 * var(--s));
+}
+.eps button{
+  height:calc(56 * var(--s));
+  border-radius:calc(8 * var(--s));
+  background:var(--panel);color:var(--text);
+  font-size:calc(19 * var(--s));
+}
+.eps button.is-focused{outline:calc(3 * var(--s)) solid var(--focus);outline-offset:calc(2 * var(--s))}
+
+/* ---------- 搜索 ---------- */
+.search-box{
+  display:flex;align-items:center;gap:calc(16 * var(--s));
+  background:var(--panel);border-radius:calc(10 * var(--s));
+  padding:0 calc(24 * var(--s));
+  height:calc(66 * var(--s));
+  max-width:calc(980 * var(--s));
+  margin-bottom:calc(28 * var(--s));
+}
+.search-box.is-focused{outline:calc(3 * var(--s)) solid var(--focus);outline-offset:calc(2 * var(--s))}
+.search-box input{
+  flex:1;height:100%;border:0;background:transparent;
+  color:var(--text);font-size:calc(22 * var(--s));outline:none;
+}
+.search-box input::placeholder{color:var(--muted)}
+.search-hint{font-size:calc(18 * var(--s));color:var(--muted);margin:0 0 calc(26 * var(--s))}
+
+/* ---------- 我的 ---------- */
+.tabs{display:flex;gap:calc(12 * var(--s));margin-bottom:calc(26 * var(--s))}
+.empty{
+  font-size:calc(20 * var(--s));color:var(--muted);
+  padding:calc(60 * var(--s)) 0;
+}
+
+/* ---------- 提示与登录 ---------- */
+#toast{
+  position:absolute;left:50%;bottom:calc(60 * var(--s));
+  transform:translateX(-50%);
+  background:rgba(0,0,0,.86);color:var(--text);
+  padding:calc(14 * var(--s)) calc(26 * var(--s));
+  border-radius:calc(10 * var(--s));
+  font-size:calc(19 * var(--s));
+  opacity:0;transition:opacity .16s linear;
+  pointer-events:none;
+}
+#toast.show{opacity:1}
+
+#login{
+  position:absolute;inset:0;z-index:30;
+  background:rgba(6,8,10,.96);
+  display:flex;align-items:center;justify-content:center;
+}
+.login-box{text-align:center;max-width:calc(720 * var(--s))}
+.login-box h1{font-size:calc(40 * var(--s));margin:0 0 calc(14 * var(--s))}
+.login-box p{font-size:calc(20 * var(--s));color:var(--muted);margin:0 0 calc(26 * var(--s))}
+.login-qr{
+  width:calc(260 * var(--s));height:calc(260 * var(--s));
+  margin:0 auto calc(24 * var(--s));
+  padding:calc(10 * var(--s));background:#fff;border-radius:calc(10 * var(--s));
+}
+.login-qr svg{width:100%;height:100%;display:block}
+.login-box .btn{margin:0 auto}

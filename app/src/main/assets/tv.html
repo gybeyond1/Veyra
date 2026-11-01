@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN" data-device="tv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>Veyra</title>
+<!-- 电视端独立页面：不加载 app.css / 玻璃 / 转场 / 主题那几套，只有这一个样式表。 -->
+<link rel="stylesheet" href="tv.css">
+</head>
+<body>
+<div id="app">
+  <nav id="rail">
+    <div class="brand">Veyra</div>
+    <button class="rail-item is-active" type="button" data-nav="home" data-key="nav:home" data-focusable>首页</button>
+    <button class="rail-item" type="button" data-nav="adult" data-key="nav:adult" data-focusable>剧场</button>
+    <button class="rail-item" type="button" data-nav="search" data-key="nav:search" data-focusable>搜索</button>
+    <button class="rail-item" type="button" data-nav="library" data-key="nav:library" data-focusable>我的</button>
+    <div class="rail-foot" id="rail-account">未登录</div>
+  </nav>
+  <main id="stage"><div id="view"></div></main>
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <div id="login" hidden>
+    <section class="login-box">
+      <h1>登录电视</h1>
+      <p id="login-tip">用手机上的 Veyra 扫下面的二维码</p>
+      <div id="login-qr" class="login-qr" hidden></div>
+      <button id="login-retry" class="btn" type="button" data-focusable>显示二维码</button>
+    </section>
+  </div>
+</div>
+<script src="tv-polyfill.js"></script>
+<script src="vendor/qrcode.js"></script>
+<script src="tv.js"></script>
+</body>
+</html>

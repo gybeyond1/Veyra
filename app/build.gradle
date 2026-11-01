@@ -10,8 +10,8 @@ android {
         applicationId 'com.veyra.gybeyond'
         minSdk 26
         targetSdk 36
-        versionCode 349
-        versionName "0.23.29"
+        versionCode 350
+        versionName "0.24.0"
         testInstrumentationRunner 'com.veyra.gybeyond.PlaybackTestRunner'
     }
 
@@ -25,6 +25,8 @@ android {
         }
         tv {
             dimension 'form'
+            // 电视独立包：单独包名，能和手机包装在同一台设备上互不覆盖
+            applicationIdSuffix '.tv'
         }
     }
 

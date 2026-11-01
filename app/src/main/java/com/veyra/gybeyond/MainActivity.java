@@ -245,6 +245,9 @@ public final class MainActivity extends Activity {
         com.hongguotv.core.AppContext.init(this);
         installCrashLogger();
         deviceType = DeviceProfile.type(this);
+        // TV 独立包：装在什么设备上都按电视跑（横屏、焦点导航、扫码输入、tv.html），
+        // 否则拿手机装 TV 包调试时会被判成 phone，遥控器逻辑和局域网服务全都不会起来。
+        if (getResources().getBoolean(R.bool.veyra_lite)) deviceType = DeviceProfile.TV;
         // 电视只有横屏一种形态：manifest 里的 portrait 是为了锁住手机，这里对 TV 运行期覆盖，
         // 手机不会走到这段，方向行为与改动前完全一致。
         if (DeviceProfile.TV.equals(deviceType)) {
@@ -265,7 +268,10 @@ public final class MainActivity extends Activity {
         String previousRules = hotPrefs.getString("siteFingerprint", "");
         if (!previousRules.isEmpty() && !previousRules.equals(hotSession.site.fingerprint)) store.clearCache();
         hotPrefs.edit().putString("siteFingerprint", hotSession.site.fingerprint).apply();
-        migratingOrigin = !hotPrefs.getBoolean("originMigrated", false);
+        // 电视包不参与「老 file:// 存储迁移」：那是给 app.html 换源用的，
+        // 而电视首启如果先加载 app.html，就会拿手机布局糊在电视上（甚至白屏卡住）。
+        migratingOrigin = !getResources().getBoolean(R.bool.veyra_lite)
+                && !hotPrefs.getBoolean("originMigrated", false);
         account = new AccountService(this, store);
         try { store.activateUser(account.userId()); }
         catch (Exception error) { Log.w(TAG, "无法恢复账号数据", error); }
@@ -384,9 +390,11 @@ public final class MainActivity extends Activity {
         checkLastCrash();
     }
 
-    /** 电视构建走 ?lite=1：页面据此只加载降级脚本和轻量样式，手机 / 平板不带这个参数。 */
+    /** 电视构建走独立页面 tv.html（不再给 app.html 加 ?lite=1）；手机 / 平板仍是 app.html。 */
     private String uiUrl() {
-        return liteBuild() ? HotUpdateManager.UI_URL + "?lite=1" : HotUpdateManager.UI_URL;
+        // 不走热更新资源通道：热更新包里没有 tv.html 时会 404 白屏，电视端不值得赌这一下。
+        if (liteBuild()) return "file:///android_asset/tv.html";
+        return HotUpdateManager.UI_URL;
     }
 
     /**
