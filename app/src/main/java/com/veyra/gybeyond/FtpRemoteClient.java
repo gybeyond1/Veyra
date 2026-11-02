@@ -118,6 +118,20 @@ final class FtpRemoteClient extends RemoteClient {
     }
 
     @Override
+    long size(String dir, String name) throws Exception {
+        home();
+        if (dir != null && !dir.isEmpty()) enterPath(dir, true);
+        try {
+            // 二进制模式下 SIZE 给的就是字节数；服务器不支持/文件不存在时返回 null
+            String raw = ftp.getSize(name);
+            if (raw == null) return -1;
+            try { return Long.parseLong(raw.trim()); } catch (Exception error) { return -1; }
+        } finally {
+            home();
+        }
+    }
+
+    @Override
     public void close() {
         if (ftp != null) {
             try { if (ftp.isConnected()) ftp.logout(); } catch (Exception ignored) { }

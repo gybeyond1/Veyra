@@ -1976,7 +1976,8 @@ function remoteDraftOf(server) {
     pass: "",
     hasPass: !!s.hasPass,
     secure: !!s.secure,
-    insecure: s.insecure !== false
+    insecure: s.insecure !== false,
+    cleanup: s.cleanup !== false
   };
 }
 function buildRemoteFormHtml() {
@@ -1994,6 +1995,7 @@ function buildRemoteFormHtml() {
     <label class="remote-field"><span>\u663E\u793A\u540D\u79F0\uFF08\u53EF\u9009\uFF09</span><input id="remote-name" class="settings-input" type="text" placeholder="\u5BA2\u5385 NAS" value="${esc(d.name)}" autocomplete="off"></label>
     ${isSmb ? "" : `<label class="remote-check"><input id="remote-secure" type="checkbox"${d.secure ? " checked" : ""}><span>${isWebdav ? "\u4F7F\u7528 HTTPS" : "\u4F7F\u7528 FTPS\uFF08\u663E\u5F0F TLS\uFF09"}</span></label>`}
     ${isSmb ? "" : `<label class="remote-check"><input id="remote-insecure" type="checkbox"${d.insecure ? " checked" : ""}><span>\u5FFD\u7565\u8BC1\u4E66\u6821\u9A8C\uFF08\u5BB6\u7528 NAS \u5E38\u662F\u81EA\u7B7E\u8BC1\u4E66\uFF09</span></label>`}
+    <label class="remote-check"><input id="remote-cleanup" type="checkbox"${d.cleanup ? " checked" : ""}><span>\u4F20\u5B8C\u5220\u672C\u5730\uFF08\u5927\u5C0F\u5BF9\u4E0D\u4E0A\u4F1A\u4FDD\u7559\uFF09</span></label>
     <div class="remote-test-row"><button type="button" class="remote-secondary" data-remote-test>\u6D4B\u8BD5\u8FDE\u63A5</button><span class="remote-test-result ${remoteTestOk ? "ok" : "fail"}" data-remote-result${remoteTestText ? "" : " hidden"}>${esc(remoteTestText)}</span></div>
     <div class="remote-actions">
       <button type="button" class="remote-secondary" data-remote-cancel>\u8FD4\u56DE</button>
@@ -2009,7 +2011,7 @@ function buildRemoteListHtml() {
   }
   return `<p class="appearance-note">\u652F\u6301 SMB\uFF08Windows \u5171\u4EAB / NAS\uFF09\u3001WebDAV\u3001FTP\u3002\u70B9\u6761\u76EE\u53EF\u4FEE\u6539\u3002</p>
     <div class="remote-list">${list.map((s) => `<button type="button" class="remote-item" data-remote-edit="${esc(s.id)}">
-        <span class="remote-item-main"><strong>${esc(s.name)}</strong><small>${esc(s.typeName || remoteTypeName(s.type))} \xB7 ${esc(s.address || "")}</small></span>
+        <span class="remote-item-main"><strong>${esc(s.name)}</strong><small>${esc(s.typeName || remoteTypeName(s.type))} \xB7 ${esc(s.address || "")}${s.cleanup === false ? " \xB7 \u672C\u5730\u4FDD\u7559" : " \xB7 \u4F20\u5B8C\u5220\u672C\u5730"}</small></span>
         ${icon("arrow")}
       </button>`).join("")}</div>
     <div class="remote-actions"><button type="button" class="remote-primary" data-remote-add>\u6DFB\u52A0\u670D\u52A1\u5668</button></div>`;
@@ -2089,7 +2091,8 @@ function readRemoteForm() {
     user: value("remote-user"),
     pass: value("remote-pass"),
     secure: isSmb ? false : checked("remote-secure"),
-    insecure: isSmb ? true : checked("remote-insecure")
+    insecure: isSmb ? true : checked("remote-insecure"),
+    cleanup: checked("remote-cleanup")
   };
 }
 function stashRemoteForm() {
@@ -2181,7 +2184,7 @@ async function openRemotePicker(taskId, title) {
     <div class="appearance-head"><h2 id="remote-pick-title">\u4F20\u5230\u8FDC\u7A0B\u670D\u52A1\u5668</h2><button type="button" class="appearance-close" data-remote-pick-close aria-label="\u5173\u95ED">\u2715</button></div>
     <p class="appearance-note">\u300A${esc(title || "\u8FD9\u90E8")}\u300B\u4F1A\u5728\u670D\u52A1\u5668\u4E0A\u5EFA\u540C\u540D\u6587\u4EF6\u5939\uFF0C\u6210\u54C1\u76F4\u63A5\u653E\u8FDB\u53BB\u3002</p>
     <div class="remote-list">${list.map((s) => `<button type="button" class="remote-item" data-remote-pick="${esc(s.id)}">
-        <span class="remote-item-main"><strong>${esc(s.name)}</strong><small>${esc(s.typeName || remoteTypeName(s.type))} \xB7 ${esc(s.address || "")}</small></span>
+        <span class="remote-item-main"><strong>${esc(s.name)}</strong><small>${esc(s.typeName || remoteTypeName(s.type))} \xB7 ${esc(s.address || "")}${s.cleanup === false ? " \xB7 \u672C\u5730\u4FDD\u7559" : " \xB7 \u4F20\u5B8C\u5220\u672C\u5730"}</small></span>
         ${icon("arrow")}
       </button>`).join("")}</div>
   </div>`;

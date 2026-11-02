@@ -1791,7 +1791,8 @@ function remoteDraftOf(server) {
     pass: '',
     hasPass: !!s.hasPass,
     secure: !!s.secure,
-    insecure: s.insecure !== false
+    insecure: s.insecure !== false,
+    cleanup: s.cleanup !== false
   };
 }
 
@@ -1812,6 +1813,7 @@ function buildRemoteFormHtml() {
     <label class="remote-field"><span>显示名称（可选）</span><input id="remote-name" class="settings-input" type="text" placeholder="客厅 NAS" value="${esc(d.name)}" autocomplete="off"></label>
     ${isSmb ? '' : `<label class="remote-check"><input id="remote-secure" type="checkbox"${d.secure ? ' checked' : ''}><span>${isWebdav ? '使用 HTTPS' : '使用 FTPS（显式 TLS）'}</span></label>`}
     ${isSmb ? '' : `<label class="remote-check"><input id="remote-insecure" type="checkbox"${d.insecure ? ' checked' : ''}><span>忽略证书校验（家用 NAS 常是自签证书）</span></label>`}
+    <label class="remote-check"><input id="remote-cleanup" type="checkbox"${d.cleanup ? ' checked' : ''}><span>传完删本地（大小对不上会保留）</span></label>
     <div class="remote-test-row"><button type="button" class="remote-secondary" data-remote-test>测试连接</button><span class="remote-test-result ${remoteTestOk ? 'ok' : 'fail'}" data-remote-result${remoteTestText ? '' : ' hidden'}>${esc(remoteTestText)}</span></div>
     <div class="remote-actions">
       <button type="button" class="remote-secondary" data-remote-cancel>返回</button>
@@ -1828,7 +1830,7 @@ function buildRemoteListHtml() {
   }
   return `<p class="appearance-note">支持 SMB（Windows 共享 / NAS）、WebDAV、FTP。点条目可修改。</p>
     <div class="remote-list">${list.map(s => `<button type="button" class="remote-item" data-remote-edit="${esc(s.id)}">
-        <span class="remote-item-main"><strong>${esc(s.name)}</strong><small>${esc(s.typeName || remoteTypeName(s.type))} · ${esc(s.address || '')}</small></span>
+        <span class="remote-item-main"><strong>${esc(s.name)}</strong><small>${esc(s.typeName || remoteTypeName(s.type))} · ${esc(s.address || '')}${s.cleanup === false ? ' · 本地保留' : ' · 传完删本地'}</small></span>
         ${icon('arrow')}
       </button>`).join('')}</div>
     <div class="remote-actions"><button type="button" class="remote-primary" data-remote-add>添加服务器</button></div>`;
@@ -1903,7 +1905,8 @@ function readRemoteForm() {
     user: value('remote-user'),
     pass: value('remote-pass'),
     secure: isSmb ? false : checked('remote-secure'),
-    insecure: isSmb ? true : checked('remote-insecure')
+    insecure: isSmb ? true : checked('remote-insecure'),
+    cleanup: checked('remote-cleanup')
   };
 }
 
@@ -1982,7 +1985,7 @@ async function openRemotePicker(taskId, title) {
     <div class="appearance-head"><h2 id="remote-pick-title">传到远程服务器</h2><button type="button" class="appearance-close" data-remote-pick-close aria-label="关闭">✕</button></div>
     <p class="appearance-note">《${esc(title || '这部')}》会在服务器上建同名文件夹，成品直接放进去。</p>
     <div class="remote-list">${list.map(s => `<button type="button" class="remote-item" data-remote-pick="${esc(s.id)}">
-        <span class="remote-item-main"><strong>${esc(s.name)}</strong><small>${esc(s.typeName || remoteTypeName(s.type))} · ${esc(s.address || '')}</small></span>
+        <span class="remote-item-main"><strong>${esc(s.name)}</strong><small>${esc(s.typeName || remoteTypeName(s.type))} · ${esc(s.address || '')}${s.cleanup === false ? ' · 本地保留' : ' · 传完删本地'}</small></span>
         ${icon('arrow')}
       </button>`).join('')}</div>
   </div>`;

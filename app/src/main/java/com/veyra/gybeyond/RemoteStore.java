@@ -83,6 +83,8 @@ final class RemoteStore {
         server.put("host", host);
         server.put("secure", in.optBoolean("secure", false));
         server.put("insecure", in.optBoolean("insecure", true));
+        // 传完删本地：默认开（传上去就是为了腾出手机空间）。显式传 false 才关。
+        server.put("cleanup", in.optBoolean("cleanup", true));
         server.put("user", in.optString("user", "").trim());
         server.put("path", cleanPath(in.optString("path", "")));
         server.put("share", TYPE_SMB.equals(type) ? cleanShare(in.optString("share", "")) : "");
@@ -195,6 +197,8 @@ final class RemoteStore {
                 item.put("port", defaultPort(item.optString("type"), item.optBoolean("secure", false)));
             }
             if (item.optString("name", "").trim().isEmpty()) item.put("name", defaultName(item));
+            // 老配置没有这个键：按「开」处理，跟新保存的默认一致
+            if (!item.has("cleanup")) item.put("cleanup", true);
         } catch (Exception ignored) { }
         return item;
     }
@@ -265,6 +269,7 @@ final class RemoteStore {
             out.put("user", server.optString("user", ""));
             out.put("secure", server.optBoolean("secure", false));
             out.put("insecure", server.optBoolean("insecure", true));
+            out.put("cleanup", server.optBoolean("cleanup", true));
             out.put("hasPass", !server.optString("pass", "").isEmpty());
             out.put("address", describe(server));
             out.put("typeName", typeName(server.optString("type", "")));

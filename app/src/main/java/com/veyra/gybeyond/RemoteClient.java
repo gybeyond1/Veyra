@@ -34,6 +34,9 @@ abstract class RemoteClient implements Closeable {
     /** 把本地文件写成「相对 basePath 的 dir 目录 + name」（同名覆盖）。 */
     abstract void upload(File file, String dir, String name, Progress progress) throws Exception;
 
+    /** 远端文件大小（字节）。传完拿它跟本地比一次，对得上才敢删本地；返回 -1 = 协议/服务器不给。 */
+    abstract long size(String dir, String name) throws Exception;
+
     /** 连通性 + 写权限自检（测试连接用）。 */
     abstract void verify() throws Exception;
 

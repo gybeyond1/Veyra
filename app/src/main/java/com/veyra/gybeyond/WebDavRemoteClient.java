@@ -104,6 +104,34 @@ final class WebDavRemoteClient extends RemoteClient {
     }
 
     @Override
+    long size(String dir, String name) throws Exception {
+        HttpUrl.Builder b = root.newBuilder();
+        for (String seg : baseSegments) b.addPathSegment(seg);
+        for (String seg : segments(dir)) b.addPathSegment(seg);
+        b.addPathSegment(name);
+        HttpUrl url = b.build();
+        // 先 HEAD 拿 Content-Length；有的 WebDAV 实现不给 HEAD（405/501），退一步用 Range 取一个字节，
+        // 从 Content-Range 的 "/总长" 里读总大小。
+        Request head = authorized(new Request.Builder().url(url).head());
+        try (Response response = http.newCall(head).execute()) {
+            if (response.isSuccessful()) {
+                String len = response.header("Content-Length");
+                if (len != null) { try { return Long.parseLong(len.trim()); } catch (Exception ignored) { } }
+            } else if (response.code() != 405 && response.code() != 501) {
+                return -1;
+            }
+        }
+        Request ranged = authorized(new Request.Builder().url(url).header("Range", "bytes=0-0").get());
+        try (Response response = http.newCall(ranged).execute()) {
+            String range = response.header("Content-Range");
+            if (range == null) return -1;
+            int slash = range.lastIndexOf('/');
+            if (slash < 0) return -1;
+            try { return Long.parseLong(range.substring(slash + 1).trim()); } catch (Exception ignored) { return -1; }
+        }
+    }
+
+    @Override
     void verify() throws Exception {
         // 能 MKCOL 到目标目录 = 地址对、账号对、有写权限
         ensureDir("");

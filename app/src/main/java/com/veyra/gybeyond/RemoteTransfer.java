@@ -165,6 +165,10 @@ final class RemoteTransfer {
         job.detail = "连接服务器…";
         persist();
         RemoteClient client = null;
+        // 「传完删本地」：服务器上的配置项，默认开。只有全部传完、且大小都对得上才真删。
+        final boolean cleanup = server.optBoolean("cleanup", true);
+        int unverified = 0;
+        boolean complete = false;
         try {
             client = RemoteClient.create(server);
             client.open();
@@ -182,9 +186,14 @@ final class RemoteTransfer {
                     job.done = i + 1;
                     continue;
                 }
-                job.detail = "上传 " + item.optString("name", "") + "（" + (i + 1) + "/" + files.length() + "）";
+                String name = item.optString("name", file.getName());
+                job.detail = "上传 " + name + "（" + (i + 1) + "/" + files.length() + "）";
                 persist();
-                client.upload(file, dir, item.optString("name", file.getName()), delta -> { job.bytes += delta; });
+                client.upload(file, dir, name, delta -> { job.bytes += delta; });
+                // 传完立刻量一次远端大小：对不上说明传残了（断流/空间不足/DLP 拦截），这种绝不能再删本地
+                long remote = -1;
+                try { remote = client.size(dir, name); } catch (Exception ignored) { }
+                if (remote >= 0 && remote != file.length()) unverified++;
                 job.done = i + 1;
                 persist();
             }
@@ -192,6 +201,7 @@ final class RemoteTransfer {
             job.status = "done";
             job.bytes = Math.max(job.bytes, job.totalBytes);
             job.detail = "已传到 " + job.serverName + " / " + dir;
+            complete = true;
             Log.i(TAG, "done " + job.title + " -> " + client.target());
         } catch (Exception error) {
             if (!job.canceled) fail(job, RemoteClient.describeError(error));
@@ -200,7 +210,43 @@ final class RemoteTransfer {
                 try { client.close(); } catch (Exception ignored) { }
             }
             persist();
+            if (complete && cleanup) cleanupLocal(job, unverified);
         }
+    }
+
+    /** 传完清本地：删掉下载任务（公共 Downloads 里的分集/成品 + 任务目录），列表里那条也一并消失。 */
+    private void cleanupLocal(Job job, int unverified) {
+        if (unverified > 0) {
+            job.detail = job.detail + "（有 " + unverified + " 个文件大小对不上，本地已保留）";
+            persist();
+            return;
+        }
+        // 同一部剧还排着别的服务器：这时候删了，后面那台就传不成了
+        if (hasPendingJob(job.taskId, job.id)) {
+            job.detail = job.detail + "（还有别的服务器在排队，本地先留着）";
+            persist();
+            return;
+        }
+        try {
+            DownloadManager.get(context).delete(job.taskId);
+            job.detail = job.detail + "，本地已清理";
+            synchronized (jobs) { jobs.remove(job); }
+            persist();
+            Log.i(TAG, "local cleaned " + job.title);
+        } catch (Exception error) {
+            job.detail = job.detail + "（本地文件没删掉，可手动删）";
+            persist();
+        }
+    }
+
+    private boolean hasPendingJob(String taskId, String exceptId) {
+        synchronized (jobs) {
+            for (Job other : jobs) {
+                if (other.id.equals(exceptId) || !other.taskId.equals(taskId)) continue;
+                if ("queued".equals(other.status) || "running".equals(other.status)) return true;
+            }
+        }
+        return false;
     }
 
     private void fail(Job job, String message) {

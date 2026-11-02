@@ -87,6 +87,13 @@ final class SmbRemoteClient extends RemoteClient {
     }
 
     @Override
+    long size(String dir, String name) throws Exception {
+        SmbFile folder = descend(dir);
+        SmbFile target = child(folder, name, false);
+        return target.exists() ? target.length() : -1;
+    }
+
+    @Override
     public void close() {
         try { if (context != null) context.close(); } catch (Exception ignored) { }
         context = null;
