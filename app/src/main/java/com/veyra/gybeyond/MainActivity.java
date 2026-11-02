@@ -1055,20 +1055,25 @@ public final class MainActivity extends Activity {
                     throw new IllegalStateException("NAS 任务尚未完成（" + task.optString("status") + "）");
                 int count = task.optInt("episodeCount", 0);
                 String title = task.optString("title", "NAS 下载");
+                // 地址必须走 endpoint()：baseUrl 末尾自带 "/"，手写 "/api" 会拼出 "//api"，后端 404。
                 JSONArray eps = new JSONArray();
                 for (int i = 1; i <= count; i++) {
                     eps.put(new JSONObject().put("index", i)
-                            .put("url", account.baseUrl() + "/api/download/files/" + nasId + "/" + i));
+                            .put("url", endpoint(account.baseUrl(), "/api/download/files/" + nasId + "/" + i)));
                 }
-                String mergedUrl = account.baseUrl() + "/api/download/files/" + nasId + "/0";
+                String mergedUrl = endpoint(account.baseUrl(), "/api/download/files/" + nasId + "/0");
+                String firstEpUrl = count > 0 ? endpoint(account.baseUrl(), "/api/download/files/" + nasId + "/1") : mergedUrl;
+                // status=done 才是「已合并」，这时才有 files/{id}/0；ready 只是下载完，直接播第 1 集，
+                // 省掉一次注定 404 的请求（以前固定先探合并产物，未合并时白闪一下再回退）。
+                boolean hasMerged = "done".equals(task.optString("status"));
                 String token = account.authToken();
                 Intent intent = new Intent(this, LocalPlayerActivity.class);
                 intent.putExtra("title", title);
-                intent.putExtra("merged", true);          // 先探测合并产物：404 则回退逐集
+                intent.putExtra("merged", hasMerged);     // 合并产物缺失时播放器还会回退逐集，这里只是少走弯路
                 intent.putExtra("nasMode", true);
                 intent.putExtra("auth", token);
                 intent.putExtra("episodes", eps.toString());
-                intent.putExtra("path", mergedUrl);
+                intent.putExtra("path", hasMerged ? mergedUrl : firstEpUrl);
                 runOnUiThread(() -> startActivity(intent));
                 return true;
             }
@@ -1231,6 +1236,22 @@ public final class MainActivity extends Activity {
             }
             default: throw new IllegalArgumentException("未知请求");
         }
+    }
+
+    /**
+     * 拼后端绝对地址。
+     *
+     * 坑：ServerConfig 存下来的 baseUrl 一定带结尾斜杠（normalize 里 withSlash 补的），
+     * 再手写 "/api/..." 就变成 "https://host//api/..."。Express 的 strict routing 下
+     * "//api/..." 不匹配 "/api/..."，直接 404 —— 表现就是播放器一句 "Source error"，
+     * 没有任何有用信息。这里统一去掉尾部斜杠再拼，顺便兼容部署在子路径的地址。
+     */
+    private static String endpoint(String base, String path) {
+        String b = base == null ? "" : base.trim();
+        while (b.endsWith("/")) b = b.substring(0, b.length() - 1);
+        String p = path == null ? "" : path.trim();
+        if (!p.startsWith("/")) p = "/" + p;
+        return b + p;
     }
 
     /**

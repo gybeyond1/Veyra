@@ -175,7 +175,7 @@ public final class LocalPlayerActivity extends Activity {
                     String url = ep == null ? "" : ep.optString("url", "");
                     if (!url.isEmpty()) { play(url, false); revealControls(); return; }
                 }
-                toast("播放失败：" + error.getMessage());
+                toast("播放失败：" + describeError(error));
             }
         });
         play(path, true);
@@ -589,6 +589,31 @@ public final class LocalPlayerActivity extends Activity {
     }
 
     private void toast(String msg) { Toast.makeText(this, msg, Toast.LENGTH_SHORT).show(); }
+
+    /**
+     * 把 ExoPlayer 的错误翻成人能看懂的一句话。
+     *
+     * 顶层 message 只有一句 "Source error"，真正的状态码藏在 cause 链里（
+     * InvalidResponseCodeException.responseCode）。以前直接把顶层 message 弹出来，
+     * 用户和开发者都看不出是 404 还是 401。
+     */
+    private String describeError(androidx.media3.common.PlaybackException error) {
+        if (error == null) return "未知错误";
+        for (Throwable t = error.getCause(); t != null; t = t.getCause()) {
+            if (t instanceof androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException) {
+                androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException http =
+                        (androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException) t;
+                if (http.responseCode == 404) return "服务器上找不到这个文件（可能已被清理或还没合并）";
+                if (http.responseCode == 401 || http.responseCode == 403) return "没有权限读取，请重新登录后再试";
+                return "服务器返回 HTTP " + http.responseCode;
+            }
+            if (t instanceof java.io.FileNotFoundException) return "文件不存在";
+            String msg = t.getMessage();
+            if (msg != null && !msg.isEmpty() && !msg.startsWith("Source error")) return msg;
+        }
+        // 拿不到细节时至少给出错误类别，比如 ERROR_CODE_IO_NETWORK_CONNECTION_FAILED
+        return error.getErrorCodeName() == null ? "未知错误" : error.getErrorCodeName();
+    }
 
     private void toastOnce(String msg) {
         long now = System.currentTimeMillis();
