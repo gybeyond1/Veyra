@@ -50,11 +50,12 @@ const WAKE_ROUNDS = parseInt(process.env.APP_UPDATE_WAKE_ROUNDS || '24', 10);
 const WAKE_API_WINDOW_MS = 120_000;
 const MAX_BYTES = 120 * 1024 * 1024;
 /**
- * 每个渠道在盘上保留几个版本（默认 2：当前版 + 上一版）。
- * 留上一版不是为了好看：客户端可能正在下旧包，manifest 一换就 404 了；
- * 新包出问题时也要能把清单指回去。磁盘紧就用 APP_UPDATE_KEEP_VERSIONS=1 关掉。
+ * 每个渠道在盘上保留几个版本，默认 1：只留最新的。
+ * 检查更新拿到的永远是清单里的最新版，旧包没有任何分发路径，留着只占地方。
+ * （早期留 2 是担心有人正在下旧包，实际客户端下载 10MB 只要几十秒，撞上的概率极低，
+ *   真撞上它会自动回退 GitHub 重下。）
  */
-const KEEP_VERSIONS = Math.max(1, parseInt(process.env.APP_UPDATE_KEEP_VERSIONS || '2', 10) || 2);
+const KEEP_VERSIONS = Math.max(1, parseInt(process.env.APP_UPDATE_KEEP_VERSIONS || '1', 10) || 1);
 /** 分几段并发下。8 段在丢包链路上提升明显，再多容易把家宽连接数打满。 */
 const CHUNK_COUNT = 6;
 /** 单轮 poll 里最多重试几轮（每轮每段换一个源）。 */

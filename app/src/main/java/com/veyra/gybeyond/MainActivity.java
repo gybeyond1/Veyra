@@ -1233,6 +1233,18 @@ public final class MainActivity extends Activity {
         }
     }
 
+    /**
+     * 电视的设备名，写进登录二维码给手机看。
+     * 手机端弹确认框时要让人一眼认出「是不是客厅那台」，光有 IP 认不出来。
+     */
+    private static String tvLabel() {
+        String brand = Build.MANUFACTURER == null ? "" : Build.MANUFACTURER.trim();
+        String model = Build.MODEL == null ? "" : Build.MODEL.trim();
+        if (model.isEmpty()) return brand.isEmpty() ? "Veyra TV" : brand;
+        if (brand.isEmpty() || model.toLowerCase().startsWith(brand.toLowerCase())) return model;
+        return brand + " " + model;
+    }
+
     private final class Bridge {
         // 跟手拖拽的合帧状态：触摸事件只更新这些值，真正碰视图的只有 applyDrag 一次
         private volatile boolean pendingDragStart;
@@ -1298,10 +1310,12 @@ public final class MainActivity extends Activity {
                 }
                 info.put("ready", true)
                         .put("url", "veyra://tv-login?h=" + relay.address() + "&p=" + relay.port()
-                                + "&t=" + relay.token() + "&c=" + activeLoginCode)
+                                + "&t=" + relay.token() + "&c=" + activeLoginCode
+                                + "&n=" + Uri.encode(tvLabel()))
                         .put("code", activeLoginCode)
                         .put("host", relay.address())
                         .put("port", relay.port())
+                        .put("name", tvLabel())
                         .put("expiresIn", Math.max(0, 300 - (now - activeLoginCodeAt) / 1000));
             } catch (Exception ignored) { }
             return info.toString();
