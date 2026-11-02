@@ -1006,6 +1006,7 @@ async function renderLibraryDownloads(prefetched) {
       try { const result = await withTimeout(api('nas-download-list'), 4000); nas = asArray(result.tasks); } catch (error) { nas = []; }
     }
   }
+  await loadRemoteJobs();
   if (state.route !== 'library' || state.libraryTab !== 'downloads' || token !== libraryDownloadsToken) return;
   const list = document.getElementById('library-downloads');
   if (!list) return;
@@ -1054,7 +1055,11 @@ function backfillNasCovers(nasTasks) {
 // 仅当任务状态真正变化时才重建列表，避免滑动落位后无谓重绘（那一闪）。
 function downloadListSignature(phone, nas) {
   const red = t => [t.id, t.status, t.percent, t.doneCount, t.totalCount, t.nasTaskId, t.cover].map(v => v == null ? '' : v).join('|');
-  return [...phone.map(red), ...nas.map(red)].join(',');
+  // 远程传输进度也算进签名：否则 2s 轮询时列表不重绘，传输百分比永远停在打开那一瞬
+  const remote = [...remoteJobs.values()]
+    .map(j => [j.taskId, j.status, j.percent, j.serverName, j.error].map(v => v == null ? '' : v).join('|'))
+    .join(';');
+  return [...phone.map(red), ...nas.map(red), remote].join(',');
 }
 
 // 下载任务是否仍在进行（手机端 running/pulling；NAS 端 queued/downloading/merging）
@@ -1093,7 +1098,7 @@ async function processForwardTasks(phoneTasks, nasTasks) {
 
 // 有进行中任务则维持 2s 轮询，全部终态则停止；避免反复 stop/start 重置定时器
 function syncDownloadsTimer(tasks) {
-  const active = tasks.some(downloadTaskActive);
+  const active = tasks.some(downloadTaskActive) || [...remoteJobs.values()].some(job => job && (job.status === 'running' || job.status === 'queued'));
   if (active) {
     if (!downloadsTimer) downloadsTimer = setInterval(() => {
       if (state.route === 'downloads') refreshDownloads(routeToken, true);
@@ -1103,8 +1108,23 @@ function syncDownloadsTimer(tasks) {
   } else stopDownloadsTimer();
 }
 
-// ---- 下载（手机本地 + NAS 后端）----
+// ---- 下载（手机本地 + NAS 后端 + 远程服务器）----
 let downloadsTimer = null;
+/** 远程传输任务：taskId → 最新一条任务（列表里按下载任务展示状态） */
+let remoteJobs = new Map();
+async function loadRemoteJobs() {
+  try {
+    const list = asArray(await withTimeout(api('remote-transfer-list'), 3000));
+    const map = new Map();
+    for (const job of list) {
+      if (job && job.taskId) map.set(String(job.taskId), job);
+    }
+    remoteJobs = map;
+  } catch (error) {
+    // 拉不到就沿用上一轮，别让下载列表因为远程状态失败而空掉
+  }
+  return remoteJobs;
+}
 
 function stopDownloadsTimer() { if (downloadsTimer) { clearInterval(downloadsTimer); downloadsTimer = null; } }
 
@@ -1124,6 +1144,7 @@ async function refreshDownloads(token, keepTimer) {
   if (state.account.loggedIn) {
     try { const result = await api('nas-download-list'); nas = asArray(result.tasks); } catch (error) { nas = []; }
   }
+  await loadRemoteJobs();
   if (state.route !== 'downloads' || routeToken !== token) return;
   const list = document.getElementById('downloads-list');
   if (!list) return;
@@ -1204,6 +1225,16 @@ function downloadTaskRow(task, kind) {
   const sourceBadge = kind === 'nas'
     ? '<span class="dl-source-badge nas">NAS</span>'
     : '<span class="dl-source-badge phone">手机</span>';
+  // 远程传输（手机下载 → SMB/WebDAV/FTP）：一部剧只有一条最新记录，直接挂在下载行上显示
+  const remoteJob = kind === 'phone' ? remoteJobs.get(String(task.id)) : null;
+  const remoteText = remoteJobText(remoteJob);
+  const remoteBusy = !!(remoteJob && (remoteJob.status === 'running' || remoteJob.status === 'queued'));
+  const canTransfer = kind === 'phone' && !running && !remoteBusy
+    && (task.status === 'done' || task.status === 'ready' || task.status === 'failed');
+  const transferBtn = canTransfer
+    ? `<button type="button" class="dl-cancel dl-transfer" data-dl-transfer="${esc(task.id)}">${remoteJob && remoteJob.status === 'failed' ? '重传' : '传到服务器'}</button>` : '';
+  const transferCancel = remoteJob && (remoteJob.status === 'running' || remoteJob.status === 'queued')
+    ? `<button type="button" class="dl-cancel" data-dl-transfer-cancel="${esc(remoteJob.id)}">取消传输</button>` : '';
   // 直写导出后 output 是 file:// 路径（不再走 MediaStore 的 content://），两者都按「已保存」展示
   const output = task.output && (task.output.startsWith('content://') || task.output.startsWith('file://')) ? '已保存到系统下载目录' : task.output || '';
   const cancelBtn = running ? `<button type="button" class="dl-cancel" data-dl-cancel="${kind}" data-dl-id="${esc(task.id)}">取消</button>` : '';
@@ -1233,10 +1264,21 @@ function downloadTaskRow(task, kind) {
     <span class="download-cover-hint">${playHint}</span></button>`;
   return `<div class="download-card">${playTile}<div class="download-task">
     <div class="download-task-head"><strong>${esc(task.title || '未知剧集')}</strong>${sourceBadge}<span class="dl-status ${running ? 'is-running' : ''}">${statusText}</span></div>
-    <div class="download-task-meta">${task.doneCount}/${task.totalCount} 集 · ${task.doneCount === task.totalCount && task.status !== 'running' ? '已下载全部集' : (failedList.length ? `失败 ${failedList.length} 集` : '')}${srcNote ? ` · <b class="dl-src-note">${esc(srcNote)}</b>` : ''}${detailHint}</div>
+    <div class="download-task-meta">${task.doneCount}/${task.totalCount} 集 · ${task.doneCount === task.totalCount && task.status !== 'running' ? '已下载全部集' : (failedList.length ? `失败 ${failedList.length} 集` : '')}${srcNote ? ` · <b class="dl-src-note">${esc(srcNote)}</b>` : ''}${detailHint}${remoteText ? ` · <span class="dl-remote-note ${remoteJob.status}">${esc(remoteText)}</span>` : ''}</div>
     <div class="download-track"><i style="width:${Math.max(0, Math.min(100, Number(task.percent) || 0))}%"></i></div>
-    <div class="download-task-foot">${output ? `<span class="dl-output">${esc(output)}</span>` : ''}${failedInfo}${errBlock}${mergeBtn}${retryFailedBtn}${retryBtn}${cancelBtn}${deleteBtn}</div>
+    <div class="download-task-foot">${output ? `<span class="dl-output">${esc(output)}</span>` : ''}${failedInfo}${errBlock}${transferBtn}${transferCancel}${mergeBtn}${retryFailedBtn}${retryBtn}${cancelBtn}${deleteBtn}</div>
   </div></div>`;
+}
+
+/** 远程传输状态文案（没有任务就返回空串，行里不显示） */
+function remoteJobText(job) {
+  if (!job) return '';
+  const name = job.serverName || '远程服务器';
+  if (job.status === 'running' || job.status === 'queued') return `传输到 ${name} ${Number(job.percent) || 0}%`;
+  if (job.status === 'done') return `已传到 ${name}`;
+  if (job.status === 'failed') return `传输失败：${job.error || '未知错误'}`;
+  if (job.status === 'canceled') return '传输已取消';
+  return '';
 }
 
 function downloadStatusText(task, kind) {
@@ -1305,12 +1347,21 @@ function renderDownloadSheet() {
     // 「调试」只在私密（黄果）模式给：那条链路才是 m3u8 → ts 分片 → 本地合并，
     // 也只有它能保留 TS/KEY 给开发者复现黑屏。公开模式没有分片可留。
     const canDebug = privateMode();
+    const hasRemote = !!(remoteServers && remoteServers.length);
     sheet.innerHTML = `<div class="download-pick">
       <button type="button" class="download-pick-option" data-dl-pick="phone"><strong>下载到手机</strong></button>
+      <button type="button" class="download-pick-option" data-dl-pick="remote"><strong>下载到远程服务器</strong><small>${hasRemote ? '先下到手机，完成后自动传到所选服务器（按剧名建文件夹）' : '还没配置服务器 · 到「设置 → 远程服务器」添加'}</small></button>
       <button type="button" class="download-pick-option" data-dl-pick="nas" ${isAdmin ? '' : 'disabled'}><strong>下载到 NAS</strong>${isAdmin ? '' : '<small>仅管理员可用</small>'}</button>
       ${canDebug ? '<button type="button" class="download-pick-option" data-dl-pick="phone-debug"><strong>下载到手机（调试）</strong><small>保留 TS 与 Key，不自动合并，导出调试包</small></button>' : ''}
       <p class="download-nas-note">${state.account.loggedIn ? '' : 'NAS 下载需要先登录账号。'}</p>
     </div>`;
+    return;
+  }
+  if (downloadMode === 'remote') {
+    const servers = asArray(remoteServers);
+    sheet.innerHTML = `<p class="dl-remote-tip">选择要传到哪台服务器。下载完成后会自动上传，并在服务器上按剧名建同名文件夹。</p>
+      <div class="download-pick">${servers.map(s => `<button type="button" class="download-pick-option" data-dl-remote="${esc(s.id)}"><strong>${esc(s.name)}</strong><small>${esc(s.typeName)} · ${esc(s.address)}</small></button>`).join('')}</div>
+      <div class="download-sheet-buttons"><button type="button" class="dl-secondary" data-dl-back-target="1">返回</button></div>`;
     return;
   }
   const all = episodes.map(ep => Number(ep.number) || 0);
@@ -1362,7 +1413,7 @@ async function resolveEpisodesForDownload(episodes) {
   return resolved;
 }
 
-async function submitDownloadTo(target) {
+async function submitDownloadTo(target, remoteId) {
   if (downloadParsing) return;
   if (target === 'nas') {
     if (!state.account.loggedIn) { toast('请先登录账号', true); return; }
@@ -1370,6 +1421,7 @@ async function submitDownloadTo(target) {
     try { const fresh = await api('refresh-account'); if (fresh && fresh.role) setAccount(fresh); } catch (ignore) {}
     if (state.account.role !== 'admin') { toast('仅管理员可下载到 NAS', true); return; }
   }
+  if (target === 'remote' && !remoteId) { toast('请选择要传到哪台服务器', true); return; }
   const episodes = asArray(state.detail.episodes).map(ep => Number(ep.number) || 0).filter(n => downloadSelection.has(n));
   if (!episodes.length) { toast('请先选择集数', true); return; }
   downloadParsing = true;
@@ -1381,7 +1433,7 @@ async function submitDownloadTo(target) {
       await api('nas-download-start', { source: contentSource, title: state.detail.title, seriesId: String(state.detail.seriesId || state.detail.id), episodes, cover: state.detail.cover || '' });
       toast('已提交 NAS 下载任务（后端自行解析取流）');
     } else {
-      // 下载到手机。
+      // 下载到手机 / 下载到远程服务器。
       // 判定依据优先级：① 当前详情页实际内容源（detail.source，与详情/播放完全一致，杜绝全局模式脱节）；
       // ② 实时问原生端 content-status；③ 全局 contentSource。
       let sourceNow = String(state.detail?.source || '');
@@ -1395,16 +1447,21 @@ async function submitDownloadTo(target) {
       // NAS 端"下载到 NAS"入口仍保留（主动下载到 NAS 用）。
       let proxyModeNow = Number(state.proxyMode) || 3;
       try { const pmv = await api('get-proxy-mode'); if (pmv !== null && pmv !== undefined && pmv !== '') proxyModeNow = Number(pmv) || 3; } catch (ignore) {}
-      console.log(`[dl-judge] source=${sourceNow} proxyMode=${proxyModeNow} role=${state.account?.role}`);
+      console.log(`[dl-judge] source=${sourceNow} proxyMode=${proxyModeNow} role=${state.account?.role} remote=${remoteId || '-'}`);
       {
         const resolved = await resolveEpisodesForDownload(episodes);
         if (!resolved.length) throw new Error('没有可下载的分集');
         // 调试模式：仍是「下载到手机」，但要求原生保留 TS/KEY、不自动合并，最后打成一个调试包
         const debug = target === 'phone-debug';
-        await api('download-start', { source: sourceNow, title: state.detail.title, episodes: resolved, debug, cover: state.detail.cover || '' });
+        // 远程服务器：先照常下到手机（同一条链路），下载+合并完成后原生自动上传到所选服务器
+        const targetRemote = target === 'remote' ? String(remoteId || '') : '';
+        await api('download-start', { source: sourceNow, title: state.detail.title, episodes: resolved, debug, cover: state.detail.cover || '', remoteId: targetRemote });
+        const server = targetRemote ? asArray(remoteServers).find(s => String(s.id) === targetRemote) : null;
         toast(debug
           ? `调试模式已开始（${resolved.length} 集）：分片下完后会导出「第NN集_调试包.zip」到 Download/Veyra/${state.detail.title}`
-          : `判定[源=${sourceNow} 通道=${proxyModeNow}] 已开始下载到手机（手机经代理拉源合并）`);
+          : targetRemote
+            ? `已开始下载 ${resolved.length} 集，完成后自动传到「${server ? server.name : '远程服务器'}」`
+            : `判定[源=${sourceNow} 通道=${proxyModeNow}] 已开始下载到手机（手机经代理拉源合并）`);
       }
     }
     hideDownloadSheet();
@@ -1421,9 +1478,11 @@ function renderSettings() {
     ${window.renderAppearance ? window.renderAppearance() : ''}
     <section><button type="button" class="settings-link" data-account-management="1"><span><strong>账号管理</strong><small>${state.account.loggedIn ? esc(state.account.username) : '登录或注册账号'}</small></span>${icon('arrow')}</button></section>
     <section><button type="button" class="settings-link" data-proxy-open><span><strong>黄果网络通道</strong><small data-proxy-summary>${esc(proxySummaryText())}</small></span>${icon('arrow')}</button></section>
+    <section><button type="button" class="settings-link" data-remote-open><span><strong>远程服务器</strong><small data-remote-summary>${esc(remoteSummaryText())}</small></span>${icon('arrow')}</button></section>
     <section><button type="button" class="settings-link" data-about-open><span><strong>关于 Veyra</strong><small>项目地址 · GPL-3.0 开源</small></span>${icon('arrow')}</button></section></div>`;
   if (window.bindAppearance) window.bindAppearance();
   api('hot-update-status').then(window.hgHotUpdateStatus).catch(() => {});
+  loadRemoteServers(true).catch(() => {});   // 设置页摘要要显示「已配置几台」
 }
 
 const PROXY_MODE_NAMES = { 1: '仅直连', 2: '仅代理', 3: '走后端转发' };
@@ -1682,6 +1741,280 @@ function closeAboutPop() {
 }
 window.__veyraAboutBack = () => { if (aboutPop && !aboutPop.hidden) { closeAboutPop(); return true; } return false; };
 window.__veyraAboutOpen = () => !!(aboutPop && !aboutPop.hidden);
+
+// ================= 远程服务器（SMB / WebDAV / FTP）=================
+// 配置在原生侧（SharedPreferences），这里只管展示与编辑；密码不回传，编辑时留空 = 不改。
+var REMOTE_TYPES = [['smb', 'SMB'], ['webdav', 'WebDAV'], ['ftp', 'FTP']];
+let remoteServers = null;
+let remoteEditing = null;    // null = 列表；'' = 新建；其它 = 正在编辑的 id
+let remoteDraft = null;      // 表单草稿（切类型重绘时保留已填内容）
+let remoteTestText = '';
+let remoteTestOk = false;
+
+function remoteTypeName(type) {
+  const hit = REMOTE_TYPES.find(t => t[0] === type);
+  return hit ? hit[1] : String(type || '').toUpperCase();
+}
+
+function remoteSummaryText() {
+  const list = asArray(remoteServers);
+  if (!list.length) return '未配置 · 支持 SMB / WebDAV / FTP';
+  if (list.length === 1) return `${list[0].name} · ${list[0].typeName || remoteTypeName(list[0].type)}`;
+  return `${list.length} 个服务器 · ${list.slice(0, 2).map(s => s.name).join('、')}`;
+}
+
+async function loadRemoteServers(force) {
+  if (remoteServers && !force) return remoteServers;
+  try { remoteServers = asArray(await api('remote-list')); }
+  catch (error) { if (!remoteServers) remoteServers = []; }
+  const summary = document.querySelector('[data-remote-summary]');
+  if (summary) summary.textContent = remoteSummaryText();
+  return remoteServers;
+}
+
+var remotePop = null;
+
+function remoteDraftOf(server) {
+  const s = server || {};
+  return {
+    id: s.id || '',
+    type: s.type || 'smb',
+    name: s.name || '',
+    host: s.host || '',
+    port: Number(s.port) || 0,
+    share: s.share || '',
+    path: s.path || '',
+    user: s.user || '',
+    pass: '',
+    hasPass: !!s.hasPass,
+    secure: !!s.secure,
+    insecure: s.insecure !== false
+  };
+}
+
+function buildRemoteFormHtml() {
+  const d = remoteDraft;
+  const isSmb = d.type === 'smb';
+  const isWebdav = d.type === 'webdav';
+  const portHint = isSmb ? '445' : isWebdav ? (d.secure ? '443' : '80') : (d.secure ? '990' : '21');
+  // 表单压成「地址+端口」「用户名+密码」两排，一个弹窗就能看完，不用滚
+  return `<div class="remote-types">${REMOTE_TYPES.map(t => `<button type="button" data-remote-type="${t[0]}"${d.type === t[0] ? ' class="active"' : ''}>${t[1]}</button>`).join('')}</div>
+    <div class="remote-row"><label class="remote-field"><span>地址</span><input id="remote-host" class="settings-input" type="text" placeholder="192.168.1.10" value="${esc(d.host)}" autocomplete="off" inputmode="url"></label>
+      <label class="remote-field remote-field-port"><span>端口</span><input id="remote-port" class="settings-input" type="text" placeholder="${portHint}" value="${d.port ? esc(String(d.port)) : ''}" inputmode="numeric"></label></div>
+    ${isSmb ? `<div class="remote-row"><label class="remote-field"><span>共享名</span><input id="remote-share" class="settings-input" type="text" placeholder="video" value="${esc(d.share)}" autocomplete="off"></label>
+      <label class="remote-field"><span>目录（可选）</span><input id="remote-path" class="settings-input" type="text" placeholder="/短剧" value="${esc(d.path)}" autocomplete="off"></label></div>`
+      : `<label class="remote-field"><span>目录（可选）</span><input id="remote-path" class="settings-input" type="text" placeholder="/短剧" value="${esc(d.path)}" autocomplete="off"></label>`}
+    <div class="remote-row"><label class="remote-field"><span>用户名（可选）</span><input id="remote-user" class="settings-input" type="text" value="${esc(d.user)}" autocomplete="off"></label>
+      <label class="remote-field"><span>密码${d.hasPass ? '（已存，留空不改）' : '（可选）'}</span><input id="remote-pass" class="settings-input" type="password" placeholder="${d.hasPass ? '••••••' : ''}" autocomplete="new-password"></label></div>
+    <label class="remote-field"><span>显示名称（可选）</span><input id="remote-name" class="settings-input" type="text" placeholder="客厅 NAS" value="${esc(d.name)}" autocomplete="off"></label>
+    ${isSmb ? '' : `<label class="remote-check"><input id="remote-secure" type="checkbox"${d.secure ? ' checked' : ''}><span>${isWebdav ? '使用 HTTPS' : '使用 FTPS（显式 TLS）'}</span></label>`}
+    ${isSmb ? '' : `<label class="remote-check"><input id="remote-insecure" type="checkbox"${d.insecure ? ' checked' : ''}><span>忽略证书校验（家用 NAS 常是自签证书）</span></label>`}
+    <div class="remote-test-row"><button type="button" class="remote-secondary" data-remote-test>测试连接</button><span class="remote-test-result ${remoteTestOk ? 'ok' : 'fail'}" data-remote-result${remoteTestText ? '' : ' hidden'}>${esc(remoteTestText)}</span></div>
+    <div class="remote-actions">
+      <button type="button" class="remote-secondary" data-remote-cancel>返回</button>
+      ${d.id ? '<button type="button" class="remote-danger" data-remote-delete="1">删除</button>' : ''}
+      <button type="button" class="remote-primary" data-remote-save>保存</button>
+    </div>`;
+}
+
+function buildRemoteListHtml() {
+  const list = asArray(remoteServers);
+  if (!list.length) {
+    return `<p class="appearance-note">还没有服务器。添加后，下载完成的剧会按剧名在服务器上建同名文件夹，把成品放进去。</p>
+      <div class="remote-actions"><button type="button" class="remote-primary" data-remote-add>添加服务器</button></div>`;
+  }
+  return `<p class="appearance-note">支持 SMB（Windows 共享 / NAS）、WebDAV、FTP。点条目可修改。</p>
+    <div class="remote-list">${list.map(s => `<button type="button" class="remote-item" data-remote-edit="${esc(s.id)}">
+        <span class="remote-item-main"><strong>${esc(s.name)}</strong><small>${esc(s.typeName || remoteTypeName(s.type))} · ${esc(s.address || '')}</small></span>
+        ${icon('arrow')}
+      </button>`).join('')}</div>
+    <div class="remote-actions"><button type="button" class="remote-primary" data-remote-add>添加服务器</button></div>`;
+}
+
+function renderRemotePop() {
+  if (!remotePop) return;
+  const editing = remoteEditing;
+  const title = editing === null ? '远程服务器' : (editing ? '编辑服务器' : '添加服务器');
+  remotePop.innerHTML = `<div class="appearance-pop account-pop remote-pop" role="dialog" aria-modal="true" aria-labelledby="remote-title">
+    <div class="appearance-head"><h2 id="remote-title">${title}</h2><button type="button" class="appearance-close" data-remote-close aria-label="关闭">✕</button></div>
+    ${editing === null ? buildRemoteListHtml() : buildRemoteFormHtml()}
+  </div>`;
+}
+
+function ensureRemotePop() {
+  if (remotePop && document.body.contains(remotePop)) return remotePop;
+  remotePop = document.createElement('div');
+  remotePop.className = 'appearance-scrim';
+  remotePop.hidden = true;
+  remotePop.addEventListener('click', event => {
+    if (event.target === remotePop || event.target.closest('[data-remote-close]')) { closeRemotePop(); return; }
+  });
+  document.body.appendChild(remotePop);
+  return remotePop;
+}
+
+async function openRemotePop() {
+  ensureRemotePop();
+  remoteEditing = null;
+  remoteDraft = null;
+  remoteTestText = '';
+  remoteTestOk = false;
+  remotePop.hidden = false;
+  document.body.classList.add('appearance-open');
+  await loadRemoteServers(true);
+  renderRemotePop();
+  updateBackEnabled();
+}
+
+function closeRemotePop() {
+  if (!remotePop || remotePop.hidden) return;
+  remotePop.hidden = true;
+  document.body.classList.remove('appearance-open');
+  remoteEditing = null;
+  remoteDraft = null;
+  updateBackEnabled();
+}
+
+window.__veyraRemoteBack = () => {
+  if (!remotePop || remotePop.hidden) return false;
+  // 表单里按返回先回到列表，再按一次才关弹窗
+  if (remoteEditing !== null) { remoteEditing = null; renderRemotePop(); return true; }
+  closeRemotePop();
+  return true;
+};
+window.__veyraRemoteOpen = () => !!(remotePop && !remotePop.hidden);
+
+/** 读表单当前值（草稿 + DOM），保存/测试都用它，避免两组字段口径不一致。 */
+function readRemoteForm() {
+  const value = id => { const el = document.getElementById(id); return el ? String(el.value || '').trim() : ''; };
+  const checked = id => { const el = document.getElementById(id); return !!(el && el.checked); };
+  const isSmb = remoteDraft.type === 'smb';
+  return {
+    id: remoteDraft.id || '',
+    type: remoteDraft.type,
+    name: value('remote-name'),
+    host: value('remote-host'),
+    port: Number(value('remote-port')) || 0,
+    share: isSmb ? value('remote-share') : '',
+    path: value('remote-path'),
+    user: value('remote-user'),
+    pass: value('remote-pass'),
+    secure: isSmb ? false : checked('remote-secure'),
+    insecure: isSmb ? true : checked('remote-insecure')
+  };
+}
+
+function stashRemoteForm() {
+  if (remoteEditing === null || !remoteDraft) return;
+  const form = readRemoteForm();
+  remoteDraft = Object.assign({}, remoteDraft, form, { hasPass: remoteDraft.hasPass || !!remoteDraft.pass });
+}
+
+async function saveRemoteForm() {
+  const server = readRemoteForm();
+  if (!server.host) { toast('请填写服务器地址', true); return; }
+  if (server.type === 'smb' && !server.share) { toast('请填写共享文件夹名', true); return; }
+  try {
+    await api('remote-save', { server });
+    remoteServers = null;
+    await loadRemoteServers(true);
+    remoteEditing = null;
+    remoteDraft = null;
+    remoteTestText = '';
+    renderRemotePop();
+    toast('服务器已保存');
+  } catch (error) { toast(error.message, true); }
+}
+
+async function testRemoteForm(button) {
+  const server = readRemoteForm();
+  const result = remotePop && remotePop.querySelector('[data-remote-result]');
+  if (!server.host) { toast('请填写服务器地址', true); return; }
+  if (button) { button.disabled = true; button.textContent = '测试中…'; }
+  remoteTestText = '';
+  if (result) result.hidden = true;
+  try {
+    const info = await api('remote-test', { server });
+    remoteTestOk = true;
+    remoteTestText = `连接正常 · ${Number(info && info.ms) || 0}ms`;
+    toast(`连接成功：${(info && info.address) || server.host}`);
+  } catch (error) {
+    remoteTestOk = false;
+    remoteTestText = `连接失败：${error.message}`;
+    toast(`连接失败：${error.message}`, true);
+  } finally {
+    if (button) { button.disabled = false; button.textContent = '测试连接'; }
+    if (result) {
+      result.textContent = remoteTestText;
+      result.classList.toggle('ok', remoteTestOk);
+      result.classList.toggle('fail', !remoteTestOk);
+      result.hidden = !remoteTestText;
+    }
+  }
+}
+
+// ---- 传输到远程服务器：从「我的下载」手动补传 ----
+var remotePicker = null;
+let remotePickerTaskId = '';
+
+function ensureRemotePicker() {
+  if (remotePicker && document.body.contains(remotePicker)) return remotePicker;
+  remotePicker = document.createElement('div');
+  remotePicker.className = 'appearance-scrim';
+  remotePicker.hidden = true;
+  remotePicker.addEventListener('click', event => {
+    if (event.target === remotePicker || event.target.closest('[data-remote-pick-close]')) closeRemotePicker();
+  });
+  document.body.appendChild(remotePicker);
+  return remotePicker;
+}
+
+async function openRemotePicker(taskId, title) {
+  await loadRemoteServers(true);
+  const list = asArray(remoteServers);
+  if (!list.length) { toast('还没有远程服务器，请先到「设置 → 远程服务器」添加', true); return; }
+  ensureRemotePicker();
+  remotePickerTaskId = String(taskId);
+  remotePicker.innerHTML = `<div class="appearance-pop account-pop remote-pop" role="dialog" aria-modal="true" aria-labelledby="remote-pick-title">
+    <div class="appearance-head"><h2 id="remote-pick-title">传到远程服务器</h2><button type="button" class="appearance-close" data-remote-pick-close aria-label="关闭">✕</button></div>
+    <p class="appearance-note">《${esc(title || '这部')}》会在服务器上建同名文件夹，成品直接放进去。</p>
+    <div class="remote-list">${list.map(s => `<button type="button" class="remote-item" data-remote-pick="${esc(s.id)}">
+        <span class="remote-item-main"><strong>${esc(s.name)}</strong><small>${esc(s.typeName || remoteTypeName(s.type))} · ${esc(s.address || '')}</small></span>
+        ${icon('arrow')}
+      </button>`).join('')}</div>
+  </div>`;
+  remotePicker.hidden = false;
+  document.body.classList.add('appearance-open');
+  updateBackEnabled();
+}
+
+function closeRemotePicker() {
+  if (!remotePicker || remotePicker.hidden) return;
+  remotePicker.hidden = true;
+  document.body.classList.remove('appearance-open');
+  remotePickerTaskId = '';
+  updateBackEnabled();
+}
+
+window.__veyraRemotePickBack = () => { if (remotePicker && !remotePicker.hidden) { closeRemotePicker(); return true; } return false; };
+window.__veyraRemotePickOpen = () => !!(remotePicker && !remotePicker.hidden);
+
+async function startRemoteTransfer(taskId, remoteId) {
+  try {
+    const job = await api('remote-transfer-start', { taskId, remoteId });
+    const name = (job && job.serverName) || '远程服务器';
+    toast(`已开始传输到 ${name}`);
+    closeRemotePicker();
+    await loadRemoteJobs();
+    // 注意：refreshCurrentDownloads 是点击监听函数内部的局部函数，这里（顶层）调不到，
+    // 直接按当前路由重绘列表。
+    if (state.route === 'library' && state.libraryTab === 'downloads') renderLibraryDownloads();
+    else if (state.route === 'downloads') refreshDownloads(routeToken, true);
+  } catch (error) {
+    toast(error.message || '传输失败', true);
+  }
+}
+
 
 
 function renderSearch() {
@@ -1973,7 +2306,7 @@ function clearPredictivePreview() {
 
 window.hgPredictiveBackStart = fromRight => {
   clearPredictivePreview();
-  if (!downloadOverlay.hidden || (window.__veyraAppearanceOpen && window.__veyraAppearanceOpen()) || (window.__veyraAccountOpen && window.__veyraAccountOpen()) || (window.__veyraProxyOpen && window.__veyraProxyOpen()) || (window.__veyraAboutOpen && window.__veyraAboutOpen())) return false;
+  if (!downloadOverlay.hidden || (window.__veyraAppearanceOpen && window.__veyraAppearanceOpen()) || (window.__veyraAccountOpen && window.__veyraAccountOpen()) || (window.__veyraProxyOpen && window.__veyraProxyOpen()) || (window.__veyraAboutOpen && window.__veyraAboutOpen()) || (window.__veyraRemoteOpen && window.__veyraRemoteOpen()) || (window.__veyraRemotePickOpen && window.__veyraRemotePickOpen())) return false;
   if (state.route === 'detail' && detailCard && authOverlay.hidden && confirmOverlay.hidden && updateOverlay.hidden && unlockOverlay.hidden) {
     detailCard.fromRight = fromRight;
     return detailCard.begin();
@@ -2078,6 +2411,8 @@ window.hgPredictiveBackCommit = () => {
   if (window.__veyraAccountBack && window.__veyraAccountBack()) return true;
   if (window.__veyraProxyBack && window.__veyraProxyBack()) return true;
   if (window.__veyraAboutBack && window.__veyraAboutBack()) return true;
+  if (window.__veyraRemoteBack && window.__veyraRemoteBack()) return true;
+  if (window.__veyraRemotePickBack && window.__veyraRemotePickBack()) return true;
   if (state.route === 'detail' && detailCard && downloadOverlay.hidden && authOverlay.hidden && confirmOverlay.hidden && updateOverlay.hidden && unlockOverlay.hidden) {
     detailCard.close(); return true;
   }
@@ -2480,6 +2815,8 @@ window.hgBack = () => {
   if (window.__veyraAccountBack && window.__veyraAccountBack()) return true;
   if (window.__veyraProxyBack && window.__veyraProxyBack()) return true;
   if (window.__veyraAboutBack && window.__veyraAboutBack()) return true;
+  if (window.__veyraRemoteBack && window.__veyraRemoteBack()) return true;
+  if (window.__veyraRemotePickBack && window.__veyraRemotePickBack()) return true;
   if (!downloadOverlay.hidden) { hideDownloadSheet(); return true; }
   if (!unlockOverlay.hidden) { closeUnlock(); return true; }
   if (!authOverlay.hidden) { if (state.account.loggedIn) hideAuth(); return true; }
@@ -3392,6 +3729,71 @@ document.addEventListener('click', async event => {
   if (event.target.closest('[data-qr-login]')) { startQrScan(); return; }
   if (event.target.closest('[data-proxy-open]')) { openProxyPop(); return; }
   if (event.target.closest('[data-about-open]')) { openAboutPop(); return; }
+  // ---- 远程服务器配置 ----
+  if (event.target.closest('[data-remote-open]')) { openRemotePop(); return; }
+  if (event.target.closest('[data-remote-add]')) {
+    remoteEditing = '';
+    remoteDraft = remoteDraftOf(null);
+    remoteTestText = '';
+    remoteTestOk = false;
+    renderRemotePop();
+    return;
+  }
+  if (event.target.closest('[data-remote-edit]')) {
+    const id = event.target.closest('[data-remote-edit]').dataset.remoteEdit;
+    const server = asArray(remoteServers).find(s => String(s.id) === String(id));
+    if (!server) { toast('这条配置不存在了，请重新打开', true); return; }
+    remoteEditing = String(id);
+    remoteDraft = remoteDraftOf(server);
+    remoteTestText = '';
+    remoteTestOk = false;
+    renderRemotePop();
+    return;
+  }
+  if (event.target.closest('[data-remote-type]')) {
+    // 切协议：先把已填内容收进草稿，再按新协议重画表单（SMB 需要共享名，WebDAV/FTP 不需要）
+    stashRemoteForm();
+    remoteDraft.type = event.target.closest('[data-remote-type]').dataset.remoteType;
+    remoteTestText = '';
+    renderRemotePop();
+    return;
+  }
+  if (event.target.closest('[data-remote-cancel]')) { remoteEditing = null; remoteDraft = null; renderRemotePop(); return; }
+  if (event.target.closest('[data-remote-save]')) { saveRemoteForm(); return; }
+  if (event.target.closest('[data-remote-test]')) { testRemoteForm(event.target.closest('[data-remote-test]')); return; }
+  if (event.target.closest('[data-remote-delete]')) {
+    const current = remoteDraft ? remoteDraft.id : '';
+    const name = remoteDraft && remoteDraft.name ? remoteDraft.name : '这台服务器';
+    askConfirmation('删除服务器', `确定删除「${name}」的配置？已传过去的文件不受影响。`, '删除').then(ok => {
+      if (!ok || !current) return;
+      api('remote-delete', { id: current }).then(async () => {
+        remoteServers = null;
+        await loadRemoteServers(true);
+        remoteEditing = null;
+        remoteDraft = null;
+        renderRemotePop();
+        toast('已删除');
+      }).catch(error => toast(error.message, true));
+    });
+    return;
+  }
+  if (event.target.closest('[data-remote-pick]')) {
+    startRemoteTransfer(remotePickerTaskId, event.target.closest('[data-remote-pick]').dataset.remotePick);
+    return;
+  }
+  if (event.target.closest('[data-remote-pick-close]')) { closeRemotePicker(); return; }
+  if (event.target.closest('[data-dl-transfer]')) {
+    const button = event.target.closest('[data-dl-transfer]');
+    const head = button.closest('.download-task');
+    const title = head ? (head.querySelector('.download-task-head strong') || {}).textContent : '';
+    openRemotePicker(button.dataset.dlTransfer, title);
+    return;
+  }
+  if (event.target.closest('[data-dl-transfer-cancel]')) {
+    const id = event.target.closest('[data-dl-transfer-cancel]').dataset.dlTransferCancel;
+    api('remote-transfer-cancel', { id }).then(() => { toast('已取消传输'); refreshCurrentDownloads(); }).catch(error => toast(error.message, true));
+    return;
+  }
   const openUrl = event.target.closest('[data-open-url]');
   if (openUrl) {
     api('open-url', { url: openUrl.dataset.openUrl }).catch(error => toast(error.message, true));
@@ -3401,9 +3803,24 @@ document.addEventListener('click', async event => {
   if (event.target.closest('[data-download]')) { showDownloadSheet(); return; }
   if (event.target === downloadOverlay) { hideDownloadSheet(); return; }
   if (event.target.closest('[data-dl-pick]')) {
-    submitDownloadTo(event.target.closest('[data-dl-pick]').dataset.dlPick);
+    const pick = event.target.closest('[data-dl-pick]').dataset.dlPick;
+    if (pick === 'remote') {
+      // 先进服务器选择步骤；没配服务器就直接引导去设置，别让用户白点
+      loadRemoteServers(true).then(list => {
+        if (!asArray(list).length) { toast('还没有远程服务器，请先到「设置 → 远程服务器」添加', true); return; }
+        downloadMode = 'remote';
+        renderDownloadSheet();
+      });
+      return;
+    }
+    submitDownloadTo(pick);
     return;
   }
+  if (event.target.closest('[data-dl-remote]')) {
+    submitDownloadTo('remote', event.target.closest('[data-dl-remote]').dataset.dlRemote);
+    return;
+  }
+  if (event.target.closest('[data-dl-back-target]')) { downloadMode = 'target'; renderDownloadSheet(); return; }
   if (event.target.closest('[data-dl-back]')) { hideDownloadSheet(); return; }
   if (event.target.closest('[data-dl-confirm]')) { downloadMode = 'target'; renderDownloadSheet(); return; }
   if (event.target.closest('[data-dl-all]')) {
