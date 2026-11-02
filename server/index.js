@@ -99,6 +99,11 @@ const adminSessions = new Map(); // adminToken -> expiry ms
 // 主站为 *.pqhybuxo.cc 系；封面 CDN pic.drleao.cn / 详情图 expose.eisees.com；视频播放 yd-hls.hzjvlo.cn；
 // hongguoduanju.com 为红果官方站（搜索联想接口 /incent_resource/suggestion 补全短剧名用）
 const HUANGGUO_HOST_RE = /(^|\.)(pqhybuxo\.cc|im41z53s\.cc|huangguoju\.com|drleao\.cn|eisees\.com|hzjvlo\.cn|hongguoduanju\.com|douyinpic\.com|douyinvod\.com|byteicdn\.com|byteimg\.com|bytetos\.com)$/i;
+// 这个端点是匿名的（WebView 的 <img>/播放器带不了 Authorization），目标 URL 又完全由调用方给，
+// 所以必须两道闸：白名单外的域名只允许媒体资源（防止被当通用代理），以及 ssrf-guard 的公网校验。
+// 确实需要放开时设 PROXY_STRICT=0（不建议）。
+const PROXY_STRICT = process.env.PROXY_STRICT !== '0';
+const { isPrivateHostname, assertPublicUrl } = require('./ssrf-guard');
 const proxyFetch = require('./proxy-fetch');
 
 // ---- TOTP 动态码（RFC 6238，30 秒窗口，6 位）----
@@ -662,26 +667,25 @@ function kindOf(type, body) {
 }
 // 媒体资源放行任意公网域名（CDN 域名无法枚举）：视频分片/图片/无扩展名 hls 路径；拒绝内网地址防 SSRF
 const MEDIA_PATH_RE = /\.(m3u8|ts|mp4|m4s|flv|key|jpg|jpeg|png|webp|gif|avif)(\?|#|$)|(?:hls|vod|live|media|segment|index)\//i;
-function isPrivateHost(hostname) {
-  if (!hostname) return true;
-  const h = hostname.toLowerCase();
-  if (h === 'localhost' || h.endsWith('.local') || h.endsWith('.internal') || h.endsWith('.lan')) return true;
-  if (/^(\d{1,3}\.){3}\d{1,3}$/.test(h)) {
-    const [a, b] = h.split('.').map(Number);
-    return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31);
-  }
-  return false;
-}
-app.get('/api/huangguo-proxy', (req, res) => {
+// isPrivateHost 的实现搬到 ssrf-guard.js：原来的前缀表漏了 192.168/16、CGNAT 和整个 IPv6，
+// 而且只判断字符串，域名解析到 127.0.0.1 照样能过。
+app.get('/api/huangguo-proxy', async (req, res) => {
   const target = String(req.query.url || '');
   console.log('[proxy]', new Date().toISOString(), 'REQ', (req.headers['user-agent'] || '').slice(0, 24), target.slice(0, 120));
   let parsed;
   try { parsed = new URL(target); } catch { return res.status(400).json({ error: '无效地址' }); }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')
     return res.status(400).json({ error: '仅支持 http/https' });
-  const isMedia = MEDIA_PATH_RE.test(parsed.pathname + parsed.search);
-  if (isPrivateHost(parsed.hostname))
+  // 先做同步的内网判断，报错才准确（否则 127.0.0.1 会被下面的媒体规则截胡，提示看不出是 SSRF）
+  if (isPrivateHostname(parsed.hostname))
     return res.status(403).json({ error: '代理拒绝内网地址（防 SSRF）' });
+  const isMedia = MEDIA_PATH_RE.test(parsed.pathname + parsed.search);
+  // 白名单命中的源站随便抓；其余只放行媒体资源，避免这个匿名端点被当成通用代理
+  if (PROXY_STRICT && !HUANGGUO_HOST_RE.test(parsed.hostname) && !isMedia)
+    return res.status(403).json({ error: '代理只转发媒体资源' });
+  // 域名解析校验：解析到 127.0.0.1 / 192.168.x 的域名同样拒绝
+  try { await assertPublicUrl(target); }
+  catch (error) { return res.status(403).json({ error: error.message }); }
   const cached = cacheGet(target);
   if (cached) {
     console.log('[proxy]', new Date().toISOString(), 'HIT', cached.type, target.slice(0, 90));
@@ -706,6 +710,7 @@ app.get('/api/huangguo-proxy', (req, res) => {
     u = String(u).replace(/[\[\]\(\)\{\}]/g, c => encodeURIComponent(c));
     proxyFetch.requestThroughProxy(u, backendProxy, {
       headers, timeout: 25_000, maxBytes: 50 * 1024 * 1024, redirects: 5,
+      guard: assertPublicUrl,   // 每一跳重定向都要过公网校验，否则 302 到内网就绕过去了
     }, (err, result) => {
       if (err) {
         console.log('[proxy]', new Date().toISOString(), 'ERR', (err.message || '').slice(0, 120), u.slice(0, 90));
@@ -790,13 +795,14 @@ app.get('/api/debug/proxy', requireAdmin, (req, res) => {
   let parsed;
   try { parsed = new URL(target); } catch { return res.json({ ok: false, error: '无效地址', target }); }
   const isMedia = MEDIA_PATH_RE.test(parsed.pathname + parsed.search);
-  const verdict = isPrivateHost(parsed.hostname) ? '拒绝:内网地址' : '放行:公网资源';
+  const verdict = isPrivateHostname(parsed.hostname) ? '拒绝:内网地址' : '放行:公网资源';
   const attempted = [];
   const attemptDbg = (u, retriedHttp) => {
     attempted.push(u.slice(0, 200));
     proxyFetch.requestThroughProxy(u, backendProxy, {
       headers: { 'User-Agent': 'Mozilla/5.0 (Linux; Android 13) Mobile', 'Referer': `${parsed.protocol}//${parsed.hostname}/` },
       timeout: 20_000, maxBytes: 20 * 1024 * 1024, redirects: 5,
+      guard: assertPublicUrl,
     }, (err, result) => {
       if (err) {
         if (!retriedHttp && u.startsWith('https://') && /TLS|SSL|eof|handshake|connect/i.test(err.message || '')) {

@@ -66,51 +66,81 @@ function connectViaProxy(proxy, host, port, done) {
   socket.on('error', (e) => done(e));
 }
 
-// 抓取 URL（proxyUrl 为空则直连）；跟随重定向；返回 { status, headers, body(Buffer) }
+// 抓取 URL（proxyUrl 为空则直连）；返回 { status, headers, body(Buffer) }
 // 底层用系统 curl：目标站点对 Node TLS 指纹风控（400）时 curl 可正常访问（浏览器级指纹更接近）。
+//
+// 重定向改成手动逐跳：以前用 curl -L，跳转目标完全不经检查 —— 传一个自己的公网域名，
+// 让它 302 到 http://192.168.1.1/，前面所有 host 校验就白做了。现在每一跳都过 opts.guard
+// （一般是 ssrf-guard 的 assertPublicUrl），跳数仍受 opts.redirects 限制。
 function requestThroughProxy(targetUrl, proxyUrl, opts, done) {
-  const { headers = {}, timeout = 25000, maxBytes = 5 * 1024 * 1024, redirects = 5 } = opts || {};
-  let parsed;
-  try { parsed = new URL(targetUrl); } catch (e) { return done(e); }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return done(new Error('仅支持 http/https'));
+  const { headers = {}, timeout = 25000, maxBytes = 5 * 1024 * 1024, redirects = 5, guard } = opts || {};
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'veyra-curl-'));
   const bodyFile = path.join(dir, 'body');
   const headerFile = path.join(dir, 'headers');
-  const args = ['-sS', '-L', '--max-redirs', String(redirects),
-    '--max-time', String(Math.max(1, Math.round(timeout / 1000)))];
-  if (proxyUrl) args.push('-x', proxyUrl);
-  for (const [k, v] of Object.entries(headers)) {
-    if (v !== undefined && v !== null) args.push('-H', `${k}: ${v}`);
-  }
-  // -w 输出跟随重定向后的最终状态码与 content-type；body/响应头落临时文件，避免内存/管道限制
-  args.push('-o', bodyFile, '-D', headerFile, '-w', '%{http_code}\n%{content_type}', targetUrl);
-  execFile('curl', args, { maxBuffer: 16 * 1024 * 1024, timeout: timeout + 5000 }, (err, stdout, stderr) => {
-    const cleanup = () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* 忽略 */ } };
-    if (err) {
-      cleanup();
-      const msg = String(stderr || '').trim() || err.message || 'curl 抓取失败';
-      return done(new Error(msg));
+  let current = String(targetUrl || '');
+  let hops = 0;
+
+  const cleanup = () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* 忽略 */ } };
+  const finish = (err, result) => { cleanup(); done(err, result); };
+
+  const fetchOne = () => {
+    let parsed;
+    try { parsed = new URL(current); } catch (e) { return finish(e); }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return finish(new Error('仅支持 http/https'));
+
+    const args = ['-sS', '--max-time', String(Math.max(1, Math.round(timeout / 1000)))];
+    if (proxyUrl) args.push('-x', proxyUrl);
+    for (const [k, v] of Object.entries(headers)) {
+      if (v !== undefined && v !== null) args.push('-H', `${k}: ${v}`);
     }
-    const lines = String(stdout).split('\n');
-    const code = parseInt(lines[0], 10) || 0;
-    const contentType = String(lines[1] || '').trim();
-    let body;
-    try { body = fs.readFileSync(bodyFile); } catch (e) { cleanup(); return done(e); }
-    if (body.length > maxBytes) { cleanup(); return done(new Error('响应超过大小限制 ' + maxBytes)); }
-    // 解析 curl -D dump 的响应头（重定向链只保留最终响应的头）
-    const respHeaders = {};
-    try {
-      const raw = fs.readFileSync(headerFile, 'utf8');
-      const blocks = raw.split(/\r?\n\r?\n/);
-      const last = blocks.filter(b => b.trim()).pop() || '';
-      for (const line of last.split(/\r?\n/)) {
-        const idx = line.indexOf(':');
-        if (idx > 0) respHeaders[line.slice(0, idx).trim().toLowerCase()] = line.slice(idx + 1).trim();
+    // 不带 -L：自己跟，才能逐跳校验。%{redirect_url} 给出 3xx 的绝对 Location
+    args.push('-o', bodyFile, '-D', headerFile, '-w', '%{http_code}\n%{content_type}\n%{redirect_url}', current);
+    execFile('curl', args, { maxBuffer: 16 * 1024 * 1024, timeout: timeout + 5000 }, (err, stdout, stderr) => {
+      if (err) {
+        const msg = String(stderr || '').trim() || err.message || 'curl 抓取失败';
+        return finish(new Error(msg));
       }
-    } catch { /* 无响应头时忽略 */ }
-    cleanup();
-    done(null, { status: code, headers: Object.assign({ 'content-type': contentType }, respHeaders), body });
-  });
+      const lines = String(stdout).split('\n');
+      const code = parseInt(lines[0], 10) || 0;
+      const contentType = String(lines[1] || '').trim();
+      const location = String(lines[2] || '').trim();
+
+      if (code >= 300 && code < 400 && location) {
+        if (hops++ >= redirects) return finish(new Error('重定向次数超过 ' + redirects));
+        let next;
+        try { next = new URL(location, current).toString(); } catch { return finish(new Error('重定向地址无效: ' + location.slice(0, 120))); }
+        current = next;
+        return step();
+      }
+
+      let body;
+      try { body = fs.readFileSync(bodyFile); } catch (e) { return finish(e); }
+      if (body.length > maxBytes) return finish(new Error('响应超过大小限制 ' + maxBytes));
+      // 解析 curl -D dump 的响应头（只取最后一段）
+      const respHeaders = {};
+      try {
+        const raw = fs.readFileSync(headerFile, 'utf8');
+        const blocks = raw.split(/\r?\n\r?\n/);
+        const last = blocks.filter(b => b.trim()).pop() || '';
+        for (const line of last.split(/\r?\n/)) {
+          const idx = line.indexOf(':');
+          if (idx > 0) respHeaders[line.slice(0, idx).trim().toLowerCase()] = line.slice(idx + 1).trim();
+        }
+      } catch { /* 无响应头时忽略 */ }
+      finish(null, { status: code, headers: Object.assign({ 'content-type': contentType }, respHeaders), body });
+    });
+  };
+
+  // 每一跳（含第一跳）都先过 guard；guard 抛错就整条中止
+  const step = () => {
+    if (!guard) return fetchOne();
+    Promise.resolve()
+      .then(() => guard(current))
+      .then(() => fetchOne())
+      .catch((e) => finish(e instanceof Error ? e : new Error(String(e))));
+  };
+
+  step();
 }
 
 module.exports = { requestThroughProxy, parseProxy, connectViaProxy };
