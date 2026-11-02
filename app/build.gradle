@@ -10,8 +10,8 @@ android {
         applicationId 'com.veyra.gybeyond'
         minSdk 26
         targetSdk 36
-        versionCode 359
-        versionName "0.24.9"
+        versionCode 360
+        versionName "0.24.10"
         testInstrumentationRunner 'com.veyra.gybeyond.PlaybackTestRunner'
     }
 
@@ -106,7 +106,14 @@ dependencies {
     implementation 'androidx.media3:media3-exoplayer-hls:1.11.1'
     implementation 'androidx.media3:media3-ui:1.11.1'
     // 扫码登录电视：只用 zxing 的纯 Java 解码核心（约 600KB），不拖 appcompat。
-    // 电视包没有相机，这个依赖只进手机/平板。
+    // 电视包没有相机，这些依赖只进手机/平板。
     mobileImplementation 'com.google.zxing:core:3.5.3'
+    // 预览用 CameraX：PreviewView 统一处理传感器朝向 + 屏幕方向 + 镜像 + 等比裁剪，
+    // 这些是 CameraX 在大量机型上校准过的。自己用 Camera2 + TextureView 推矩阵，
+    // 试了两版画面还是歪的 —— 这活儿不该手工做。
+    mobileImplementation "androidx.camera:camera-core:1.4.1"
+    mobileImplementation "androidx.camera:camera-camera2:1.4.1"
+    mobileImplementation "androidx.camera:camera-lifecycle:1.4.1"
+    mobileImplementation "androidx.camera:camera-view:1.4.1"
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs_nio:2.0.1'
 }
