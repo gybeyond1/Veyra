@@ -174,7 +174,18 @@ api('server-base').then(serverBase => {
 window.hgWindowInsets = height => {
   document.getElementById('app').style.setProperty('--status-bar-height', `${Math.max(0, Number(height) || 0)}px`);
 };
+// 手势导航条/三键导航栏占的高度：WebView 已经铺到屏幕最底，底栏自己让开这么多。
+// 旧版 APK 没有这个回调，--safe-bottom 保持 0（旧版仍由 Window 留白）。
+window.hgSafeInsets = bottom => {
+  const app = document.getElementById('app');
+  if (!app) return;
+  app.style.setProperty('--safe-bottom', `${Math.max(0, Number(bottom) || 0)}px`);
+};
 api('window-insets').then(window.hgWindowInsets).catch(() => {});
+api('window-safe-insets').then(value => {
+  const values = Array.isArray(value) ? value : [value];
+  window.hgSafeInsets(values[0], values[1]);
+}).catch(() => {});
 api('screen-corners').then(corners => {
   const app = document.getElementById('app');
   for (const name of ['topLeft', 'topRight', 'bottomRight', 'bottomLeft']) {

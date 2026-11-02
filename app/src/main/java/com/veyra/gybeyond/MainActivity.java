@@ -17,6 +17,7 @@ import android.util.Log;
 import android.view.View;
 import android.view.KeyEvent;
 import android.view.WindowInsets;
+import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.view.RoundedCorner;
 import android.webkit.ConsoleMessage;
@@ -111,6 +112,8 @@ public final class MainActivity extends Activity {
     private int backViewWidth;
     private float backLeadPx;
     private volatile float statusBarInsetDp;
+    private volatile float bottomInsetDp;
+    private volatile float leftInsetDp;
     private boolean detailSystemBars;
     // Web 管理台「下载到手机」：设备心跳 + 指令领取（前台每 40 秒一次）
     private DeviceLink deviceLink;
@@ -303,8 +306,15 @@ public final class MainActivity extends Activity {
         root.setOnApplyWindowInsetsListener((view, insets) -> {
             if (Build.VERSION.SDK_INT >= 30) {
                 android.graphics.Insets safe = insets.getInsets(WindowInsets.Type.systemBars());
-                statusBarInsetDp = safe.top / getResources().getDisplayMetrics().density;
-                root.setPadding(safe.left, 0, safe.right, safe.bottom);
+                float density = getResources().getDisplayMetrics().density;
+                statusBarInsetDp = safe.top / density;
+                // 底部不再由 Window 留白：WebView 铺到屏幕最底，手势条/导航栏区域由
+                // 前端底栏自己让开（#dock 的 bottom 加 --safe-bottom）。
+                // 这样做页面背景能一直延伸到手势条下面，手势条是浮在底栏同色背景上，
+                // 而不是浮在一条跟页面不一致的空白带上——微信、酷安都是这个做法。
+                bottomInsetDp = safe.bottom / density;
+                leftInsetDp = safe.left / density;
+                root.setPadding(safe.left, 0, safe.right, 0);
             } else {
                 statusBarInsetDp = insets.getSystemWindowInsetTop() / getResources().getDisplayMetrics().density;
                 root.setPadding(insets.getSystemWindowInsetLeft(), 0,
@@ -493,14 +503,41 @@ public final class MainActivity extends Activity {
     }
 
     private void publishWindowInsets() {
-        if (webView != null) webView.evaluateJavascript("window.hgWindowInsets && window.hgWindowInsets(" + statusBarInsetDp + ")", null);
+        if (webView == null) return;
+        // 顶部沿用单参数的老接口，底部/左侧另开一个函数：万一热更新回滚到旧资源，
+        // 旧脚本不认识 hgSafeInsets，&& 短路即可，不会把状态栏高度读成 NaN。
+        webView.evaluateJavascript("window.hgWindowInsets && window.hgWindowInsets(" + statusBarInsetDp + ");"
+                + "window.hgSafeInsets && window.hgSafeInsets(" + bottomInsetDp + "," + leftInsetDp + ")", null);
     }
 
     private void applySystemBars() {
         boolean dark = dark();
         getWindow().setStatusBarColor(Color.TRANSPARENT);
-        getWindow().setNavigationBarColor(Color.parseColor(dark ? "#171B1D" : "#F5F2E9"));
-        if (Build.VERSION.SDK_INT >= 29) getWindow().setStatusBarContrastEnforced(false);
+        if (Build.VERSION.SDK_INT >= 30) {
+            // 铺到屏幕最底后导航栏必须透明，否则手势条下面会压一条系统色带；
+            // 同时关掉对比度遮罩，避免浅色页面上出现一层发灰的横向渐变。
+            getWindow().setNavigationBarColor(Color.TRANSPARENT);
+        } else {
+            // 30 以下没有铺底，导航栏维持不透明，避免三键导航出现白底白键
+            getWindow().setNavigationBarColor(Color.parseColor(dark ? "#171B1D" : "#F5F2E9"));
+        }
+        if (Build.VERSION.SDK_INT >= 29) {
+            getWindow().setStatusBarContrastEnforced(false);
+            getWindow().setNavigationBarContrastEnforced(false);
+        }
+        if (Build.VERSION.SDK_INT >= 30) {
+            // 30+ 用 Appearance 控制图标/手势条明暗，比 setSystemUiVisibility 可靠
+            WindowInsetsController controller = getWindow().getInsetsController();
+            if (controller != null) {
+                int mask = WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+                        | WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS;
+                int appearance = 0;
+                if (!dark) appearance |= WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+                if (!dark && !detailSystemBars) appearance |= WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS;
+                controller.setSystemBarsAppearance(appearance, mask);
+            }
+            return;
+        }
         int flags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN;
         if (!dark) flags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
         if (!dark && !detailSystemBars) flags |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
@@ -1006,6 +1043,7 @@ public final class MainActivity extends Activity {
             case "theme": return dark();
             case "screen-corners": return screenCorners();
             case "window-insets": return statusBarInsetDp;
+            case "window-safe-insets": return new float[]{bottomInsetDp, leftInsetDp};
             case "account": return account.profile();
             case "refresh-account": return account.refreshProfileNow(); // 强制拉服务端最新角色/解锁状态（NAS 下载鉴权用）
             case "register": return account.register(args.optString("username"), args.optString("password"), args.optString("server"), args.optString("code"));

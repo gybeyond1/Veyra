@@ -237,7 +237,17 @@ api("server-base").then((serverBase) => {
 window.hgWindowInsets = (height) => {
   document.getElementById("app").style.setProperty("--status-bar-height", `${Math.max(0, Number(height) || 0)}px`);
 };
+window.hgSafeInsets = (bottom) => {
+  const app = document.getElementById("app");
+  if (!app) return;
+  app.style.setProperty("--safe-bottom", `${Math.max(0, Number(bottom) || 0)}px`);
+};
 api("window-insets").then(window.hgWindowInsets).catch(() => {
+});
+api("window-safe-insets").then((value) => {
+  const values = Array.isArray(value) ? value : [value];
+  window.hgSafeInsets(values[0], values[1]);
+}).catch(() => {
 });
 api("screen-corners").then((corners) => {
   const app = document.getElementById("app");
