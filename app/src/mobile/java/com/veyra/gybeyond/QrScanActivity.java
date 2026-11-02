@@ -5,6 +5,8 @@ import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.ImageFormat;
+import android.graphics.Matrix;
+import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
@@ -23,8 +25,7 @@ import android.util.Log;
 import android.util.Size;
 import android.view.Gravity;
 import android.view.Surface;
-import android.view.SurfaceHolder;
-import android.view.SurfaceView;
+import android.view.TextureView;
 import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.TextView;
@@ -56,11 +57,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   veyra://tv-login?h=192.168.1.5&p=8765&t=<relay token>&c=<一次性码>
  * 扫到之后直接 POST 到电视的 http://h:p/login?t=…，和「扫码输入」共用同一条通道。
  */
-public class QrScanActivity extends Activity implements SurfaceHolder.Callback {
+public class QrScanActivity extends Activity implements TextureView.SurfaceTextureListener {
     private static final String TAG = "VeyraQrScan";
     private static final int REQUEST_CAMERA = 0x61;
 
-    private SurfaceView preview;
+    private TextureView preview;
+    private Surface previewSurface;
     private TextView hint;
     private CameraDevice camera;
     private CameraCaptureSession session;
@@ -71,9 +73,8 @@ public class QrScanActivity extends Activity implements SurfaceHolder.Callback {
     private final MultiFormatReader decoder = new MultiFormatReader();
     private String sessionJson = "";
     private boolean surfaceReady;
-    /** 相机会把画面等比铺进 SurfaceView：尺寸比例不对就会被拉伸（左右压扁）。 */
+    /** 相机出流的尺寸；预览按它的比例缩放，比例只由 Matrix 决定。 */
     private Size previewSize;
-    private String appliedLayout = "";
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -83,8 +84,10 @@ public class QrScanActivity extends Activity implements SurfaceHolder.Callback {
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(0xFF101216);
 
-        preview = new SurfaceView(this);
-        preview.getHolder().addCallback(this);
+        preview = new TextureView(this);
+        // 不透明：TextureView 默认半透明，扫码这种全屏预览开不透明省一次混合
+        preview.setOpaque(true);
+        preview.setSurfaceTextureListener(this);
         root.addView(preview, new FrameLayout.LayoutParams(-1, -1));
 
         /* 取景方框只是视觉参考：解码用的是整帧，框外照样能认出来。
@@ -145,25 +148,29 @@ public class QrScanActivity extends Activity implements SurfaceHolder.Callback {
         openCamera();
     }
 
-    @Override public void surfaceCreated(SurfaceHolder holder) {
+    @Override public void onSurfaceTextureAvailable(SurfaceTexture texture, int width, int height) {
         surfaceReady = true;
         openCamera();
     }
 
-    @Override public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
-        // 尺寸被改过之后 surface 会重建，重建完再开相机，避免用旧比例的画面
-        if (camera == null) openCamera();
+    @Override public void onSurfaceTextureSizeChanged(SurfaceTexture texture, int width, int height) {
+        // 转屏、分屏：按新尺寸重新摆一次，别让画面跟着窗口变形
+        configureTransform(previewSize);
     }
 
-    @Override public void surfaceDestroyed(SurfaceHolder holder) {
+    @Override public boolean onSurfaceTextureDestroyed(SurfaceTexture texture) {
         surfaceReady = false;
         closeCamera();
+        return true;
+    }
+
+    @Override public void onSurfaceTextureUpdated(SurfaceTexture texture) {
     }
 
     private void openCamera() {
         if (!surfaceReady || camera != null) return;
         if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) return;
-        Surface previewSurface = preview.getHolder().getSurface();
+
         try {
             CameraManager manager = (CameraManager) getSystemService(CAMERA_SERVICE);
             String id = null;
@@ -184,10 +191,16 @@ public class QrScanActivity extends Activity implements SurfaceHolder.Callback {
             }
             previewSize = size;
 
-            /* 先把预览画面按相机比例摆好，比例不对就等 surface 重建再来一次。
-               之前直接把 SurfaceView 铺满整屏，竖屏下相机画面（9:16）被拉成
-               屏幕比例（约 9:20），看起来就是左右被压扁。 */
-            if (!applyPreviewLayout(size)) return;
+            /* 预览改走 TextureView：相机流尺寸由 setDefaultBufferSize 固定，
+               画面怎么摆由 Matrix 决定（等比缩放 + 旋转 + 居中裁剪），
+               不再指望 SurfaceView 的尺寸去"凑"相机比例 —— 那条路在部分机型上
+               会被系统再拉伸一次，于是画面就成了瘦长条。 */
+            SurfaceTexture texture = preview.getSurfaceTexture();
+            if (texture == null) return;
+            texture.setDefaultBufferSize(size.getWidth(), size.getHeight());
+            if (previewSurface != null) previewSurface.release();
+            previewSurface = new Surface(texture);
+            configureTransform(size);
 
             cameraThread = new HandlerThread("veyra-scan");
             cameraThread.start();
@@ -233,42 +246,35 @@ public class QrScanActivity extends Activity implements SurfaceHolder.Callback {
     }
 
     /**
-     * 把预览画面摆成相机的真实比例（中心裁剪铺满）。
+     * 把预览画面摆正：等比缩放 → 旋转 90°（竖屏）→ 居中裁剪铺满。
      *
-     * 相机只会把画面等比塞进 SurfaceView，所以 surface 比例必须跟画面一致，
-     * 否则就是拉伸 —— 竖屏把 9:16 的画面铺到约 9:20 的整屏上，结果就是左右压扁。
-     * 返回 true 表示当前 surface 已经是目标尺寸，可以开相机；false 表示刚改过布局，
-     * surface 会重建，等 surfaceCreated / surfaceChanged 再进这里一次。
+     * 关键在于「比例只由 Matrix 说话」：相机流是 1280x720 的横向画面，
+     * 竖屏下要转 90° 才正，缩放系数取 max(viewW/bufferW, viewH/bufferH)，
+     * 这样画面一定填满、且横竖比例不会被改。多出来的部分由 TextureView 自己裁掉。
      */
-    private boolean applyPreviewLayout(Size size) {
-        if (preview == null || size == null) return false;
-        DisplayMetrics screen = getResources().getDisplayMetrics();
-        int screenW = screen.widthPixels;
-        int screenH = screen.heightPixels;
-        View parent = (View) preview.getParent();
-        if (parent != null && parent.getWidth() > 0 && parent.getHeight() > 0) {
-            screenW = parent.getWidth();
-            screenH = parent.getHeight();
-        }
+    private void configureTransform(Size size) {
+        if (preview == null || size == null) return;
+        int viewW = preview.getWidth();
+        int viewH = preview.getHeight();
+        if (viewW <= 0 || viewH <= 0) return;
+
         int rotation = getWindowManager().getDefaultDisplay().getRotation();
-        boolean portrait = rotation == Surface.ROTATION_0 || rotation == Surface.ROTATION_180;
-        int streamW = portrait ? size.getHeight() : size.getWidth();
-        int streamH = portrait ? size.getWidth() : size.getHeight();
-        float fill = Math.max(screenW / (float) streamW, screenH / (float) streamH);
-        int width = Math.max(1, Math.round(streamW * fill));
-        int height = Math.max(1, Math.round(streamH * fill));
-        String key = width + "x" + height;
-        if (key.equals(appliedLayout)) return true;
-        appliedLayout = key;
-        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(width, height);
-        params.gravity = Gravity.CENTER;
-        preview.setLayoutParams(params);
-        return false;
+        boolean rotate = rotation == Surface.ROTATION_0 || rotation == Surface.ROTATION_180;
+        float bufferW = rotate ? size.getHeight() : size.getWidth();
+        float bufferH = rotate ? size.getWidth() : size.getHeight();
+
+        Matrix matrix = new Matrix();
+        // 先把 buffer 的原点挪到画面中心，旋转再缩放，最后放回控件中心
+        matrix.postTranslate(-size.getWidth() / 2f, -size.getHeight() / 2f);
+        if (rotate) matrix.postRotate(90f);
+        float scale = Math.max(viewW / bufferW, viewH / bufferH);
+        matrix.postScale(scale, scale);
+        matrix.postTranslate(viewW / 2f, viewH / 2f);
+        preview.setTransform(matrix);
     }
 
     @Override public void onConfigurationChanged(android.content.res.Configuration configuration) {
         super.onConfigurationChanged(configuration);
-        appliedLayout = "";
         closeCamera();
         if (preview != null) preview.post(this::openCamera);
     }
@@ -422,6 +428,7 @@ public class QrScanActivity extends Activity implements SurfaceHolder.Callback {
         camera = null;
         try { if (reader != null) reader.close(); } catch (Exception ignored) { }
         reader = null;
+        if (previewSurface != null) { previewSurface.release(); previewSurface = null; }
         if (cameraThread != null) {
             cameraThread.quitSafely();
             cameraThread = null;
