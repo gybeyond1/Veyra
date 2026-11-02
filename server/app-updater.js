@@ -49,7 +49,12 @@ const WAKE_ROUNDS = parseInt(process.env.APP_UPDATE_WAKE_ROUNDS || '24', 10);
 /** 被唤醒后这段时间内按 tag 精确查 API（atom 有 CDN 缓存，可能还看不到新版本）。 */
 const WAKE_API_WINDOW_MS = 120_000;
 const MAX_BYTES = 120 * 1024 * 1024;
-const KEEP_VERSIONS = 2;
+/**
+ * 每个渠道在盘上保留几个版本（默认 2：当前版 + 上一版）。
+ * 留上一版不是为了好看：客户端可能正在下旧包，manifest 一换就 404 了；
+ * 新包出问题时也要能把清单指回去。磁盘紧就用 APP_UPDATE_KEEP_VERSIONS=1 关掉。
+ */
+const KEEP_VERSIONS = Math.max(1, parseInt(process.env.APP_UPDATE_KEEP_VERSIONS || '2', 10) || 2);
 /** 分几段并发下。8 段在丢包链路上提升明显，再多容易把家宽连接数打满。 */
 const CHUNK_COUNT = 6;
 /** 单轮 poll 里最多重试几轮（每轮每段换一个源）。 */
