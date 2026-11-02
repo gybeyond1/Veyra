@@ -10,10 +10,12 @@
  * 拉取策略（每一步失败都换下一个源）：
  *   1. 版本号：releases.atom（几百字节，比 api.github.com 稳，还不吃限流）
  *      失败再试 api.github.com/repos/<repo>/releases/latest
- *   2. 包体：直连 + 若干公共反代，按顺序试；单个源 10 秒内跑不到 300KB/s 就换下一个
- *      （`--speed-limit` / `--speed-time`，比设死超时好：慢源早点放弃，快源不打断）
- *   3. 下载支持断点续传：换源后从 .part 续，不用从头再下 10MB
- *   4. 落盘前校验大小 + sha256（GitHub API 给了 digest 就用它的）
+ *   2. 包体：先探测大小与 Range 支持，然后**切 6 段并发**，每段独立 .part，
+ *      每段每轮换一个源（直连 / 多个公共反代），断在哪续在哪。公共反代经常
+ *      「一条连接下 4MB 就掐」，分段后每段不到 2MB，一次就能过。
+ *   3. 源不支持 Range 就退化成单流，多轮续传
+ *   4. 每轮统计进度，有推进就继续；全失败也不等 10 分钟，1 分钟后重试
+ *   5. 落盘前校验大小 + sha256（GitHub API 给了 digest 就用它的）
  *
  * 落盘结构：
  *   <dataDir>/app-update/latest.json
@@ -35,8 +37,14 @@ const { execFile } = require('child_process');
 const REPO = process.env.APP_UPDATE_REPO || 'gybeyond1/Veyra';
 const POLL_MS = parseInt(process.env.APP_UPDATE_POLL_MS || String(10 * 60 * 1000), 10);
 const FIRST_DELAY_MS = parseInt(process.env.APP_UPDATE_FIRST_DELAY_MS || '20000', 10);
+/** 有渠道没拉到时，隔多久再试（比 POLL_MS 短得多：半截包留着，早一轮就早一点下完）。 */
+const RETRY_MS = parseInt(process.env.APP_UPDATE_RETRY_MS || '60000', 10);
 const MAX_BYTES = 120 * 1024 * 1024;
 const KEEP_VERSIONS = 2;
+/** 分几段并发下。8 段在丢包链路上提升明显，再多容易把家宽连接数打满。 */
+const CHUNK_COUNT = 6;
+/** 单轮 poll 里最多重试几轮（每轮每段换一个源）。 */
+const MAX_ROUNDS = 8;
 const UA = 'Veyra-Backend-Updater/1.0';
 
 /** 下载源前缀：空串 = 直连。可用 APP_UPDATE_MIRRORS 覆盖（逗号分隔）。 */
@@ -143,23 +151,102 @@ async function sha256OfFile(file) {
 }
 
 /**
- * 单个源下载。返回 { ok, reason }。
- * -C - ：有 .part 就续传
- * --speed-limit/--speed-time：10 秒内平均不到 300KB/s 直接掐掉，换下一个源
+ * 探测远端大小、以及是否支持 Range。
+ * 用 `-r 0-0` 发一个只要 1 字节的请求：拿得到 206 + Content-Range 才算支持分段，
+ * 只回 200 + Content-Length 的源（不少公共反代就这样）只能整包下。
  */
-async function downloadFrom(prefix, url, partFile, proxy) {
+async function probeRemote(url, proxy) {
+  for (const prefix of mirrors()) {
+    const args = ['-sS', '-L', '--connect-timeout', '15', '--max-time', '40',
+      '-r', '0-0', '-D', '-', '-o', '/dev/null', '-A', UA];
+    if (proxy) args.push('-x', proxy);
+    args.push(prefix + url);
+    const result = await curl(args, 45_000);
+    if (result.error) continue;
+    const header = String(result.stdout || '');
+    // 可能经过多次跳转，头有好几段，取最后出现的那个
+    let m, last = null;
+    const re = /content-range:\s*bytes\s+0-0\/(\d+)/gi;
+    while ((m = re.exec(header))) last = m;
+    if (last) return { size: Number(last[1]), range: true, prefix };
+    let n, len = null;
+    const re2 = /content-length:\s*(\d+)/gi;
+    while ((n = re2.exec(header))) len = n;
+    if (len) return { size: Number(len[1]), range: false, prefix };
+  }
+  return null;
+}
+
+/**
+ * 下载 [start, end] 这一段。outFile 里已有的字节视为有效，从断点续。
+ * 返回 true 表示这一段已经完整。
+ *
+ * 为什么每段自己一个文件：以前所有源共用一个 .part，A 源下了 4MB 断流、
+ * B 源不支持 Range，两边互相踩，永远凑不齐一整份。
+ */
+async function fetchRange(url, prefix, start, end, outFile, proxy) {
+  const need = end - start + 1;
+  let have = fs.existsSync(outFile) ? fs.statSync(outFile).size : 0;
+  if (have >= need) return true;
+  if (have > need) { fs.rmSync(outFile, { force: true }); have = 0; }
+
+  const tmp = outFile + '.tmp';
+  fs.rmSync(tmp, { force: true });
   const args = ['-sS', '-L', '--fail', '--connect-timeout', '15',
-    '--speed-limit', '307200', '--speed-time', '10', '--max-time', '900',
+    // 分片后单连接速率本来就低，阈值压到 20KB/s，30 秒都不动才掐
+    '--speed-limit', '20480', '--speed-time', '30', '--max-time', '600',
+    '-r', `${start + have}-${end}`, '-o', tmp, '-A', UA];
+  if (proxy) args.push('-x', proxy);
+  args.push(prefix + url);
+  const result = await curl(args, 660_000);
+
+  let got = 0;
+  try {
+    if (fs.existsSync(tmp)) {
+      got = fs.statSync(tmp).size;
+      // 源忽略 Range 会回整包，长度远大于本段 —— 这种数据拼进去就是废包
+      if (got > 0 && have + got <= need) {
+        fs.appendFileSync(outFile, fs.readFileSync(tmp));
+        have += got;
+      }
+    }
+  } finally {
+    fs.rmSync(tmp, { force: true });
+  }
+  if (result.error && got === 0) {
+    const code = result.error.code;
+    if (code === 33) return false; // 不支持 Range
+  }
+  return have >= need;
+}
+
+/** 按顺序拼接分段。整包 10MB 级别，读进内存比流式拼接稳妥。 */
+function assemble(files, target) {
+  const tmp = target + '.assembling';
+  const fd = fs.openSync(tmp, 'w');
+  try {
+    for (const file of files) {
+      if (!fs.existsSync(file)) throw new Error('分段缺失：' + path.basename(file));
+      fs.writeSync(fd, fs.readFileSync(file));
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+  fs.rmSync(target, { force: true });
+  fs.renameSync(tmp, target);
+}
+
+/** 单流下载（源不支持 Range 时用），多轮续传。 */
+async function downloadWhole(url, partFile, proxy, round) {
+  const sources = mirrors();
+  const prefix = sources[round % sources.length];
+  const args = ['-sS', '-L', '--fail', '--connect-timeout', '15',
+    '--speed-limit', '30720', '--speed-time', '30', '--max-time', '600',
     '-A', UA, '-o', partFile, '-C', '-'];
   if (proxy) args.push('-x', proxy);
   args.push(prefix + url);
-  const result = await curl(args, 960000);
-  if (result.error) {
-    // 28 = 超时/低速被掐；33 = 服务端不支持 Range 续传
-    const code = result.error.code;
-    return { ok: false, reason: code === 28 ? 'too-slow' : (code === 33 ? 'resume-unsupported' : String(code || 'failed')) };
-  }
-  return { ok: true };
+  const result = await curl(args, 660_000);
+  return { ok: !result.error, source: prefix || '直连' };
 }
 
 function createAppUpdater(options) {
@@ -171,7 +258,10 @@ function createAppUpdater(options) {
 
   let manifest = null;
   let timer = null;
+  let retryTimer = null;
   let polling = false;
+  /** 正在下载的进度，给 /api/health 看，方便判断到底卡在哪一段。 */
+  let progressState = null;
 
   fs.mkdirSync(root, { recursive: true });
   for (const channel of CHANNELS) fs.mkdirSync(path.join(root, channel), { recursive: true });
@@ -225,6 +315,15 @@ function createAppUpdater(options) {
     return { tag, version: versionOf(tag), notes: htmlToText(release.body || ''), assets: release.assets || [] };
   }
 
+  /**
+   * 把某个渠道的包拉到本地。
+   *
+   * 先探测远端大小和是否支持 Range：
+   *   - 支持 → 切 CHUNK_COUNT 段并发，每段独立 .part，某段失败按轮次换源续传
+   *   - 不支持 → 单流，多轮换源续传
+   * 每轮结束统计进度，只要还有推进就继续，最多 MAX_ROUNDS 轮；
+   * 不再「试一轮全失败就等 10 分钟」。
+   */
   async function fetchChannel(channel, version, tag, assets) {
     const dir = channelDir(channel);
     const name = fileName(channel, version);
@@ -235,33 +334,110 @@ function createAppUpdater(options) {
 
     // 附件名以 API 为准（万一某次发布改了名）；API 没给就按约定拼
     let assetName = name;
+    let expectSha = '';
     if (Array.isArray(assets) && assets.length) {
       const hit = assets.find(a => a && typeof a.name === 'string' && a.name.endsWith('.apk')
         && /(^|[-_.])tv([-_.]|$)/i.test(a.name) === (channel === 'tv'));
-      if (hit) assetName = hit.name;
+      if (hit) {
+        assetName = hit.name;
+        const digest = String(hit.digest || '');
+        if (digest.indexOf('sha256:') === 0) expectSha = digest.slice(7).toLowerCase();
+      }
     }
     const url = `https://github.com/${REPO}/releases/download/${tag}/${encodeURIComponent(assetName)}`;
-    const part = path.join(dir, name + '.part');
     const proxy = getProxy() || '';
 
-    for (const prefix of mirrors()) {
-      const result = await downloadFrom(prefix, url, part, proxy);
-      if (result.ok) {
-        const size = fs.existsSync(part) ? fs.statSync(part).size : 0;
-        if (size <= 0) { fs.rmSync(part, { force: true }); continue; }
-        if (size > MAX_BYTES) {
-          fs.rmSync(part, { force: true });
-          throw new Error(`更新包过大：${size} 字节`);
-        }
-        fs.rmSync(apk, { force: true });
-        fs.renameSync(part, apk);
-        log(`[update] 已缓存 ${channel} ${version}（${Math.round(size / 1048576)}MB，源 ${prefix || '直连'}）`);
-        return { file: name, size, sha256: await sha256OfFile(apk) };
-      }
-      if (result.reason === 'resume-unsupported') fs.rmSync(part, { force: true });
-      log(`[update] ${channel} 源 ${prefix || '直连'} 不可用：${result.reason}`);
+    const remote = await probeRemote(url, proxy);
+    if (!remote || !remote.size) throw new Error('所有源都探测不到包大小');
+    const total = remote.size;
+    if (total > MAX_BYTES) throw new Error(`更新包过大：${total} 字节`);
+
+    progressState = { channel, version, total, done: 0, round: 0, mode: remote.range ? 'chunked' : 'whole' };
+    log(`[update] ${channel} ${version} 共 ${(total / 1048576).toFixed(1)}MB，`
+      + (remote.range ? `分 ${CHUNK_COUNT} 段并发` : '单流') + `（探测源 ${remote.prefix || '直连'}）`);
+
+    // 旧版留下的整体 .part 是从 0 顺序写下来的，前 N 字节都是对的 —— 按段切开当起步数据，
+    // 用户那边正卡在 4MB 的两坨不用白扔。
+    const legacy = path.join(dir, name + '.part');
+    let seed = null;
+    if (fs.existsSync(legacy)) {
+      try { seed = fs.readFileSync(legacy); } catch { seed = null; }
     }
-    throw new Error(`所有下载源都失败（${channel} ${version}）`);
+
+    if (!remote.range) {
+      let finished = false;
+      for (let round = 0; round < MAX_ROUNDS && !finished; round++) {
+        const result = await downloadWhole(url, legacy, proxy, round);
+        progressState.round = round + 1;
+        progressState.done = fs.existsSync(legacy) ? fs.statSync(legacy).size : 0;
+        finished = progressState.done >= total;
+        log(`[update] ${channel} 第 ${round + 1} 轮（${result.source}）：${(progressState.done / 1048576).toFixed(1)}MB / ${(total / 1048576).toFixed(1)}MB`);
+      }
+      if (!finished) {
+        throw new Error(`${channel} 单流没下完（${(progressState.done / 1048576).toFixed(1)}MB），下一轮续传`);
+      }
+      fs.rmSync(apk, { force: true });
+      fs.renameSync(legacy, apk);
+    } else {
+      const chunkCount = Math.max(1, Math.min(CHUNK_COUNT, Math.ceil(total / (512 * 1024))));
+      const chunkSize = Math.ceil(total / chunkCount);
+      const chunks = [];
+      for (let i = 0; i < chunkCount; i++) {
+        const start = i * chunkSize;
+        const end = Math.min(total - 1, start + chunkSize - 1);
+        if (start > end) break;
+        const file = path.join(dir, `${name}.chunk${i}.part`);
+        if (seed && seed.length > start && !fs.existsSync(file)) {
+          const slice = seed.subarray(start, Math.min(start + (end - start + 1), seed.length));
+          if (slice.length > 0) fs.writeFileSync(file, slice);
+        }
+        chunks.push({ start, end, file });
+      }
+      if (seed) fs.rmSync(legacy, { force: true });
+
+      const sizeOf = (chunk) => {
+        try { return Math.min(fs.statSync(chunk.file).size, chunk.end - chunk.start + 1); }
+        catch { return 0; }
+      };
+      const doneBytes = () => chunks.reduce((sum, chunk) => sum + sizeOf(chunk), 0);
+      const sources = mirrors();
+
+      for (let round = 0; round < MAX_ROUNDS; round++) {
+        const todo = chunks.filter(chunk => sizeOf(chunk) < chunk.end - chunk.start + 1);
+        progressState.round = round + 1;
+        progressState.done = doneBytes();
+        if (!todo.length) break;
+        log(`[update] ${channel} 第 ${round + 1} 轮：${todo.length}/${chunks.length} 段待补，已有 ${(progressState.done / 1048576).toFixed(1)}MB`);
+        await Promise.all(todo.map((chunk, index) => {
+          // 每段起点错开一个源：同时把几个源都用上，不是排队等第一个超时
+          const prefix = sources[(round + index) % sources.length];
+          return fetchRange(url, prefix, chunk.start, chunk.end, chunk.file, proxy).catch(() => false);
+        }));
+      }
+
+      progressState.done = doneBytes();
+      const missing = chunks.filter(chunk => sizeOf(chunk) < chunk.end - chunk.start + 1);
+      if (missing.length) {
+        const left = ((total - progressState.done) / 1048576).toFixed(1);
+        throw new Error(`${channel} 还有 ${missing.length} 段没下完，差 ${left}MB，下一轮接着续`);
+      }
+      assemble(chunks.map(chunk => chunk.file), apk);
+      chunks.forEach(chunk => fs.rmSync(chunk.file, { force: true }));
+    }
+
+    const size = fs.statSync(apk).size;
+    const sha = await sha256OfFile(apk);
+    if (size !== total) {
+      fs.rmSync(apk, { force: true });
+      throw new Error(`${channel} 大小不符（${size} != ${total}）`);
+    }
+    if (expectSha && sha !== expectSha) {
+      fs.rmSync(apk, { force: true });
+      throw new Error(`${channel} sha256 校验失败，已丢弃`);
+    }
+    progressState = null;
+    log(`[update] 已缓存 ${channel} ${version}（${(size / 1048576).toFixed(1)}MB）`);
+    return { file: name, size, sha256: sha };
   }
 
   /** 清理旧版本：每渠道只留最近 KEEP_VERSIONS 个，.part 超过一天也清掉。 */
@@ -325,7 +501,34 @@ function createAppUpdater(options) {
       log(`[update] 检查失败：${error.message}`);
     } finally {
       polling = false;
+      // 有渠道还没落地：短间隔重试。以前全失败要干等 10 分钟，
+      // 而 .part 已经下了一大半，早一轮就早一点补完。
+      const ready = CHANNELS.every(channel => {
+        const entry = manifest && manifest.channels && manifest.channels[channel];
+        return entry && entry.file && fs.existsSync(path.join(channelDir(channel), entry.file));
+      });
+      if (!ready) scheduleRetry(RETRY_MS);
     }
+  }
+
+  function scheduleRetry(ms) {
+    if (retryTimer || !timer) return;   // 没 start 过就不排（单测里别留定时器）
+    retryTimer = setTimeout(() => { retryTimer = null; poll(); }, Math.max(5000, ms));
+    if (retryTimer.unref) retryTimer.unref();
+  }
+
+  /** 当前下载进度，给 /api/health 看；没在下载就返回 null。 */
+  function progress() {
+    if (!progressState) return null;
+    return {
+      channel: progressState.channel,
+      version: progressState.version,
+      mode: progressState.mode,
+      round: progressState.round,
+      total: progressState.total,
+      done: progressState.done,
+      percent: progressState.total ? Math.round((progressState.done / progressState.total) * 100) : 0,
+    };
   }
 
   function status(channel, currentVersion) {
@@ -387,9 +590,10 @@ function createAppUpdater(options) {
 
   function stop() {
     if (timer) { clearInterval(timer); timer = null; }
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
   }
 
-  return { start, stop, poll, status, fileOf, get manifest() { return manifest || loadManifest(); } };
+  return { start, stop, poll, status, fileOf, progress, get manifest() { return manifest || loadManifest(); } };
 }
 
-module.exports = { createAppUpdater, compareVersion, fileName, parseAtom };
+module.exports = { createAppUpdater, compareVersion, fileName, parseAtom, probeRemote, fetchRange };

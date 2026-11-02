@@ -976,6 +976,8 @@ app.get('/api/health', (_req, res) => {
     code: 200, service: 'veyra-backend', status: 'ok', time: Date.now(),
     download: downloader.status(),
     update: update ? { version: update.version, channels: Object.keys(update.channels || {}) } : null,
+    // 正在拉的包进度（几段、第几轮、已下多少）—— 排查「为什么一直没好」全靠它
+    updateProgress: appUpdater.progress(),
   });
 });
 
