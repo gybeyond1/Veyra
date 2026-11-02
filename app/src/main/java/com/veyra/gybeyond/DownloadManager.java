@@ -763,7 +763,6 @@ final class DownloadManager {
                         }
                     }
                     String epName = String.format(Locale.US, "第%02d集.mp4", realSeq);
-                    long normLen = norm.length();
                     Uri u = exportToDownloads(norm, subDir, epName);
                     if (lastExportDirect) directOk++;
                     if (u != null) { if (outList.length() > 0) outList.append('|'); outList.append(u); }
@@ -772,18 +771,11 @@ final class DownloadManager {
                     // 每导出一集就查一次名字，被改名立刻正名（别等全部导出完 —— 中间隔得越久，
                     // 越可能留下一个带时间戳的名字被用户看到）
                     normalizeEpisodeNames(episodeDir(task.title));
-                    // 导出成功 → 任务目录里的中间产物也删掉：剧集目录已经是同一集的正片，
-                    // 再留一份就是「同一部剧出现两个文件夹、内容完全重复」（用户实测反馈的 dl_xxx
-                    // 与剧名目录并存就是这么来的）。合并阶段改从剧集目录的「第NN集.mp4」读，
-                    // 见 runMerge 的查找顺序。
-                    // 但必须先确认公共目录那份**真的能用 File 读到**（个别 ROM 上 MediaStore 写入
-                    // 成功、直接路径却读不了）：读不到就保留中间产物，合并走任务目录那条兜底。
-                    File src = plain.get(i);
-                    File pubEp = publicEpisodeFile(task.title, epName);
-                    if (u != null && src != null && !src.equals(norm)
-                            && pubEp.exists() && pubEp.length() == normLen) {
-                        src.delete();
-                    }
+                    // 中间产物（dl_xxx/epNNN.mp4）**留到合并成功再删**（deleteEpisodesAfterMerge 统一清）。
+                    // 以前导出成功就删掉，靠公共目录那份「第NN集.mp4」当唯一来源；但 MediaStore 是异步的，
+                    // 写完可能过一会儿才做撞名去重、把文件改名成「第02集_1793626632226.mp4」，改名那一瞬间
+                    // 新旧两个名字都可能读不到 —— 合并随即误报「分集不完整（2/3）」，可用户打开文件管理器
+                    // 明明三集都在（用户实测）。留着任务目录这份，runMerge 拿不到正式名就回退到它。
                 } catch (Exception ex) {
                     // 单集导出失败不阻塞任务，原始密文仍在 app 私有目录供合并
                 }
@@ -935,8 +927,6 @@ final class DownloadManager {
             // 先把名字漂移（第01集_1793034343293.mp4）的集数正名回来，再按「集号」找人。
             // 分集文件名是合并找人的依据，名字被动过就报「分集不完整」，所以这里既修名、也不依赖名。
             File edir = episodeDir(task.title);
-            normalizeEpisodeNames(edir);
-            java.util.Map<Integer, File> named = episodeFilesIn(edir);
             List<File> plain = new ArrayList<>();
             // 与 plain 一一对应的解密密钥：中间产物可能是 CENC 密文 → 要 key；
             // 剧集目录里的「第NN集.mp4」是已解密归一化的正式分集 → 传空串，让 C 层按明文处理。
@@ -953,25 +943,47 @@ final class DownloadManager {
             // 收集顺序（同剧分次下载 → 一次合并整部，产物自然累积，不再互相覆盖）：
             //   ① 已有合并产物「剧名.mp4」  —— 此前批次合并的成品，作为第一段，后续分集接在其后
             //   ② 剧集目录全部「第NN集.mp4」 —— 本任务 + 同剧其它批次导出的正式分集（明文，升序）
-            //   ③ 本任务在剧集目录缺失的集   —— 任务目录 epNNN 中间产物兜底（可能密文，带 key）
+            //   ③ 本任务在剧集目录缺失的集   —— 任务目录 epNNN / norm_ 中间产物兜底（可能密文，带 key）
             List<Integer> plainSeqs = new ArrayList<>();
             File existing = new File(edir, task.title.replaceAll("[\\\\/:*?\"<>|]", "_") + ".mp4");
-            if (existing.exists() && existing.length() > 0) { plain.add(existing); plainKeys.add(""); plainSeqs.add(0); }
-            java.util.Set<Integer> allSeq = new java.util.TreeSet<>(named.keySet());
-            allSeq.addAll(wanted);
-            for (int seq : allSeq) {
-                File f = named.get(seq);
-                if (f != null && f.exists() && f.length() > 0) { plain.add(f); plainKeys.add(""); plainSeqs.add(seq); continue; }
-                if (!wanted.contains(seq)) continue;   // 同剧其它批次缺失的那几集，下次下载后再合并补上
-                Integer batch = seqToBatch.get(seq);
-                if (batch == null) continue;
-                f = new File(dir, String.format(Locale.US, "ep%03d.mp4", batch + 1));
-                if (f.exists() && f.length() > 0) { plain.add(f); plainKeys.add(task.episodes.optJSONObject(batch).optString("key", "")); plainSeqs.add(seq); }
-            }
-            // 完整性：本任务每集必须命中（同剧其它批次缺失不阻塞）
+            // 集数扫不全就等一会儿重扫，别一次扫不到就判死：MediaStore 是异步的，刚写完的文件可能
+            // 正在改名（第02集.mp4 → 第02集_1793626632226.mp4），改名过程中新旧名字都可能读不到。
+            // 用户实际遇到的就是这个 —— 报「分集不完整（2/3）」，可文件管理器里三集都在。
             int got = 0;
-            for (int seq : wanted) if (plainSeqs.contains(seq)) got++;
-            if (got != wanted.size()) throw new java.io.IOException("分集不完整（" + got + "/" + wanted.size() + "），请重新下载");
+            java.util.Map<Integer, File> named = new java.util.HashMap<>();
+            for (int attempt = 0; attempt < 6; attempt++) {
+                if (attempt > 0) {
+                    if (task.canceled) return;
+                    try { Thread.sleep(attempt <= 2 ? 400 : 900); } catch (InterruptedException ignored) { }
+                    try {
+                        MediaScannerConnection.scanFile(context, new String[]{edir.getAbsolutePath()}, null, null);
+                    } catch (Exception ignored) { }
+                }
+                normalizeEpisodeNames(edir);
+                named = episodeFilesIn(edir);
+                plain.clear(); plainKeys.clear(); plainSeqs.clear();
+                if (existing.exists() && existing.length() > 0) { plain.add(existing); plainKeys.add(""); plainSeqs.add(0); }
+                java.util.Set<Integer> allSeq = new java.util.TreeSet<>(named.keySet());
+                allSeq.addAll(wanted);
+                for (int seq : allSeq) {
+                    File f = named.get(seq);
+                    if (f != null && f.exists() && f.length() > 0) { plain.add(f); plainKeys.add(""); plainSeqs.add(seq); continue; }
+                    if (!wanted.contains(seq)) continue;   // 同剧其它批次缺失的那几集，下次下载后再合并补上
+                    Integer batch = seqToBatch.get(seq);
+                    if (batch == null) continue;
+                    f = new File(dir, String.format(Locale.US, "ep%03d.mp4", batch + 1));
+                    if (!f.exists() || f.length() <= 0) f = new File(dir, "norm_" + (batch + 1) + ".mp4");
+                    if (f.exists() && f.length() > 0) { plain.add(f); plainKeys.add(task.episodes.optJSONObject(batch).optString("key", "")); plainSeqs.add(seq); }
+                }
+                // 完整性：本任务每集必须命中（同剧其它批次缺失不阻塞）
+                got = 0;
+                for (int seq : wanted) if (plainSeqs.contains(seq)) got++;
+                if (got == wanted.size()) break;
+                task.detail = "合并分集（等分集就绪 " + got + "/" + wanted.size() + "）";
+            }
+            if (got != wanted.size())
+                throw new java.io.IOException("合并失败：分集未就绪（" + got + "/" + wanted.size()
+                        + "），点「合并」可重试，已下载的分集不会丢");
             // 优先合并成单个文件；若合并仍失败（个别设备 MediaMuxer 兼容问题），自动回退为分集逐个导出，下载不白费。
             String subDir = task.title.replaceAll("[\\\\/:*?\"<>|]", "_");
             String displayName = task.title.replaceAll("[\\\\/:*?\"<>|]", "_") + ".mp4";
@@ -1057,8 +1069,9 @@ final class DownloadManager {
                 task.status = "failed"; task.percent = 100;
                 task.detail = "合并失败（已保存 " + plain.size() + " 集分集，可直接重试合并）";
             }
-            // 「下载到远程服务器」：这里（合并成功/失败落定后）才上传，保证远端拿到的是成品
-            enqueueRemote(task);
+            // 「下载到远程服务器」：只在合并成功后上传。合并失败还硬传，远端拿到的就是缺集的半成品，
+            // 用户还得自己去服务器上删一遍 —— 不如留在本地，让他点「合并」重试成功后再传。
+            if (mergedOk) enqueueRemote(task);
         } catch (Exception e) {
             if (!task.canceled) { task.status = "failed"; task.error = e.getMessage() == null ? "合并失败" : e.getMessage(); task.detail = "失败"; }
         } finally {

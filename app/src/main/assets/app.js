@@ -1255,7 +1255,7 @@ function downloadTaskRow(task, kind) {
     ? `<span class="dl-error" data-dl-copy="${esc(task.id)}" data-dl-log="${esc('失败集: ' + failedList.map(f => '第' + f.index + '集(' + (f.error || '') + ')').join('；'))}" title="点击复制失败明细">失败 ${failedList.length} 集：${esc(failedList.slice(0, 3).map(f => '第' + f.index + '集').join('、'))}${failedList.length > 3 ? ' 等' : ''}</span>` : '';
   const errLog = task.error || task.debug || '';
   const errBlock = errLog
-    ? `<span class="dl-error" data-dl-copy="${esc(task.id)}" data-dl-log="${esc(errLog.replace(/\n/g, '\\n'))}" title="点击复制全部日志">${task.error ? esc(task.error.split('\n').slice(0, 4).join('<br>')) : '<span class="dl-log-link">复制合并日志</span>'}</span>` : '';
+    ? `<span class="dl-error" data-dl-copy="${esc(task.id)}" data-dl-log="${esc(errLog.replace(/\n/g, '\\n'))}" title="点击复制全部日志">${task.error ? task.error.split('\n').slice(0, 4).map(esc).join('<br>') : '<span class="dl-log-link">复制合并日志</span>'}</span>` : '';
   const detailHint = task.detail && (/片/.test(task.detail) || task.detail.includes('合并中')) ? ` · <span class="dl-detail-hint">${esc(task.detail)}</span>` : '';
   const playAttr = kind === 'nas' ? 'data-dl-play-nas' : 'data-dl-play';
   const playHint = kind === 'nas' ? '播放 NAS 成品' : '本地播放';
@@ -1347,10 +1347,15 @@ function renderDownloadSheet() {
     // 「调试」只在私密（黄果）模式给：那条链路才是 m3u8 → ts 分片 → 本地合并，
     // 也只有它能保留 TS/KEY 给开发者复现黑屏。公开模式没有分片可留。
     const canDebug = privateMode();
+    // 没进过设置页时 remoteServers 还是 null：这里补拉一次再重画，
+    // 否则配好的服务器会被误判成「还没配置」，点进去还是空列表。
+    if (remoteServers === null) {
+      loadRemoteServers(true).then(() => { if (downloadMode === 'target') renderDownloadSheet(); }).catch(() => {});
+    }
     const hasRemote = !!(remoteServers && remoteServers.length);
     sheet.innerHTML = `<div class="download-pick">
       <button type="button" class="download-pick-option" data-dl-pick="phone"><strong>下载到手机</strong></button>
-      <button type="button" class="download-pick-option" data-dl-pick="remote"><strong>下载到远程服务器</strong><small>${hasRemote ? '先下到手机，完成后自动传到所选服务器（按剧名建文件夹）' : '还没配置服务器 · 到「设置 → 远程服务器」添加'}</small></button>
+      <button type="button" class="download-pick-option" data-dl-pick="remote"><strong>下载到远程服务器</strong>${hasRemote ? '' : '<small>还没配置服务器</small>'}</button>
       <button type="button" class="download-pick-option" data-dl-pick="nas" ${isAdmin ? '' : 'disabled'}><strong>下载到 NAS</strong>${isAdmin ? '' : '<small>仅管理员可用</small>'}</button>
       ${canDebug ? '<button type="button" class="download-pick-option" data-dl-pick="phone-debug"><strong>下载到手机（调试）</strong><small>保留 TS 与 Key，不自动合并，导出调试包</small></button>' : ''}
       <p class="download-nas-note">${state.account.loggedIn ? '' : 'NAS 下载需要先登录账号。'}</p>
@@ -1359,8 +1364,7 @@ function renderDownloadSheet() {
   }
   if (downloadMode === 'remote') {
     const servers = asArray(remoteServers);
-    sheet.innerHTML = `<p class="dl-remote-tip">选择要传到哪台服务器。下载完成后会自动上传，并在服务器上按剧名建同名文件夹。</p>
-      <div class="download-pick">${servers.map(s => `<button type="button" class="download-pick-option" data-dl-remote="${esc(s.id)}"><strong>${esc(s.name)}</strong><small>${esc(s.typeName)} · ${esc(s.address)}</small></button>`).join('')}</div>
+    sheet.innerHTML = `<div class="download-pick">${servers.map(s => `<button type="button" class="download-pick-option" data-dl-remote="${esc(s.id)}"><strong>${esc(s.name)}</strong><small>${esc(s.typeName)} · ${esc(s.address)}</small></button>`).join('')}</div>
       <div class="download-sheet-buttons"><button type="button" class="dl-secondary" data-dl-back-target="1">返回</button></div>`;
     return;
   }
@@ -1456,11 +1460,10 @@ async function submitDownloadTo(target, remoteId) {
         // 远程服务器：先照常下到手机（同一条链路），下载+合并完成后原生自动上传到所选服务器
         const targetRemote = target === 'remote' ? String(remoteId || '') : '';
         await api('download-start', { source: sourceNow, title: state.detail.title, episodes: resolved, debug, cover: state.detail.cover || '', remoteId: targetRemote });
-        const server = targetRemote ? asArray(remoteServers).find(s => String(s.id) === targetRemote) : null;
         toast(debug
           ? `调试模式已开始（${resolved.length} 集）：分片下完后会导出「第NN集_调试包.zip」到 Download/Veyra/${state.detail.title}`
           : targetRemote
-            ? `已开始下载 ${resolved.length} 集，完成后自动传到「${server ? server.name : '远程服务器'}」`
+            ? `已开始下载 ${resolved.length} 集`
             : `判定[源=${sourceNow} 通道=${proxyModeNow}] 已开始下载到手机（手机经代理拉源合并）`);
       }
     }

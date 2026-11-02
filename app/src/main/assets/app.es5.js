@@ -160,11 +160,11 @@ const icon = (name) => {
     back: '<path d="m15 5-7 7 7 7"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'
   };
-  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'.concat(paths[name], "</svg>");
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`;
 };
 function toast(message, info = false) {
   clearTimeout(toastTimer);
-  toastHost.innerHTML = '<div class="toast '.concat(info ? "info" : "", '"><i></i><span>').concat(esc(message), "</span></div>");
+  toastHost.innerHTML = `<div class="toast ${info ? "info" : ""}"><i></i><span>${esc(message)}</span></div>`;
   toastHost.classList.add("visible");
   toastTimer = setTimeout(() => toastHost.classList.remove("visible"), 3e3);
 }
@@ -211,7 +211,7 @@ function setAccount(profile) {
   if (profile == null ? void 0 : profile.avatar) avatarImage.src = profile.avatar;
   else avatarImage.removeAttribute("src");
   avatarButton.classList.toggle("is-signed-in", Boolean(profile == null ? void 0 : profile.loggedIn));
-  avatarButton.setAttribute("aria-label", (profile == null ? void 0 : profile.loggedIn) ? "\u6253\u5F00".concat(profile.username, "\u7684\u8D26\u53F7\u7BA1\u7406") : "\u767B\u5F55\u8D26\u53F7");
+  avatarButton.setAttribute("aria-label", (profile == null ? void 0 : profile.loggedIn) ? `\u6253\u5F00${profile.username}\u7684\u8D26\u53F7\u7BA1\u7406` : "\u767B\u5F55\u8D26\u53F7");
   const roleBadge = document.getElementById("account-role-badge");
   if (roleBadge) {
     const role = (profile == null ? void 0 : profile.role) === "admin" ? "admin" : (profile == null ? void 0 : profile.role) === "vip" ? "vip" : "user";
@@ -235,7 +235,7 @@ api("server-base").then((serverBase) => {
 }).catch(() => {
 });
 window.hgWindowInsets = (height) => {
-  document.getElementById("app").style.setProperty("--status-bar-height", "".concat(Math.max(0, Number(height) || 0), "px"));
+  document.getElementById("app").style.setProperty("--status-bar-height", `${Math.max(0, Number(height) || 0)}px`);
 };
 api("window-insets").then(window.hgWindowInsets).catch(() => {
 });
@@ -243,7 +243,7 @@ api("screen-corners").then((corners) => {
   const app = document.getElementById("app");
   for (const name of ["topLeft", "topRight", "bottomRight", "bottomLeft"]) {
     const radius = Number(corners == null ? void 0 : corners[name]);
-    if (radius > 0) app.style.setProperty("--screen-corner-".concat(name), "".concat(radius, "px"));
+    if (radius > 0) app.style.setProperty(`--screen-corner-${name}`, `${radius}px`);
   }
 }).catch(() => {
 });
@@ -466,11 +466,11 @@ function setAvailableUpdate(result) {
   const versionButton = content.querySelector(".app-version");
   if (versionButton) {
     versionButton.classList.toggle("has-update", Boolean(updateAvailable));
-    versionButton.setAttribute("aria-label", updateAvailable ? "\u5F53\u524D\u7248\u672C ".concat(appVersion, "\uFF0C\u53D1\u73B0\u65B0\u7248 ").concat(updateAvailable.version, "\uFF0C\u67E5\u770B\u66F4\u65B0") : "\u5F53\u524D\u7248\u672C ".concat(appVersion, "\uFF0C\u68C0\u67E5\u66F4\u65B0"));
+    versionButton.setAttribute("aria-label", updateAvailable ? `\u5F53\u524D\u7248\u672C ${appVersion}\uFF0C\u53D1\u73B0\u65B0\u7248 ${updateAvailable.version}\uFF0C\u67E5\u770B\u66F4\u65B0` : `\u5F53\u524D\u7248\u672C ${appVersion}\uFF0C\u68C0\u67E5\u66F4\u65B0`);
   }
 }
 function showUpdate(result) {
-  document.getElementById("update-version").textContent = "\u5F53\u524D ".concat(result.currentVersion, " \xB7 \u65B0\u7248 ").concat(result.version);
+  document.getElementById("update-version").textContent = `\u5F53\u524D ${result.currentVersion} \xB7 \u65B0\u7248 ${result.version}`;
   const notes = document.getElementById("update-notes");
   notes.textContent = String(result.notes || "").trim().slice(0, 1200);
   notes.hidden = !notes.textContent;
@@ -511,7 +511,7 @@ async function checkUpdate(manual) {
       }
     } else if (result.status === "current" || result.status === "unpublished" || result.status === "none") {
       setAvailableUpdate(null);
-      if (manual && result.status === "current") toast("\u5DF2\u662F\u6700\u65B0\u7248\u672C ".concat(result.version));
+      if (manual && result.status === "current") toast(`\u5DF2\u662F\u6700\u65B0\u7248\u672C ${result.version}`);
       if (manual && result.status === "unpublished") toast("\u6682\u672A\u53D1\u5E03\u66F4\u65B0\u5305", true);
     } else if (result.status === "channel-missing") {
       setAvailableUpdate(null);
@@ -526,8 +526,8 @@ async function checkUpdate(manual) {
 }
 window.hgUpdateProgress = (percent) => {
   document.getElementById("update-progress").hidden = false;
-  document.getElementById("update-percent").textContent = "".concat(percent, "%");
-  document.getElementById("update-fill").style.transform = "scaleX(".concat(percent / 100, ")");
+  document.getElementById("update-percent").textContent = `${percent}%`;
+  document.getElementById("update-fill").style.transform = `scaleX(${percent / 100})`;
 };
 window.hgUpdateInstallPermissionDenied = () => toast("\u8BF7\u5141\u8BB8\u6B64\u5E94\u7528\u5B89\u88C5\u66F4\u65B0\u5305\u540E\u91CD\u8BD5", true);
 window.hgUpdateInstallError = () => toast("\u65E0\u6CD5\u6253\u5F00\u7CFB\u7EDF\u5B89\u88C5\u7A0B\u5E8F\uFF0C\u8BF7\u91CD\u8BD5", true);
@@ -582,20 +582,25 @@ function itemCard(item) {
   const id = esc(item.id);
   const title = esc(item.title || "\u5F71\u7247");
   const info = esc(item.episodeLabel || asArray(item.tags).slice(0, 2).join(" \xB7 ") || "\u6253\u5F00\u8BE6\u60C5");
-  return '<button class="film-card" type="button" data-open-id="'.concat(id, '" aria-label="\u67E5\u770B').concat(title, '">\n    <span class="poster loading"><span class="poster-letter">').concat(title.slice(0, 1), '</span><img data-cover="').concat(esc(item.cover || ""), '" alt=""><span class="poster-score" ').concat(item.score ? "" : "hidden", ">").concat(esc(item.score || ""), '</span></span>\n    <span class="film-title">').concat(title, '</span><span class="film-info">').concat(info, "</span></button>");
+  return `<button class="film-card" type="button" data-open-id="${id}" aria-label="\u67E5\u770B${title}">
+    <span class="poster loading"><span class="poster-letter">${title.slice(0, 1)}</span><img data-cover="${esc(item.cover || "")}" alt=""><span class="poster-score" ${item.score ? "" : "hidden"}>${esc(item.score || "")}</span></span>
+    <span class="film-title">${title}</span><span class="film-info">${info}</span></button>`;
 }
 function moreCard(kind) {
-  return '<button class="film-card more-tile" type="button" data-more="'.concat(esc(kind), '" aria-label="\u67E5\u770B\u66F4\u591A\u63A8\u8350">\n    <span class="poster more-poster"><span class="more-tile-label">\u66F4\u591A\u63A8\u8350 ').concat(icon("arrow"), '</span></span>\n    <span class="film-title">\u67E5\u770B\u5168\u90E8</span><span class="film-info">\u6253\u5F00\u5B8C\u6574\u5217\u8868</span></button>');
+  return `<button class="film-card more-tile" type="button" data-more="${esc(kind)}" aria-label="\u67E5\u770B\u66F4\u591A\u63A8\u8350">
+    <span class="poster more-poster"><span class="more-tile-label">\u66F4\u591A\u63A8\u8350 ${icon("arrow")}</span></span>
+    <span class="film-title">\u67E5\u770B\u5168\u90E8</span><span class="film-info">\u6253\u5F00\u5B8C\u6574\u5217\u8868</span></button>`;
 }
 function section(title, items, kind = "") {
   if (!items.length) return "";
   const cells = items.slice(0, 5).map(itemCard);
   if (kind) cells.push(moreCard(kind));
-  return '<section class="film-section"><div class="section-heading"><h2>'.concat(esc(title), '</h2></div><div class="film-row">').concat(cells.join(""), "</div></section>");
+  return `<section class="film-section"><div class="section-heading"><h2>${esc(title)}</h2></div><div class="film-row">${cells.join("")}</div></section>`;
 }
 function homeTagBar() {
   const choices = privateMode() ? popularTags : publicPopularTags;
-  return '<nav class="home-tags" aria-label="\u6309\u7C7B\u578B\u6D4F\u89C8"><button type="button" class="all-tags-link" data-all-tags="1">\u5168\u90E8\u7C7B\u578B '.concat(icon("arrow"), '</button>\n    <div class="home-tag-scroll">').concat(choices.map(([slug, name]) => '<button type="button" class="home-tag" data-tag-slug="'.concat(slug, '" data-tag-name="').concat(name, '">').concat(name, "</button>")).join(""), "</div></nav>");
+  return `<nav class="home-tags" aria-label="\u6309\u7C7B\u578B\u6D4F\u89C8"><button type="button" class="all-tags-link" data-all-tags="1">\u5168\u90E8\u7C7B\u578B ${icon("arrow")}</button>
+    <div class="home-tag-scroll">${choices.map(([slug, name]) => `<button type="button" class="home-tag" data-tag-slug="${slug}" data-tag-name="${name}">${name}</button>`).join("")}</div></nav>`;
 }
 function homeSignature(data) {
   var _a2, _b2;
@@ -630,7 +635,7 @@ function paletteFromImage(image) {
     hue = (hue * 60 + 360) % 360;
   }
   const saturation = Math.round(Math.max(17, Math.min(32, difference / Math.max(max, 0.01) * 75)));
-  return { light: "hsl(".concat(Math.round(hue), " ").concat(saturation, "% 62%)"), dark: "hsl(".concat(Math.round(hue), " ").concat(Math.min(34, saturation + 2), "% 25%)") };
+  return { light: `hsl(${Math.round(hue)} ${saturation}% 62%)`, dark: `hsl(${Math.round(hue)} ${Math.min(34, saturation + 2)}% 25%)` };
 }
 function applyBannerPalette(image) {
   const slide = image.closest(".hero-slide") || image.closest(".hero");
@@ -836,7 +841,7 @@ function restoreBannerIndex() {
   else if (state.route === "home") state.banner = index;
 }
 function categorySlide(item, index, count) {
-  return '<div class="hero-slide" data-index="'.concat(index, '"><img class="hero-image" data-cover="').concat(esc(item.cover || ""), '" alt=""><button class="hero-cover-button" type="button" data-open-id="').concat(esc(item.id), '" aria-label="\u67E5\u770B').concat(esc(item.title), '\u8BE6\u60C5"></button><div class="hero-shade"></div><div class="category-spotlight-copy"><h2>').concat(esc(item.title), '</h2><button type="button" data-open-id="').concat(esc(item.id), '">\u67E5\u770B\u4F5C\u54C1 ').concat(icon("arrow"), '</button></div><div class="hero-index"><b>').concat(String(index + 1).padStart(2, "0"), "</b> / ").concat(String(count).padStart(2, "0"), "</div></div>");
+  return `<div class="hero-slide" data-index="${index}"><img class="hero-image" data-cover="${esc(item.cover || "")}" alt=""><button class="hero-cover-button" type="button" data-open-id="${esc(item.id)}" aria-label="\u67E5\u770B${esc(item.title)}\u8BE6\u60C5"></button><div class="hero-shade"></div><div class="category-spotlight-copy"><h2>${esc(item.title)}</h2><button type="button" data-open-id="${esc(item.id)}">\u67E5\u770B\u4F5C\u54C1 ${icon("arrow")}</button></div><div class="hero-index"><b>${String(index + 1).padStart(2, "0")}</b> / ${String(count).padStart(2, "0")}</div></div>`;
 }
 function stopBannerAuto() {
   clearTimeout(bannerTimer);
@@ -866,7 +871,9 @@ document.addEventListener("visibilitychange", () => {
 });
 function heroSlide(item, index, count) {
   if (item.kind === "campaign") return campaignSlide(item, index, count);
-  return '<div class="hero-slide" data-index="'.concat(index, '"><img class="hero-image" data-cover="').concat(esc(item.cover || ""), '" alt=""><button class="hero-cover-button" type="button" data-open-id="').concat(esc(item.id || ""), '" aria-label="\u67E5\u770B').concat(esc(item.title || "\u4F5C\u54C1"), '\u8BE6\u60C5"></button><div class="hero-shade"></div>\n    <div class="hero-copy"><span class="hero-label">\u672C\u5468\u7126\u70B9 <i></i> \u72EC\u5BB6\u7CBE\u9009</span><h2>').concat(esc(item.title || "\u4E3A\u4F60\u63A8\u8350"), "</h2><p>").concat(esc(item.description || item.episodeLabel || ""), '</p><button class="hero-action" data-open-id="').concat(esc(item.id || ""), '" type="button">').concat(icon("play"), ' \u7ACB\u5373\u89C2\u770B</button></div>\n    <div class="hero-index"><b>').concat(String(index + 1).padStart(2, "0"), "</b> / ").concat(String(count).padStart(2, "0"), "</div></div>");
+  return `<div class="hero-slide" data-index="${index}"><img class="hero-image" data-cover="${esc(item.cover || "")}" alt=""><button class="hero-cover-button" type="button" data-open-id="${esc(item.id || "")}" aria-label="\u67E5\u770B${esc(item.title || "\u4F5C\u54C1")}\u8BE6\u60C5"></button><div class="hero-shade"></div>
+    <div class="hero-copy"><span class="hero-label">\u672C\u5468\u7126\u70B9 <i></i> \u72EC\u5BB6\u7CBE\u9009</span><h2>${esc(item.title || "\u4E3A\u4F60\u63A8\u8350")}</h2><p>${esc(item.description || item.episodeLabel || "")}</p><button class="hero-action" data-open-id="${esc(item.id || "")}" type="button">${icon("play")} \u7ACB\u5373\u89C2\u770B</button></div>
+    <div class="hero-index"><b>${String(index + 1).padStart(2, "0")}</b> / ${String(count).padStart(2, "0")}</div></div>`;
 }
 async function changeBanner(targetIndex, direction, automatic = false) {
   const slides = bannerSlides();
@@ -886,7 +893,7 @@ async function changeBanner(targetIndex, direction, automatic = false) {
     const image = incoming.querySelector("img");
     image.src = data;
     if (!hero.isConnected || !currentRoute()) return;
-    incoming.style.transform = "translateX(".concat(direction > 0 ? 100 : -100, "%)");
+    incoming.style.transform = `translateX(${direction > 0 ? 100 : -100}%)`;
     hero.appendChild(incoming);
     await image.decode();
     if (!hero.isConnected || !currentRoute()) {
@@ -899,7 +906,7 @@ async function changeBanner(targetIndex, direction, automatic = false) {
     incoming.classList.add("animating");
     current.classList.add("animating");
     incoming.style.transform = "translateX(0)";
-    current.style.transform = "translateX(".concat(direction > 0 ? -100 : 100, "%)");
+    current.style.transform = `translateX(${direction > 0 ? -100 : 100}%)`;
     await new Promise((resolve) => setTimeout(resolve, 330));
     current.remove();
     incoming.classList.remove("animating");
@@ -932,8 +939,13 @@ function continueWatchingMarkup() {
   const total = Number(item.episodeCount) || 0;
   const finished = Boolean(item.completed) && total > 0 && episode >= total;
   const seconds = Math.floor(Math.max(0, Number(item.position) || 0) / 1e3);
-  const time = "".concat(String(Math.floor(seconds / 60)).padStart(2, "0"), ":").concat(String(seconds % 60).padStart(2, "0"));
-  return '<section class="continue-section"><div class="section-heading"><h2>\u7EE7\u7EED\u89C2\u770B</h2><button type="button" class="more" data-all-history="1">\u5168\u90E8\u5386\u53F2 '.concat(icon("arrow"), '</button></div>\n    <button type="button" class="continue-card" data-continue-id="').concat(esc(item.id), '" aria-label="').concat(esc(item.title), "\uFF0C").concat(finished ? "\u6253\u5F00\u8BE6\u60C5" : "\u7EE7\u7EED\u89C2\u770B", '">\n      <span class="continue-poster poster loading"><span class="poster-letter">').concat(esc(String(item.title || "\u5F71\u7247").slice(0, 1)), '</span><img data-cover="').concat(esc(item.cover || ""), '" alt=""></span>\n      <span class="continue-copy"><strong>').concat(esc(item.title || "\u5F71\u7247"), "</strong><span>\u5DF2\u770B\u5230\u7B2C ").concat(episode, " \u96C6").concat(total ? " \xB7 \u5171 ".concat(total, " \u96C6") : "", '</span><span class="continue-time">').concat(finished ? "\u5168\u5267\u5DF2\u770B\u5B8C" : item.completed ? "\u672C\u96C6\u5DF2\u770B\u5B8C\uFF0C\u63A5\u7740\u770B\u4E0B\u4E00\u96C6" : "\u4E0A\u6B21\u770B\u5230 ".concat(time), '</span></span>\n      <span class="continue-action">').concat(icon("play")).concat(finished ? "\u8BE6\u60C5" : item.completed ? "\u7EE7\u7EED\u770B" : "\u7EED\u64AD", "</span>\n    </button></section>");
+  const time = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+  return `<section class="continue-section"><div class="section-heading"><h2>\u7EE7\u7EED\u89C2\u770B</h2><button type="button" class="more" data-all-history="1">\u5168\u90E8\u5386\u53F2 ${icon("arrow")}</button></div>
+    <button type="button" class="continue-card" data-continue-id="${esc(item.id)}" aria-label="${esc(item.title)}\uFF0C${finished ? "\u6253\u5F00\u8BE6\u60C5" : "\u7EE7\u7EED\u89C2\u770B"}">
+      <span class="continue-poster poster loading"><span class="poster-letter">${esc(String(item.title || "\u5F71\u7247").slice(0, 1))}</span><img data-cover="${esc(item.cover || "")}" alt=""></span>
+      <span class="continue-copy"><strong>${esc(item.title || "\u5F71\u7247")}</strong><span>\u5DF2\u770B\u5230\u7B2C ${episode} \u96C6${total ? ` \xB7 \u5171 ${total} \u96C6` : ""}</span><span class="continue-time">${finished ? "\u5168\u5267\u5DF2\u770B\u5B8C" : item.completed ? "\u672C\u96C6\u5DF2\u770B\u5B8C\uFF0C\u63A5\u7740\u770B\u4E0B\u4E00\u96C6" : `\u4E0A\u6B21\u770B\u5230 ${time}`}</span></span>
+      <span class="continue-action">${icon("play")}${finished ? "\u8BE6\u60C5" : item.completed ? "\u7EE7\u7EED\u770B" : "\u7EED\u64AD"}</span>
+    </button></section>`;
 }
 function updateContinueWatching() {
   const host = content.querySelector(".home-continue");
@@ -977,7 +989,12 @@ function renderHome() {
   const slides = homeSlides();
   const index = Math.min(state.banner, Math.max(0, slides.length - 1));
   const selected = slides[index] || {};
-  content.innerHTML = '<div class="home-page"><div class="hero" data-hero="1">'.concat(heroSlide(selected, index, slides.length), '</div>\n      <div class="hero-dots">').concat(slides.map((_, i) => '<i class="'.concat(i === index ? "active" : "", '" data-slide="').concat(i, '"></i>')).join(""), "</div>\n      ").concat(homeTagBar(), '\n      <div class="home-continue">').concat(continueWatchingMarkup(), "</div>\n      ").concat(section("\u7CBE\u9009\u63A8\u8350", asArray(data.homepageRecommend).length ? asArray(data.homepageRecommend) : asArray((_a2 = data.recommend) == null ? void 0 : _a2.items).slice(0, 12), "recommend"), "\n      ").concat(section(privateMode() ? "\u6700\u8FD1\u4E0A\u65B0" : "\u70ED\u95E8\u6F2B\u5267", asArray(data.homepageNewest).length ? asArray(data.homepageNewest) : asArray((_b2 = data.newest) == null ? void 0 : _b2.items).slice(0, 12), "newest"), "</div>");
+  content.innerHTML = `<div class="home-page"><div class="hero" data-hero="1">${heroSlide(selected, index, slides.length)}</div>
+      <div class="hero-dots">${slides.map((_, i) => `<i class="${i === index ? "active" : ""}" data-slide="${i}"></i>`).join("")}</div>
+      ${homeTagBar()}
+      <div class="home-continue">${continueWatchingMarkup()}</div>
+      ${section("\u7CBE\u9009\u63A8\u8350", asArray(data.homepageRecommend).length ? asArray(data.homepageRecommend) : asArray((_a2 = data.recommend) == null ? void 0 : _a2.items).slice(0, 12), "recommend")}
+      ${section(privateMode() ? "\u6700\u8FD1\u4E0A\u65B0" : "\u70ED\u95E8\u6F2B\u5267", asArray(data.homepageNewest).length ? asArray(data.homepageNewest) : asArray((_b2 = data.newest) == null ? void 0 : _b2.items).slice(0, 12), "newest")}</div>`;
   hydrateImages();
   slides.forEach((item) => {
     if (item.cover) getCover(item.cover).catch(() => {
@@ -993,13 +1010,14 @@ function renderTags() {
   const groups = sections.map(([id, title]) => {
     const members = tags.filter((tag) => tag.group === id);
     if (!members.length) return "";
-    return '<section class="tags-group"><h2>'.concat(title, '</h2><div class="tags-grid">').concat(members.map((tag) => {
+    return `<section class="tags-group"><h2>${title}</h2><div class="tags-grid">${members.map((tag) => {
       const name = String(tag.name || tag.slug);
       const size = name.length > 8 ? "wide" : name.length > 4 ? "medium" : "";
-      return '<button type="button" class="tag-choice '.concat(size, '" data-tag-slug="').concat(esc(tag.slug), '" data-tag-name="').concat(esc(name), '">').concat(esc(name), "</button>");
-    }).join(""), "</div></section>");
+      return `<button type="button" class="tag-choice ${size}" data-tag-slug="${esc(tag.slug)}" data-tag-name="${esc(name)}">${esc(name)}</button>`;
+    }).join("")}</div></section>`;
   }).join("");
-  content.innerHTML = '<div class="tags-page"><div class="tags-heading"><button type="button" data-back="1" aria-label="\u8FD4\u56DE\u4E0A\u4E00\u9875">'.concat(icon("back"), "</button><h1>\u5168\u90E8\u7C7B\u578B</h1><span>").concat(tags.length, " \u4E2A").concat(privateMode() ? "\u6807\u7B7E" : "\u5927\u7C7B", '</span></div>\n    <p class="tags-intro">').concat(privateMode() ? "\u70B9\u9009\u6807\u7B7E\uFF0C\u53D1\u73B0\u76F8\u5173\u4F5C\u54C1" : "\u6309\u77ED\u5267\u3001\u6F2B\u5267\u5927\u7C7B\uFF0C\u53D1\u73B0\u76F8\u5173\u4F5C\u54C1", "</p>").concat(groups, "</div>");
+  content.innerHTML = `<div class="tags-page"><div class="tags-heading"><button type="button" data-back="1" aria-label="\u8FD4\u56DE\u4E0A\u4E00\u9875">${icon("back")}</button><h1>\u5168\u90E8\u7C7B\u578B</h1><span>${tags.length} \u4E2A${privateMode() ? "\u6807\u7B7E" : "\u5927\u7C7B"}</span></div>
+    <p class="tags-intro">${privateMode() ? "\u70B9\u9009\u6807\u7B7E\uFF0C\u53D1\u73B0\u76F8\u5173\u4F5C\u54C1" : "\u6309\u77ED\u5267\u3001\u6F2B\u5267\u5927\u7C7B\uFF0C\u53D1\u73B0\u76F8\u5173\u4F5C\u54C1"}</p>${groups}</div>`;
 }
 function refreshMissingImages(items) {
   const byId = new Map(items.filter((item) => (item == null ? void 0 : item.id) && (item == null ? void 0 : item.cover)).map((item) => [String(item.id), item.cover]));
@@ -1020,7 +1038,7 @@ function compactMarkup() {
   if (!privateMode()) return "";
   const adult = state.tab === "adult";
   const tabs = privateMode() ? adult ? ["\u6210\u4EBA\u77ED\u5267", "\u6210\u4EBA\u6F2B\u5267"] : ["AI\u6362\u8138", "AI\u9B54\u6539"] : [adult ? "\u77ED\u5267" : "\u6F2B\u5267"];
-  return "<strong>".concat(privateMode() ? adult ? "\u6210\u4EBA\u5267\u573A" : "AI\u4E13\u533A" : adult ? "\u77ED\u5267" : "\u6F2B\u5267", '</strong><div class="compact-tabs" role="tablist">').concat(tabs.map((name, index) => '<button type="button" role="tab" aria-selected="'.concat(index === state.sub[state.tab], '" data-sub="').concat(index, '" class="').concat(index === state.sub[state.tab] ? "selected" : "", '">').concat(name, "</button>")).join(""), "</div>");
+  return `<strong>${privateMode() ? adult ? "\u6210\u4EBA\u5267\u573A" : "AI\u4E13\u533A" : adult ? "\u77ED\u5267" : "\u6F2B\u5267"}</strong><div class="compact-tabs" role="tablist">${tabs.map((name, index) => `<button type="button" role="tab" aria-selected="${index === state.sub[state.tab]}" data-sub="${index}" class="${index === state.sub[state.tab] ? "selected" : ""}">${name}</button>`).join("")}</div>`;
 }
 function updateCompact() {
   var _a2;
@@ -1044,9 +1062,13 @@ function renderCategory(keepCompact = false) {
   const slides = privateMode() ? [] : items.slice(0, 5);
   const banner = Math.min(state.categoryBanner, Math.max(0, slides.length - 1));
   state.categoryBanner = banner;
-  const spotlight = !privateMode() && slides.length ? '<div class="hero category-spotlight category-carousel">'.concat(categorySlide(slides[banner], banner, slides.length), '</div><div class="hero-dots">').concat(slides.map((_, index) => '<i class="'.concat(index === banner ? "active" : "", '" data-slide="').concat(index, '"></i>')).join(""), "</div>") : lead ? '<div class="category-spotlight"><img data-cover="'.concat(esc(lead.cover), '" alt=""><div class="category-spotlight-copy"><h2>').concat(esc(lead.title), '</h2><button type="button" data-open-id="').concat(esc(lead.id), '">\u67E5\u770B\u4F5C\u54C1 ').concat(icon("arrow"), "</button></div></div>") : "";
-  const switcher = privateMode() ? '<div class="segmented" role="tablist">'.concat(tabs.map((name, index) => '<button type="button" role="tab" data-sub="'.concat(index, '" aria-selected="').concat(index === state.sub[state.tab], '" class="').concat(index === state.sub[state.tab] ? "selected" : "", '">').concat(name, "</button>")).join(""), "</div>") : "";
-  content.innerHTML = '<div class="category-page"><div class="category-head"><h1>'.concat(privateMode() ? adult ? "\u6210\u4EBA\u5267\u573A" : "AI\u4E13\u533A" : adult ? "\u77ED\u5267" : "\u6F2B\u5267", "</h1><p>").concat(privateMode() ? adult ? "\u77ED\u5267\u4E0E\u6F2B\u5267\uFF0C\u8D70\u8FDB\u4E0D\u540C\u7684\u4EBA\u751F\u3002" : "\u6362\u8138\u4E0E\u9B54\u6539\uFF0C\u63A2\u7D22\u5F71\u50CF\u65B0\u53EF\u80FD\u3002" : adult ? "\u771F\u4EBA\u6F14\u7684\u770B\u4E86\u4E0D\u70E7\u5FC3" : "\u63A2\u7D22\u70ED\u95E8\u6F2B\u5267\u3002", "</p></div>\n    ").concat(switcher, "\n    ").concat(spotlight, '\n    <section class="category-section"><div class="section-heading"><h2>').concat(tabs[state.sub[state.tab]], '\u4F5C\u54C1</h2><span class="category-count">\u5DF2\u663E\u793A ').concat(items.length, ' \u90E8</span></div>\n    <div class="search-grid category-grid">').concat(items.map(itemCard).join(""), '</div><div class="category-footer">').concat(categoryFooter(), "</div></section></div>");
+  const spotlight = !privateMode() && slides.length ? `<div class="hero category-spotlight category-carousel">${categorySlide(slides[banner], banner, slides.length)}</div><div class="hero-dots">${slides.map((_, index) => `<i class="${index === banner ? "active" : ""}" data-slide="${index}"></i>`).join("")}</div>` : lead ? `<div class="category-spotlight"><img data-cover="${esc(lead.cover)}" alt=""><div class="category-spotlight-copy"><h2>${esc(lead.title)}</h2><button type="button" data-open-id="${esc(lead.id)}">\u67E5\u770B\u4F5C\u54C1 ${icon("arrow")}</button></div></div>` : "";
+  const switcher = privateMode() ? `<div class="segmented" role="tablist">${tabs.map((name, index) => `<button type="button" role="tab" data-sub="${index}" aria-selected="${index === state.sub[state.tab]}" class="${index === state.sub[state.tab] ? "selected" : ""}">${name}</button>`).join("")}</div>` : "";
+  content.innerHTML = `<div class="category-page"><div class="category-head"><h1>${privateMode() ? adult ? "\u6210\u4EBA\u5267\u573A" : "AI\u4E13\u533A" : adult ? "\u77ED\u5267" : "\u6F2B\u5267"}</h1><p>${privateMode() ? adult ? "\u77ED\u5267\u4E0E\u6F2B\u5267\uFF0C\u8D70\u8FDB\u4E0D\u540C\u7684\u4EBA\u751F\u3002" : "\u6362\u8138\u4E0E\u9B54\u6539\uFF0C\u63A2\u7D22\u5F71\u50CF\u65B0\u53EF\u80FD\u3002" : adult ? "\u771F\u4EBA\u6F14\u7684\u770B\u4E86\u4E0D\u70E7\u5FC3" : "\u63A2\u7D22\u70ED\u95E8\u6F2B\u5267\u3002"}</p></div>
+    ${switcher}
+    ${spotlight}
+    <section class="category-section"><div class="section-heading"><h2>${tabs[state.sub[state.tab]]}\u4F5C\u54C1</h2><span class="category-count">\u5DF2\u663E\u793A ${items.length} \u90E8</span></div>
+    <div class="search-grid category-grid">${items.map(itemCard).join("")}</div><div class="category-footer">${categoryFooter()}</div></section></div>`;
   compact.innerHTML = compactMarkup();
   scroll.scrollTop = keepCompact ? 150 : 0;
   state.compactHeld = keepCompact;
@@ -1098,9 +1120,24 @@ function renderLibrary() {
     const completed = Boolean(item.completed);
     const episode = Number(item.episode) || 1;
     const percentage = completed ? 100 : Math.max(0, Math.min(100, item.duration ? item.position / item.duration * 100 : 0));
-    return '<button type="button" class="history-card" data-history-id="'.concat(esc(item.id), '" data-history-episode="').concat(episode, '" data-history-completed="').concat(completed, '" aria-label="').concat(esc(item.title), "\uFF0C\u7B2C ").concat(episode, " \u96C6\uFF0C").concat(completed ? "\u5DF2\u770B\u5B8C\uFF0C\u6253\u5F00\u8BE6\u60C5" : "\u7EE7\u7EED\u89C2\u770B", '">\n      <span class="history-poster poster loading"><span class="poster-letter">').concat(esc(String(item.title || "\u5F71\u7247").slice(0, 1)), '</span><img data-cover="').concat(esc(item.cover || ""), '" alt=""></span><span class="history-copy"><span class="history-status">').concat(completed ? "\u5DF2\u770B\u5B8C" : "\u7EE7\u7EED\u89C2\u770B", " \xB7 \u7B2C ").concat(episode, " \u96C6</span>\n      <strong>").concat(esc(item.title || "\u5F71\u7247"), '</strong><span class="progress"><i style="width:').concat(percentage, '%"></i></span><span class="history-hint">').concat(completed ? "\u6253\u5F00\u8BE6\u60C5\u9009\u62E9\u5267\u96C6" : "\u5DF2\u770B ".concat(Math.floor(item.position / 6e4), " \u5206\u949F"), "</span></span></button>");
+    return `<button type="button" class="history-card" data-history-id="${esc(item.id)}" data-history-episode="${episode}" data-history-completed="${completed}" aria-label="${esc(item.title)}\uFF0C\u7B2C ${episode} \u96C6\uFF0C${completed ? "\u5DF2\u770B\u5B8C\uFF0C\u6253\u5F00\u8BE6\u60C5" : "\u7EE7\u7EED\u89C2\u770B"}">
+      <span class="history-poster poster loading"><span class="poster-letter">${esc(String(item.title || "\u5F71\u7247").slice(0, 1))}</span><img data-cover="${esc(item.cover || "")}" alt=""></span><span class="history-copy"><span class="history-status">${completed ? "\u5DF2\u770B\u5B8C" : "\u7EE7\u7EED\u89C2\u770B"} \xB7 \u7B2C ${episode} \u96C6</span>
+      <strong>${esc(item.title || "\u5F71\u7247")}</strong><span class="progress"><i style="width:${percentage}%"></i></span><span class="history-hint">${completed ? "\u6253\u5F00\u8BE6\u60C5\u9009\u62E9\u5267\u96C6" : `\u5DF2\u770B ${Math.floor(item.position / 6e4)} \u5206\u949F`}</span></span></button>`;
   }).join("");
-  content.innerHTML = '<div class="library-page"><div class="my-heading"><h1>\u6211\u7684</h1></div>\n    '.concat(state.account.loggedIn ? "" : '<button type="button" class="my-account" data-account-action="1">\u70B9\u51FB\u5934\u50CF\u767B\u5F55\uFF0C\u540C\u6B65\u6536\u85CF\u548C\u89C2\u770B\u5386\u53F2 '.concat(icon("arrow"), "</button>"), "\n    ").concat(query ? '<div class="library-results"><p class="library-count">\u5728\u89C2\u770B\u5386\u53F2\u4E2D\u627E\u5230 '.concat(progress.length, " \u90E8\uFF0C\u5728\u6211\u7684\u6536\u85CF\u4E2D\u627E\u5230 ").concat(bookmarks.length, " \u90E8</p>\n      <h2>\u89C2\u770B\u5386\u53F2</h2>").concat(progress.length ? '<div class="history-list">'.concat(historyCards, "</div>") : '<p class="library-no-match">\u6CA1\u6709\u5339\u914D\u7684\u89C2\u770B\u8BB0\u5F55</p>', "\n      <h2>\u6211\u7684\u6536\u85CF</h2>").concat(bookmarks.length ? '<div class="search-grid library-bookmark-grid">'.concat(bookmarks.map(itemCard).join(""), "</div>") : '<p class="library-no-match">\u6CA1\u6709\u5339\u914D\u7684\u6536\u85CF</p>', "</div>") : downloadsActive ? '\n    <div class="segmented library-tabs" role="tablist" aria-label="\u6211\u7684\u7247\u5355\u5206\u7C7B"><button type="button" role="tab" data-library-tab="history" aria-selected="'.concat(false, '" class="">\u89C2\u770B\u5386\u53F2</button>\n    <button type="button" role="tab" data-library-tab="bookmarks" aria-selected="').concat(false, '" class="">\u6211\u7684\u6536\u85CF</button>\n    <button type="button" role="tab" data-library-tab="downloads" aria-selected="').concat(true, '" class="selected">\u6211\u7684\u4E0B\u8F7D</button></div>\n    <div id="library-downloads"><p class="page-loading">\u6B63\u5728\u52A0\u8F7D\u2026</p></div>') : '\n    <div class="segmented library-tabs" role="tablist" aria-label="\u6211\u7684\u7247\u5355\u5206\u7C7B"><button type="button" role="tab" data-library-tab="history" aria-selected="'.concat(historyActive, '" class="').concat(historyActive ? "selected" : "", '">\u89C2\u770B\u5386\u53F2</button>\n    <button type="button" role="tab" data-library-tab="bookmarks" aria-selected="').concat(!historyActive, '" class="').concat(!historyActive ? "selected" : "", '">\u6211\u7684\u6536\u85CF</button>\n    <button type="button" role="tab" data-library-tab="downloads" aria-selected="').concat(false, '" class="">\u6211\u7684\u4E0B\u8F7D</button></div>\n    <p class="library-count">').concat(historyActive ? "\u6700\u8FD1\u89C2\u770B\u7684 ".concat(progress.length, " \u90E8\u4F5C\u54C1") : "\u5DF2\u6536\u85CF ".concat(bookmarks.length, " \u90E8\u4F5C\u54C1"), "</p>\n    ").concat(historyActive ? progress.length ? '<div class="history-list">'.concat(historyCards, "</div>") : '<div class="empty-state">\u8FD8\u6CA1\u6709\u89C2\u770B\u8BB0\u5F55\uFF0C\u64AD\u653E\u4F5C\u54C1\u540E\u4F1A\u51FA\u73B0\u5728\u8FD9\u91CC</div>' : bookmarks.length ? '<div class="search-grid library-bookmark-grid">'.concat(bookmarks.map(itemCard).join(""), "</div>") : '<div class="empty-state">\u8FD8\u6CA1\u6709\u6536\u85CF\u4F5C\u54C1</div>'), "</div>");
+  content.innerHTML = `<div class="library-page"><div class="my-heading"><h1>\u6211\u7684</h1></div>
+    ${state.account.loggedIn ? "" : `<button type="button" class="my-account" data-account-action="1">\u70B9\u51FB\u5934\u50CF\u767B\u5F55\uFF0C\u540C\u6B65\u6536\u85CF\u548C\u89C2\u770B\u5386\u53F2 ${icon("arrow")}</button>`}
+    ${query ? `<div class="library-results"><p class="library-count">\u5728\u89C2\u770B\u5386\u53F2\u4E2D\u627E\u5230 ${progress.length} \u90E8\uFF0C\u5728\u6211\u7684\u6536\u85CF\u4E2D\u627E\u5230 ${bookmarks.length} \u90E8</p>
+      <h2>\u89C2\u770B\u5386\u53F2</h2>${progress.length ? `<div class="history-list">${historyCards}</div>` : '<p class="library-no-match">\u6CA1\u6709\u5339\u914D\u7684\u89C2\u770B\u8BB0\u5F55</p>'}
+      <h2>\u6211\u7684\u6536\u85CF</h2>${bookmarks.length ? `<div class="search-grid library-bookmark-grid">${bookmarks.map(itemCard).join("")}</div>` : '<p class="library-no-match">\u6CA1\u6709\u5339\u914D\u7684\u6536\u85CF</p>'}</div>` : downloadsActive ? `
+    <div class="segmented library-tabs" role="tablist" aria-label="\u6211\u7684\u7247\u5355\u5206\u7C7B"><button type="button" role="tab" data-library-tab="history" aria-selected="${false}" class="">\u89C2\u770B\u5386\u53F2</button>
+    <button type="button" role="tab" data-library-tab="bookmarks" aria-selected="${false}" class="">\u6211\u7684\u6536\u85CF</button>
+    <button type="button" role="tab" data-library-tab="downloads" aria-selected="${true}" class="selected">\u6211\u7684\u4E0B\u8F7D</button></div>
+    <div id="library-downloads"><p class="page-loading">\u6B63\u5728\u52A0\u8F7D\u2026</p></div>` : `
+    <div class="segmented library-tabs" role="tablist" aria-label="\u6211\u7684\u7247\u5355\u5206\u7C7B"><button type="button" role="tab" data-library-tab="history" aria-selected="${historyActive}" class="${historyActive ? "selected" : ""}">\u89C2\u770B\u5386\u53F2</button>
+    <button type="button" role="tab" data-library-tab="bookmarks" aria-selected="${!historyActive}" class="${!historyActive ? "selected" : ""}">\u6211\u7684\u6536\u85CF</button>
+    <button type="button" role="tab" data-library-tab="downloads" aria-selected="${false}" class="">\u6211\u7684\u4E0B\u8F7D</button></div>
+    <p class="library-count">${historyActive ? `\u6700\u8FD1\u89C2\u770B\u7684 ${progress.length} \u90E8\u4F5C\u54C1` : `\u5DF2\u6536\u85CF ${bookmarks.length} \u90E8\u4F5C\u54C1`}</p>
+    ${historyActive ? progress.length ? `<div class="history-list">${historyCards}</div>` : '<div class="empty-state">\u8FD8\u6CA1\u6709\u89C2\u770B\u8BB0\u5F55\uFF0C\u64AD\u653E\u4F5C\u54C1\u540E\u4F1A\u51FA\u73B0\u5728\u8FD9\u91CC</div>' : bookmarks.length ? `<div class="search-grid library-bookmark-grid">${bookmarks.map(itemCard).join("")}</div>` : '<div class="empty-state">\u8FD8\u6CA1\u6709\u6536\u85CF\u4F5C\u54C1</div>'}`}</div>`;
   hydrateImages();
   if (downloadsActive && !swipePrefetchBusy) renderLibraryDownloads();
 }
@@ -1160,7 +1197,7 @@ function backfillNasCovers(nasTasks) {
       nasCoverBackfill.delete(key);
       if (!detail || !detail.cover) return;
       rememberTitleCover(t.title, detail.cover);
-      const img = content.querySelector('[data-dl-play-nas="'.concat(t.id, '"] img[data-cover]'));
+      const img = content.querySelector(`[data-dl-play-nas="${t.id}"] img[data-cover]`);
       if (img && !img.naturalWidth) {
         img.dataset.cover = detail.cover;
         delete img.dataset.loading;
@@ -1197,7 +1234,7 @@ async function processForwardTasks(phoneTasks, nasTasks) {
   }
   forwardProcessing = true;
   try {
-    toast("NAS \u5DF2\u5408\u5E76\uFF0C\u6B63\u5728\u62C9\u5230\u624B\u673A\uFF08".concat(fwd.title, "\uFF09"));
+    toast(`NAS \u5DF2\u5408\u5E76\uFF0C\u6B63\u5728\u62C9\u5230\u624B\u673A\uFF08${fwd.title}\uFF09`);
     await api("download-forward-pull-merged", { id: fwd.id, nasTaskId: fwd.nasTaskId });
     try {
       await api("nas-download-cancel", { id: fwd.nasTaskId });
@@ -1205,7 +1242,7 @@ async function processForwardTasks(phoneTasks, nasTasks) {
     }
     toast("\u5DF2\u62C9\u5230\u624B\u673A\u5B8C\u6574\u6210\u54C1");
   } catch (error) {
-    toast("\u8F6C\u53D1\u62C9\u53D6\u5931\u8D25\uFF1A".concat(error.message), true);
+    toast(`\u8F6C\u53D1\u62C9\u53D6\u5931\u8D25\uFF1A${error.message}`, true);
   } finally {
     forwardProcessing = false;
   }
@@ -1245,7 +1282,7 @@ function goDownloads() {
   state.previous = { route: state.route };
   state.settingsReturn = { route: state.route };
   setRoute("downloads");
-  content.innerHTML = '<div class="settings-page downloads-page"><button type="button" class="listing-back" data-back="1">'.concat(icon("back"), ' \u8FD4\u56DE\u8BBE\u7F6E</button><h1>\u4E0B\u8F7D\u7BA1\u7406</h1><div id="downloads-list"><p class="page-loading">\u6B63\u5728\u52A0\u8F7D\u2026</p></div></div>');
+  content.innerHTML = `<div class="settings-page downloads-page"><button type="button" class="listing-back" data-back="1">${icon("back")} \u8FD4\u56DE\u8BBE\u7F6E</button><h1>\u4E0B\u8F7D\u7BA1\u7406</h1><div id="downloads-list"><p class="page-loading">\u6B63\u5728\u52A0\u8F7D\u2026</p></div></div>`;
   refreshDownloads(token, true);
 }
 async function refreshDownloads(token, keepTimer) {
@@ -1281,7 +1318,7 @@ async function refreshDownloads(token, keepTimer) {
 function renderDownloadSection(label, tasks, kind) {
   if (!tasks.length) return "";
   const rows = tasks.map((task) => downloadTaskRow(task, kind)).join("");
-  return '<h2 class="downloads-section-title">'.concat(label, "</h2>").concat(rows);
+  return `<h2 class="downloads-section-title">${label}</h2>${rows}`;
 }
 function renderDownloadList(tasks) {
   if (!tasks.length) return '<div class="empty-state">\u8FD8\u6CA1\u6709\u4E0B\u8F7D\u5185\u5BB9\uFF0C\u53BB\u8BE6\u60C5\u9875\u70B9\u51FB\u300C\u4E0B\u8F7D\u300D\u5427</div>';
@@ -1307,12 +1344,12 @@ function renderDownloadList(tasks) {
     const anyFailed = list.some((t) => t.status === "failed" && !(t.error || "").includes("\u5408\u5E76\u5931\u8D25"));
     first.status = anyActive ? "running" : anyReady ? "ready" : anyFailed ? "failed" : "done";
     first.percent = list.reduce((s, t) => s + (Number(t.percent) || 0), 0) / list.length;
-    if (!anyActive && anyReady) first.detail = "\u5DF2\u4E0B\u8F7D ".concat(first.doneCount, " \u96C6\uFF0C\u5F85\u5408\u5E76");
+    if (!anyActive && anyReady) first.detail = `\u5DF2\u4E0B\u8F7D ${first.doneCount} \u96C6\uFF0C\u5F85\u5408\u5E76`;
     first.children = list;
     grouped.push(first);
   }
   const rows = grouped.map((task) => downloadTaskRow(task, task.kind || (task.nas ? "nas" : "phone"))).join("");
-  return '<div class="downloads-list">'.concat(rows, "</div>");
+  return `<div class="downloads-list">${rows}</div>`;
 }
 const TITLE_COVERS_KEY = "veyra-title-covers";
 let titleCovers = null;
@@ -1348,32 +1385,39 @@ function downloadTaskRow(task, kind) {
   const remoteText = remoteJobText(remoteJob);
   const remoteBusy = !!(remoteJob && (remoteJob.status === "running" || remoteJob.status === "queued"));
   const canTransfer = kind === "phone" && !running && !remoteBusy && (task.status === "done" || task.status === "ready" || task.status === "failed");
-  const transferBtn = canTransfer ? '<button type="button" class="dl-cancel dl-transfer" data-dl-transfer="'.concat(esc(task.id), '">').concat(remoteJob && remoteJob.status === "failed" ? "\u91CD\u4F20" : "\u4F20\u5230\u670D\u52A1\u5668", "</button>") : "";
-  const transferCancel = remoteJob && (remoteJob.status === "running" || remoteJob.status === "queued") ? '<button type="button" class="dl-cancel" data-dl-transfer-cancel="'.concat(esc(remoteJob.id), '">\u53D6\u6D88\u4F20\u8F93</button>') : "";
+  const transferBtn = canTransfer ? `<button type="button" class="dl-cancel dl-transfer" data-dl-transfer="${esc(task.id)}">${remoteJob && remoteJob.status === "failed" ? "\u91CD\u4F20" : "\u4F20\u5230\u670D\u52A1\u5668"}</button>` : "";
+  const transferCancel = remoteJob && (remoteJob.status === "running" || remoteJob.status === "queued") ? `<button type="button" class="dl-cancel" data-dl-transfer-cancel="${esc(remoteJob.id)}">\u53D6\u6D88\u4F20\u8F93</button>` : "";
   const output = task.output && (task.output.startsWith("content://") || task.output.startsWith("file://")) ? "\u5DF2\u4FDD\u5B58\u5230\u7CFB\u7EDF\u4E0B\u8F7D\u76EE\u5F55" : task.output || "";
-  const cancelBtn = running ? '<button type="button" class="dl-cancel" data-dl-cancel="'.concat(kind, '" data-dl-id="').concat(esc(task.id), '">\u53D6\u6D88</button>') : "";
-  const retryBtn = !running && kind === "phone" && (task.status === "failed" || task.status === "canceled") && !(task.error || "").includes("\u5408\u5E76\u5931\u8D25") ? '<button type="button" class="dl-cancel dl-retry" data-dl-retry="phone" data-dl-id="'.concat(esc(task.id), '">\u91CD\u8BD5</button>') : "";
+  const cancelBtn = running ? `<button type="button" class="dl-cancel" data-dl-cancel="${kind}" data-dl-id="${esc(task.id)}">\u53D6\u6D88</button>` : "";
+  const retryBtn = !running && kind === "phone" && (task.status === "failed" || task.status === "canceled") && !(task.error || "").includes("\u5408\u5E76\u5931\u8D25") ? `<button type="button" class="dl-cancel dl-retry" data-dl-retry="phone" data-dl-id="${esc(task.id)}">\u91CD\u8BD5</button>` : "";
   const failedList = task.failedEpisodes || [];
   const srcNote = task.detail && task.detail.includes("\uFF08") ? (task.detail.match(/（([^）]*)）/) || [])[1] || "" : "";
   const canRetryFailed = task.status === "ready" || task.status === "failed" && !(task.error || "").includes("\u5408\u5E76\u5931\u8D25");
-  const retryFailedBtn = !running && kind === "nas" && canRetryFailed && failedList.length > 0 ? '<button type="button" class="dl-cancel dl-retry" data-dl-retry-failed="nas" data-dl-id="'.concat(esc(task.id), '">\u91CD\u8BD5\u5931\u8D25').concat(failedList.length, "\u96C6</button>") : "";
-  const mergeBtn = !running && (task.status === "ready" || (task.status === "failed" || task.status === "done") && (task.error || "").includes("\u5408\u5E76\u5931\u8D25")) ? '<button type="button" class="dl-cancel dl-retry" data-dl-merge="'.concat(kind, '" data-dl-id="').concat(esc(task.id), '">\u5408\u5E76</button>') : "";
-  const deleteBtn = !running ? '<button type="button" class="dl-cancel" data-dl-delete="'.concat(kind, '" data-dl-id="').concat(esc(task.id), '"').concat(task.children && task.children.length > 1 ? ' data-dl-siblings="'.concat(esc(task.children.map((c) => c.id).join(",")), '"') : "", ">\u5220\u9664</button>") : "";
-  const failedInfo = failedList.length > 0 ? '<span class="dl-error" data-dl-copy="'.concat(esc(task.id), '" data-dl-log="').concat(esc("\u5931\u8D25\u96C6: " + failedList.map((f) => "\u7B2C" + f.index + "\u96C6(" + (f.error || "") + ")").join("\uFF1B")), '" title="\u70B9\u51FB\u590D\u5236\u5931\u8D25\u660E\u7EC6">\u5931\u8D25 ').concat(failedList.length, " \u96C6\uFF1A").concat(esc(failedList.slice(0, 3).map((f) => "\u7B2C" + f.index + "\u96C6").join("\u3001"))).concat(failedList.length > 3 ? " \u7B49" : "", "</span>") : "";
+  const retryFailedBtn = !running && kind === "nas" && canRetryFailed && failedList.length > 0 ? `<button type="button" class="dl-cancel dl-retry" data-dl-retry-failed="nas" data-dl-id="${esc(task.id)}">\u91CD\u8BD5\u5931\u8D25${failedList.length}\u96C6</button>` : "";
+  const mergeBtn = !running && (task.status === "ready" || (task.status === "failed" || task.status === "done") && (task.error || "").includes("\u5408\u5E76\u5931\u8D25")) ? `<button type="button" class="dl-cancel dl-retry" data-dl-merge="${kind}" data-dl-id="${esc(task.id)}">\u5408\u5E76</button>` : "";
+  const deleteBtn = !running ? `<button type="button" class="dl-cancel" data-dl-delete="${kind}" data-dl-id="${esc(task.id)}"${task.children && task.children.length > 1 ? ` data-dl-siblings="${esc(task.children.map((c) => c.id).join(","))}"` : ""}>\u5220\u9664</button>` : "";
+  const failedInfo = failedList.length > 0 ? `<span class="dl-error" data-dl-copy="${esc(task.id)}" data-dl-log="${esc("\u5931\u8D25\u96C6: " + failedList.map((f) => "\u7B2C" + f.index + "\u96C6(" + (f.error || "") + ")").join("\uFF1B"))}" title="\u70B9\u51FB\u590D\u5236\u5931\u8D25\u660E\u7EC6">\u5931\u8D25 ${failedList.length} \u96C6\uFF1A${esc(failedList.slice(0, 3).map((f) => "\u7B2C" + f.index + "\u96C6").join("\u3001"))}${failedList.length > 3 ? " \u7B49" : ""}</span>` : "";
   const errLog = task.error || task.debug || "";
-  const errBlock = errLog ? '<span class="dl-error" data-dl-copy="'.concat(esc(task.id), '" data-dl-log="').concat(esc(errLog.replace(/\n/g, "\\n")), '" title="\u70B9\u51FB\u590D\u5236\u5168\u90E8\u65E5\u5FD7">').concat(task.error ? esc(task.error.split("\n").slice(0, 4).join("<br>")) : '<span class="dl-log-link">\u590D\u5236\u5408\u5E76\u65E5\u5FD7</span>', "</span>") : "";
-  const detailHint = task.detail && (/片/.test(task.detail) || task.detail.includes("\u5408\u5E76\u4E2D")) ? ' \xB7 <span class="dl-detail-hint">'.concat(esc(task.detail), "</span>") : "";
+  const errBlock = errLog ? `<span class="dl-error" data-dl-copy="${esc(task.id)}" data-dl-log="${esc(errLog.replace(/\n/g, "\\n"))}" title="\u70B9\u51FB\u590D\u5236\u5168\u90E8\u65E5\u5FD7">${task.error ? task.error.split("\n").slice(0, 4).map(esc).join("<br>") : '<span class="dl-log-link">\u590D\u5236\u5408\u5E76\u65E5\u5FD7</span>'}</span>` : "";
+  const detailHint = task.detail && (/片/.test(task.detail) || task.detail.includes("\u5408\u5E76\u4E2D")) ? ` \xB7 <span class="dl-detail-hint">${esc(task.detail)}</span>` : "";
   const playAttr = kind === "nas" ? "data-dl-play-nas" : "data-dl-play";
   const playHint = kind === "nas" ? "\u64AD\u653E NAS \u6210\u54C1" : "\u672C\u5730\u64AD\u653E";
-  const playTile = '<button type="button" class="download-cover" '.concat(playAttr, '="').concat(esc(task.id), '" aria-label="').concat(playHint, "\u300A").concat(esc(task.title || "\u672A\u77E5\u5267\u96C6"), '\u300B">\n    <span class="poster loading"><span class="poster-letter">').concat(esc(String(task.title || "\u5F71").slice(0, 1)), '</span><img data-cover="').concat(esc(coverForTask(task)), '" alt=""></span>\n    <span class="download-cover-hint">').concat(playHint, "</span></button>");
-  return '<div class="download-card">'.concat(playTile, '<div class="download-task">\n    <div class="download-task-head"><strong>').concat(esc(task.title || "\u672A\u77E5\u5267\u96C6"), "</strong>").concat(sourceBadge, '<span class="dl-status ').concat(running ? "is-running" : "", '">').concat(statusText, '</span></div>\n    <div class="download-task-meta">').concat(task.doneCount, "/").concat(task.totalCount, " \u96C6 \xB7 ").concat(task.doneCount === task.totalCount && task.status !== "running" ? "\u5DF2\u4E0B\u8F7D\u5168\u90E8\u96C6" : failedList.length ? "\u5931\u8D25 ".concat(failedList.length, " \u96C6") : "").concat(srcNote ? ' \xB7 <b class="dl-src-note">'.concat(esc(srcNote), "</b>") : "").concat(detailHint).concat(remoteText ? ' \xB7 <span class="dl-remote-note '.concat(remoteJob.status, '">').concat(esc(remoteText), "</span>") : "", '</div>\n    <div class="download-track"><i style="width:').concat(Math.max(0, Math.min(100, Number(task.percent) || 0)), '%"></i></div>\n    <div class="download-task-foot">').concat(output ? '<span class="dl-output">'.concat(esc(output), "</span>") : "").concat(failedInfo).concat(errBlock).concat(transferBtn).concat(transferCancel).concat(mergeBtn).concat(retryFailedBtn).concat(retryBtn).concat(cancelBtn).concat(deleteBtn, "</div>\n  </div></div>");
+  const playTile = `<button type="button" class="download-cover" ${playAttr}="${esc(task.id)}" aria-label="${playHint}\u300A${esc(task.title || "\u672A\u77E5\u5267\u96C6")}\u300B">
+    <span class="poster loading"><span class="poster-letter">${esc(String(task.title || "\u5F71").slice(0, 1))}</span><img data-cover="${esc(coverForTask(task))}" alt=""></span>
+    <span class="download-cover-hint">${playHint}</span></button>`;
+  return `<div class="download-card">${playTile}<div class="download-task">
+    <div class="download-task-head"><strong>${esc(task.title || "\u672A\u77E5\u5267\u96C6")}</strong>${sourceBadge}<span class="dl-status ${running ? "is-running" : ""}">${statusText}</span></div>
+    <div class="download-task-meta">${task.doneCount}/${task.totalCount} \u96C6 \xB7 ${task.doneCount === task.totalCount && task.status !== "running" ? "\u5DF2\u4E0B\u8F7D\u5168\u90E8\u96C6" : failedList.length ? `\u5931\u8D25 ${failedList.length} \u96C6` : ""}${srcNote ? ` \xB7 <b class="dl-src-note">${esc(srcNote)}</b>` : ""}${detailHint}${remoteText ? ` \xB7 <span class="dl-remote-note ${remoteJob.status}">${esc(remoteText)}</span>` : ""}</div>
+    <div class="download-track"><i style="width:${Math.max(0, Math.min(100, Number(task.percent) || 0))}%"></i></div>
+    <div class="download-task-foot">${output ? `<span class="dl-output">${esc(output)}</span>` : ""}${failedInfo}${errBlock}${transferBtn}${transferCancel}${mergeBtn}${retryFailedBtn}${retryBtn}${cancelBtn}${deleteBtn}</div>
+  </div></div>`;
 }
 function remoteJobText(job) {
   if (!job) return "";
   const name = job.serverName || "\u8FDC\u7A0B\u670D\u52A1\u5668";
-  if (job.status === "running" || job.status === "queued") return "\u4F20\u8F93\u5230 ".concat(name, " ").concat(Number(job.percent) || 0, "%");
-  if (job.status === "done") return "\u5DF2\u4F20\u5230 ".concat(name);
-  if (job.status === "failed") return "\u4F20\u8F93\u5931\u8D25\uFF1A".concat(job.error || "\u672A\u77E5\u9519\u8BEF");
+  if (job.status === "running" || job.status === "queued") return `\u4F20\u8F93\u5230 ${name} ${Number(job.percent) || 0}%`;
+  if (job.status === "done") return `\u5DF2\u4F20\u5230 ${name}`;
+  if (job.status === "failed") return `\u4F20\u8F93\u5931\u8D25\uFF1A${job.error || "\u672A\u77E5\u9519\u8BEF"}`;
   if (job.status === "canceled") return "\u4F20\u8F93\u5DF2\u53D6\u6D88";
   return "";
 }
@@ -1384,18 +1428,18 @@ function downloadStatusText(task, kind) {
     if (d.includes("\u62C9\u53D6")) return d.replace(/已从 NAS /, "\u4ECE NAS ");
     return "\u7B49\u5F85 NAS \u4E0B\u8F7D";
   }
-  if (task.status === "ready") return failedCount > 0 ? "\u5DF2\u4E0B\u8F7D \xB7 \u5931\u8D25".concat(failedCount, "\u96C6") : "\u5DF2\u4E0B\u8F7D \xB7 \u5F85\u5408\u5E76";
+  if (task.status === "ready") return failedCount > 0 ? `\u5DF2\u4E0B\u8F7D \xB7 \u5931\u8D25${failedCount}\u96C6` : "\u5DF2\u4E0B\u8F7D \xB7 \u5F85\u5408\u5E76";
   if (task.status === "done") {
     if (kind === "nas") return "\u5DF2\u4E0B\u8F7D \xB7 \u5DF2\u5408\u5E76";
     if ((task.detail || "").includes("\u5DF2\u5408\u5E76")) return "\u5DF2\u4E0B\u8F7D \xB7 \u5DF2\u5408\u5E76";
     return "\u5DF2\u4E0B\u8F7D";
   }
-  if (task.status === "failed") return failedCount > 0 ? "\u5931\u8D25 \xB7 \u53EF\u91CD\u8BD5".concat(failedCount, "\u96C6") : "\u5931\u8D25";
+  if (task.status === "failed") return failedCount > 0 ? `\u5931\u8D25 \xB7 \u53EF\u91CD\u8BD5${failedCount}\u96C6` : "\u5931\u8D25";
   if (task.status === "canceled") return "\u5DF2\u53D6\u6D88";
   const detail = task.detail || "";
   if (detail.includes("\u4FDD\u5B58")) return "\u4FDD\u5B58\u5230\u624B\u673A";
   const m = detail.match(/第\s*(\d+)\s*\/\s*(\d+)/);
-  if (m) return "\u4E0B\u8F7D\u4E2D ".concat(m[1], "/").concat(m[2]);
+  if (m) return `\u4E0B\u8F7D\u4E2D ${m[1]}/${m[2]}`;
   if (/第\s*\d+\s*集/.test(detail) && detail.includes("\u5408\u5E76")) return "\u4E0B\u8F7D\u4E2D \xB7 \u53D6\u6D41\u5408\u5E76";
   if (detail.includes("\u5F85\u5408\u5E76")) return "\u5F85\u5408\u5E76";
   if (detail.includes("\u5408\u5E76")) return "\u5408\u5E76\u4E2D";
@@ -1434,28 +1478,43 @@ function renderDownloadSheet() {
   if (!sheet) return;
   const episodes = asArray(state.detail.episodes);
   if (downloadMode === "parsing") {
-    sheet.innerHTML = '<p class="download-parsing">\u6B63\u5728\u89E3\u6790\u64AD\u653E\u5730\u5740\u2026<br><small>\u9700\u8981\u9010\u96C6\u89E3\u6790\uFF0C\u8BF7\u7A0D\u5019</small></p>';
+    sheet.innerHTML = `<p class="download-parsing">\u6B63\u5728\u89E3\u6790\u64AD\u653E\u5730\u5740\u2026<br><small>\u9700\u8981\u9010\u96C6\u89E3\u6790\uFF0C\u8BF7\u7A0D\u5019</small></p>`;
     return;
   }
   if (downloadMode === "target") {
     const isAdmin = state.account.role === "admin";
     const canDebug = privateMode();
+    if (remoteServers === null) {
+      loadRemoteServers(true).then(() => {
+        if (downloadMode === "target") renderDownloadSheet();
+      }).catch(() => {
+      });
+    }
     const hasRemote = !!(remoteServers && remoteServers.length);
-    sheet.innerHTML = '<div class="download-pick">\n      <button type="button" class="download-pick-option" data-dl-pick="phone"><strong>\u4E0B\u8F7D\u5230\u624B\u673A</strong></button>\n      <button type="button" class="download-pick-option" data-dl-pick="remote"><strong>\u4E0B\u8F7D\u5230\u8FDC\u7A0B\u670D\u52A1\u5668</strong><small>'.concat(hasRemote ? "\u5148\u4E0B\u5230\u624B\u673A\uFF0C\u5B8C\u6210\u540E\u81EA\u52A8\u4F20\u5230\u6240\u9009\u670D\u52A1\u5668\uFF08\u6309\u5267\u540D\u5EFA\u6587\u4EF6\u5939\uFF09" : "\u8FD8\u6CA1\u914D\u7F6E\u670D\u52A1\u5668 \xB7 \u5230\u300C\u8BBE\u7F6E \u2192 \u8FDC\u7A0B\u670D\u52A1\u5668\u300D\u6DFB\u52A0", '</small></button>\n      <button type="button" class="download-pick-option" data-dl-pick="nas" ').concat(isAdmin ? "" : "disabled", "><strong>\u4E0B\u8F7D\u5230 NAS</strong>").concat(isAdmin ? "" : "<small>\u4EC5\u7BA1\u7406\u5458\u53EF\u7528</small>", "</button>\n      ").concat(canDebug ? '<button type="button" class="download-pick-option" data-dl-pick="phone-debug"><strong>\u4E0B\u8F7D\u5230\u624B\u673A\uFF08\u8C03\u8BD5\uFF09</strong><small>\u4FDD\u7559 TS \u4E0E Key\uFF0C\u4E0D\u81EA\u52A8\u5408\u5E76\uFF0C\u5BFC\u51FA\u8C03\u8BD5\u5305</small></button>' : "", '\n      <p class="download-nas-note">').concat(state.account.loggedIn ? "" : "NAS \u4E0B\u8F7D\u9700\u8981\u5148\u767B\u5F55\u8D26\u53F7\u3002", "</p>\n    </div>");
+    sheet.innerHTML = `<div class="download-pick">
+      <button type="button" class="download-pick-option" data-dl-pick="phone"><strong>\u4E0B\u8F7D\u5230\u624B\u673A</strong></button>
+      <button type="button" class="download-pick-option" data-dl-pick="remote"><strong>\u4E0B\u8F7D\u5230\u8FDC\u7A0B\u670D\u52A1\u5668</strong>${hasRemote ? "" : "<small>\u8FD8\u6CA1\u914D\u7F6E\u670D\u52A1\u5668</small>"}</button>
+      <button type="button" class="download-pick-option" data-dl-pick="nas" ${isAdmin ? "" : "disabled"}><strong>\u4E0B\u8F7D\u5230 NAS</strong>${isAdmin ? "" : "<small>\u4EC5\u7BA1\u7406\u5458\u53EF\u7528</small>"}</button>
+      ${canDebug ? '<button type="button" class="download-pick-option" data-dl-pick="phone-debug"><strong>\u4E0B\u8F7D\u5230\u624B\u673A\uFF08\u8C03\u8BD5\uFF09</strong><small>\u4FDD\u7559 TS \u4E0E Key\uFF0C\u4E0D\u81EA\u52A8\u5408\u5E76\uFF0C\u5BFC\u51FA\u8C03\u8BD5\u5305</small></button>' : ""}
+      <p class="download-nas-note">${state.account.loggedIn ? "" : "NAS \u4E0B\u8F7D\u9700\u8981\u5148\u767B\u5F55\u8D26\u53F7\u3002"}</p>
+    </div>`;
     return;
   }
   if (downloadMode === "remote") {
     const servers = asArray(remoteServers);
-    sheet.innerHTML = '<p class="dl-remote-tip">\u9009\u62E9\u8981\u4F20\u5230\u54EA\u53F0\u670D\u52A1\u5668\u3002\u4E0B\u8F7D\u5B8C\u6210\u540E\u4F1A\u81EA\u52A8\u4E0A\u4F20\uFF0C\u5E76\u5728\u670D\u52A1\u5668\u4E0A\u6309\u5267\u540D\u5EFA\u540C\u540D\u6587\u4EF6\u5939\u3002</p>\n      <div class="download-pick">'.concat(servers.map((s) => '<button type="button" class="download-pick-option" data-dl-remote="'.concat(esc(s.id), '"><strong>').concat(esc(s.name), "</strong><small>").concat(esc(s.typeName), " \xB7 ").concat(esc(s.address), "</small></button>")).join(""), '</div>\n      <div class="download-sheet-buttons"><button type="button" class="dl-secondary" data-dl-back-target="1">\u8FD4\u56DE</button></div>');
+    sheet.innerHTML = `<div class="download-pick">${servers.map((s) => `<button type="button" class="download-pick-option" data-dl-remote="${esc(s.id)}"><strong>${esc(s.name)}</strong><small>${esc(s.typeName)} \xB7 ${esc(s.address)}</small></button>`).join("")}</div>
+      <div class="download-sheet-buttons"><button type="button" class="dl-secondary" data-dl-back-target="1">\u8FD4\u56DE</button></div>`;
     return;
   }
   const all = episodes.map((ep) => Number(ep.number) || 0);
   const checked = all.filter((n) => downloadSelection.has(n)).length;
   const allSelected = all.length && checked === all.length;
-  sheet.innerHTML = '<div class="download-sheet-toolbar"><button type="button" class="dl-secondary" data-dl-all="1">'.concat(allSelected ? "\u53D6\u6D88\u5168\u9009" : "\u5168\u9009", "</button><span>\u5DF2\u9009 ").concat(checked, "/").concat(all.length, ' \u96C6</span></div>\n    <div class="download-sheet-grid">').concat(episodes.map((ep) => {
+  sheet.innerHTML = `<div class="download-sheet-toolbar"><button type="button" class="dl-secondary" data-dl-all="1">${allSelected ? "\u53D6\u6D88\u5168\u9009" : "\u5168\u9009"}</button><span>\u5DF2\u9009 ${checked}/${all.length} \u96C6</span></div>
+    <div class="download-sheet-grid">${episodes.map((ep) => {
     const n = Number(ep.number) || 0;
-    return '<label class="dl-ep '.concat(downloadSelection.has(n) ? "checked" : "", '" data-dl-ep="').concat(n, '"><span>').concat(n, "</span></label>");
-  }).join(""), '</div>\n    <div class="download-sheet-buttons"><button type="button" class="dl-secondary" data-dl-back="1">\u53D6\u6D88</button><button type="button" class="dl-primary" data-dl-confirm="1" ').concat(checked ? "" : "disabled", ">\u4E0B\u8F7D ").concat(checked ? checked + " \u96C6" : "", "</button></div>");
+    return `<label class="dl-ep ${downloadSelection.has(n) ? "checked" : ""}" data-dl-ep="${n}"><span>${n}</span></label>`;
+  }).join("")}</div>
+    <div class="download-sheet-buttons"><button type="button" class="dl-secondary" data-dl-back="1">\u53D6\u6D88</button><button type="button" class="dl-primary" data-dl-confirm="1" ${checked ? "" : "disabled"}>\u4E0B\u8F7D ${checked ? checked + " \u96C6" : ""}</button></div>`;
 }
 async function resolveEpisodesForDownload(episodes) {
   const resolved = [];
@@ -1475,11 +1534,11 @@ async function resolveEpisodesForDownload(episodes) {
     try {
       data = await api("episode", { id: state.detail.id, episode: n });
     } catch (error) {
-      throw new Error("\u7B2C ".concat(n, " \u96C6\u64AD\u653E\u5730\u5740\u89E3\u6790\u5931\u8D25\uFF1A").concat(error.message || "\u672A\u77E5\u9519\u8BEF"));
+      throw new Error(`\u7B2C ${n} \u96C6\u64AD\u653E\u5730\u5740\u89E3\u6790\u5931\u8D25\uFF1A${error.message || "\u672A\u77E5\u9519\u8BEF"}`);
     }
     const source = String(data && data.source || "");
     if (!/^https?:\/\//i.test(source)) {
-      throw new Error("\u7B2C ".concat(n, " \u96C6\u6CA1\u6709\u62FF\u5230\u6709\u6548\u7684\u64AD\u653E\u5730\u5740\uFF08").concat(source.slice(0, 40) || "\u4E3A\u7A7A", "\uFF09\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5"));
+      throw new Error(`\u7B2C ${n} \u96C6\u6CA1\u6709\u62FF\u5230\u6709\u6548\u7684\u64AD\u653E\u5730\u5740\uFF08${source.slice(0, 40) || "\u4E3A\u7A7A"}\uFF09\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5`);
     }
     resolved.push({ index: n, url: source, key: data.key || "" });
   }
@@ -1488,15 +1547,15 @@ async function resolveEpisodesForDownload(episodes) {
     try {
       data = await j.p;
     } catch (error) {
-      throw new Error("\u7B2C ".concat(j.n, " \u96C6\u64AD\u653E\u5730\u5740\u89E3\u6790\u5931\u8D25\uFF1A").concat(error.message || "\u672A\u77E5\u9519\u8BEF"));
+      throw new Error(`\u7B2C ${j.n} \u96C6\u64AD\u653E\u5730\u5740\u89E3\u6790\u5931\u8D25\uFF1A${error.message || "\u672A\u77E5\u9519\u8BEF"}`);
     }
     const source = String(data && data.source || "");
-    if (!/^https?:\/\//i.test(source)) throw new Error("\u7B2C ".concat(j.n, " \u96C6\u6CA1\u6709\u62FF\u5230\u6709\u6548\u7684\u64AD\u653E\u5730\u5740\uFF08").concat(source.slice(0, 40) || "\u4E3A\u7A7A", "\uFF09\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5"));
+    if (!/^https?:\/\//i.test(source)) throw new Error(`\u7B2C ${j.n} \u96C6\u6CA1\u6709\u62FF\u5230\u6709\u6548\u7684\u64AD\u653E\u5730\u5740\uFF08${source.slice(0, 40) || "\u4E3A\u7A7A"}\uFF09\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5`);
     resolved.push({ index: j.n, url: source, key: "" });
   }
   if (!resolved.length) throw new Error("\u6CA1\u6709\u53EF\u4E0B\u8F7D\u7684\u5206\u96C6");
   const bad = resolved.find((r) => !/^https?:\/\//i.test(String(r.url || "")));
-  if (bad) throw new Error("\u7B2C ".concat(bad.index, " \u96C6\u64AD\u653E\u5730\u5740\u65E0\u6548\uFF0C\u5DF2\u53D6\u6D88\u63D0\u4EA4"));
+  if (bad) throw new Error(`\u7B2C ${bad.index} \u96C6\u64AD\u653E\u5730\u5740\u65E0\u6548\uFF0C\u5DF2\u53D6\u6D88\u63D0\u4EA4`);
   return resolved;
 }
 async function submitDownloadTo(target, remoteId) {
@@ -1549,15 +1608,14 @@ async function submitDownloadTo(target, remoteId) {
         if (pmv !== null && pmv !== void 0 && pmv !== "") proxyModeNow = Number(pmv) || 3;
       } catch (ignore) {
       }
-      console.log("[dl-judge] source=".concat(sourceNow, " proxyMode=").concat(proxyModeNow, " role=").concat((_b2 = state.account) == null ? void 0 : _b2.role, " remote=").concat(remoteId || "-"));
+      console.log(`[dl-judge] source=${sourceNow} proxyMode=${proxyModeNow} role=${(_b2 = state.account) == null ? void 0 : _b2.role} remote=${remoteId || "-"}`);
       {
         const resolved = await resolveEpisodesForDownload(episodes);
         if (!resolved.length) throw new Error("\u6CA1\u6709\u53EF\u4E0B\u8F7D\u7684\u5206\u96C6");
         const debug = target === "phone-debug";
         const targetRemote = target === "remote" ? String(remoteId || "") : "";
         await api("download-start", { source: sourceNow, title: state.detail.title, episodes: resolved, debug, cover: state.detail.cover || "", remoteId: targetRemote });
-        const server = targetRemote ? asArray(remoteServers).find((s) => String(s.id) === targetRemote) : null;
-        toast(debug ? "\u8C03\u8BD5\u6A21\u5F0F\u5DF2\u5F00\u59CB\uFF08".concat(resolved.length, " \u96C6\uFF09\uFF1A\u5206\u7247\u4E0B\u5B8C\u540E\u4F1A\u5BFC\u51FA\u300C\u7B2CNN\u96C6_\u8C03\u8BD5\u5305.zip\u300D\u5230 Download/Veyra/").concat(state.detail.title) : targetRemote ? "\u5DF2\u5F00\u59CB\u4E0B\u8F7D ".concat(resolved.length, " \u96C6\uFF0C\u5B8C\u6210\u540E\u81EA\u52A8\u4F20\u5230\u300C").concat(server ? server.name : "\u8FDC\u7A0B\u670D\u52A1\u5668", "\u300D") : "\u5224\u5B9A[\u6E90=".concat(sourceNow, " \u901A\u9053=").concat(proxyModeNow, "] \u5DF2\u5F00\u59CB\u4E0B\u8F7D\u5230\u624B\u673A\uFF08\u624B\u673A\u7ECF\u4EE3\u7406\u62C9\u6E90\u5408\u5E76\uFF09"));
+        toast(debug ? `\u8C03\u8BD5\u6A21\u5F0F\u5DF2\u5F00\u59CB\uFF08${resolved.length} \u96C6\uFF09\uFF1A\u5206\u7247\u4E0B\u5B8C\u540E\u4F1A\u5BFC\u51FA\u300C\u7B2CNN\u96C6_\u8C03\u8BD5\u5305.zip\u300D\u5230 Download/Veyra/${state.detail.title}` : targetRemote ? `\u5DF2\u5F00\u59CB\u4E0B\u8F7D ${resolved.length} \u96C6` : `\u5224\u5B9A[\u6E90=${sourceNow} \u901A\u9053=${proxyModeNow}] \u5DF2\u5F00\u59CB\u4E0B\u8F7D\u5230\u624B\u673A\uFF08\u624B\u673A\u7ECF\u4EE3\u7406\u62C9\u6E90\u5408\u5E76\uFF09`);
       }
     }
     hideDownloadSheet();
@@ -1565,11 +1623,16 @@ async function submitDownloadTo(target, remoteId) {
     downloadParsing = false;
     downloadMode = "target";
     renderDownloadSheet();
-    toast("".concat(target === "nas" ? "\u63D0\u4EA4\u5931\u8D25" : "\u4E0B\u8F7D\u5931\u8D25", "\uFF1A").concat(error.message), true);
+    toast(`${target === "nas" ? "\u63D0\u4EA4\u5931\u8D25" : "\u4E0B\u8F7D\u5931\u8D25"}\uFF1A${error.message}`, true);
   }
 }
 function renderSettings() {
-  content.innerHTML = '<div class="settings-page"><button type="button" class="listing-back" data-back="1">'.concat(icon("back"), " \u8FD4\u56DE\u6211\u7684</button><h1>\u8BBE\u7F6E</h1>\n    ").concat(window.renderAppearance ? window.renderAppearance() : "", '\n    <section><button type="button" class="settings-link" data-account-management="1"><span><strong>\u8D26\u53F7\u7BA1\u7406</strong><small>').concat(state.account.loggedIn ? esc(state.account.username) : "\u767B\u5F55\u6216\u6CE8\u518C\u8D26\u53F7", "</small></span>").concat(icon("arrow"), '</button></section>\n    <section><button type="button" class="settings-link" data-proxy-open><span><strong>\u9EC4\u679C\u7F51\u7EDC\u901A\u9053</strong><small data-proxy-summary>').concat(esc(proxySummaryText()), "</small></span>").concat(icon("arrow"), '</button></section>\n    <section><button type="button" class="settings-link" data-remote-open><span><strong>\u8FDC\u7A0B\u670D\u52A1\u5668</strong><small data-remote-summary>').concat(esc(remoteSummaryText()), "</small></span>").concat(icon("arrow"), '</button></section>\n    <section><button type="button" class="settings-link" data-about-open><span><strong>\u5173\u4E8E Veyra</strong><small>\u9879\u76EE\u5730\u5740 \xB7 GPL-3.0 \u5F00\u6E90</small></span>').concat(icon("arrow"), "</button></section></div>");
+  content.innerHTML = `<div class="settings-page"><button type="button" class="listing-back" data-back="1">${icon("back")} \u8FD4\u56DE\u6211\u7684</button><h1>\u8BBE\u7F6E</h1>
+    ${window.renderAppearance ? window.renderAppearance() : ""}
+    <section><button type="button" class="settings-link" data-account-management="1"><span><strong>\u8D26\u53F7\u7BA1\u7406</strong><small>${state.account.loggedIn ? esc(state.account.username) : "\u767B\u5F55\u6216\u6CE8\u518C\u8D26\u53F7"}</small></span>${icon("arrow")}</button></section>
+    <section><button type="button" class="settings-link" data-proxy-open><span><strong>\u9EC4\u679C\u7F51\u7EDC\u901A\u9053</strong><small data-proxy-summary>${esc(proxySummaryText())}</small></span>${icon("arrow")}</button></section>
+    <section><button type="button" class="settings-link" data-remote-open><span><strong>\u8FDC\u7A0B\u670D\u52A1\u5668</strong><small data-remote-summary>${esc(remoteSummaryText())}</small></span>${icon("arrow")}</button></section>
+    <section><button type="button" class="settings-link" data-about-open><span><strong>\u5173\u4E8E Veyra</strong><small>\u9879\u76EE\u5730\u5740 \xB7 GPL-3.0 \u5F00\u6E90</small></span>${icon("arrow")}</button></section></div>`;
   if (window.bindAppearance) window.bindAppearance();
   api("hot-update-status").then(window.hgHotUpdateStatus).catch(() => {
   });
@@ -1602,7 +1665,7 @@ function fitPopToMenu(menu) {
   if (!pop || menu.hidden) return;
   pop.style.minHeight = "";
   const overflow = menu.getBoundingClientRect().bottom - pop.getBoundingClientRect().bottom;
-  if (overflow > 0) pop.style.minHeight = "".concat(Math.ceil(pop.offsetHeight + overflow + 12), "px");
+  if (overflow > 0) pop.style.minHeight = `${Math.ceil(pop.offsetHeight + overflow + 12)}px`;
   menu.scrollIntoView({ block: "nearest" });
 }
 function initProxyModeDropdown() {
@@ -1638,7 +1701,7 @@ function initProxyModeDropdown() {
       setProxyModeLabel(value);
       close();
       api("set-proxy-mode", { value }).then(() => {
-        toast("\u5DF2\u5207\u6362\uFF1A".concat(PROXY_MODE_NAMES[value] || value), false);
+        toast(`\u5DF2\u5207\u6362\uFF1A${PROXY_MODE_NAMES[value] || value}`, false);
       }).catch((error) => {
         setProxyModeLabel(state.proxyMode);
         toast(error.message, true);
@@ -1657,17 +1720,38 @@ function accountRoleInfo() {
 function accountIdentityHtml() {
   const account = state.account;
   const role = accountRoleInfo();
-  return '<section class="account-identity"><button type="button" class="account-avatar-pick" data-choose-avatar="1" aria-label="\u70B9\u51FB\u5934\u50CF\u4ECE\u76F8\u518C\u66F4\u6362"><img src="'.concat(esc(account.avatar || "user.svg"), '" alt=""></button><div><strong>').concat(esc(account.username), '</strong><span class="account-role is-').concat(role.key, '">').concat(role.label, "</span></div></section>");
+  return `<section class="account-identity"><button type="button" class="account-avatar-pick" data-choose-avatar="1" aria-label="\u70B9\u51FB\u5934\u50CF\u4ECE\u76F8\u518C\u66F4\u6362"><img src="${esc(account.avatar || "user.svg")}" alt=""></button><div><strong>${esc(account.username)}</strong><span class="account-role is-${role.key}">${role.label}</span></div></section>`;
 }
 function renderAccountManagement() {
   const account = state.account;
-  content.innerHTML = '<div class="settings-page account-page"><button type="button" class="listing-back" data-back="1">'.concat(icon("back"), " \u8FD4\u56DE\u8BBE\u7F6E</button><h1>\u8D26\u53F7\u7BA1\u7406</h1>\n    ").concat(account.loggedIn ? "".concat(accountIdentityHtml(), '\n      <section class="settings-account"><h2>\u4FEE\u6539\u5BC6\u7801</h2><p>\u5148\u9A8C\u8BC1\u65E7\u5BC6\u7801\uFF0C\u518D\u8BBE\u7F6E\u65B0\u5BC6\u7801\u3002</p>\n        <form id="password-form" class="password-form">\n          <label for="old-password">\u65E7\u5BC6\u7801</label><input id="old-password" type="password" autocomplete="current-password" required>\n          <label for="new-password">\u65B0\u5BC6\u7801</label><input id="new-password" type="password" autocomplete="new-password" required>\n          <p id="password-error" class="auth-error" role="alert" hidden></p><button type="submit">\u786E\u8BA4\u4FEE\u6539</button>\n        </form></section>\n      <section class="settings-account"><h2>\u540C\u6B65\u4E0E\u767B\u5F55</h2><button type="button" data-sync-now="1">\u7ACB\u5373\u540C\u6B65\u7247\u5355</button><button type="button" data-logout="1" aria-live="polite">\u9000\u51FA\u767B\u5F55</button></section>\n      <section class="settings-account"><h2>\u7535\u89C6\u7AEF</h2><p>\u7535\u89C6\u4E0A\u7528\u624B\u673A\u626B\u7801\u767B\u5F55\uFF1A\u626B\u7535\u89C6\u5C4F\u5E55\u4E0A\u7684\u4E8C\u7EF4\u7801\uFF0C\u8D26\u53F7\u76F4\u63A5\u540C\u6B65\u8FC7\u53BB\u3002</p><button type="button" data-qr-login="1">\u626B\u7801\u767B\u5F55\u7535\u89C6</button></section>') : '<section class="settings-account"><p>\u767B\u5F55\u540E\u53EF\u540C\u6B65\u6536\u85CF\u548C\u89C2\u770B\u5386\u53F2\uFF0C\u5E76\u7BA1\u7406\u5934\u50CF\u4E0E\u5BC6\u7801\u3002</p><button type="button" data-account-action="1">\u767B\u5F55\u6216\u6CE8\u518C</button></section>\n      <section class="settings-account"><h2>\u7535\u89C6\u7AEF</h2><p>\u7535\u89C6\u4E0A\u7528\u624B\u673A\u626B\u7801\u767B\u5F55\uFF1A\u626B\u7535\u89C6\u5C4F\u5E55\u4E0A\u7684\u4E8C\u7EF4\u7801\uFF0C\u8D26\u53F7\u76F4\u63A5\u540C\u6B65\u8FC7\u53BB\u3002</p><button type="button" data-qr-login="1">\u626B\u7801\u767B\u5F55\u7535\u89C6</button></section>', "</div>");
+  content.innerHTML = `<div class="settings-page account-page"><button type="button" class="listing-back" data-back="1">${icon("back")} \u8FD4\u56DE\u8BBE\u7F6E</button><h1>\u8D26\u53F7\u7BA1\u7406</h1>
+    ${account.loggedIn ? `${accountIdentityHtml()}
+      <section class="settings-account"><h2>\u4FEE\u6539\u5BC6\u7801</h2><p>\u5148\u9A8C\u8BC1\u65E7\u5BC6\u7801\uFF0C\u518D\u8BBE\u7F6E\u65B0\u5BC6\u7801\u3002</p>
+        <form id="password-form" class="password-form">
+          <label for="old-password">\u65E7\u5BC6\u7801</label><input id="old-password" type="password" autocomplete="current-password" required>
+          <label for="new-password">\u65B0\u5BC6\u7801</label><input id="new-password" type="password" autocomplete="new-password" required>
+          <p id="password-error" class="auth-error" role="alert" hidden></p><button type="submit">\u786E\u8BA4\u4FEE\u6539</button>
+        </form></section>
+      <section class="settings-account"><h2>\u540C\u6B65\u4E0E\u767B\u5F55</h2><button type="button" data-sync-now="1">\u7ACB\u5373\u540C\u6B65\u7247\u5355</button><button type="button" data-logout="1" aria-live="polite">\u9000\u51FA\u767B\u5F55</button></section>
+      <section class="settings-account"><h2>\u7535\u89C6\u7AEF</h2><p>\u7535\u89C6\u4E0A\u7528\u624B\u673A\u626B\u7801\u767B\u5F55\uFF1A\u626B\u7535\u89C6\u5C4F\u5E55\u4E0A\u7684\u4E8C\u7EF4\u7801\uFF0C\u8D26\u53F7\u76F4\u63A5\u540C\u6B65\u8FC7\u53BB\u3002</p><button type="button" data-qr-login="1">\u626B\u7801\u767B\u5F55\u7535\u89C6</button></section>` : `<section class="settings-account"><p>\u767B\u5F55\u540E\u53EF\u540C\u6B65\u6536\u85CF\u548C\u89C2\u770B\u5386\u53F2\uFF0C\u5E76\u7BA1\u7406\u5934\u50CF\u4E0E\u5BC6\u7801\u3002</p><button type="button" data-account-action="1">\u767B\u5F55\u6216\u6CE8\u518C</button></section>
+      <section class="settings-account"><h2>\u7535\u89C6\u7AEF</h2><p>\u7535\u89C6\u4E0A\u7528\u624B\u673A\u626B\u7801\u767B\u5F55\uFF1A\u626B\u7535\u89C6\u5C4F\u5E55\u4E0A\u7684\u4E8C\u7EF4\u7801\uFF0C\u8D26\u53F7\u76F4\u63A5\u540C\u6B65\u8FC7\u53BB\u3002</p><button type="button" data-qr-login="1">\u626B\u7801\u767B\u5F55\u7535\u89C6</button></section>`}</div>`;
 }
 var accountPop = null;
 function buildAccountPopHtml() {
   const account = state.account;
-  const body = account.loggedIn ? "".concat(accountIdentityHtml(), '\n      <section class="settings-account"><h2>\u4FEE\u6539\u5BC6\u7801</h2><p>\u5148\u9A8C\u8BC1\u65E7\u5BC6\u7801\uFF0C\u518D\u8BBE\u7F6E\u65B0\u5BC6\u7801\u3002</p>\n        <form id="password-form" class="password-form">\n          <label for="old-password">\u65E7\u5BC6\u7801</label><input id="old-password" type="password" autocomplete="current-password" required>\n          <label for="new-password">\u65B0\u5BC6\u7801</label><input id="new-password" type="password" autocomplete="new-password" required>\n          <p id="password-error" class="auth-error" role="alert" hidden></p><button type="submit">\u786E\u8BA4\u4FEE\u6539</button>\n        </form></section>\n      <section class="settings-account"><h2>\u540C\u6B65\u4E0E\u767B\u5F55</h2><button type="button" data-sync-now="1">\u7ACB\u5373\u540C\u6B65\u7247\u5355</button><button type="button" data-logout="1" aria-live="polite">\u9000\u51FA\u767B\u5F55</button></section>\n      <section class="settings-account"><h2>\u7535\u89C6\u7AEF</h2><p>\u7535\u89C6\u4E0A\u7528\u624B\u673A\u626B\u7801\u767B\u5F55\uFF1A\u626B\u7535\u89C6\u5C4F\u5E55\u4E0A\u7684\u4E8C\u7EF4\u7801\uFF0C\u8D26\u53F7\u76F4\u63A5\u540C\u6B65\u8FC7\u53BB\u3002</p><button type="button" data-qr-login="1">\u626B\u7801\u767B\u5F55\u7535\u89C6</button></section>') : '<section class="settings-account"><p>\u767B\u5F55\u540E\u53EF\u540C\u6B65\u6536\u85CF\u548C\u89C2\u770B\u5386\u53F2\uFF0C\u5E76\u7BA1\u7406\u5934\u50CF\u4E0E\u5BC6\u7801\u3002</p><button type="button" data-account-action="1">\u767B\u5F55\u6216\u6CE8\u518C</button></section>\n      <section class="settings-account"><h2>\u7535\u89C6\u7AEF</h2><p>\u7535\u89C6\u4E0A\u7528\u624B\u673A\u626B\u7801\u767B\u5F55\uFF1A\u626B\u7535\u89C6\u5C4F\u5E55\u4E0A\u7684\u4E8C\u7EF4\u7801\uFF0C\u8D26\u53F7\u76F4\u63A5\u540C\u6B65\u8FC7\u53BB\u3002</p><button type="button" data-qr-login="1">\u626B\u7801\u767B\u5F55\u7535\u89C6</button></section>';
-  return '<div class="appearance-pop account-pop" role="dialog" aria-modal="true" aria-labelledby="account-title">\n    <div class="appearance-head"><h2 id="account-title">\u8D26\u53F7\u7BA1\u7406</h2><button type="button" class="appearance-close" data-account-close aria-label="\u5173\u95ED">\u2715</button></div>\n    '.concat(body, "</div>");
+  const body = account.loggedIn ? `${accountIdentityHtml()}
+      <section class="settings-account"><h2>\u4FEE\u6539\u5BC6\u7801</h2><p>\u5148\u9A8C\u8BC1\u65E7\u5BC6\u7801\uFF0C\u518D\u8BBE\u7F6E\u65B0\u5BC6\u7801\u3002</p>
+        <form id="password-form" class="password-form">
+          <label for="old-password">\u65E7\u5BC6\u7801</label><input id="old-password" type="password" autocomplete="current-password" required>
+          <label for="new-password">\u65B0\u5BC6\u7801</label><input id="new-password" type="password" autocomplete="new-password" required>
+          <p id="password-error" class="auth-error" role="alert" hidden></p><button type="submit">\u786E\u8BA4\u4FEE\u6539</button>
+        </form></section>
+      <section class="settings-account"><h2>\u540C\u6B65\u4E0E\u767B\u5F55</h2><button type="button" data-sync-now="1">\u7ACB\u5373\u540C\u6B65\u7247\u5355</button><button type="button" data-logout="1" aria-live="polite">\u9000\u51FA\u767B\u5F55</button></section>
+      <section class="settings-account"><h2>\u7535\u89C6\u7AEF</h2><p>\u7535\u89C6\u4E0A\u7528\u624B\u673A\u626B\u7801\u767B\u5F55\uFF1A\u626B\u7535\u89C6\u5C4F\u5E55\u4E0A\u7684\u4E8C\u7EF4\u7801\uFF0C\u8D26\u53F7\u76F4\u63A5\u540C\u6B65\u8FC7\u53BB\u3002</p><button type="button" data-qr-login="1">\u626B\u7801\u767B\u5F55\u7535\u89C6</button></section>` : `<section class="settings-account"><p>\u767B\u5F55\u540E\u53EF\u540C\u6B65\u6536\u85CF\u548C\u89C2\u770B\u5386\u53F2\uFF0C\u5E76\u7BA1\u7406\u5934\u50CF\u4E0E\u5BC6\u7801\u3002</p><button type="button" data-account-action="1">\u767B\u5F55\u6216\u6CE8\u518C</button></section>
+      <section class="settings-account"><h2>\u7535\u89C6\u7AEF</h2><p>\u7535\u89C6\u4E0A\u7528\u624B\u673A\u626B\u7801\u767B\u5F55\uFF1A\u626B\u7535\u89C6\u5C4F\u5E55\u4E0A\u7684\u4E8C\u7EF4\u7801\uFF0C\u8D26\u53F7\u76F4\u63A5\u540C\u6B65\u8FC7\u53BB\u3002</p><button type="button" data-qr-login="1">\u626B\u7801\u767B\u5F55\u7535\u89C6</button></section>`;
+  return `<div class="appearance-pop account-pop" role="dialog" aria-modal="true" aria-labelledby="account-title">
+    <div class="appearance-head"><h2 id="account-title">\u8D26\u53F7\u7BA1\u7406</h2><button type="button" class="appearance-close" data-account-close aria-label="\u5173\u95ED">\u2715</button></div>
+    ${body}</div>`;
 }
 function ensureAccountPop() {
   if (accountPop && document.body.contains(accountPop)) return accountPop;
@@ -1704,7 +1788,7 @@ window.__veyraAccountBack = () => {
 window.__veyraAccountOpen = () => !!(accountPop && !accountPop.hidden);
 function proxySummaryText() {
   const m = PROXY_MODE_NAMES[state.proxyMode] || "\u8D70\u540E\u7AEF\u8F6C\u53D1";
-  return state.proxy ? "".concat(m, " \xB7 ").concat(state.proxy) : m;
+  return state.proxy ? `${m} \xB7 ${state.proxy}` : m;
 }
 function updateProxySummary() {
   const el = document.querySelector("[data-proxy-summary]");
@@ -1712,7 +1796,24 @@ function updateProxySummary() {
 }
 var proxyPop = null;
 function buildProxyPopHtml() {
-  return '<div class="appearance-pop account-pop proxy-pop" role="dialog" aria-modal="true" aria-labelledby="proxy-title">\n    <div class="appearance-head"><h2 id="proxy-title">\u9EC4\u679C\u7F51\u7EDC\u901A\u9053</h2><button type="button" class="appearance-close" data-proxy-close aria-label="\u5173\u95ED">\u2715</button></div>\n    <p class="appearance-note">\u4EC5\u9EC4\u679C/\u79C1\u5BC6\u6A21\u5F0F\u751F\u6548\uFF0C\u7EA2\u679C\u6C38\u8FDC\u76F4\u8FDE\u4E0D\u53D7\u5F71\u54CD\uFF1B\u9009\u62E9\u540E\u7ACB\u5373\u751F\u6548\uFF0C\u65E0\u9700\u91CD\u542F\u3002</p>\n    <div class="settings-storage">'.concat(privateMode() ? '<button type="button" data-return-public>\u8FD4\u56DE\u7EA2\u679C\uFF08\u516C\u5F00\u6A21\u5F0F\uFF09</button>' : '<button type="button" data-enter-private>\u8FDB\u5165\u79C1\u5BC6\u6A21\u5F0F</button>', '</div>\n    <div class="proxy-test-row">\n      <input id="proxy-address" class="settings-input" type="text" placeholder="\u4EE3\u7406\u5730\u5740 host:port\uFF0C\u5982 192.168.31.108:7893" value="').concat(esc(state.proxy || ""), '" autocomplete="off" aria-label="\u9EC4\u679C\u4EE3\u7406\u5730\u5740">\n      <button type="button" id="proxy-test" class="proxy-test-btn">\u68C0\u6D4B</button>\n    </div>\n    <span id="proxy-test-result" class="proxy-test-result" hidden></span>\n    <div class="proxy-mode-dd" id="proxy-mode-dd">\n      <button type="button" class="proxy-mode-dd-btn" data-mode-toggle aria-haspopup="listbox" aria-expanded="false"><span id="proxy-mode-label">').concat(esc(PROXY_MODE_NAMES[state.proxyMode] || "\u8D70\u540E\u7AEF\u8F6C\u53D1"), "</span>").concat(icon("arrow"), '</button>\n      <div class="proxy-mode-dd-menu" id="proxy-mode-menu" hidden>\n        <button type="button" data-mode="1">\u4EC5\u76F4\u8FDE</button>\n        <button type="button" data-mode="2">\u4EC5\u4EE3\u7406</button>\n        <button type="button" data-mode="3">\u8D70\u540E\u7AEF\u8F6C\u53D1</button>\n      </div>\n    </div>\n  </div>');
+  return `<div class="appearance-pop account-pop proxy-pop" role="dialog" aria-modal="true" aria-labelledby="proxy-title">
+    <div class="appearance-head"><h2 id="proxy-title">\u9EC4\u679C\u7F51\u7EDC\u901A\u9053</h2><button type="button" class="appearance-close" data-proxy-close aria-label="\u5173\u95ED">\u2715</button></div>
+    <p class="appearance-note">\u4EC5\u9EC4\u679C/\u79C1\u5BC6\u6A21\u5F0F\u751F\u6548\uFF0C\u7EA2\u679C\u6C38\u8FDC\u76F4\u8FDE\u4E0D\u53D7\u5F71\u54CD\uFF1B\u9009\u62E9\u540E\u7ACB\u5373\u751F\u6548\uFF0C\u65E0\u9700\u91CD\u542F\u3002</p>
+    <div class="settings-storage">${privateMode() ? '<button type="button" data-return-public>\u8FD4\u56DE\u7EA2\u679C\uFF08\u516C\u5F00\u6A21\u5F0F\uFF09</button>' : '<button type="button" data-enter-private>\u8FDB\u5165\u79C1\u5BC6\u6A21\u5F0F</button>'}</div>
+    <div class="proxy-test-row">
+      <input id="proxy-address" class="settings-input" type="text" placeholder="\u4EE3\u7406\u5730\u5740 host:port\uFF0C\u5982 192.168.31.108:7893" value="${esc(state.proxy || "")}" autocomplete="off" aria-label="\u9EC4\u679C\u4EE3\u7406\u5730\u5740">
+      <button type="button" id="proxy-test" class="proxy-test-btn">\u68C0\u6D4B</button>
+    </div>
+    <span id="proxy-test-result" class="proxy-test-result" hidden></span>
+    <div class="proxy-mode-dd" id="proxy-mode-dd">
+      <button type="button" class="proxy-mode-dd-btn" data-mode-toggle aria-haspopup="listbox" aria-expanded="false"><span id="proxy-mode-label">${esc(PROXY_MODE_NAMES[state.proxyMode] || "\u8D70\u540E\u7AEF\u8F6C\u53D1")}</span>${icon("arrow")}</button>
+      <div class="proxy-mode-dd-menu" id="proxy-mode-menu" hidden>
+        <button type="button" data-mode="1">\u4EC5\u76F4\u8FDE</button>
+        <button type="button" data-mode="2">\u4EC5\u4EE3\u7406</button>
+        <button type="button" data-mode="3">\u8D70\u540E\u7AEF\u8F6C\u53D1</button>
+      </div>
+    </div>
+  </div>`;
 }
 function ensureProxyPop() {
   if (proxyPop && document.body.contains(proxyPop)) return proxyPop;
@@ -1762,12 +1863,12 @@ function openProxyPop() {
       testResult.hidden = true;
       api("test-proxy").then((value) => {
         const v = value || {};
-        testResult.textContent = "\u901A \xB7 ".concat(Number(v.ms) || "?", "ms");
+        testResult.textContent = `\u901A \xB7 ${Number(v.ms) || "?"}ms`;
         testResult.classList.remove("fail");
         testResult.classList.add("ok");
         testResult.hidden = false;
       }).catch((error) => {
-        testResult.textContent = "\u4E0D\u901A\uFF1A".concat(error.message);
+        testResult.textContent = `\u4E0D\u901A\uFF1A${error.message}`;
         testResult.classList.remove("ok");
         testResult.classList.add("fail");
         testResult.hidden = false;
@@ -1794,7 +1895,11 @@ window.__veyraProxyBack = () => {
 window.__veyraProxyOpen = () => !!(proxyPop && !proxyPop.hidden);
 var aboutPop = null;
 function buildAboutPopHtml() {
-  return '<div class="appearance-pop account-pop" role="dialog" aria-modal="true" aria-labelledby="about-title">\n    <div class="appearance-head"><h2 id="about-title">\u5173\u4E8E Veyra</h2><button type="button" class="appearance-close" data-about-close aria-label="\u5173\u95ED">\u2715</button></div>\n    <p class="appearance-note">\u9879\u76EE\u5730\u5740\uFF1A<button type="button" class="settings-url" data-open-url="https://github.com/gybeyond1/Veyra">github.com/gybeyond1/Veyra</button> <button type="button" data-check-update>\u68C0\u67E5\u66F4\u65B0</button></p>\n    <p class="appearance-note">Veyra \u57FA\u4E8E\u5F00\u6E90\u9879\u76EE\u4E8C\u6B21\u5F00\u53D1\uFF0C\u9075\u5FAA GPL-3.0 \u5F00\u6E90\u534F\u8BAE\u53D1\u5E03\uFF0C\u5B8C\u6574\u6E90\u7801\u3001\u81EA\u5EFA\u540E\u7AEF\u4E0E Docker \u90E8\u7F72\u8BF4\u660E\u89C1\u4ED3\u5E93\u3002</p>\n  </div>';
+  return `<div class="appearance-pop account-pop" role="dialog" aria-modal="true" aria-labelledby="about-title">
+    <div class="appearance-head"><h2 id="about-title">\u5173\u4E8E Veyra</h2><button type="button" class="appearance-close" data-about-close aria-label="\u5173\u95ED">\u2715</button></div>
+    <p class="appearance-note">\u9879\u76EE\u5730\u5740\uFF1A<button type="button" class="settings-url" data-open-url="https://github.com/gybeyond1/Veyra">github.com/gybeyond1/Veyra</button> <button type="button" data-check-update>\u68C0\u67E5\u66F4\u65B0</button></p>
+    <p class="appearance-note">Veyra \u57FA\u4E8E\u5F00\u6E90\u9879\u76EE\u4E8C\u6B21\u5F00\u53D1\uFF0C\u9075\u5FAA GPL-3.0 \u5F00\u6E90\u534F\u8BAE\u53D1\u5E03\uFF0C\u5B8C\u6574\u6E90\u7801\u3001\u81EA\u5EFA\u540E\u7AEF\u4E0E Docker \u90E8\u7F72\u8BF4\u660E\u89C1\u4ED3\u5E93\u3002</p>
+  </div>`;
 }
 function ensureAboutPop() {
   if (aboutPop && document.body.contains(aboutPop)) return aboutPop;
@@ -1842,8 +1947,8 @@ function remoteTypeName(type) {
 function remoteSummaryText() {
   const list = asArray(remoteServers);
   if (!list.length) return "\u672A\u914D\u7F6E \xB7 \u652F\u6301 SMB / WebDAV / FTP";
-  if (list.length === 1) return "".concat(list[0].name, " \xB7 ").concat(list[0].typeName || remoteTypeName(list[0].type));
-  return "".concat(list.length, " \u4E2A\u670D\u52A1\u5668 \xB7 ").concat(list.slice(0, 2).map((s) => s.name).join("\u3001"));
+  if (list.length === 1) return `${list[0].name} \xB7 ${list[0].typeName || remoteTypeName(list[0].type)}`;
+  return `${list.length} \u4E2A\u670D\u52A1\u5668 \xB7 ${list.slice(0, 2).map((s) => s.name).join("\u3001")}`;
 }
 async function loadRemoteServers(force) {
   if (remoteServers && !force) return remoteServers;
@@ -1879,20 +1984,44 @@ function buildRemoteFormHtml() {
   const isSmb = d.type === "smb";
   const isWebdav = d.type === "webdav";
   const portHint = isSmb ? "445" : isWebdav ? d.secure ? "443" : "80" : d.secure ? "990" : "21";
-  return '<div class="remote-types">'.concat(REMOTE_TYPES.map((t) => '<button type="button" data-remote-type="'.concat(t[0], '"').concat(d.type === t[0] ? ' class="active"' : "", ">").concat(t[1], "</button>")).join(""), '</div>\n    <div class="remote-row"><label class="remote-field"><span>\u5730\u5740</span><input id="remote-host" class="settings-input" type="text" placeholder="192.168.1.10" value="').concat(esc(d.host), '" autocomplete="off" inputmode="url"></label>\n      <label class="remote-field remote-field-port"><span>\u7AEF\u53E3</span><input id="remote-port" class="settings-input" type="text" placeholder="').concat(portHint, '" value="').concat(d.port ? esc(String(d.port)) : "", '" inputmode="numeric"></label></div>\n    ').concat(isSmb ? '<div class="remote-row"><label class="remote-field"><span>\u5171\u4EAB\u540D</span><input id="remote-share" class="settings-input" type="text" placeholder="video" value="'.concat(esc(d.share), '" autocomplete="off"></label>\n      <label class="remote-field"><span>\u76EE\u5F55\uFF08\u53EF\u9009\uFF09</span><input id="remote-path" class="settings-input" type="text" placeholder="/\u77ED\u5267" value="').concat(esc(d.path), '" autocomplete="off"></label></div>') : '<label class="remote-field"><span>\u76EE\u5F55\uFF08\u53EF\u9009\uFF09</span><input id="remote-path" class="settings-input" type="text" placeholder="/\u77ED\u5267" value="'.concat(esc(d.path), '" autocomplete="off"></label>'), '\n    <div class="remote-row"><label class="remote-field"><span>\u7528\u6237\u540D\uFF08\u53EF\u9009\uFF09</span><input id="remote-user" class="settings-input" type="text" value="').concat(esc(d.user), '" autocomplete="off"></label>\n      <label class="remote-field"><span>\u5BC6\u7801').concat(d.hasPass ? "\uFF08\u5DF2\u5B58\uFF0C\u7559\u7A7A\u4E0D\u6539\uFF09" : "\uFF08\u53EF\u9009\uFF09", '</span><input id="remote-pass" class="settings-input" type="password" placeholder="').concat(d.hasPass ? "\u2022\u2022\u2022\u2022\u2022\u2022" : "", '" autocomplete="new-password"></label></div>\n    <label class="remote-field"><span>\u663E\u793A\u540D\u79F0\uFF08\u53EF\u9009\uFF09</span><input id="remote-name" class="settings-input" type="text" placeholder="\u5BA2\u5385 NAS" value="').concat(esc(d.name), '" autocomplete="off"></label>\n    ').concat(isSmb ? "" : '<label class="remote-check"><input id="remote-secure" type="checkbox"'.concat(d.secure ? " checked" : "", "><span>").concat(isWebdav ? "\u4F7F\u7528 HTTPS" : "\u4F7F\u7528 FTPS\uFF08\u663E\u5F0F TLS\uFF09", "</span></label>"), "\n    ").concat(isSmb ? "" : '<label class="remote-check"><input id="remote-insecure" type="checkbox"'.concat(d.insecure ? " checked" : "", "><span>\u5FFD\u7565\u8BC1\u4E66\u6821\u9A8C\uFF08\u5BB6\u7528 NAS \u5E38\u662F\u81EA\u7B7E\u8BC1\u4E66\uFF09</span></label>"), '\n    <div class="remote-test-row"><button type="button" class="remote-secondary" data-remote-test>\u6D4B\u8BD5\u8FDE\u63A5</button><span class="remote-test-result ').concat(remoteTestOk ? "ok" : "fail", '" data-remote-result').concat(remoteTestText ? "" : " hidden", ">").concat(esc(remoteTestText), '</span></div>\n    <div class="remote-actions">\n      <button type="button" class="remote-secondary" data-remote-cancel>\u8FD4\u56DE</button>\n      ').concat(d.id ? '<button type="button" class="remote-danger" data-remote-delete="1">\u5220\u9664</button>' : "", '\n      <button type="button" class="remote-primary" data-remote-save>\u4FDD\u5B58</button>\n    </div>');
+  return `<div class="remote-types">${REMOTE_TYPES.map((t) => `<button type="button" data-remote-type="${t[0]}"${d.type === t[0] ? ' class="active"' : ""}>${t[1]}</button>`).join("")}</div>
+    <div class="remote-row"><label class="remote-field"><span>\u5730\u5740</span><input id="remote-host" class="settings-input" type="text" placeholder="192.168.1.10" value="${esc(d.host)}" autocomplete="off" inputmode="url"></label>
+      <label class="remote-field remote-field-port"><span>\u7AEF\u53E3</span><input id="remote-port" class="settings-input" type="text" placeholder="${portHint}" value="${d.port ? esc(String(d.port)) : ""}" inputmode="numeric"></label></div>
+    ${isSmb ? `<div class="remote-row"><label class="remote-field"><span>\u5171\u4EAB\u540D</span><input id="remote-share" class="settings-input" type="text" placeholder="video" value="${esc(d.share)}" autocomplete="off"></label>
+      <label class="remote-field"><span>\u76EE\u5F55\uFF08\u53EF\u9009\uFF09</span><input id="remote-path" class="settings-input" type="text" placeholder="/\u77ED\u5267" value="${esc(d.path)}" autocomplete="off"></label></div>` : `<label class="remote-field"><span>\u76EE\u5F55\uFF08\u53EF\u9009\uFF09</span><input id="remote-path" class="settings-input" type="text" placeholder="/\u77ED\u5267" value="${esc(d.path)}" autocomplete="off"></label>`}
+    <div class="remote-row"><label class="remote-field"><span>\u7528\u6237\u540D\uFF08\u53EF\u9009\uFF09</span><input id="remote-user" class="settings-input" type="text" value="${esc(d.user)}" autocomplete="off"></label>
+      <label class="remote-field"><span>\u5BC6\u7801${d.hasPass ? "\uFF08\u5DF2\u5B58\uFF0C\u7559\u7A7A\u4E0D\u6539\uFF09" : "\uFF08\u53EF\u9009\uFF09"}</span><input id="remote-pass" class="settings-input" type="password" placeholder="${d.hasPass ? "\u2022\u2022\u2022\u2022\u2022\u2022" : ""}" autocomplete="new-password"></label></div>
+    <label class="remote-field"><span>\u663E\u793A\u540D\u79F0\uFF08\u53EF\u9009\uFF09</span><input id="remote-name" class="settings-input" type="text" placeholder="\u5BA2\u5385 NAS" value="${esc(d.name)}" autocomplete="off"></label>
+    ${isSmb ? "" : `<label class="remote-check"><input id="remote-secure" type="checkbox"${d.secure ? " checked" : ""}><span>${isWebdav ? "\u4F7F\u7528 HTTPS" : "\u4F7F\u7528 FTPS\uFF08\u663E\u5F0F TLS\uFF09"}</span></label>`}
+    ${isSmb ? "" : `<label class="remote-check"><input id="remote-insecure" type="checkbox"${d.insecure ? " checked" : ""}><span>\u5FFD\u7565\u8BC1\u4E66\u6821\u9A8C\uFF08\u5BB6\u7528 NAS \u5E38\u662F\u81EA\u7B7E\u8BC1\u4E66\uFF09</span></label>`}
+    <div class="remote-test-row"><button type="button" class="remote-secondary" data-remote-test>\u6D4B\u8BD5\u8FDE\u63A5</button><span class="remote-test-result ${remoteTestOk ? "ok" : "fail"}" data-remote-result${remoteTestText ? "" : " hidden"}>${esc(remoteTestText)}</span></div>
+    <div class="remote-actions">
+      <button type="button" class="remote-secondary" data-remote-cancel>\u8FD4\u56DE</button>
+      ${d.id ? '<button type="button" class="remote-danger" data-remote-delete="1">\u5220\u9664</button>' : ""}
+      <button type="button" class="remote-primary" data-remote-save>\u4FDD\u5B58</button>
+    </div>`;
 }
 function buildRemoteListHtml() {
   const list = asArray(remoteServers);
   if (!list.length) {
-    return '<p class="appearance-note">\u8FD8\u6CA1\u6709\u670D\u52A1\u5668\u3002\u6DFB\u52A0\u540E\uFF0C\u4E0B\u8F7D\u5B8C\u6210\u7684\u5267\u4F1A\u6309\u5267\u540D\u5728\u670D\u52A1\u5668\u4E0A\u5EFA\u540C\u540D\u6587\u4EF6\u5939\uFF0C\u628A\u6210\u54C1\u653E\u8FDB\u53BB\u3002</p>\n      <div class="remote-actions"><button type="button" class="remote-primary" data-remote-add>\u6DFB\u52A0\u670D\u52A1\u5668</button></div>';
+    return `<p class="appearance-note">\u8FD8\u6CA1\u6709\u670D\u52A1\u5668\u3002\u6DFB\u52A0\u540E\uFF0C\u4E0B\u8F7D\u5B8C\u6210\u7684\u5267\u4F1A\u6309\u5267\u540D\u5728\u670D\u52A1\u5668\u4E0A\u5EFA\u540C\u540D\u6587\u4EF6\u5939\uFF0C\u628A\u6210\u54C1\u653E\u8FDB\u53BB\u3002</p>
+      <div class="remote-actions"><button type="button" class="remote-primary" data-remote-add>\u6DFB\u52A0\u670D\u52A1\u5668</button></div>`;
   }
-  return '<p class="appearance-note">\u652F\u6301 SMB\uFF08Windows \u5171\u4EAB / NAS\uFF09\u3001WebDAV\u3001FTP\u3002\u70B9\u6761\u76EE\u53EF\u4FEE\u6539\u3002</p>\n    <div class="remote-list">'.concat(list.map((s) => '<button type="button" class="remote-item" data-remote-edit="'.concat(esc(s.id), '">\n        <span class="remote-item-main"><strong>').concat(esc(s.name), "</strong><small>").concat(esc(s.typeName || remoteTypeName(s.type)), " \xB7 ").concat(esc(s.address || ""), "</small></span>\n        ").concat(icon("arrow"), "\n      </button>")).join(""), '</div>\n    <div class="remote-actions"><button type="button" class="remote-primary" data-remote-add>\u6DFB\u52A0\u670D\u52A1\u5668</button></div>');
+  return `<p class="appearance-note">\u652F\u6301 SMB\uFF08Windows \u5171\u4EAB / NAS\uFF09\u3001WebDAV\u3001FTP\u3002\u70B9\u6761\u76EE\u53EF\u4FEE\u6539\u3002</p>
+    <div class="remote-list">${list.map((s) => `<button type="button" class="remote-item" data-remote-edit="${esc(s.id)}">
+        <span class="remote-item-main"><strong>${esc(s.name)}</strong><small>${esc(s.typeName || remoteTypeName(s.type))} \xB7 ${esc(s.address || "")}</small></span>
+        ${icon("arrow")}
+      </button>`).join("")}</div>
+    <div class="remote-actions"><button type="button" class="remote-primary" data-remote-add>\u6DFB\u52A0\u670D\u52A1\u5668</button></div>`;
 }
 function renderRemotePop() {
   if (!remotePop) return;
   const editing = remoteEditing;
   const title = editing === null ? "\u8FDC\u7A0B\u670D\u52A1\u5668" : editing ? "\u7F16\u8F91\u670D\u52A1\u5668" : "\u6DFB\u52A0\u670D\u52A1\u5668";
-  remotePop.innerHTML = '<div class="appearance-pop account-pop remote-pop" role="dialog" aria-modal="true" aria-labelledby="remote-title">\n    <div class="appearance-head"><h2 id="remote-title">'.concat(title, '</h2><button type="button" class="appearance-close" data-remote-close aria-label="\u5173\u95ED">\u2715</button></div>\n    ').concat(editing === null ? buildRemoteListHtml() : buildRemoteFormHtml(), "\n  </div>");
+  remotePop.innerHTML = `<div class="appearance-pop account-pop remote-pop" role="dialog" aria-modal="true" aria-labelledby="remote-title">
+    <div class="appearance-head"><h2 id="remote-title">${title}</h2><button type="button" class="appearance-close" data-remote-close aria-label="\u5173\u95ED">\u2715</button></div>
+    ${editing === null ? buildRemoteListHtml() : buildRemoteFormHtml()}
+  </div>`;
 }
 function ensureRemotePop() {
   if (remotePop && document.body.contains(remotePop)) return remotePop;
@@ -2007,12 +2136,12 @@ async function testRemoteForm(button) {
   try {
     const info = await api("remote-test", { server });
     remoteTestOk = true;
-    remoteTestText = "\u8FDE\u63A5\u6B63\u5E38 \xB7 ".concat(Number(info && info.ms) || 0, "ms");
-    toast("\u8FDE\u63A5\u6210\u529F\uFF1A".concat(info && info.address || server.host));
+    remoteTestText = `\u8FDE\u63A5\u6B63\u5E38 \xB7 ${Number(info && info.ms) || 0}ms`;
+    toast(`\u8FDE\u63A5\u6210\u529F\uFF1A${info && info.address || server.host}`);
   } catch (error) {
     remoteTestOk = false;
-    remoteTestText = "\u8FDE\u63A5\u5931\u8D25\uFF1A".concat(error.message);
-    toast("\u8FDE\u63A5\u5931\u8D25\uFF1A".concat(error.message), true);
+    remoteTestText = `\u8FDE\u63A5\u5931\u8D25\uFF1A${error.message}`;
+    toast(`\u8FDE\u63A5\u5931\u8D25\uFF1A${error.message}`, true);
   } finally {
     if (button) {
       button.disabled = false;
@@ -2048,7 +2177,14 @@ async function openRemotePicker(taskId, title) {
   }
   ensureRemotePicker();
   remotePickerTaskId = String(taskId);
-  remotePicker.innerHTML = '<div class="appearance-pop account-pop remote-pop" role="dialog" aria-modal="true" aria-labelledby="remote-pick-title">\n    <div class="appearance-head"><h2 id="remote-pick-title">\u4F20\u5230\u8FDC\u7A0B\u670D\u52A1\u5668</h2><button type="button" class="appearance-close" data-remote-pick-close aria-label="\u5173\u95ED">\u2715</button></div>\n    <p class="appearance-note">\u300A'.concat(esc(title || "\u8FD9\u90E8"), '\u300B\u4F1A\u5728\u670D\u52A1\u5668\u4E0A\u5EFA\u540C\u540D\u6587\u4EF6\u5939\uFF0C\u6210\u54C1\u76F4\u63A5\u653E\u8FDB\u53BB\u3002</p>\n    <div class="remote-list">').concat(list.map((s) => '<button type="button" class="remote-item" data-remote-pick="'.concat(esc(s.id), '">\n        <span class="remote-item-main"><strong>').concat(esc(s.name), "</strong><small>").concat(esc(s.typeName || remoteTypeName(s.type)), " \xB7 ").concat(esc(s.address || ""), "</small></span>\n        ").concat(icon("arrow"), "\n      </button>")).join(""), "</div>\n  </div>");
+  remotePicker.innerHTML = `<div class="appearance-pop account-pop remote-pop" role="dialog" aria-modal="true" aria-labelledby="remote-pick-title">
+    <div class="appearance-head"><h2 id="remote-pick-title">\u4F20\u5230\u8FDC\u7A0B\u670D\u52A1\u5668</h2><button type="button" class="appearance-close" data-remote-pick-close aria-label="\u5173\u95ED">\u2715</button></div>
+    <p class="appearance-note">\u300A${esc(title || "\u8FD9\u90E8")}\u300B\u4F1A\u5728\u670D\u52A1\u5668\u4E0A\u5EFA\u540C\u540D\u6587\u4EF6\u5939\uFF0C\u6210\u54C1\u76F4\u63A5\u653E\u8FDB\u53BB\u3002</p>
+    <div class="remote-list">${list.map((s) => `<button type="button" class="remote-item" data-remote-pick="${esc(s.id)}">
+        <span class="remote-item-main"><strong>${esc(s.name)}</strong><small>${esc(s.typeName || remoteTypeName(s.type))} \xB7 ${esc(s.address || "")}</small></span>
+        ${icon("arrow")}
+      </button>`).join("")}</div>
+  </div>`;
   remotePicker.hidden = false;
   document.body.classList.add("appearance-open");
   updateBackEnabled();
@@ -2072,7 +2208,7 @@ async function startRemoteTransfer(taskId, remoteId) {
   try {
     const job = await api("remote-transfer-start", { taskId, remoteId });
     const name = job && job.serverName || "\u8FDC\u7A0B\u670D\u52A1\u5668";
-    toast("\u5DF2\u5F00\u59CB\u4F20\u8F93\u5230 ".concat(name));
+    toast(`\u5DF2\u5F00\u59CB\u4F20\u8F93\u5230 ${name}`);
     closeRemotePicker();
     await loadRemoteJobs();
     if (state.route === "library" && state.libraryTab === "downloads") renderLibraryDownloads();
@@ -2095,7 +2231,8 @@ function renderSearch() {
   });
   const { blocks, singles } = seriesGroups(items);
   const cards = [...blocks.map(seriesBlock), ...singles.map(itemCard)].join("");
-  content.innerHTML = '<div class="search-page"><h1>\u641C\u7D22\u7ED3\u679C</h1><p>'.concat(esc(state.query), " \xB7 ").concat(items.length, " \u90E8\u4F5C\u54C1</p>").concat(searchFeedback(), '<div class="filter-row">').concat(filters.map(([id, label]) => '<button type="button" data-filter="'.concat(id, '" class="').concat(state.filter === id ? "active" : "", '">').concat(label, "</button>")).join(""), "</div>\n    ").concat(items.length ? '<div class="search-grid">'.concat(cards, "</div>") : '<div class="empty-state">\u6CA1\u6709\u627E\u5230\u5339\u914D\u7684\u5F71\u7247</div>', "</div>");
+  content.innerHTML = `<div class="search-page"><h1>\u641C\u7D22\u7ED3\u679C</h1><p>${esc(state.query)} \xB7 ${items.length} \u90E8\u4F5C\u54C1</p>${searchFeedback()}<div class="filter-row">${filters.map(([id, label]) => `<button type="button" data-filter="${id}" class="${state.filter === id ? "active" : ""}">${label}</button>`).join("")}</div>
+    ${items.length ? `<div class="search-grid">${cards}</div>` : '<div class="empty-state">\u6CA1\u6709\u627E\u5230\u5339\u914D\u7684\u5F71\u7247</div>'}</div>`;
   hydrateImages();
 }
 function seriesGroups(items) {
@@ -2123,7 +2260,10 @@ function seriesGroups(items) {
 }
 function seriesBlock(group) {
   const head = esc(group.title || "\u7CFB\u5217");
-  return '<section class="series-block" data-album="'.concat(esc(group.aid), '">\n    <div class="series-head"><span class="poster loading small"><img data-cover="').concat(esc(group.cover || ""), '" alt=""></span>\n    <div class="series-meta"><h3>').concat(head, "</h3><span>\u5B98\u65B9\u7CFB\u5217 \xB7 ").concat(group.seasons.length, ' \u5B63</span></div></div>\n    <div class="series-row">').concat(group.seasons.map(itemCard).join(""), "</div></section>");
+  return `<section class="series-block" data-album="${esc(group.aid)}">
+    <div class="series-head"><span class="poster loading small"><img data-cover="${esc(group.cover || "")}" alt=""></span>
+    <div class="series-meta"><h3>${head}</h3><span>\u5B98\u65B9\u7CFB\u5217 \xB7 ${group.seasons.length} \u5B63</span></div></div>
+    <div class="series-row">${group.seasons.map(itemCard).join("")}</div></section>`;
 }
 function listingFooter() {
   const listing = state.listing;
@@ -2160,10 +2300,13 @@ function renderListing() {
     return;
   }
   const tagName = String(listing.label || listing.slug).replace(/^#+/, "");
-  const tagTitle = privateMode() ? "#".concat(tagName) : "".concat(((_a2 = listing.slug) == null ? void 0 : _a2.startsWith("comic:")) ? "\u6F2B\u5267" : "\u77ED\u5267", " \xB7 ").concat(tagName);
+  const tagTitle = privateMode() ? `#${tagName}` : `${((_a2 = listing.slug) == null ? void 0 : _a2.startsWith("comic:")) ? "\u6F2B\u5267" : "\u77ED\u5267"} \xB7 ${tagName}`;
   const title = listing.kind === "tag-list" ? tagTitle : listing.kind === "recommend" ? "\u7CBE\u9009\u63A8\u8350" : privateMode() ? "\u6700\u8FD1\u4E0A\u65B0" : "\u70ED\u95E8\u6F2B\u5267";
   const backLabel = listing.kind === "tag-list" && ((_b2 = state.listingReturn) == null ? void 0 : _b2.route) === "tags" ? "\u8FD4\u56DE\u5168\u90E8\u7C7B\u578B" : "\u8FD4\u56DE\u9996\u9875";
-  content.innerHTML = '<div class="listing-page"><button class="listing-back" type="button" data-back="1">'.concat(icon("back"), " ").concat(backLabel, "</button>\n    <h1>").concat(esc(title), "</h1><p>\u5DF2\u663E\u793A ").concat(listing.items.length, " \u90E8\u4F5C\u54C1</p>\n    ").concat(listing.items.length ? '<div class="search-grid listing-grid">'.concat(listing.items.map(itemCard).join(""), "</div>") : '<div class="empty-state">\u8FD9\u4E2A\u6807\u7B7E\u4E0B\u6682\u65E0\u4F5C\u54C1</div>', '\n    <div class="listing-footer">').concat(listingFooter(), "</div></div>");
+  content.innerHTML = `<div class="listing-page"><button class="listing-back" type="button" data-back="1">${icon("back")} ${backLabel}</button>
+    <h1>${esc(title)}</h1><p>\u5DF2\u663E\u793A ${listing.items.length} \u90E8\u4F5C\u54C1</p>
+    ${listing.items.length ? `<div class="search-grid listing-grid">${listing.items.map(itemCard).join("")}</div>` : '<div class="empty-state">\u8FD9\u4E2A\u6807\u7B7E\u4E0B\u6682\u65E0\u4F5C\u54C1</div>'}
+    <div class="listing-footer">${listingFooter()}</div></div>`;
   hydrateImages();
   observeListingEnd();
 }
@@ -2177,7 +2320,10 @@ function renderDetail() {
   const loading = state.detailLoading;
   (_b2 = (_a2 = window.AndroidHost) == null ? void 0 : _a2.setDetailMode) == null ? void 0 : _b2.call(_a2, true);
   const episodes = asArray(data.episodes);
-  content.innerHTML = '<div class="detail-page"><button class="detail-back" type="button" data-back="1">'.concat(icon("back"), ' \u8FD4\u56DE</button>\n    <div class="detail-art"><img data-cover="').concat(esc(data.cover), '" alt=""></div><div class="detail-copy"><h1>').concat(esc(data.title), "</h1><p>").concat(loading ? "\u6B63\u5728\u83B7\u53D6\u5185\u5BB9\u2026" : "".concat(esc(data.score), " ").concat(esc(data.episodeLabel)), '</p><div class="detail-desc-wrap"><p class="detail-description">').concat(esc(data.description || ""), '</p></div>\n    <div class="detail-buttons"><button class="detail-play" type="button" data-play="1" ').concat(loading ? "disabled" : "", ">").concat(loading ? "\u6B63\u5728\u52A0\u8F7D\u2026" : "\u7ACB\u5373\u64AD\u653E", '</button><button class="bookmark-button" type="button" data-bookmark="1" aria-label="').concat(state.bookmarked ? "\u53D6\u6D88\u6536\u85CF" : "\u6536\u85CF", '" ').concat(loading ? "disabled" : "", ">").concat(state.bookmarked ? "\u2605" : "\u2606", '</button><button class="detail-download" type="button" data-download="1" ').concat(loading ? "disabled" : "", ">\u4E0B\u8F7D</button></div>\n    ").concat(loading ? '<div class="detail-loading" role="status">\u6B63\u5728\u83B7\u53D6\u9009\u96C6\u2026</div>' : episodes.length ? '<h2>\u9009\u96C6</h2><div class="episode-grid">'.concat(episodes.map((item, index) => '<button type="button" data-episode="'.concat(item.number, '" class="').concat(index === 0 ? "active" : "", '">').concat(item.number, "</button>")).join(""), "</div>") : "", "</div></div>");
+  content.innerHTML = `<div class="detail-page"><button class="detail-back" type="button" data-back="1">${icon("back")} \u8FD4\u56DE</button>
+    <div class="detail-art"><img data-cover="${esc(data.cover)}" alt=""></div><div class="detail-copy"><h1>${esc(data.title)}</h1><p>${loading ? "\u6B63\u5728\u83B7\u53D6\u5185\u5BB9\u2026" : `${esc(data.score)} ${esc(data.episodeLabel)}`}</p><div class="detail-desc-wrap"><p class="detail-description">${esc(data.description || "")}</p></div>
+    <div class="detail-buttons"><button class="detail-play" type="button" data-play="1" ${loading ? "disabled" : ""}>${loading ? "\u6B63\u5728\u52A0\u8F7D\u2026" : "\u7ACB\u5373\u64AD\u653E"}</button><button class="bookmark-button" type="button" data-bookmark="1" aria-label="${state.bookmarked ? "\u53D6\u6D88\u6536\u85CF" : "\u6536\u85CF"}" ${loading ? "disabled" : ""}>${state.bookmarked ? "\u2605" : "\u2606"}</button><button class="detail-download" type="button" data-download="1" ${loading ? "disabled" : ""}>\u4E0B\u8F7D</button></div>
+    ${loading ? '<div class="detail-loading" role="status">\u6B63\u5728\u83B7\u53D6\u9009\u96C6\u2026</div>' : episodes.length ? `<h2>\u9009\u96C6</h2><div class="episode-grid">${episodes.map((item, index) => `<button type="button" data-episode="${item.number}" class="${index === 0 ? "active" : ""}">${item.number}</button>`).join("")}</div>` : ""}</div></div>`;
   hydrateImages();
   ensureDetailFilled();
 }
@@ -2203,11 +2349,11 @@ function ensureDetailFilled() {
 }
 function searchFeedback() {
   if (state.searchPending) return '<div class="search-feedback" role="status" aria-live="polite"><span class="search-spinner" aria-hidden="true"></span><span>\u6B63\u5728\u66F4\u65B0\u641C\u7D22\u7ED3\u679C\u2026</span></div>';
-  if (state.searchError) return '<div class="search-feedback search-feedback--error" role="status"><span>\u66F4\u65B0\u5931\u8D25\uFF0C\u5F53\u524D\u663E\u793A\u7F13\u5B58\u7ED3\u679C</span><button type="button" data-retry="search">\u91CD\u8BD5</button></div>';
+  if (state.searchError) return `<div class="search-feedback search-feedback--error" role="status"><span>\u66F4\u65B0\u5931\u8D25\uFF0C\u5F53\u524D\u663E\u793A\u7F13\u5B58\u7ED3\u679C</span><button type="button" data-retry="search">\u91CD\u8BD5</button></div>`;
   return "";
 }
 function renderSearchLoading() {
-  content.innerHTML = '<section class="search-loading" role="status" aria-live="polite" aria-busy="true"><span class="search-spinner search-spinner--large" aria-hidden="true"></span><h1>\u6B63\u5728\u641C\u7D22\u2026</h1><p>'.concat(esc(state.query), "</p></section>");
+  content.innerHTML = `<section class="search-loading" role="status" aria-live="polite" aria-busy="true"><span class="search-spinner search-spinner--large" aria-hidden="true"></span><h1>\u6B63\u5728\u641C\u7D22\u2026</h1><p>${esc(state.query)}</p></section>`;
 }
 function renderSkeleton() {
   content.innerHTML = '<div class="skeleton-home" role="status" aria-label="\u6B63\u5728\u52A0\u8F7D\u5185\u5BB9"><div class="skeleton skeleton-hero"></div><div class="skeleton skeleton-title"></div><div class="skeleton-row"><div class="skeleton skeleton-poster"></div><div class="skeleton skeleton-poster"></div><div class="skeleton skeleton-poster"></div></div><div class="skeleton skeleton-line"></div></div>';
@@ -2216,10 +2362,16 @@ function renderError(error, retry) {
   var _a2, _b2;
   if (state.route === "detail") (_b2 = (_a2 = window.AndroidHost) == null ? void 0 : _a2.setDetailMode) == null ? void 0 : _b2.call(_a2, false);
   if (/站点连接失败|站点请求失败|failed to connect|unable to resolve host|unknownhost|connectexception|sockettimeoutexception|timed? out|network is unreachable|connection reset|connection refused|网络|连接失败|无法连接/i.test((error == null ? void 0 : error.message) || "")) {
-    content.innerHTML = '<div class="error-state error-state--network" role="alert">\n      <div class="error-main">\n        <svg class="error-icon" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="24" cy="24" r="21"/><path d="m12 24 6-5 6 5 6-5 6 5"/></svg>\n        <h1>\u7F51\u7EDC\u8D70\u4E22\u4E86</h1>\n      </div>\n      <div class="error-footer"><p>\u8BF7\u5C1D\u8BD5\u4F7F\u7528\u4EE3\u7406\u7F51\u7EDC\uFF0C\u6216\u8054\u7CFB\u5F00\u53D1\u8005\u3002</p><button type="button" data-retry="'.concat(esc(retry), '">\u91CD\u65B0\u5C1D\u8BD5</button></div>\n    </div>');
+    content.innerHTML = `<div class="error-state error-state--network" role="alert">
+      <div class="error-main">
+        <svg class="error-icon" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="24" cy="24" r="21"/><path d="m12 24 6-5 6 5 6-5 6 5"/></svg>
+        <h1>\u7F51\u7EDC\u8D70\u4E22\u4E86</h1>
+      </div>
+      <div class="error-footer"><p>\u8BF7\u5C1D\u8BD5\u4F7F\u7528\u4EE3\u7406\u7F51\u7EDC\uFF0C\u6216\u8054\u7CFB\u5F00\u53D1\u8005\u3002</p><button type="button" data-retry="${esc(retry)}">\u91CD\u65B0\u5C1D\u8BD5</button></div>
+    </div>`;
     return;
   }
-  content.innerHTML = '<div class="error-state">'.concat(esc(error.message || "\u52A0\u8F7D\u5931\u8D25\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5"), '<button type="button" data-retry="').concat(esc(retry), '">\u91CD\u8BD5</button></div>');
+  content.innerHTML = `<div class="error-state">${esc(error.message || "\u52A0\u8F7D\u5931\u8D25\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5")}<button type="button" data-retry="${esc(retry)}">\u91CD\u8BD5</button></div>`;
 }
 function rememberScreen() {
   if (state.route === "detail") return;
@@ -2413,13 +2565,13 @@ window.hgPredictiveBackStart = (fromRight) => {
   }
   if (fromDetail) {
     const holder = document.createElement("div");
-    holder.style.transform = "translateY(".concat(-snapshot.scrollTop, "px)");
+    holder.style.transform = `translateY(${-snapshot.scrollTop}px)`;
     predictiveSourceNode = snapshot.pageNode;
     holder.appendChild(predictiveSourceNode);
     preview.appendChild(holder);
   } else {
     predictiveSourceNode = snapshot.content;
-    predictiveSourceNode.style.transform = "translateY(".concat(-snapshot.scrollTop, "px)");
+    predictiveSourceNode.style.transform = `translateY(${-snapshot.scrollTop}px)`;
     preview.appendChild(predictiveSourceNode);
   }
   document.getElementById("app").appendChild(preview);
@@ -2445,7 +2597,7 @@ window.hgPredictiveBackProgress = (progress) => {
     predictiveFrame = null;
     if (!predictivePreview) return;
     const direction = predictivePreview.fromRight ? -1 : 1;
-    scroll.style.transform = "translate3d(".concat(direction * pendingPredictiveProgress * 100, "%,0,0)");
+    scroll.style.transform = `translate3d(${direction * pendingPredictiveProgress * 100}%,0,0)`;
   });
 };
 window.hgPredictiveBackCancel = () => {
@@ -2480,7 +2632,7 @@ window.hgPredictiveBackCommit = () => {
   predictiveFrame = null;
   const direction = predictivePreview.fromRight ? -1 : 1;
   scroll.style.transition = "transform 150ms ease-out";
-  scroll.style.transform = "translate3d(".concat(direction * 100, "%,0,0)");
+  scroll.style.transform = `translate3d(${direction * 100}%,0,0)`;
   predictiveTimer = setTimeout(() => {
     const oldPage = content.firstElementChild;
     if (!window.hgBack()) {
@@ -2573,9 +2725,9 @@ async function goTag(slug, label) {
   setRoute("listing");
   state.tab = "home";
   setNav("home");
-  searchInput.value = "#".concat(privateMode() ? "" : slug.startsWith("comic:") ? "\u6F2B\u5267\xB7" : "\u77ED\u5267\xB7").concat(String(label).replace(/^#+/, ""));
+  searchInput.value = `#${privateMode() ? "" : slug.startsWith("comic:") ? "\u6F2B\u5267\xB7" : "\u77ED\u5267\xB7"}${String(label).replace(/^#+/, "")}`;
   const refreshing = api("tag-list", { slug, page: 1 });
-  const cached = await api("cached", { key: "tag:".concat(slug, ":1") }).catch(() => null);
+  const cached = await api("cached", { key: `tag:${slug}:1` }).catch(() => null);
   if (token !== routeToken) return;
   const firstLoad = !(cached == null ? void 0 : cached.data);
   state.listing = (cached == null ? void 0 : cached.data) ? { ...cached.data, kind: "tag-list", slug, label, refreshing: true, loading: false, error: false } : { items: [], nextPage: null, kind: "tag-list", slug, label, refreshing: true, loading: false, error: false };
@@ -2623,7 +2775,7 @@ async function goTagQuery(query) {
     }
   }
   const normalize = (value) => String(value || "").replace(/^#+/, "").trim().toLocaleLowerCase();
-  const matches = (item) => normalize(item.name) === normalize(name) || !privateMode() && normalize("".concat(item.group === "comic" ? "\u6F2B\u5267" : "\u77ED\u5267", "\xB7").concat(item.name)) === normalize(name);
+  const matches = (item) => normalize(item.name) === normalize(name) || !privateMode() && normalize(`${item.group === "comic" ? "\u6F2B\u5267" : "\u77ED\u5267"}\xB7${item.name}`) === normalize(name);
   let tag = tags.find(matches);
   if (!tag) {
     try {
@@ -2701,7 +2853,7 @@ async function loadMoreListing() {
       images.forEach((image, index) => index < 8 ? loadCoverInto(image) : observer.observe(image));
     }
     const count = content.querySelector(".listing-page > p");
-    if (count) count.textContent = "\u5DF2\u663E\u793A ".concat(listing.items.length, " \u90E8\u4F5C\u54C1");
+    if (count) count.textContent = `\u5DF2\u663E\u793A ${listing.items.length} \u90E8\u4F5C\u54C1`;
   } catch (error) {
     if (token === routeToken && state.listing === listing && state.route === "listing") listing.error = true;
   } finally {
@@ -2723,7 +2875,7 @@ async function goCategory(tab, sub = state.sub[tab], keepCompact = false) {
   if (!keepCompact) setNav(tab);
   const id = categoryId();
   const refreshing = api("category", { id, page: 1 });
-  const cached = await api("cached", { key: "category:".concat(id, ":1") }).catch(() => null);
+  const cached = await api("cached", { key: `category:${id}:1` }).catch(() => null);
   if (token !== routeToken) return;
   state.category = (cached == null ? void 0 : cached.data) ? { ...cached.data, refreshing: true, loading: false, error: false } : null;
   if (adopted) {
@@ -2836,7 +2988,7 @@ async function goSearch(query) {
   let settled = false;
   let timeout;
   const refreshing = api("search", { query: state.query });
-  api("cached", { key: "search:".concat(state.query) }).then((cached) => {
+  api("cached", { key: `search:${state.query}` }).then((cached) => {
     if (settled || token !== routeToken || !(cached == null ? void 0 : cached.data)) return;
     state.search = cached.data;
     renderSearch();
@@ -2865,7 +3017,7 @@ async function goSearch(query) {
 function sourceItem(id) {
   var _a2, _b2, _c2, _d2, _e, _f, _g, _h, _i, _j, _k, _l;
   const candidates = [(_a2 = state.listing) == null ? void 0 : _a2.items, (_b2 = state.home) == null ? void 0 : _b2.featured, (_c2 = state.home) == null ? void 0 : _c2.homepageRecommend, (_d2 = state.home) == null ? void 0 : _d2.homepageNewest, (_f = (_e = state.home) == null ? void 0 : _e.recommend) == null ? void 0 : _f.items, (_h = (_g = state.home) == null ? void 0 : _g.newest) == null ? void 0 : _h.items, (_i = state.category) == null ? void 0 : _i.items, (_j = state.search) == null ? void 0 : _j.items, (_k = state.library) == null ? void 0 : _k.bookmarks, (_l = state.library) == null ? void 0 : _l.progress].flatMap(asArray);
-  return candidates.find((item) => item.id === id) || { id, title: "\u5267\u96C6 ".concat(id) };
+  return candidates.find((item) => item.id === id) || { id, title: `\u5267\u96C6 ${id}` };
 }
 async function goDetail(id, trigger) {
   var _a2, _b2, _c2, _d2, _e, _f, _g, _h;
@@ -2935,7 +3087,7 @@ async function goDetail(id, trigger) {
     detailCard.open();
   }
   const refreshing = api("detail", { id });
-  const cached = await api("cached", { key: "detail:".concat(id) }).catch(() => null);
+  const cached = await api("cached", { key: `detail:${id}` }).catch(() => null);
   if (token !== routeToken) return;
   let hasDetailData = Boolean(cached == null ? void 0 : cached.data);
   if (hasDetailData) {
@@ -3120,7 +3272,7 @@ async function loadMoreCategory() {
       [...grid.querySelectorAll("img[data-cover]")].slice(-added.length).forEach((image, index) => index < 8 ? loadCoverInto(image) : observer.observe(image));
     }
     const count = content.querySelector(".category-count");
-    if (count) count.textContent = "\u5DF2\u663E\u793A ".concat(category.items.length, " \u90E8");
+    if (count) count.textContent = `\u5DF2\u663E\u793A ${category.items.length} \u90E8`;
   } catch (error) {
     if (token === routeToken && state.category === category && state.route === "category") category.error = true;
   } finally {
@@ -3211,7 +3363,8 @@ function renderSearchHistory() {
     el.hidden = true;
     return;
   }
-  el.innerHTML = '<div class="search-suggest-title">\u641C\u7D22\u5386\u53F2<button type="button" class="ss-clear" data-ss-clear>\u6E05\u7A7A</button></div>\n    <div class="search-suggest-list">'.concat(h.map((q) => '<div class="search-suggest-item"><button type="button" class="ss-word" data-ss-word="'.concat(esc(q), '">').concat(icon("clock"), "<span>").concat(esc(q), '</span></button><button type="button" class="ss-del" data-ss-del="').concat(esc(q), '" aria-label="\u5220\u9664 ').concat(esc(q), '">\xD7</button></div>')).join(""), "</div>");
+  el.innerHTML = `<div class="search-suggest-title">\u641C\u7D22\u5386\u53F2<button type="button" class="ss-clear" data-ss-clear>\u6E05\u7A7A</button></div>
+    <div class="search-suggest-list">${h.map((q) => `<div class="search-suggest-item"><button type="button" class="ss-word" data-ss-word="${esc(q)}">${icon("clock")}<span>${esc(q)}</span></button><button type="button" class="ss-del" data-ss-del="${esc(q)}" aria-label="\u5220\u9664 ${esc(q)}">\xD7</button></div>`).join("")}</div>`;
   el.hidden = false;
 }
 async function suggestSearch(v) {
@@ -3231,7 +3384,7 @@ async function suggestSearch(v) {
     el.hidden = true;
     return;
   }
-  el.innerHTML = '<div class="search-suggest-title">\u8054\u60F3\u7ED3\u679C</div><div class="search-suggest-list">'.concat(items.slice(0, 8).map((it) => '<button type="button" class="search-suggest-card" data-open-id="'.concat(esc(it.id), '" data-ss-close>').concat(it.cover ? '<span class="search-suggest-thumb"><img src="'.concat(esc(it.cover), '" alt="" loading="lazy" onerror="this.closest(\'.search-suggest-thumb\').style.display=\'none\'"></span>') : "", "<strong>").concat(esc(it.title || ""), "</strong>").concat(it.episodeLabel ? "<em>".concat(esc(it.episodeLabel), "</em>") : "", "</button>")).join(""), "</div>");
+  el.innerHTML = `<div class="search-suggest-title">\u8054\u60F3\u7ED3\u679C</div><div class="search-suggest-list">${items.slice(0, 8).map((it) => `<button type="button" class="search-suggest-card" data-open-id="${esc(it.id)}" data-ss-close>${it.cover ? `<span class="search-suggest-thumb"><img src="${esc(it.cover)}" alt="" loading="lazy" onerror="this.closest('.search-suggest-thumb').style.display='none'"></span>` : ""}<strong>${esc(it.title || "")}</strong>${it.episodeLabel ? `<em>${esc(it.episodeLabel)}</em>` : ""}</button>`).join("")}</div>`;
   el.hidden = false;
 }
 document.addEventListener("focusin", (event) => {
@@ -3394,7 +3547,7 @@ async function swipePrefetchAll() {
       categoryJobs.push([
         "category:" + tab + ":" + index,
         async () => {
-          const cached = await api("cached", { key: "category:".concat(id, ":1") }).catch(() => null);
+          const cached = await api("cached", { key: `category:${id}:1` }).catch(() => null);
           const fresh = (cached == null ? void 0 : cached.data) || await withTimeout(api("category", { id, page: 1 }), 8e3).catch(() => null);
           return fresh ? { fresh, tab, sub: index } : null;
         },
@@ -3508,7 +3661,7 @@ function swipeBuildSkeleton(key) {
   const wrap = document.createElement("div");
   if (String(key).indexOf("library:") === 0) {
     const cards = Array.from({ length: 4 }, () => '<div class="skeleton sk-card"></div>').join("");
-    wrap.innerHTML = '<div class="library-page swipe-skel" role="status" aria-label="\u6B63\u5728\u52A0\u8F7D\u5185\u5BB9"><div class="my-heading"><h1>\u6211\u7684</h1></div><div class="segmented library-tabs skeleton-tabs" role="tablist"><span class="skeleton skeleton-pill"></span><span class="skeleton skeleton-pill"></span><span class="skeleton skeleton-pill"></span></div><p class="library-count"><span class="skeleton sk-sm"></span></p>' + '<div class="sk-list">'.concat(cards, "</div></div>");
+    wrap.innerHTML = `<div class="library-page swipe-skel" role="status" aria-label="\u6B63\u5728\u52A0\u8F7D\u5185\u5BB9"><div class="my-heading"><h1>\u6211\u7684</h1></div><div class="segmented library-tabs skeleton-tabs" role="tablist"><span class="skeleton skeleton-pill"></span><span class="skeleton skeleton-pill"></span><span class="skeleton skeleton-pill"></span></div><p class="library-count"><span class="skeleton sk-sm"></span></p><div class="sk-list">${cards}</div></div>`;
   } else {
     const posters = Array.from({ length: 3 }, () => '<div class="skeleton skeleton-poster"></div>').join("");
     wrap.innerHTML = '<div class="swipe-skel" role="status" aria-label="\u6B63\u5728\u52A0\u8F7D\u5185\u5BB9"><div class="skeleton skeleton-hero"></div><div class="skeleton skeleton-title"></div><div class="skeleton-row">' + posters + '</div><div class="skeleton-row">' + posters + "</div></div>";
@@ -3648,7 +3801,7 @@ function swipeOpenTrack(delta, dx) {
   const scrollOverflowX = scroll.style.overflowX;
   const previousScrollTop = scroll.scrollTop;
   if (current && currentRect) {
-    current.style.cssText += ";position:absolute;left:0;top:".concat(Math.round(currentRect.top - box.top), "px;") + "width:100%;margin:0;z-index:2;background:".concat(getComputedStyle(scroll).background, ";");
+    current.style.cssText += `;position:absolute;left:0;top:${Math.round(currentRect.top - box.top)}px;width:100%;margin:0;z-index:2;background:${getComputedStyle(scroll).background};`;
   }
   scroll.style.overflowX = "hidden";
   scroll.scrollTop = 0;
@@ -3673,7 +3826,7 @@ function swipeOpenTrack(delta, dx) {
           sib.remove();
           sib = next;
         }
-        shell.style.cssText += ";position:fixed;left:".concat(Math.round(pageRect.left), "px;top:").concat(Math.round(pageRect.top), "px;width:").concat(Math.round(pageRect.width), "px;margin:0;z-index:14;pointer-events:none;");
+        shell.style.cssText += `;position:fixed;left:${Math.round(pageRect.left)}px;top:${Math.round(pageRect.top)}px;width:${Math.round(pageRect.width)}px;margin:0;z-index:14;pointer-events:none;`;
         document.body.appendChild(shell);
         track.clones.push(shell);
         shellTab.setAttribute("data-seg-no-gesture", "");
@@ -3701,7 +3854,7 @@ function swipeOpenTrack(delta, dx) {
     }
     if (firstMoving && firstTarget && firstTarget.offsetHeight > 0) {
       const align = Math.round(firstMoving.getBoundingClientRect().top - firstTarget.getBoundingClientRect().top);
-      if (align) node.style.marginTop = "".concat(align, "px");
+      if (align) node.style.marginTop = `${align}px`;
     }
   }
   if (track.mode === "page") track.dockAnim = swipeBuildDockAnim(resolve.step);
@@ -3717,13 +3870,13 @@ function swipeLayTrack(dx) {
   const t = swipeTrack;
   if (!t) return;
   if (t.mode === "inline") {
-    for (const el of t.moving) el.style.transform = "translateX(".concat(dx, "px)");
+    for (const el of t.moving) el.style.transform = `translateX(${dx}px)`;
     swipeTabProgress(t, Math.abs(dx) / t.width);
   } else if (t.current) {
-    t.current.style.transform = "translateX(".concat(dx, "px)");
+    t.current.style.transform = `translateX(${dx}px)`;
     swipeDockProgress(t, Math.abs(dx) / t.width);
   }
-  t.panel.style.transform = "translateX(".concat(t.dirSign * t.width + dx, "px)");
+  t.panel.style.transform = `translateX(${t.dirSign * t.width + dx}px)`;
 }
 function swipeClearTabs(t) {
   var _a2, _b2;
@@ -3781,11 +3934,11 @@ function swipeCloseTrack(commit) {
     if (t.mode === "inline") {
       for (const el of t.moving) {
         el.style.transition = ease;
-        el.style.transform = "translateX(".concat(x, "px)");
+        el.style.transform = `translateX(${x}px)`;
       }
     } else if (t.current) {
       t.current.style.transition = ease;
-      t.current.style.transform = "translateX(".concat(x, "px)");
+      t.current.style.transform = `translateX(${x}px)`;
     }
   };
   t.panel.style.transition = ease;
@@ -3831,7 +3984,7 @@ function swipeCloseTrack(commit) {
       swipeTabProgress(t, 0);
     }
     moveCurrent(0);
-    t.panel.style.transform = "translateX(".concat(t.dirSign * t.width, "px)");
+    t.panel.style.transform = `translateX(${t.dirSign * t.width}px)`;
     setTimeout(() => {
       swipeClearTabs(t);
       restoreStyle(t.current, t.currentStyle);
@@ -3891,7 +4044,7 @@ scroll.addEventListener("touchmove", (event) => {
   if (swipeAxis !== "x") return;
   if (event.cancelable) event.preventDefault();
   if (swipeTrack) swipeLayTrack(dx);
-  else scroll.style.transform = "translateX(".concat(dx * 0.3, "px)");
+  else scroll.style.transform = `translateX(${dx * 0.3}px)`;
 }, { passive: false });
 scroll.addEventListener("touchend", (event) => {
   const start = swipeStart;
@@ -4084,7 +4237,7 @@ document.addEventListener("click", async (event) => {
   if (event.target.closest("[data-remote-delete]")) {
     const current = remoteDraft ? remoteDraft.id : "";
     const name = remoteDraft && remoteDraft.name ? remoteDraft.name : "\u8FD9\u53F0\u670D\u52A1\u5668";
-    askConfirmation("\u5220\u9664\u670D\u52A1\u5668", "\u786E\u5B9A\u5220\u9664\u300C".concat(name, "\u300D\u7684\u914D\u7F6E\uFF1F\u5DF2\u4F20\u8FC7\u53BB\u7684\u6587\u4EF6\u4E0D\u53D7\u5F71\u54CD\u3002"), "\u5220\u9664").then((ok) => {
+    askConfirmation("\u5220\u9664\u670D\u52A1\u5668", `\u786E\u5B9A\u5220\u9664\u300C${name}\u300D\u7684\u914D\u7F6E\uFF1F\u5DF2\u4F20\u8FC7\u53BB\u7684\u6587\u4EF6\u4E0D\u53D7\u5F71\u54CD\u3002`, "\u5220\u9664").then((ok) => {
       if (!ok || !current) return;
       api("remote-delete", { id: current }).then(async () => {
         remoteServers = null;
@@ -4258,7 +4411,7 @@ document.addEventListener("click", async (event) => {
     return;
   }
   function removeDownloadRow(kind, id) {
-    const button = document.querySelector('[data-dl-delete="'.concat(kind, '"][data-dl-id="').concat(id, '"], [data-dl-cancel="').concat(kind, '"][data-dl-id="').concat(id, '"]'));
+    const button = document.querySelector(`[data-dl-delete="${kind}"][data-dl-id="${id}"], [data-dl-cancel="${kind}"][data-dl-id="${id}"]`);
     if (!button) return;
     const card2 = button.closest(".download-task");
     if (!card2 || !card2.parentElement) return;
@@ -4290,7 +4443,7 @@ document.addEventListener("click", async (event) => {
       state.library = await api("library");
       toast("\u7247\u5355\u5DF2\u540C\u6B65");
     } catch (error) {
-      toast("\u540C\u6B65\u5931\u8D25\uFF1A".concat(error.message), true);
+      toast(`\u540C\u6B65\u5931\u8D25\uFF1A${error.message}`, true);
     }
     return;
   }
@@ -4480,7 +4633,7 @@ function heroBuildPartner(ht, dir) {
   template.innerHTML = state.route === "category" ? categorySlide(item, idx, count) : heroSlide(item, idx, count);
   const node = template.content.firstElementChild;
   node.style.transition = "none";
-  node.style.transform = "translateX(".concat(dir > 0 ? 100 : -100, "%)");
+  node.style.transform = `translateX(${dir > 0 ? 100 : -100}%)`;
   ht.hero.appendChild(node);
   const img = node.querySelector("img");
   if (img) {
@@ -4510,7 +4663,7 @@ function heroCommit(ht, dir, targetIndex) {
   partner.classList.add("animating");
   cur.style.transition = "";
   partner.style.transition = "";
-  cur.style.transform = "translateX(".concat(dir > 0 ? -100 : 100, "%)");
+  cur.style.transform = `translateX(${dir > 0 ? -100 : 100}%)`;
   partner.style.transform = "translateX(0)";
   if (state.route === "category") state.categoryBanner = targetIndex;
   else state.banner = targetIndex;
@@ -4541,7 +4694,7 @@ function heroSnap(ht, dir) {
   if (partner) {
     partner.classList.add("animating");
     partner.style.transition = "";
-    partner.style.transform = "translateX(".concat(dir > 0 ? 100 : -100, "%)");
+    partner.style.transform = `translateX(${dir > 0 ? 100 : -100}%)`;
     setTimeout(() => {
       if (partner.isConnected) partner.remove();
     }, 340);
@@ -4586,10 +4739,10 @@ content.addEventListener("touchmove", (event) => {
   const dir = dxv < 0 ? 1 : -1;
   heroTouch.dir = dir;
   heroBuildPartner(heroTouch, dir);
-  heroTouch.current.style.transform = "translateX(".concat(dxv, "px)");
+  heroTouch.current.style.transform = `translateX(${dxv}px)`;
   if (heroTouch.partner) {
     heroTouch.partner.style.transition = "none";
-    heroTouch.partner.style.transform = "translateX(calc(".concat(dir > 0 ? 100 : -100, "% + ").concat(dxv, "px))");
+    heroTouch.partner.style.transform = `translateX(calc(${dir > 0 ? 100 : -100}% + ${dxv}px))`;
   }
 }, { passive: true });
 content.addEventListener("touchend", (event) => {
@@ -4624,7 +4777,7 @@ scroll.addEventListener("scroll", () => {
 api("app-version").then((version) => {
   appVersion = String(version || "");
   const label = content.querySelector(".app-version-text");
-  if (label) label.textContent = "\u7248\u672C v".concat(appVersion);
+  if (label) label.textContent = `\u7248\u672C v${appVersion}`;
   setAvailableUpdate(updateAvailable);
 }).catch(() => {
 });

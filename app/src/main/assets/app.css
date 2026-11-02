@@ -159,8 +159,9 @@ html[data-theme=dark] .dl-primary{background:var(--accent);color:var(--accent-in
 .download-track i{display:block;height:100%;border-radius:99px;background:var(--accent)}
 html[data-theme=dark] .download-track i{background:var(--accent)}
 .download-task-foot{display:flex;align-items:center;gap:10px;margin-top:8px;min-height:28px;flex-wrap:wrap}
-.dl-output{font-size:11px;color:var(--muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dl-error{font-size:11px;color:#bb3c2d;flex:1;max-height:150px;overflow:auto;line-height:1.6;word-break:break-all;cursor:pointer;padding:4px 6px;border-radius:calc(6px * var(--corner-scale,1));background:rgba(187,60,45,.06)}
+.dl-output{font-size:11px;color:var(--muted);flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 错误日志独占一行：跟按钮挤在同一行时会被压到只剩一个字宽，中文逐字竖排（用户截图反馈） */
+.dl-error{font-size:11px;color:#bb3c2d;flex:1 1 100%;min-width:0;max-height:150px;overflow:auto;line-height:1.6;word-break:break-word;cursor:pointer;padding:4px 6px;border-radius:calc(6px * var(--corner-scale,1));background:rgba(187,60,45,.06)}
 .dl-cancel{border:1px solid var(--line);border-radius:calc(9px * var(--corner-scale,1));background:var(--bg);color:var(--text);padding:6px 14px;font-size:12px;white-space:nowrap;flex:none}
 .dl-retry{border-color:#2f7fe0;background:#2f7fe0;color:#fff;font-weight:600;margin-left:8px}
 .page-empty{color:var(--muted);font-size:12px;text-align:center;padding:26px 0}
@@ -901,8 +902,7 @@ html[data-motion=off] .ap-preview-dock > i{transition:none}
 .remote-test-result[hidden]{display:none}
 
 /* 下载弹层里的服务器选择说明 */
-.dl-remote-tip{margin:0 2px 12px;font-size:11.5px;line-height:1.55;color:var(--muted)}
-/* 下载行里的传输状态：同一行里跟集数并排，失败要一眼看到 */
+.dl-remote-note{font-weight:700}/* 下载行里的传输状态：同一行里跟集数并排，失败要一眼看到 */
 .dl-remote-note{font-weight:700}
 .dl-remote-note.running,.dl-remote-note.queued{color:var(--accent)}
 .dl-remote-note.done{color:#2e9e4f}
