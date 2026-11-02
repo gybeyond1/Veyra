@@ -658,11 +658,22 @@ function kindOf(type, body) {
 const MEDIA_PATH_RE = /\.(m3u8|ts|mp4|m4s|flv|key|jpg|jpeg|png|webp|gif|avif)(\?|#|$)|(?:hls|vod|live|media|segment|index)\//i;
 function isPrivateHost(hostname) {
   if (!hostname) return true;
-  const h = hostname.toLowerCase();
+  let h = hostname.toLowerCase();
+  if (h.startsWith('[') && h.endsWith(']')) h = h.slice(1, -1);
   if (h === 'localhost' || h.endsWith('.local') || h.endsWith('.internal') || h.endsWith('.lan')) return true;
   if (/^(\d{1,3}\.){3}\d{1,3}$/.test(h)) {
-    const [a, b] = h.split('.').map(Number);
-    return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31);
+    const parts = h.split('.').map(Number);
+    if (parts.some(n => !Number.isInteger(n) || n < 0 || n > 255)) return true;
+    const [a, b] = parts;
+    return a === 10 || a === 127 || a === 0 || (a === 100 && b >= 64 && b <= 127) ||
+      (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+  }
+  // IPv6：拦截环回/链路本地/唯一本地/IPv4 映射地址；非全球单播段一律拒绝防绕过
+  if (h.includes(':')) {
+    if (h === '::1' || h === '::' || h.startsWith('fe80:') || h.startsWith('fc') || h.startsWith('fd')) return true;
+    const mapped = h.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+    if (mapped) return isPrivateHost(mapped[1]);
+    return !/^[23]/.test(h);
   }
   return false;
 }
