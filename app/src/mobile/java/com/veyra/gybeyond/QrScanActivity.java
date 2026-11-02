@@ -2,10 +2,14 @@ package com.veyra.gybeyond;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.Canvas;
 import android.graphics.ImageFormat;
 import android.graphics.Matrix;
+import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.RectF;
 import android.graphics.SurfaceTexture;
 import android.graphics.drawable.GradientDrawable;
@@ -106,13 +110,21 @@ public class QrScanActivity extends Activity implements TextureView.SurfaceTextu
         if (sessionJson == null) sessionJson = "";
 
         FrameLayout root = new FrameLayout(this);
-        root.setBackgroundColor(0xFF101216);
+        // 纯黑：画面按完整比例居中时上下会留一点边，深灰背景会显出一道"框"
+        root.setBackgroundColor(0xFF000000);
 
         preview = new TextureView(this);
         // 不透明：TextureView 默认半透明，扫码这种全屏预览开不透明省一次混合
         preview.setOpaque(true);
         preview.setSurfaceTextureListener(this);
         root.addView(preview, new FrameLayout.LayoutParams(-1, -1));
+        // 布局稳定之前 getWidth() 可能还是 0 或旧值，那时算出来的矩阵会把画面摆歪。
+        // 尺寸一变就重算一次，代价是一次矩阵运算。
+        preview.addOnLayoutChangeListener((v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
+            if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) {
+                configureTransform(previewBuffer);
+            }
+        });
 
         addViewfinder(root);
         addHint(root);
@@ -124,20 +136,52 @@ public class QrScanActivity extends Activity implements TextureView.SurfaceTextu
 
     /** 取景方框只是视觉参考：解码用的是整帧，框外照样能认出来。 */
     private void addViewfinder(FrameLayout root) {
-        View frame = new View(this);
-        GradientDrawable border = new GradientDrawable();
-        border.setColor(0x00000000);
-        border.setStroke(dp(2), 0x99FFD277);
-        border.setCornerRadius(dp(18));
-        frame.setBackground(border);
-
         // 按屏幕宽度取边长：手机上约六成宽，平板不会缩成一个小方块
         int screenDp = Math.round(getResources().getDisplayMetrics().widthPixels
                 / getResources().getDisplayMetrics().density);
         int side = dp(Math.max(200f, Math.min(320f, screenDp * 0.62f)));
+
+        /* 框外压暗：只描个边在浅色背景上几乎看不见，用户不知道该把码怼哪儿。
+           微信那种暗角靠的就是这个，框内保持原亮度。 */
+        root.addView(new ViewfinderMask(this, side, 0x8C000000),
+                new FrameLayout.LayoutParams(-1, -1));
+
+        View frame = new View(this);
+        GradientDrawable border = new GradientDrawable();
+        border.setColor(0x00000000);
+        border.setStroke(dp(2), 0xCCFFD277);
+        border.setCornerRadius(dp(18));
+        frame.setBackground(border);
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(side, side);
         params.gravity = Gravity.CENTER;
         root.addView(frame, params);
+    }
+
+    /** 取景框外的一层半透明遮罩：中间留一个方形洞。 */
+    private static final class ViewfinderMask extends View {
+        private final int side;
+        private final Paint paint = new Paint();
+
+        ViewfinderMask(Context context, int side, int color) {
+            super(context);
+            this.side = side;
+            paint.setColor(color);
+            paint.setStyle(Paint.Style.FILL);
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            int w = getWidth();
+            int h = getHeight();
+            int left = (w - side) / 2;
+            int top = (h - side) / 2;
+            float radius = side * 0.075f;
+            // EVEN_ODD：外圈矩形 + 内圈圆角矩形，重叠区域被挖空，正好留出一个圆角取景洞
+            Path path = new Path();
+            path.setFillType(Path.FillType.EVEN_ODD);
+            path.addRect(0f, 0f, w, h, Path.Direction.CW);
+            path.addRoundRect(left, top, left + side, top + side, radius, radius, Path.Direction.CW);
+            canvas.drawPath(path, paint);
+        }
     }
 
     private void addHint(FrameLayout root) {
@@ -181,11 +225,15 @@ public class QrScanActivity extends Activity implements TextureView.SurfaceTextu
      * 卡片自己搭而不是用 AlertDialog：系统对话框的主题色跟这个全屏取景页差太远。
      */
     private void buildConfirmLayer(FrameLayout root) {
-        confirmLayer = new View(this);
-        confirmLayer.setBackgroundColor(0xC4000000);
-        confirmLayer.setVisibility(View.GONE);
-        confirmLayer.setClickable(true);   // 吃掉点击，别点穿到相机
-        root.addView(confirmLayer, new FrameLayout.LayoutParams(-1, -1));
+        /* 卡片必须放进这个容器里，不能跟遮罩平级：
+           否则 setVisibility(GONE) 只藏了遮罩，卡片照样挂在屏幕上 —— v0.24.8 就是这么翻的，
+           一进扫码页就顶着一张「允许登录电视？」。 */
+        FrameLayout layer = new FrameLayout(this);
+        layer.setBackgroundColor(0xC4000000);
+        layer.setVisibility(View.GONE);
+        layer.setClickable(true);   // 吃掉点击，别点穿到相机
+        root.addView(layer, new FrameLayout.LayoutParams(-1, -1));
+        confirmLayer = layer;
 
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
@@ -245,7 +293,7 @@ public class QrScanActivity extends Activity implements TextureView.SurfaceTextu
                 getResources().getDisplayMetrics().widthPixels - dp(48));
         FrameLayout.LayoutParams cardParams = new FrameLayout.LayoutParams(width, -2);
         cardParams.gravity = Gravity.CENTER;
-        root.addView(card, cardParams);
+        layer.addView(card, cardParams);
 
         cardSecondary.setOnClickListener(v -> {
             // 请求已经发出去了就别让它"取消"了 —— 那头电视可能已经登上了，
@@ -257,6 +305,7 @@ public class QrScanActivity extends Activity implements TextureView.SurfaceTextu
     }
 
     private void showConfirm(final TvLogin login) {
+        if (login == null) return;   // 没扫到东西就绝不弹框
         pending = login;
         pushing = false;
         hint.setVisibility(View.INVISIBLE);
@@ -524,7 +573,10 @@ public class QrScanActivity extends Activity implements TextureView.SurfaceTextu
      * 这里有个必须记住的前提：**TextureView 默认会把相机 buffer 直接拉伸到控件大小**
      * （1280x720 的横向流铺到 1080x2400 的竖屏上，默认就是一根被拉长的面条）。
      * 所以第一步必须用 setRectToRect 把这段"默认拉伸"抵消掉、还原 buffer 的原始比例，
-     * 再以控件中心为轴做旋转和等比放大。少了这一步，无论后面怎么算都是歪的、扁的。
+     * 再以控件中心为轴做旋转和等比缩放。少了这一步，无论后面怎么算都是歪的、扁的。
+     *
+     * 缩放用 min 而不是 max：宁可上下留一点黑边，也要让取景范围跟你眼睛看到的一致。
+     * 用 max 会裁掉左右约两成视野，人会本能觉得"这画面不对"。
      */
     private void configureTransform(Size buffer) {
         if (preview == null || buffer == null) return;
@@ -547,7 +599,7 @@ public class QrScanActivity extends Activity implements TextureView.SurfaceTextu
         // 转过 90°/270° 后画面占的宽高要对调过来算
         float shownW = quarter ? buffer.getHeight() : buffer.getWidth();
         float shownH = quarter ? buffer.getWidth() : buffer.getHeight();
-        float scale = Math.max(viewW / shownW, viewH / shownH);
+        float scale = Math.min(viewW / shownW, viewH / shownH);
 
         matrix.postScale(scale, scale, centerX, centerY);
         if (rotationDegrees != 0) matrix.postRotate(rotationDegrees, centerX, centerY);
