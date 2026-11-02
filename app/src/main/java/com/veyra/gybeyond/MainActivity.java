@@ -942,6 +942,45 @@ public final class MainActivity extends Activity {
           ProxySettings.setMode(this, args.optInt("value", ProxySettings.MODE_BACKEND)); return true;
         }
         if ("test-proxy".equals(action)) return testProxy();
+        // ---- 远程服务器（SMB / WebDAV / FTP）：配置 + 传输 ----
+        // 这三个协议的客户端都在手机侧直连局域网，不经后端：后端可能跑在公网 VPS 上，
+        // 看不到用户家里的 NAS；而且文件本来就在手机上。
+        if ("remote-list".equals(action)) return RemoteStore.list(this);
+        if ("remote-save".equals(action)) return RemoteStore.save(this, args.optJSONObject("server"));
+        if ("remote-delete".equals(action)) {
+            RemoteStore.remove(this, args.optString("id"));
+            return new JSONObject().put("ok", true);
+        }
+        if ("remote-test".equals(action)) {
+            JSONObject server;
+            try {
+                server = RemoteStore.withSecret(this, args.optJSONObject("server"));
+            } catch (Exception error) {
+                throw new IllegalArgumentException(error.getMessage() == null ? "配置不完整" : error.getMessage());
+            }
+            long started = System.currentTimeMillis();
+            RemoteClient client = null;
+            try {
+                client = RemoteClient.create(server);
+                client.open();
+                client.verify();
+            } catch (Exception error) {
+                throw new IllegalStateException(RemoteClient.describeError(error));
+            } finally {
+                if (client != null) { try { client.close(); } catch (Exception ignored) { } }
+            }
+            return new JSONObject().put("ok", true)
+                    .put("ms", System.currentTimeMillis() - started)
+                    .put("address", RemoteStore.describe(server));
+        }
+        if ("remote-transfer-start".equals(action)) {
+            return RemoteTransfer.get(this).enqueue(args.optString("taskId"), args.optString("remoteId"));
+        }
+        if ("remote-transfer-list".equals(action)) return RemoteTransfer.get(this).list();
+        if ("remote-transfer-cancel".equals(action)) {
+            RemoteTransfer.get(this).cancel(args.optString("id"));
+            return new JSONObject().put("ok", true);
+        }
         // A request keeps its repository and storage together while another request switches modes.
         final DualContentRepository repository;
         final AppStore store;
@@ -974,7 +1013,7 @@ public final class MainActivity extends Activity {
             case "change-password": return account.changePassword(args.optString("oldPassword"), args.optString("newPassword"));
             case "logout": account.logout(); return account.profile();
             case "sync": return account.sync();
-            case "download-start": return DownloadManager.get(this).start(args.optString("source"), args.optString("title"), args.optJSONArray("episodes"), args.optBoolean("debug", false), args.optString("cover"));
+            case "download-start": return DownloadManager.get(this).start(args.optString("source"), args.optString("title"), args.optJSONArray("episodes"), args.optBoolean("debug", false), args.optString("cover"), args.optString("remoteId"));
             case "download-list": return DownloadManager.get(this).list();
             case "download-files": return DownloadManager.get(this).localFiles(args.optString("id"));
             case "open-local-player": {
@@ -993,7 +1032,7 @@ public final class MainActivity extends Activity {
                 return true;
             }
             case "download-cancel": DownloadManager.get(this).cancel(args.optString("id")); return new JSONObject().put("ok", true);
-            case "download-delete": DownloadManager.get(this).delete(args.optString("id")); return new JSONObject().put("ok", true);
+            case "download-delete": DownloadManager.get(this).delete(args.optString("id")); RemoteTransfer.get(this).forgetTask(args.optString("id")); return new JSONObject().put("ok", true);
             case "download-retry": DownloadManager.get(this).retry(args.optString("id")); return new JSONObject().put("ok", true);
             case "download-merge": return DownloadManager.get(this).merge(args.optString("id"));
             case "download-forward-prepare": return DownloadManager.get(this).forwardPrepare(args.optString("title"), args.optInt("count"), args.optString("nasTaskId"));

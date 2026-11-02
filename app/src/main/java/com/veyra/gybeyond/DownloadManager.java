@@ -103,6 +103,8 @@ final class DownloadManager {
         volatile String error = "";
         volatile String debug = "";   // 合并/下载详细排查日志（多行，UI 换行展示）
         volatile String nasTaskId = "";   // 转发模式：NAS 后端任务 id
+        /** 「下载到远程服务器」选的服务器 id：下载完成（合并完）后自动排一次上传；空 = 只落本机。 */
+        volatile String remoteId = "";
         /** 调试模式（私密模式专用）：只把 TS 分片+KEY+playlist 下全并打包导出，**不做自动合并**。
          *  用来取「单集黑屏」那集的原始素材，交给开发者离线分析（产物在 Download/Veyra/剧名/第NN集_调试包.zip）。 */
         volatile boolean keepRaw = false;
@@ -121,6 +123,7 @@ final class DownloadManager {
                         .put("status", status).put("doneCount", doneCount).put("totalCount", totalCount)
                         .put("percent", percent).put("detail", detail)
                         .put("nasTaskId", nasTaskId).put("keepRaw", keepRaw)
+                        .put("remoteId", remoteId)
                         .put("output", output).put("error", error).put("debug", debug).put("createdAt", createdAt);
             } catch (Exception e) { return new JSONObject(); }
         }
@@ -138,6 +141,7 @@ final class DownloadManager {
                             .put("doneCount", t.doneCount).put("totalCount", t.totalCount)
                             .put("detail", t.detail).put("output", t.output).put("error", t.error).put("debug", t.debug)
                             .put("nasTaskId", t.nasTaskId)
+                            .put("remoteId", t.remoteId)
                             .put("keepRaw", t.keepRaw)
                             .put("episodes", t.episodes)
                             .put("createdAt", t.createdAt));
@@ -187,6 +191,7 @@ final class DownloadManager {
                 t.output = o.optString("output", "");
                 t.debug = o.optString("debug", "");
                 t.nasTaskId = o.optString("nasTaskId", "");
+                t.remoteId = o.optString("remoteId", "");
                 t.keepRaw = o.optBoolean("keepRaw", false);
                 // 恢复分集列表（episodes 为 final JSONArray，用 put 拷贝），否则重试恢复的任务分集数=0
                 JSONArray saved = o.optJSONArray("episodes");
@@ -365,6 +370,13 @@ final class DownloadManager {
     }
 
     JSONObject start(String source, String title, JSONArray episodes, boolean keepRaw, String cover) throws Exception {
+        return start(source, title, episodes, keepRaw, cover, "");
+    }
+
+    /**
+     * @param remoteId 「下载到远程服务器」选的服务器 id：下载并合并完成后自动排一次上传（空 = 只落本机）。
+     */
+    JSONObject start(String source, String title, JSONArray episodes, boolean keepRaw, String cover, String remoteId) throws Exception {
         if (!"hongguo".equals(source) && !"huangguo".equals(source)) throw new IllegalArgumentException("无效来源");
         if (episodes == null || episodes.length() == 0) throw new IllegalArgumentException("没有可下载的分集");
         for (int i = 0; i < episodes.length(); i++) {
@@ -377,6 +389,7 @@ final class DownloadManager {
         Task task = new Task(id, source, title, episodes);
         task.keepRaw = keepRaw;
         task.cover = cover == null ? "" : cover;
+        task.remoteId = remoteId == null ? "" : remoteId;
         tasks.add(0, task);
         persist();
         pool.execute(() -> run(task));
@@ -436,6 +449,88 @@ final class DownloadManager {
     private static int episodeNo(String name) {
         try { return Integer.parseInt(name.replaceAll("^第(\\d+)集(?:_\\d+)?\\.mp4$", "$1")); }
         catch (Exception e) { return 0; }
+    }
+
+    /**
+     * 「传到远程服务器」要传什么：有合并成品就传那一个文件，没有就把已导出的分集按集号升序传。
+     * 与 localFiles 的区别：不看当前内容模式（切到红果后照样能把黄果已下载的传出去）。
+     */
+    JSONObject transferPayload(String id) {
+        Task found = null;
+        synchronized (tasks) {
+            for (Task t : tasks) if (t.id.equals(id)) { found = t; break; }
+        }
+        if (found == null) throw new IllegalStateException("下载任务不存在（可能已被删除）");
+        if ("running".equals(found.status) || "pulling".equals(found.status))
+            throw new IllegalStateException("这部还在下载中，等下载完成再传");
+        String safe = found.title == null || found.title.isEmpty() ? "download"
+                : found.title.replaceAll("[\\\\/:*?\"<>|]", "_");
+        File dir = episodeDir(found.title);
+        normalizeEpisodeNames(dir);
+        List<File> files = new ArrayList<>();
+        boolean merged = false;
+        File official = new File(dir, safe + ".mp4");
+        if (official.exists() && official.length() > 0) {
+            files.add(official);
+            merged = true;
+        } else {
+            File[] children = dir.listFiles();
+            List<File> parts = new ArrayList<>();
+            if (children != null) {
+                for (File f : children) {
+                    if (f.length() > 0 && f.getName().matches("第\\d+集(?:_\\d+)?\\.mp4")) parts.add(f);
+                }
+            }
+            Collections.sort(parts, (a, b) -> episodeNo(a.getName()) - episodeNo(b.getName()));
+            files.addAll(parts);
+        }
+        if (files.isEmpty()) {
+            throw new IllegalStateException("《" + (found.title == null ? "" : found.title)
+                    + "》在本机还没有成品文件，等下载完成（或先合并）再传");
+        }
+        JSONArray items = new JSONArray();
+        long bytes = 0;
+        for (File f : files) {
+            try {
+                items.put(new JSONObject().put("name", f.getName())
+                        .put("path", f.getAbsolutePath()).put("size", f.length()));
+                bytes += f.length();
+            } catch (Exception ignored) { }
+        }
+        JSONObject out = new JSONObject();
+        try {
+            out.put("title", found.title == null ? "" : found.title)
+                    .put("dirName", safe).put("merged", merged)
+                    .put("files", items).put("bytes", bytes);
+        } catch (Exception ignored) { }
+        return out;
+    }
+
+    /**
+     * 「下载到远程服务器」的收尾：分集下完后先整剧合并（远端一个文件最干净），
+     * 合并落定（成功/失败）时由 merge() 里的 enqueueRemote 排上传；合并都排不上就直接传分集。
+     */
+    private void afterDownloadComplete(Task task) {
+        if (task == null || task.remoteId == null || task.remoteId.isEmpty() || task.keepRaw) return;
+        try {
+            task.detail = "已下载，正在合并后传输";
+            persist();
+            merge(task.id);
+        } catch (Exception error) {
+            enqueueRemote(task);
+        }
+    }
+
+    /** 把「本机已有文件」排进远程传输队列；失败只写进任务 detail，不改变下载任务本身的状态。 */
+    private void enqueueRemote(Task task) {
+        if (task == null || task.remoteId == null || task.remoteId.isEmpty()) return;
+        try {
+            RemoteTransfer.get(context).enqueue(task.id, task.remoteId);
+        } catch (Exception error) {
+            task.detail = (task.detail == null ? "" : task.detail + "；")
+                    + "没有开始传输：" + (error.getMessage() == null ? "未知错误" : error.getMessage());
+            persist();
+        }
     }
 
     void cancel(String id) {
@@ -709,6 +804,7 @@ final class DownloadManager {
                     + (directOk == n ? "" : "（直写 " + directOk + "/" + n + "）");
             task.output = outList.toString();
             persist();
+            afterDownloadComplete(task);
             return;
         } catch (Exception e) {
             if (!task.canceled) {
@@ -961,6 +1057,8 @@ final class DownloadManager {
                 task.status = "failed"; task.percent = 100;
                 task.detail = "合并失败（已保存 " + plain.size() + " 集分集，可直接重试合并）";
             }
+            // 「下载到远程服务器」：这里（合并成功/失败落定后）才上传，保证远端拿到的是成品
+            enqueueRemote(task);
         } catch (Exception e) {
             if (!task.canceled) { task.status = "failed"; task.error = e.getMessage() == null ? "合并失败" : e.getMessage(); task.detail = "失败"; }
         } finally {

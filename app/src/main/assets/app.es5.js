@@ -49,33 +49,33 @@ const unlockOverlay = document.getElementById("unlock-overlay");
 const downloadOverlay = document.getElementById("download-overlay");
 const categoryIds = { adult: ["ai-duanju", "ai-manju"], ai: ["ai-huanlian", "ai-mogai"] };
 const popularTags = [
-  ["dushi", "都市"],
-  ["xiaoyuan", "校园"],
-  ["gufeng", "古风"],
-  ["haomen", "豪门"],
-  ["chuanyue", "穿越"],
-  ["chongsheng", "重生"],
-  ["qihuan", "奇幻"],
-  ["zhichang", "职场"]
+  ["dushi", "\u90FD\u5E02"],
+  ["xiaoyuan", "\u6821\u56ED"],
+  ["gufeng", "\u53E4\u98CE"],
+  ["haomen", "\u8C6A\u95E8"],
+  ["chuanyue", "\u7A7F\u8D8A"],
+  ["chongsheng", "\u91CD\u751F"],
+  ["qihuan", "\u5947\u5E7B"],
+  ["zhichang", "\u804C\u573A"]
 ];
 const publicPopularTags = [
-  ["short:romance", "爱情"],
-  ["short:period", "年代"],
-  ["short:comeback", "逆袭"],
-  ["short:suspense", "悬疑"],
-  ["comic:creative", "脑洞"],
-  ["comic:fantasy", "玄幻"],
-  ["comic:apocalypse", "末世"],
-  ["comic:adventure", "冒险"]
+  ["short:romance", "\u7231\u60C5"],
+  ["short:period", "\u5E74\u4EE3"],
+  ["short:comeback", "\u9006\u88AD"],
+  ["short:suspense", "\u60AC\u7591"],
+  ["comic:creative", "\u8111\u6D1E"],
+  ["comic:fantasy", "\u7384\u5E7B"],
+  ["comic:apocalypse", "\u672B\u4E16"],
+  ["comic:adventure", "\u5192\u9669"]
 ];
 const tagGroups = [
-  ["popular", "热门类型"],
-  ["story", "故事题材"],
-  ["setting", "场景与身份"],
-  ["relationship", "人物与关系"],
-  ["style", "外形风格"],
-  ["plot", "情节元素"],
-  ["other", "更多标签"]
+  ["popular", "\u70ED\u95E8\u7C7B\u578B"],
+  ["story", "\u6545\u4E8B\u9898\u6750"],
+  ["setting", "\u573A\u666F\u4E0E\u8EAB\u4EFD"],
+  ["relationship", "\u4EBA\u7269\u4E0E\u5173\u7CFB"],
+  ["style", "\u5916\u5F62\u98CE\u683C"],
+  ["plot", "\u60C5\u8282\u5143\u7D20"],
+  ["other", "\u66F4\u591A\u6807\u7B7E"]
 ];
 const state = {
   route: "home",
@@ -123,10 +123,10 @@ contentReady = api("content-status").then((status) => {
   if (!privateMode()) {
     categoryIds.adult = ["short"];
     categoryIds.ai = ["comic"];
-    document.querySelector('[data-nav="adult"] > span:last-child').textContent = "短剧";
-    document.querySelector('[data-nav="ai"] > span:last-child').textContent = "漫剧";
-    searchInput.placeholder = "搜索剧名";
-    searchInput.setAttribute("aria-label", "搜索剧名");
+    document.querySelector('[data-nav="adult"] > span:last-child').textContent = "\u77ED\u5267";
+    document.querySelector('[data-nav="ai"] > span:last-child').textContent = "\u6F2B\u5267";
+    searchInput.placeholder = "\u641C\u7D22\u5267\u540D";
+    searchInput.setAttribute("aria-label", "\u641C\u7D22\u5267\u540D");
   }
   return status;
 });
@@ -176,7 +176,7 @@ function closeConfirmation(accepted) {
   finishConfirmation == null ? void 0 : finishConfirmation(accepted);
   finishConfirmation = null;
 }
-function askConfirmation(title, message, action = "清空") {
+function askConfirmation(title, message, action = "\u6E05\u7A7A") {
   document.getElementById("confirm-title").textContent = title;
   document.getElementById("confirm-message").textContent = message;
   document.getElementById("confirm-accept").textContent = action;
@@ -211,11 +211,11 @@ function setAccount(profile) {
   if (profile == null ? void 0 : profile.avatar) avatarImage.src = profile.avatar;
   else avatarImage.removeAttribute("src");
   avatarButton.classList.toggle("is-signed-in", Boolean(profile == null ? void 0 : profile.loggedIn));
-  avatarButton.setAttribute("aria-label", (profile == null ? void 0 : profile.loggedIn) ? "打开".concat(profile.username, "的账号管理") : "登录账号");
+  avatarButton.setAttribute("aria-label", (profile == null ? void 0 : profile.loggedIn) ? "\u6253\u5F00".concat(profile.username, "\u7684\u8D26\u53F7\u7BA1\u7406") : "\u767B\u5F55\u8D26\u53F7");
   const roleBadge = document.getElementById("account-role-badge");
   if (roleBadge) {
     const role = (profile == null ? void 0 : profile.role) === "admin" ? "admin" : (profile == null ? void 0 : profile.role) === "vip" ? "vip" : "user";
-    roleBadge.textContent = role === "admin" ? "管理员" : role === "vip" ? "特权组" : "普通用户";
+    roleBadge.textContent = role === "admin" ? "\u7BA1\u7406\u5458" : role === "vip" ? "\u7279\u6743\u7EC4" : "\u666E\u901A\u7528\u6237";
     roleBadge.classList.toggle("is-admin", role === "admin");
     roleBadge.classList.toggle("is-vip", role === "vip");
     roleBadge.hidden = !(profile == null ? void 0 : profile.loggedIn);
@@ -254,7 +254,7 @@ function setAuthPending(pending, mode = authMode) {
   submit.disabled = pending;
   submit.classList.toggle("is-loading", pending);
   submit.setAttribute("aria-busy", String(pending));
-  submit.textContent = pending ? mode === "login" ? "正在登录…" : "正在注册…" : mode === "login" ? "登录" : "注册并登录";
+  submit.textContent = pending ? mode === "login" ? "\u6B63\u5728\u767B\u5F55\u2026" : "\u6B63\u5728\u6CE8\u518C\u2026" : mode === "login" ? "\u767B\u5F55" : "\u6CE8\u518C\u5E76\u767B\u5F55";
   document.querySelectorAll("[data-auth-mode]").forEach((button) => {
     button.disabled = pending;
   });
@@ -270,8 +270,8 @@ function showTvLoginPanel() {
   if (tabs) tabs.hidden = true;
   if (form) form.hidden = true;
   if (footnote) footnote.hidden = true;
-  document.getElementById("auth-title").textContent = "登录电视";
-  document.getElementById("auth-subtitle").textContent = "用手机上的 Veyra 扫一下，账号直接同步过来";
+  document.getElementById("auth-title").textContent = "\u767B\u5F55\u7535\u89C6";
+  document.getElementById("auth-subtitle").textContent = "\u7528\u624B\u673A\u4E0A\u7684 Veyra \u626B\u4E00\u4E0B\uFF0C\u8D26\u53F7\u76F4\u63A5\u540C\u6B65\u8FC7\u6765";
   document.getElementById("tv-login").hidden = false;
   requestTvLoginQr();
 }
@@ -292,17 +292,17 @@ function requestTvLoginQr() {
     }
     if (start) {
       start.hidden = false;
-      start.textContent = "重试";
+      start.textContent = "\u91CD\u8BD5";
     }
     if (note) {
-      note.textContent = "局域网没起来，确认电视和手机连同一个 Wi-Fi 后再试";
+      note.textContent = "\u5C40\u57DF\u7F51\u6CA1\u8D77\u6765\uFF0C\u786E\u8BA4\u7535\u89C6\u548C\u624B\u673A\u8FDE\u540C\u4E00\u4E2A Wi-Fi \u540E\u518D\u8BD5";
       note.hidden = false;
     }
     return;
   }
   if (!window.qrcode) {
     if (note) {
-      note.textContent = "二维码组件没加载，请更新应用";
+      note.textContent = "\u4E8C\u7EF4\u7801\u7EC4\u4EF6\u6CA1\u52A0\u8F7D\uFF0C\u8BF7\u66F4\u65B0\u5E94\u7528";
       note.hidden = false;
     }
     return;
@@ -315,19 +315,19 @@ function requestTvLoginQr() {
     code.hidden = false;
     if (start) start.hidden = true;
     if (note) {
-      note.textContent = "手机 Veyra → 设置 → 扫码登录电视（" + info.host + ":" + info.port + "）";
+      note.textContent = "\u624B\u673A Veyra \u2192 \u8BBE\u7F6E \u2192 \u626B\u7801\u767B\u5F55\u7535\u89C6\uFF08" + info.host + ":" + info.port + "\uFF09";
       note.hidden = false;
     }
   } catch (error) {
     if (note) {
-      note.textContent = "二维码生成失败，请重试";
+      note.textContent = "\u4E8C\u7EF4\u7801\u751F\u6210\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5";
       note.hidden = false;
     }
   }
 }
 window.hgTvLogin = (ok) => {
   if (!ok) {
-    toast("登录没成功，重新扫一次", true);
+    toast("\u767B\u5F55\u6CA1\u6210\u529F\uFF0C\u91CD\u65B0\u626B\u4E00\u6B21", true);
     requestTvLoginQr();
     return;
   }
@@ -335,7 +335,7 @@ window.hgTvLogin = (ok) => {
     setAccount(profile);
     if (profile == null ? void 0 : profile.loggedIn) {
       hideAuth();
-      toast("已登录");
+      toast("\u5DF2\u767B\u5F55");
     }
   }).catch(() => {
   });
@@ -349,7 +349,7 @@ function showAuth(mode = "login") {
     showTvLoginPanel();
     return;
   }
-  document.getElementById("auth-title").textContent = mode === "login" ? "登录应用账号" : "注册应用账号";
+  document.getElementById("auth-title").textContent = mode === "login" ? "\u767B\u5F55\u5E94\u7528\u8D26\u53F7" : "\u6CE8\u518C\u5E94\u7528\u8D26\u53F7";
   setAuthPending(authPending, mode);
   document.getElementById("auth-password").autocomplete = mode === "login" ? "current-password" : "new-password";
   const codeField = document.getElementById("auth-code");
@@ -378,17 +378,17 @@ document.querySelectorAll("[data-auth-mode]").forEach((button) => button.addEven
 function startQrScan() {
   var _a2;
   if (!((_a2 = window.AndroidHost) == null ? void 0 : _a2.startQrScan)) {
-    toast("当前版本不支持扫码，请更新应用", true);
+    toast("\u5F53\u524D\u7248\u672C\u4E0D\u652F\u6301\u626B\u7801\uFF0C\u8BF7\u66F4\u65B0\u5E94\u7528", true);
     return;
   }
   try {
     window.AndroidHost.startQrScan();
   } catch (error) {
-    toast(error.message || "打不开扫码页", true);
+    toast(error.message || "\u6253\u4E0D\u5F00\u626B\u7801\u9875", true);
   }
 }
 window.hgQrScan = (ok, message) => {
-  toast(message || (ok ? "已登录电视" : "扫码失败"), !ok);
+  toast(message || (ok ? "\u5DF2\u767B\u5F55\u7535\u89C6" : "\u626B\u7801\u5931\u8D25"), !ok);
 };
 document.getElementById("auth-form").addEventListener("submit", async (event) => {
   var _a2, _b2;
@@ -405,18 +405,18 @@ document.getElementById("auth-form").addEventListener("submit", async (event) =>
   try {
     if (mode === "register") {
       const code = ((_a2 = document.getElementById("auth-code")) == null ? void 0 : _a2.value.trim()) || "";
-      if (!/^\d{6}$/.test(code)) throw new Error("注册需要管理员提供的 6 位动态码");
+      if (!/^\d{6}$/.test(code)) throw new Error("\u6CE8\u518C\u9700\u8981\u7BA1\u7406\u5458\u63D0\u4F9B\u7684 6 \u4F4D\u52A8\u6001\u7801");
       await api("verify-otp-public", { code, server });
     }
     const profile = await api(mode, { username, password, server, code: mode === "register" ? ((_b2 = document.getElementById("auth-code")) == null ? void 0 : _b2.value.trim()) || "" : void 0 });
     hideAuth();
     setAccount(profile);
     if (state.route === "library") goLibrary(state.libraryTab);
-    toast(mode === "login" ? "登录成功，片单正在同步" : "注册成功，片单正在同步");
+    toast(mode === "login" ? "\u767B\u5F55\u6210\u529F\uFF0C\u7247\u5355\u6B63\u5728\u540C\u6B65" : "\u6CE8\u518C\u6210\u529F\uFF0C\u7247\u5355\u6B63\u5728\u540C\u6B65");
   } catch (failure) {
-    if (authOverlay.hidden) toast(failure.message || "请稍后重试", true);
+    if (authOverlay.hidden) toast(failure.message || "\u8BF7\u7A0D\u540E\u91CD\u8BD5", true);
     else {
-      error.textContent = failure.message || "请稍后重试";
+      error.textContent = failure.message || "\u8BF7\u7A0D\u540E\u91CD\u8BD5";
       error.hidden = false;
     }
   } finally {
@@ -429,9 +429,9 @@ window.hgAccountRefreshed = (profile) => {
 };
 window.hgAvatarUpdated = (profile) => {
   setAccount(profile);
-  toast("头像已更新");
+  toast("\u5934\u50CF\u5DF2\u66F4\u65B0");
 };
-window.hgAvatarError = (message) => toast(message || "头像保存失败", true);
+window.hgAvatarError = (message) => toast(message || "\u5934\u50CF\u4FDD\u5B58\u5931\u8D25", true);
 window.hgCloudSynced = () => {
   if (state.route === "home") refreshHomeHistory();
   else if (state.route === "library") {
@@ -466,18 +466,18 @@ function setAvailableUpdate(result) {
   const versionButton = content.querySelector(".app-version");
   if (versionButton) {
     versionButton.classList.toggle("has-update", Boolean(updateAvailable));
-    versionButton.setAttribute("aria-label", updateAvailable ? "当前版本 ".concat(appVersion, "，发现新版 ").concat(updateAvailable.version, "，查看更新") : "当前版本 ".concat(appVersion, "，检查更新"));
+    versionButton.setAttribute("aria-label", updateAvailable ? "\u5F53\u524D\u7248\u672C ".concat(appVersion, "\uFF0C\u53D1\u73B0\u65B0\u7248 ").concat(updateAvailable.version, "\uFF0C\u67E5\u770B\u66F4\u65B0") : "\u5F53\u524D\u7248\u672C ".concat(appVersion, "\uFF0C\u68C0\u67E5\u66F4\u65B0"));
   }
 }
 function showUpdate(result) {
-  document.getElementById("update-version").textContent = "当前 ".concat(result.currentVersion, " · 新版 ").concat(result.version);
+  document.getElementById("update-version").textContent = "\u5F53\u524D ".concat(result.currentVersion, " \xB7 \u65B0\u7248 ").concat(result.version);
   const notes = document.getElementById("update-notes");
   notes.textContent = String(result.notes || "").trim().slice(0, 1200);
   notes.hidden = !notes.textContent;
   document.getElementById("update-progress").hidden = true;
-  updateDownloadButton.textContent = "立即下载";
+  updateDownloadButton.textContent = "\u7ACB\u5373\u4E0B\u8F7D";
   updateDownloadButton.disabled = false;
-  updateLaterButton.textContent = "取消";
+  updateLaterButton.textContent = "\u53D6\u6D88";
   updateLaterButton.disabled = false;
   const appRoot = document.getElementById("app");
   if (appRoot) appRoot.appendChild(updateOverlay);
@@ -486,11 +486,11 @@ function showUpdate(result) {
 }
 async function checkUpdate(manual) {
   if (updateDownloading) {
-    if (manual) toast("更新包正在下载", true);
+    if (manual) toast("\u66F4\u65B0\u5305\u6B63\u5728\u4E0B\u8F7D", true);
     return;
   }
   if (updateChecking) {
-    if (manual) toast("正在检查更新", true);
+    if (manual) toast("\u6B63\u5728\u68C0\u67E5\u66F4\u65B0", true);
     return;
   }
   updateChecking = true;
@@ -511,15 +511,15 @@ async function checkUpdate(manual) {
       }
     } else if (result.status === "current" || result.status === "unpublished" || result.status === "none") {
       setAvailableUpdate(null);
-      if (manual && result.status === "current") toast("已是最新版本 ".concat(result.version));
-      if (manual && result.status === "unpublished") toast("暂未发布更新包", true);
+      if (manual && result.status === "current") toast("\u5DF2\u662F\u6700\u65B0\u7248\u672C ".concat(result.version));
+      if (manual && result.status === "unpublished") toast("\u6682\u672A\u53D1\u5E03\u66F4\u65B0\u5305", true);
     } else if (result.status === "channel-missing") {
       setAvailableUpdate(null);
-      if (manual) toast("这个版本还没发布手机版安装包，等打包后再试", true);
-    } else if (manual && result.status === "unconfigured") toast("暂未发布更新包", true);
-    else if (manual && result.status === "throttled") toast("一小时内最多手动检查 5 次，请稍后再试", true);
+      if (manual) toast("\u8FD9\u4E2A\u7248\u672C\u8FD8\u6CA1\u53D1\u5E03\u624B\u673A\u7248\u5B89\u88C5\u5305\uFF0C\u7B49\u6253\u5305\u540E\u518D\u8BD5", true);
+    } else if (manual && result.status === "unconfigured") toast("\u6682\u672A\u53D1\u5E03\u66F4\u65B0\u5305", true);
+    else if (manual && result.status === "throttled") toast("\u4E00\u5C0F\u65F6\u5185\u6700\u591A\u624B\u52A8\u68C0\u67E5 5 \u6B21\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5", true);
   } catch (error) {
-    if (manual) toast(error.message || "检查更新失败，请稍后重试", true);
+    if (manual) toast(error.message || "\u68C0\u67E5\u66F4\u65B0\u5931\u8D25\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5", true);
   } finally {
     updateChecking = false;
   }
@@ -529,26 +529,26 @@ window.hgUpdateProgress = (percent) => {
   document.getElementById("update-percent").textContent = "".concat(percent, "%");
   document.getElementById("update-fill").style.transform = "scaleX(".concat(percent / 100, ")");
 };
-window.hgUpdateInstallPermissionDenied = () => toast("请允许此应用安装更新包后重试", true);
-window.hgUpdateInstallError = () => toast("无法打开系统安装程序，请重试", true);
+window.hgUpdateInstallPermissionDenied = () => toast("\u8BF7\u5141\u8BB8\u6B64\u5E94\u7528\u5B89\u88C5\u66F4\u65B0\u5305\u540E\u91CD\u8BD5", true);
+window.hgUpdateInstallError = () => toast("\u65E0\u6CD5\u6253\u5F00\u7CFB\u7EDF\u5B89\u88C5\u7A0B\u5E8F\uFF0C\u8BF7\u91CD\u8BD5", true);
 updateDownloadButton.addEventListener("click", async () => {
   if (updateDownloading) return;
   updateDownloading = true;
   updateDownloadButton.disabled = true;
-  updateLaterButton.textContent = "后台下载";
-  updateDownloadButton.textContent = "正在下载…";
+  updateLaterButton.textContent = "\u540E\u53F0\u4E0B\u8F7D";
+  updateDownloadButton.textContent = "\u6B63\u5728\u4E0B\u8F7D\u2026";
   window.hgUpdateProgress(0);
   try {
     await api("download-update");
     updateOverlay.hidden = true;
     rememberDismissedUpdate("");
-    updateDownloadButton.textContent = "立即下载";
-    updateLaterButton.textContent = "取消";
-    toast("下载完成，正在打开安装程序");
+    updateDownloadButton.textContent = "\u7ACB\u5373\u4E0B\u8F7D";
+    updateLaterButton.textContent = "\u53D6\u6D88";
+    toast("\u4E0B\u8F7D\u5B8C\u6210\uFF0C\u6B63\u5728\u6253\u5F00\u5B89\u88C5\u7A0B\u5E8F");
   } catch (error) {
-    updateDownloadButton.textContent = "重试下载";
-    updateLaterButton.textContent = "取消";
-    toast(error.message || "下载失败，请重试", true);
+    updateDownloadButton.textContent = "\u91CD\u8BD5\u4E0B\u8F7D";
+    updateLaterButton.textContent = "\u53D6\u6D88";
+    toast(error.message || "\u4E0B\u8F7D\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5", true);
   } finally {
     updateDownloading = false;
     updateDownloadButton.disabled = false;
@@ -559,7 +559,7 @@ updateDownloadButton.addEventListener("click", async () => {
 updateLaterButton.addEventListener("click", () => {
   updateOverlay.hidden = true;
   updateBackEnabled();
-  if (updateDownloading) toast("已转入后台下载，完成后会自动弹出安装", true);
+  if (updateDownloading) toast("\u5DF2\u8F6C\u5165\u540E\u53F0\u4E0B\u8F7D\uFF0C\u5B8C\u6210\u540E\u4F1A\u81EA\u52A8\u5F39\u51FA\u5B89\u88C5", true);
   else rememberDismissedUpdate(updatePendingVersion);
 });
 window.hgTheme = (info) => {
@@ -580,12 +580,12 @@ api("theme").then(window.hgTheme).catch(() => {
 });
 function itemCard(item) {
   const id = esc(item.id);
-  const title = esc(item.title || "影片");
-  const info = esc(item.episodeLabel || asArray(item.tags).slice(0, 2).join(" · ") || "打开详情");
-  return '<button class="film-card" type="button" data-open-id="'.concat(id, '" aria-label="查看').concat(title, '">\n    <span class="poster loading"><span class="poster-letter">').concat(title.slice(0, 1), '</span><img data-cover="').concat(esc(item.cover || ""), '" alt=""><span class="poster-score" ').concat(item.score ? "" : "hidden", ">").concat(esc(item.score || ""), '</span></span>\n    <span class="film-title">').concat(title, '</span><span class="film-info">').concat(info, "</span></button>");
+  const title = esc(item.title || "\u5F71\u7247");
+  const info = esc(item.episodeLabel || asArray(item.tags).slice(0, 2).join(" \xB7 ") || "\u6253\u5F00\u8BE6\u60C5");
+  return '<button class="film-card" type="button" data-open-id="'.concat(id, '" aria-label="\u67E5\u770B').concat(title, '">\n    <span class="poster loading"><span class="poster-letter">').concat(title.slice(0, 1), '</span><img data-cover="').concat(esc(item.cover || ""), '" alt=""><span class="poster-score" ').concat(item.score ? "" : "hidden", ">").concat(esc(item.score || ""), '</span></span>\n    <span class="film-title">').concat(title, '</span><span class="film-info">').concat(info, "</span></button>");
 }
 function moreCard(kind) {
-  return '<button class="film-card more-tile" type="button" data-more="'.concat(esc(kind), '" aria-label="查看更多推荐">\n    <span class="poster more-poster"><span class="more-tile-label">更多推荐 ').concat(icon("arrow"), '</span></span>\n    <span class="film-title">查看全部</span><span class="film-info">打开完整列表</span></button>');
+  return '<button class="film-card more-tile" type="button" data-more="'.concat(esc(kind), '" aria-label="\u67E5\u770B\u66F4\u591A\u63A8\u8350">\n    <span class="poster more-poster"><span class="more-tile-label">\u66F4\u591A\u63A8\u8350 ').concat(icon("arrow"), '</span></span>\n    <span class="film-title">\u67E5\u770B\u5168\u90E8</span><span class="film-info">\u6253\u5F00\u5B8C\u6574\u5217\u8868</span></button>');
 }
 function section(title, items, kind = "") {
   if (!items.length) return "";
@@ -595,7 +595,7 @@ function section(title, items, kind = "") {
 }
 function homeTagBar() {
   const choices = privateMode() ? popularTags : publicPopularTags;
-  return '<nav class="home-tags" aria-label="按类型浏览"><button type="button" class="all-tags-link" data-all-tags="1">全部类型 '.concat(icon("arrow"), '</button>\n    <div class="home-tag-scroll">').concat(choices.map(([slug, name]) => '<button type="button" class="home-tag" data-tag-slug="'.concat(slug, '" data-tag-name="').concat(name, '">').concat(name, "</button>")).join(""), "</div></nav>");
+  return '<nav class="home-tags" aria-label="\u6309\u7C7B\u578B\u6D4F\u89C8"><button type="button" class="all-tags-link" data-all-tags="1">\u5168\u90E8\u7C7B\u578B '.concat(icon("arrow"), '</button>\n    <div class="home-tag-scroll">').concat(choices.map(([slug, name]) => '<button type="button" class="home-tag" data-tag-slug="'.concat(slug, '" data-tag-name="').concat(name, '">').concat(name, "</button>")).join(""), "</div></nav>");
 }
 function homeSignature(data) {
   var _a2, _b2;
@@ -621,7 +621,7 @@ function paletteFromImage(image) {
     blue += b2 * weight;
     weightSum += weight;
   }
-  if (!weightSum) throw new Error("未找到可用颜色");
+  if (!weightSum) throw new Error("\u672A\u627E\u5230\u53EF\u7528\u989C\u8272");
   const r = red / weightSum / 255, g = green / weightSum / 255, b = blue / weightSum / 255;
   const max = Math.max(r, g, b), min = Math.min(r, g, b), difference = max - min;
   let hue = 28;
@@ -700,7 +700,7 @@ async function loadCoverInto(image) {
       };
       image.onerror = () => {
         image.onload = image.onerror = null;
-        reject(new Error("图片无法解码"));
+        reject(new Error("\u56FE\u7247\u65E0\u6CD5\u89E3\u7801"));
       };
       image.src = data;
       if (image.complete && image.naturalWidth > 0) {
@@ -719,10 +719,10 @@ async function loadCoverInto(image) {
       image.removeAttribute("src");
       poster == null ? void 0 : poster.classList.remove("loading");
       poster == null ? void 0 : poster.classList.add("fallback");
-      image.dataset.retryAfter = String(Date.now() + (error.message === "图片无法解码" ? 3e5 : 3e4));
+      image.dataset.retryAfter = String(Date.now() + (error.message === "\u56FE\u7247\u65E0\u6CD5\u89E3\u7801" ? 3e5 : 3e4));
     }
     const id = ((_c2 = image.closest("[data-open-id]")) == null ? void 0 : _c2.dataset.openId) || ((_e = (_d2 = image.closest(".hero-slide,.category-spotlight")) == null ? void 0 : _d2.querySelector("[data-open-id]")) == null ? void 0 : _e.dataset.openId) || "unknown";
-    console.warn("封面加载失败", id, (() => {
+    console.warn("\u5C01\u9762\u52A0\u8F7D\u5931\u8D25", id, (() => {
       try {
         return new URL(url).host;
       } catch (e) {
@@ -809,14 +809,14 @@ function homeSlides() {
   return [...activeCampaigns().map((item) => ({ ...item, kind: "campaign", cover: "" })), ...videos];
 }
 function campaignSlide(item, index, count) {
-  return '<div class="hero-slide hero-campaign" data-index="' + index + '"><img class="hero-image campaign-image" src="' + esc(campaignArtwork(item)) + '" alt=""><button class="hero-cover-button" type="button" data-open-campaign="' + esc(item.id) + '" aria-label="查看国庆庆祝页"></button><div class="hero-copy"><h2>' + esc(item.title) + "</h2><p>" + esc(item.description || "").replaceAll("\n", "<br>") + '</p><button class="hero-action" type="button" data-open-campaign="' + esc(item.id) + '">' + esc(item.button || "查看庆祝页") + '</button></div><span class="campaign-date">' + esc(item.dateLabel || "") + '</span><div class="hero-index"><b>' + String(index + 1).padStart(2, "0") + "</b> / " + String(count).padStart(2, "0") + "</div></div>";
+  return '<div class="hero-slide hero-campaign" data-index="' + index + '"><img class="hero-image campaign-image" src="' + esc(campaignArtwork(item)) + '" alt=""><button class="hero-cover-button" type="button" data-open-campaign="' + esc(item.id) + '" aria-label="\u67E5\u770B\u56FD\u5E86\u5E86\u795D\u9875"></button><div class="hero-copy"><h2>' + esc(item.title) + "</h2><p>" + esc(item.description || "").replaceAll("\n", "<br>") + '</p><button class="hero-action" type="button" data-open-campaign="' + esc(item.id) + '">' + esc(item.button || "\u67E5\u770B\u5E86\u795D\u9875") + '</button></div><span class="campaign-date">' + esc(item.dateLabel || "") + '</span><div class="hero-index"><b>' + String(index + 1).padStart(2, "0") + "</b> / " + String(count).padStart(2, "0") + "</div></div>";
 }
 function goCampaign(item) {
   state.campaignReturn = captureScreen();
   ++routeToken;
   setRoute("campaign");
   state.campaign = item;
-  content.innerHTML = '<article class="campaign-page"><button class="campaign-back" type="button" data-back>' + icon("back") + ' 返回首页</button><section class="campaign-poster"><img src="' + esc(campaignArtwork(item)) + '" alt=""><div><h1>' + esc(item.title) + "</h1><p>" + esc(item.description || "").replaceAll("\n", "<br>") + "</p><span>" + esc(item.dateLabel || "") + '</span></div></section><section class="campaign-message"><h2>共庆好时光</h2><p>' + esc(item.message || "") + '</p><button type="button" data-back>返回首页</button></section></article>';
+  content.innerHTML = '<article class="campaign-page"><button class="campaign-back" type="button" data-back>' + icon("back") + ' \u8FD4\u56DE\u9996\u9875</button><section class="campaign-poster"><img src="' + esc(campaignArtwork(item)) + '" alt=""><div><h1>' + esc(item.title) + "</h1><p>" + esc(item.description || "").replaceAll("\n", "<br>") + "</p><span>" + esc(item.dateLabel || "") + '</span></div></section><section class="campaign-message"><h2>\u5171\u5E86\u597D\u65F6\u5149</h2><p>' + esc(item.message || "") + '</p><button type="button" data-back>\u8FD4\u56DE\u9996\u9875</button></section></article>';
   scroll.scrollTop = 0;
 }
 function isBannerRoute() {
@@ -836,7 +836,7 @@ function restoreBannerIndex() {
   else if (state.route === "home") state.banner = index;
 }
 function categorySlide(item, index, count) {
-  return '<div class="hero-slide" data-index="'.concat(index, '"><img class="hero-image" data-cover="').concat(esc(item.cover || ""), '" alt=""><button class="hero-cover-button" type="button" data-open-id="').concat(esc(item.id), '" aria-label="查看').concat(esc(item.title), '详情"></button><div class="hero-shade"></div><div class="category-spotlight-copy"><h2>').concat(esc(item.title), '</h2><button type="button" data-open-id="').concat(esc(item.id), '">查看作品 ').concat(icon("arrow"), '</button></div><div class="hero-index"><b>').concat(String(index + 1).padStart(2, "0"), "</b> / ").concat(String(count).padStart(2, "0"), "</div></div>");
+  return '<div class="hero-slide" data-index="'.concat(index, '"><img class="hero-image" data-cover="').concat(esc(item.cover || ""), '" alt=""><button class="hero-cover-button" type="button" data-open-id="').concat(esc(item.id), '" aria-label="\u67E5\u770B').concat(esc(item.title), '\u8BE6\u60C5"></button><div class="hero-shade"></div><div class="category-spotlight-copy"><h2>').concat(esc(item.title), '</h2><button type="button" data-open-id="').concat(esc(item.id), '">\u67E5\u770B\u4F5C\u54C1 ').concat(icon("arrow"), '</button></div><div class="hero-index"><b>').concat(String(index + 1).padStart(2, "0"), "</b> / ").concat(String(count).padStart(2, "0"), "</div></div>");
 }
 function stopBannerAuto() {
   clearTimeout(bannerTimer);
@@ -866,7 +866,7 @@ document.addEventListener("visibilitychange", () => {
 });
 function heroSlide(item, index, count) {
   if (item.kind === "campaign") return campaignSlide(item, index, count);
-  return '<div class="hero-slide" data-index="'.concat(index, '"><img class="hero-image" data-cover="').concat(esc(item.cover || ""), '" alt=""><button class="hero-cover-button" type="button" data-open-id="').concat(esc(item.id || ""), '" aria-label="查看').concat(esc(item.title || "作品"), '详情"></button><div class="hero-shade"></div>\n    <div class="hero-copy"><span class="hero-label">本周焦点 <i></i> 独家精选</span><h2>').concat(esc(item.title || "为你推荐"), "</h2><p>").concat(esc(item.description || item.episodeLabel || ""), '</p><button class="hero-action" data-open-id="').concat(esc(item.id || ""), '" type="button">').concat(icon("play"), ' 立即观看</button></div>\n    <div class="hero-index"><b>').concat(String(index + 1).padStart(2, "0"), "</b> / ").concat(String(count).padStart(2, "0"), "</div></div>");
+  return '<div class="hero-slide" data-index="'.concat(index, '"><img class="hero-image" data-cover="').concat(esc(item.cover || ""), '" alt=""><button class="hero-cover-button" type="button" data-open-id="').concat(esc(item.id || ""), '" aria-label="\u67E5\u770B').concat(esc(item.title || "\u4F5C\u54C1"), '\u8BE6\u60C5"></button><div class="hero-shade"></div>\n    <div class="hero-copy"><span class="hero-label">\u672C\u5468\u7126\u70B9 <i></i> \u72EC\u5BB6\u7CBE\u9009</span><h2>').concat(esc(item.title || "\u4E3A\u4F60\u63A8\u8350"), "</h2><p>").concat(esc(item.description || item.episodeLabel || ""), '</p><button class="hero-action" data-open-id="').concat(esc(item.id || ""), '" type="button">').concat(icon("play"), ' \u7ACB\u5373\u89C2\u770B</button></div>\n    <div class="hero-index"><b>').concat(String(index + 1).padStart(2, "0"), "</b> / ").concat(String(count).padStart(2, "0"), "</div></div>");
 }
 async function changeBanner(targetIndex, direction, automatic = false) {
   const slides = bannerSlides();
@@ -915,7 +915,7 @@ async function changeBanner(targetIndex, direction, automatic = false) {
       slide.classList.remove("animating");
       slide.style.transform = "";
     });
-    if (!automatic) toast("封面加载失败，请重试", true);
+    if (!automatic) toast("\u5C01\u9762\u52A0\u8F7D\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5", true);
   } finally {
     bannerChanging = false;
     scheduleBannerAuto();
@@ -933,7 +933,7 @@ function continueWatchingMarkup() {
   const finished = Boolean(item.completed) && total > 0 && episode >= total;
   const seconds = Math.floor(Math.max(0, Number(item.position) || 0) / 1e3);
   const time = "".concat(String(Math.floor(seconds / 60)).padStart(2, "0"), ":").concat(String(seconds % 60).padStart(2, "0"));
-  return '<section class="continue-section"><div class="section-heading"><h2>继续观看</h2><button type="button" class="more" data-all-history="1">全部历史 '.concat(icon("arrow"), '</button></div>\n    <button type="button" class="continue-card" data-continue-id="').concat(esc(item.id), '" aria-label="').concat(esc(item.title), "，").concat(finished ? "打开详情" : "继续观看", '">\n      <span class="continue-poster poster loading"><span class="poster-letter">').concat(esc(String(item.title || "影片").slice(0, 1)), '</span><img data-cover="').concat(esc(item.cover || ""), '" alt=""></span>\n      <span class="continue-copy"><strong>').concat(esc(item.title || "影片"), "</strong><span>已看到第 ").concat(episode, " 集").concat(total ? " · 共 ".concat(total, " 集") : "", '</span><span class="continue-time">').concat(finished ? "全剧已看完" : item.completed ? "本集已看完，接着看下一集" : "上次看到 ".concat(time), '</span></span>\n      <span class="continue-action">').concat(icon("play")).concat(finished ? "详情" : item.completed ? "继续看" : "续播", "</span>\n    </button></section>");
+  return '<section class="continue-section"><div class="section-heading"><h2>\u7EE7\u7EED\u89C2\u770B</h2><button type="button" class="more" data-all-history="1">\u5168\u90E8\u5386\u53F2 '.concat(icon("arrow"), '</button></div>\n    <button type="button" class="continue-card" data-continue-id="').concat(esc(item.id), '" aria-label="').concat(esc(item.title), "\uFF0C").concat(finished ? "\u6253\u5F00\u8BE6\u60C5" : "\u7EE7\u7EED\u89C2\u770B", '">\n      <span class="continue-poster poster loading"><span class="poster-letter">').concat(esc(String(item.title || "\u5F71\u7247").slice(0, 1)), '</span><img data-cover="').concat(esc(item.cover || ""), '" alt=""></span>\n      <span class="continue-copy"><strong>').concat(esc(item.title || "\u5F71\u7247"), "</strong><span>\u5DF2\u770B\u5230\u7B2C ").concat(episode, " \u96C6").concat(total ? " \xB7 \u5171 ".concat(total, " \u96C6") : "", '</span><span class="continue-time">').concat(finished ? "\u5168\u5267\u5DF2\u770B\u5B8C" : item.completed ? "\u672C\u96C6\u5DF2\u770B\u5B8C\uFF0C\u63A5\u7740\u770B\u4E0B\u4E00\u96C6" : "\u4E0A\u6B21\u770B\u5230 ".concat(time), '</span></span>\n      <span class="continue-action">').concat(icon("play")).concat(finished ? "\u8BE6\u60C5" : item.completed ? "\u7EE7\u7EED\u770B" : "\u7EED\u64AD", "</span>\n    </button></section>");
 }
 function updateContinueWatching() {
   const host = content.querySelector(".home-continue");
@@ -977,7 +977,7 @@ function renderHome() {
   const slides = homeSlides();
   const index = Math.min(state.banner, Math.max(0, slides.length - 1));
   const selected = slides[index] || {};
-  content.innerHTML = '<div class="home-page"><div class="hero" data-hero="1">'.concat(heroSlide(selected, index, slides.length), '</div>\n      <div class="hero-dots">').concat(slides.map((_, i) => '<i class="'.concat(i === index ? "active" : "", '" data-slide="').concat(i, '"></i>')).join(""), "</div>\n      ").concat(homeTagBar(), '\n      <div class="home-continue">').concat(continueWatchingMarkup(), "</div>\n      ").concat(section("精选推荐", asArray(data.homepageRecommend).length ? asArray(data.homepageRecommend) : asArray((_a2 = data.recommend) == null ? void 0 : _a2.items).slice(0, 12), "recommend"), "\n      ").concat(section(privateMode() ? "最近上新" : "热门漫剧", asArray(data.homepageNewest).length ? asArray(data.homepageNewest) : asArray((_b2 = data.newest) == null ? void 0 : _b2.items).slice(0, 12), "newest"), "</div>");
+  content.innerHTML = '<div class="home-page"><div class="hero" data-hero="1">'.concat(heroSlide(selected, index, slides.length), '</div>\n      <div class="hero-dots">').concat(slides.map((_, i) => '<i class="'.concat(i === index ? "active" : "", '" data-slide="').concat(i, '"></i>')).join(""), "</div>\n      ").concat(homeTagBar(), '\n      <div class="home-continue">').concat(continueWatchingMarkup(), "</div>\n      ").concat(section("\u7CBE\u9009\u63A8\u8350", asArray(data.homepageRecommend).length ? asArray(data.homepageRecommend) : asArray((_a2 = data.recommend) == null ? void 0 : _a2.items).slice(0, 12), "recommend"), "\n      ").concat(section(privateMode() ? "\u6700\u8FD1\u4E0A\u65B0" : "\u70ED\u95E8\u6F2B\u5267", asArray(data.homepageNewest).length ? asArray(data.homepageNewest) : asArray((_b2 = data.newest) == null ? void 0 : _b2.items).slice(0, 12), "newest"), "</div>");
   hydrateImages();
   slides.forEach((item) => {
     if (item.cover) getCover(item.cover).catch(() => {
@@ -989,7 +989,7 @@ function renderHome() {
 function renderTags() {
   var _a2;
   const tags = asArray((_a2 = state.tags) == null ? void 0 : _a2.items);
-  const sections = privateMode() ? tagGroups : [["short", "短剧类型"], ["comic", "漫剧类型"]];
+  const sections = privateMode() ? tagGroups : [["short", "\u77ED\u5267\u7C7B\u578B"], ["comic", "\u6F2B\u5267\u7C7B\u578B"]];
   const groups = sections.map(([id, title]) => {
     const members = tags.filter((tag) => tag.group === id);
     if (!members.length) return "";
@@ -999,7 +999,7 @@ function renderTags() {
       return '<button type="button" class="tag-choice '.concat(size, '" data-tag-slug="').concat(esc(tag.slug), '" data-tag-name="').concat(esc(name), '">').concat(esc(name), "</button>");
     }).join(""), "</div></section>");
   }).join("");
-  content.innerHTML = '<div class="tags-page"><div class="tags-heading"><button type="button" data-back="1" aria-label="返回上一页">'.concat(icon("back"), "</button><h1>全部类型</h1><span>").concat(tags.length, " 个").concat(privateMode() ? "标签" : "大类", '</span></div>\n    <p class="tags-intro">').concat(privateMode() ? "点选标签，发现相关作品" : "按短剧、漫剧大类，发现相关作品", "</p>").concat(groups, "</div>");
+  content.innerHTML = '<div class="tags-page"><div class="tags-heading"><button type="button" data-back="1" aria-label="\u8FD4\u56DE\u4E0A\u4E00\u9875">'.concat(icon("back"), "</button><h1>\u5168\u90E8\u7C7B\u578B</h1><span>").concat(tags.length, " \u4E2A").concat(privateMode() ? "\u6807\u7B7E" : "\u5927\u7C7B", '</span></div>\n    <p class="tags-intro">').concat(privateMode() ? "\u70B9\u9009\u6807\u7B7E\uFF0C\u53D1\u73B0\u76F8\u5173\u4F5C\u54C1" : "\u6309\u77ED\u5267\u3001\u6F2B\u5267\u5927\u7C7B\uFF0C\u53D1\u73B0\u76F8\u5173\u4F5C\u54C1", "</p>").concat(groups, "</div>");
 }
 function refreshMissingImages(items) {
   const byId = new Map(items.filter((item) => (item == null ? void 0 : item.id) && (item == null ? void 0 : item.cover)).map((item) => [String(item.id), item.cover]));
@@ -1019,8 +1019,8 @@ function categoryId() {
 function compactMarkup() {
   if (!privateMode()) return "";
   const adult = state.tab === "adult";
-  const tabs = privateMode() ? adult ? ["成人短剧", "成人漫剧"] : ["AI换脸", "AI魔改"] : [adult ? "短剧" : "漫剧"];
-  return "<strong>".concat(privateMode() ? adult ? "成人剧场" : "AI专区" : adult ? "短剧" : "漫剧", '</strong><div class="compact-tabs" role="tablist">').concat(tabs.map((name, index) => '<button type="button" role="tab" aria-selected="'.concat(index === state.sub[state.tab], '" data-sub="').concat(index, '" class="').concat(index === state.sub[state.tab] ? "selected" : "", '">').concat(name, "</button>")).join(""), "</div>");
+  const tabs = privateMode() ? adult ? ["\u6210\u4EBA\u77ED\u5267", "\u6210\u4EBA\u6F2B\u5267"] : ["AI\u6362\u8138", "AI\u9B54\u6539"] : [adult ? "\u77ED\u5267" : "\u6F2B\u5267"];
+  return "<strong>".concat(privateMode() ? adult ? "\u6210\u4EBA\u5267\u573A" : "AI\u4E13\u533A" : adult ? "\u77ED\u5267" : "\u6F2B\u5267", '</strong><div class="compact-tabs" role="tablist">').concat(tabs.map((name, index) => '<button type="button" role="tab" aria-selected="'.concat(index === state.sub[state.tab], '" data-sub="').concat(index, '" class="').concat(index === state.sub[state.tab] ? "selected" : "", '">').concat(name, "</button>")).join(""), "</div>");
 }
 function updateCompact() {
   var _a2;
@@ -1038,15 +1038,15 @@ function renderCategory(keepCompact = false) {
   var _a2;
   categoryObserver == null ? void 0 : categoryObserver.disconnect();
   const adult = state.tab === "adult";
-  const tabs = privateMode() ? adult ? ["成人短剧", "成人漫剧"] : ["AI换脸", "AI魔改"] : [adult ? "短剧" : "漫剧"];
+  const tabs = privateMode() ? adult ? ["\u6210\u4EBA\u77ED\u5267", "\u6210\u4EBA\u6F2B\u5267"] : ["AI\u6362\u8138", "AI\u9B54\u6539"] : [adult ? "\u77ED\u5267" : "\u6F2B\u5267"];
   const items = asArray((_a2 = state.category) == null ? void 0 : _a2.items);
   const lead = items[0] || null;
   const slides = privateMode() ? [] : items.slice(0, 5);
   const banner = Math.min(state.categoryBanner, Math.max(0, slides.length - 1));
   state.categoryBanner = banner;
-  const spotlight = !privateMode() && slides.length ? '<div class="hero category-spotlight category-carousel">'.concat(categorySlide(slides[banner], banner, slides.length), '</div><div class="hero-dots">').concat(slides.map((_, index) => '<i class="'.concat(index === banner ? "active" : "", '" data-slide="').concat(index, '"></i>')).join(""), "</div>") : lead ? '<div class="category-spotlight"><img data-cover="'.concat(esc(lead.cover), '" alt=""><div class="category-spotlight-copy"><h2>').concat(esc(lead.title), '</h2><button type="button" data-open-id="').concat(esc(lead.id), '">查看作品 ').concat(icon("arrow"), "</button></div></div>") : "";
+  const spotlight = !privateMode() && slides.length ? '<div class="hero category-spotlight category-carousel">'.concat(categorySlide(slides[banner], banner, slides.length), '</div><div class="hero-dots">').concat(slides.map((_, index) => '<i class="'.concat(index === banner ? "active" : "", '" data-slide="').concat(index, '"></i>')).join(""), "</div>") : lead ? '<div class="category-spotlight"><img data-cover="'.concat(esc(lead.cover), '" alt=""><div class="category-spotlight-copy"><h2>').concat(esc(lead.title), '</h2><button type="button" data-open-id="').concat(esc(lead.id), '">\u67E5\u770B\u4F5C\u54C1 ').concat(icon("arrow"), "</button></div></div>") : "";
   const switcher = privateMode() ? '<div class="segmented" role="tablist">'.concat(tabs.map((name, index) => '<button type="button" role="tab" data-sub="'.concat(index, '" aria-selected="').concat(index === state.sub[state.tab], '" class="').concat(index === state.sub[state.tab] ? "selected" : "", '">').concat(name, "</button>")).join(""), "</div>") : "";
-  content.innerHTML = '<div class="category-page"><div class="category-head"><h1>'.concat(privateMode() ? adult ? "成人剧场" : "AI专区" : adult ? "短剧" : "漫剧", "</h1><p>").concat(privateMode() ? adult ? "短剧与漫剧，走进不同的人生。" : "换脸与魔改，探索影像新可能。" : adult ? "真人演的看了不烧心" : "探索热门漫剧。", "</p></div>\n    ").concat(switcher, "\n    ").concat(spotlight, '\n    <section class="category-section"><div class="section-heading"><h2>').concat(tabs[state.sub[state.tab]], '作品</h2><span class="category-count">已显示 ').concat(items.length, ' 部</span></div>\n    <div class="search-grid category-grid">').concat(items.map(itemCard).join(""), '</div><div class="category-footer">').concat(categoryFooter(), "</div></section></div>");
+  content.innerHTML = '<div class="category-page"><div class="category-head"><h1>'.concat(privateMode() ? adult ? "\u6210\u4EBA\u5267\u573A" : "AI\u4E13\u533A" : adult ? "\u77ED\u5267" : "\u6F2B\u5267", "</h1><p>").concat(privateMode() ? adult ? "\u77ED\u5267\u4E0E\u6F2B\u5267\uFF0C\u8D70\u8FDB\u4E0D\u540C\u7684\u4EBA\u751F\u3002" : "\u6362\u8138\u4E0E\u9B54\u6539\uFF0C\u63A2\u7D22\u5F71\u50CF\u65B0\u53EF\u80FD\u3002" : adult ? "\u771F\u4EBA\u6F14\u7684\u770B\u4E86\u4E0D\u70E7\u5FC3" : "\u63A2\u7D22\u70ED\u95E8\u6F2B\u5267\u3002", "</p></div>\n    ").concat(switcher, "\n    ").concat(spotlight, '\n    <section class="category-section"><div class="section-heading"><h2>').concat(tabs[state.sub[state.tab]], '\u4F5C\u54C1</h2><span class="category-count">\u5DF2\u663E\u793A ').concat(items.length, ' \u90E8</span></div>\n    <div class="search-grid category-grid">').concat(items.map(itemCard).join(""), '</div><div class="category-footer">').concat(categoryFooter(), "</div></section></div>");
   compact.innerHTML = compactMarkup();
   scroll.scrollTop = keepCompact ? 150 : 0;
   state.compactHeld = keepCompact;
@@ -1061,11 +1061,11 @@ function renderCategory(keepCompact = false) {
 }
 function categoryFooter() {
   const category = state.category;
-  if (category == null ? void 0 : category.error) return '<button type="button" data-retry-category="1">加载失败，点击重试</button>';
-  if (category == null ? void 0 : category.loading) return '<span role="status">正在加载更多…</span>';
-  if (category == null ? void 0 : category.refreshing) return '<span role="status">正在更新列表…</span>';
+  if (category == null ? void 0 : category.error) return '<button type="button" data-retry-category="1">\u52A0\u8F7D\u5931\u8D25\uFF0C\u70B9\u51FB\u91CD\u8BD5</button>';
+  if (category == null ? void 0 : category.loading) return '<span role="status">\u6B63\u5728\u52A0\u8F7D\u66F4\u591A\u2026</span>';
+  if (category == null ? void 0 : category.refreshing) return '<span role="status">\u6B63\u5728\u66F4\u65B0\u5217\u8868\u2026</span>';
   if (category == null ? void 0 : category.nextPage) return '<span class="category-sentinel" aria-hidden="true"></span>';
-  return "<span>已经到底了</span>";
+  return "<span>\u5DF2\u7ECF\u5230\u5E95\u4E86</span>";
 }
 function observeCategoryEnd() {
   categoryObserver == null ? void 0 : categoryObserver.disconnect();
@@ -1098,14 +1098,14 @@ function renderLibrary() {
     const completed = Boolean(item.completed);
     const episode = Number(item.episode) || 1;
     const percentage = completed ? 100 : Math.max(0, Math.min(100, item.duration ? item.position / item.duration * 100 : 0));
-    return '<button type="button" class="history-card" data-history-id="'.concat(esc(item.id), '" data-history-episode="').concat(episode, '" data-history-completed="').concat(completed, '" aria-label="').concat(esc(item.title), "，第 ").concat(episode, " 集，").concat(completed ? "已看完，打开详情" : "继续观看", '">\n      <span class="history-poster poster loading"><span class="poster-letter">').concat(esc(String(item.title || "影片").slice(0, 1)), '</span><img data-cover="').concat(esc(item.cover || ""), '" alt=""></span><span class="history-copy"><span class="history-status">').concat(completed ? "已看完" : "继续观看", " · 第 ").concat(episode, " 集</span>\n      <strong>").concat(esc(item.title || "影片"), '</strong><span class="progress"><i style="width:').concat(percentage, '%"></i></span><span class="history-hint">').concat(completed ? "打开详情选择剧集" : "已看 ".concat(Math.floor(item.position / 6e4), " 分钟"), "</span></span></button>");
+    return '<button type="button" class="history-card" data-history-id="'.concat(esc(item.id), '" data-history-episode="').concat(episode, '" data-history-completed="').concat(completed, '" aria-label="').concat(esc(item.title), "\uFF0C\u7B2C ").concat(episode, " \u96C6\uFF0C").concat(completed ? "\u5DF2\u770B\u5B8C\uFF0C\u6253\u5F00\u8BE6\u60C5" : "\u7EE7\u7EED\u89C2\u770B", '">\n      <span class="history-poster poster loading"><span class="poster-letter">').concat(esc(String(item.title || "\u5F71\u7247").slice(0, 1)), '</span><img data-cover="').concat(esc(item.cover || ""), '" alt=""></span><span class="history-copy"><span class="history-status">').concat(completed ? "\u5DF2\u770B\u5B8C" : "\u7EE7\u7EED\u89C2\u770B", " \xB7 \u7B2C ").concat(episode, " \u96C6</span>\n      <strong>").concat(esc(item.title || "\u5F71\u7247"), '</strong><span class="progress"><i style="width:').concat(percentage, '%"></i></span><span class="history-hint">').concat(completed ? "\u6253\u5F00\u8BE6\u60C5\u9009\u62E9\u5267\u96C6" : "\u5DF2\u770B ".concat(Math.floor(item.position / 6e4), " \u5206\u949F"), "</span></span></button>");
   }).join("");
-  content.innerHTML = '<div class="library-page"><div class="my-heading"><h1>我的</h1></div>\n    '.concat(state.account.loggedIn ? "" : '<button type="button" class="my-account" data-account-action="1">点击头像登录，同步收藏和观看历史 '.concat(icon("arrow"), "</button>"), "\n    ").concat(query ? '<div class="library-results"><p class="library-count">在观看历史中找到 '.concat(progress.length, " 部，在我的收藏中找到 ").concat(bookmarks.length, " 部</p>\n      <h2>观看历史</h2>").concat(progress.length ? '<div class="history-list">'.concat(historyCards, "</div>") : '<p class="library-no-match">没有匹配的观看记录</p>', "\n      <h2>我的收藏</h2>").concat(bookmarks.length ? '<div class="search-grid library-bookmark-grid">'.concat(bookmarks.map(itemCard).join(""), "</div>") : '<p class="library-no-match">没有匹配的收藏</p>', "</div>") : downloadsActive ? '\n    <div class="segmented library-tabs" role="tablist" aria-label="我的片单分类"><button type="button" role="tab" data-library-tab="history" aria-selected="'.concat(false, '" class="">观看历史</button>\n    <button type="button" role="tab" data-library-tab="bookmarks" aria-selected="').concat(false, '" class="">我的收藏</button>\n    <button type="button" role="tab" data-library-tab="downloads" aria-selected="').concat(true, '" class="selected">我的下载</button></div>\n    <div id="library-downloads"><p class="page-loading">正在加载…</p></div>') : '\n    <div class="segmented library-tabs" role="tablist" aria-label="我的片单分类"><button type="button" role="tab" data-library-tab="history" aria-selected="'.concat(historyActive, '" class="').concat(historyActive ? "selected" : "", '">观看历史</button>\n    <button type="button" role="tab" data-library-tab="bookmarks" aria-selected="').concat(!historyActive, '" class="').concat(!historyActive ? "selected" : "", '">我的收藏</button>\n    <button type="button" role="tab" data-library-tab="downloads" aria-selected="').concat(false, '" class="">我的下载</button></div>\n    <p class="library-count">').concat(historyActive ? "最近观看的 ".concat(progress.length, " 部作品") : "已收藏 ".concat(bookmarks.length, " 部作品"), "</p>\n    ").concat(historyActive ? progress.length ? '<div class="history-list">'.concat(historyCards, "</div>") : '<div class="empty-state">还没有观看记录，播放作品后会出现在这里</div>' : bookmarks.length ? '<div class="search-grid library-bookmark-grid">'.concat(bookmarks.map(itemCard).join(""), "</div>") : '<div class="empty-state">还没有收藏作品</div>'), "</div>");
+  content.innerHTML = '<div class="library-page"><div class="my-heading"><h1>\u6211\u7684</h1></div>\n    '.concat(state.account.loggedIn ? "" : '<button type="button" class="my-account" data-account-action="1">\u70B9\u51FB\u5934\u50CF\u767B\u5F55\uFF0C\u540C\u6B65\u6536\u85CF\u548C\u89C2\u770B\u5386\u53F2 '.concat(icon("arrow"), "</button>"), "\n    ").concat(query ? '<div class="library-results"><p class="library-count">\u5728\u89C2\u770B\u5386\u53F2\u4E2D\u627E\u5230 '.concat(progress.length, " \u90E8\uFF0C\u5728\u6211\u7684\u6536\u85CF\u4E2D\u627E\u5230 ").concat(bookmarks.length, " \u90E8</p>\n      <h2>\u89C2\u770B\u5386\u53F2</h2>").concat(progress.length ? '<div class="history-list">'.concat(historyCards, "</div>") : '<p class="library-no-match">\u6CA1\u6709\u5339\u914D\u7684\u89C2\u770B\u8BB0\u5F55</p>', "\n      <h2>\u6211\u7684\u6536\u85CF</h2>").concat(bookmarks.length ? '<div class="search-grid library-bookmark-grid">'.concat(bookmarks.map(itemCard).join(""), "</div>") : '<p class="library-no-match">\u6CA1\u6709\u5339\u914D\u7684\u6536\u85CF</p>', "</div>") : downloadsActive ? '\n    <div class="segmented library-tabs" role="tablist" aria-label="\u6211\u7684\u7247\u5355\u5206\u7C7B"><button type="button" role="tab" data-library-tab="history" aria-selected="'.concat(false, '" class="">\u89C2\u770B\u5386\u53F2</button>\n    <button type="button" role="tab" data-library-tab="bookmarks" aria-selected="').concat(false, '" class="">\u6211\u7684\u6536\u85CF</button>\n    <button type="button" role="tab" data-library-tab="downloads" aria-selected="').concat(true, '" class="selected">\u6211\u7684\u4E0B\u8F7D</button></div>\n    <div id="library-downloads"><p class="page-loading">\u6B63\u5728\u52A0\u8F7D\u2026</p></div>') : '\n    <div class="segmented library-tabs" role="tablist" aria-label="\u6211\u7684\u7247\u5355\u5206\u7C7B"><button type="button" role="tab" data-library-tab="history" aria-selected="'.concat(historyActive, '" class="').concat(historyActive ? "selected" : "", '">\u89C2\u770B\u5386\u53F2</button>\n    <button type="button" role="tab" data-library-tab="bookmarks" aria-selected="').concat(!historyActive, '" class="').concat(!historyActive ? "selected" : "", '">\u6211\u7684\u6536\u85CF</button>\n    <button type="button" role="tab" data-library-tab="downloads" aria-selected="').concat(false, '" class="">\u6211\u7684\u4E0B\u8F7D</button></div>\n    <p class="library-count">').concat(historyActive ? "\u6700\u8FD1\u89C2\u770B\u7684 ".concat(progress.length, " \u90E8\u4F5C\u54C1") : "\u5DF2\u6536\u85CF ".concat(bookmarks.length, " \u90E8\u4F5C\u54C1"), "</p>\n    ").concat(historyActive ? progress.length ? '<div class="history-list">'.concat(historyCards, "</div>") : '<div class="empty-state">\u8FD8\u6CA1\u6709\u89C2\u770B\u8BB0\u5F55\uFF0C\u64AD\u653E\u4F5C\u54C1\u540E\u4F1A\u51FA\u73B0\u5728\u8FD9\u91CC</div>' : bookmarks.length ? '<div class="search-grid library-bookmark-grid">'.concat(bookmarks.map(itemCard).join(""), "</div>") : '<div class="empty-state">\u8FD8\u6CA1\u6709\u6536\u85CF\u4F5C\u54C1</div>'), "</div>");
   hydrateImages();
   if (downloadsActive && !swipePrefetchBusy) renderLibraryDownloads();
 }
 let libraryDownloadsToken = 0;
-const withTimeout = (promise, ms) => Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error("请求超时")), ms))]);
+const withTimeout = (promise, ms) => Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error("\u8BF7\u6C42\u8D85\u65F6")), ms))]);
 async function renderLibraryDownloads(prefetched) {
   const token = ++libraryDownloadsToken;
   let phone = [], nas = [];
@@ -1127,6 +1127,7 @@ async function renderLibraryDownloads(prefetched) {
       }
     }
   }
+  await loadRemoteJobs();
   if (state.route !== "library" || state.libraryTab !== "downloads" || token !== libraryDownloadsToken) return;
   const list = document.getElementById("library-downloads");
   if (!list) return;
@@ -1172,7 +1173,8 @@ function backfillNasCovers(nasTasks) {
 }
 function downloadListSignature(phone, nas) {
   const red = (t) => [t.id, t.status, t.percent, t.doneCount, t.totalCount, t.nasTaskId, t.cover].map((v) => v == null ? "" : v).join("|");
-  return [...phone.map(red), ...nas.map(red)].join(",");
+  const remote = [...remoteJobs.values()].map((j) => [j.taskId, j.status, j.percent, j.serverName, j.error].map((v) => v == null ? "" : v).join("|")).join(";");
+  return [...phone.map(red), ...nas.map(red), remote].join(",");
 }
 function downloadTaskActive(task) {
   return ["queued", "downloading", "merging", "running", "pulling"].includes(task && task.status);
@@ -1195,21 +1197,21 @@ async function processForwardTasks(phoneTasks, nasTasks) {
   }
   forwardProcessing = true;
   try {
-    toast("NAS 已合并，正在拉到手机（".concat(fwd.title, "）"));
+    toast("NAS \u5DF2\u5408\u5E76\uFF0C\u6B63\u5728\u62C9\u5230\u624B\u673A\uFF08".concat(fwd.title, "\uFF09"));
     await api("download-forward-pull-merged", { id: fwd.id, nasTaskId: fwd.nasTaskId });
     try {
       await api("nas-download-cancel", { id: fwd.nasTaskId });
     } catch (ignore) {
     }
-    toast("已拉到手机完整成品");
+    toast("\u5DF2\u62C9\u5230\u624B\u673A\u5B8C\u6574\u6210\u54C1");
   } catch (error) {
-    toast("转发拉取失败：".concat(error.message), true);
+    toast("\u8F6C\u53D1\u62C9\u53D6\u5931\u8D25\uFF1A".concat(error.message), true);
   } finally {
     forwardProcessing = false;
   }
 }
 function syncDownloadsTimer(tasks) {
-  const active = tasks.some(downloadTaskActive);
+  const active = tasks.some(downloadTaskActive) || [...remoteJobs.values()].some((job) => job && (job.status === "running" || job.status === "queued"));
   if (active) {
     if (!downloadsTimer) downloadsTimer = setInterval(() => {
       if (state.route === "downloads") refreshDownloads(routeToken, true);
@@ -1219,6 +1221,19 @@ function syncDownloadsTimer(tasks) {
   } else stopDownloadsTimer();
 }
 let downloadsTimer = null;
+let remoteJobs = /* @__PURE__ */ new Map();
+async function loadRemoteJobs() {
+  try {
+    const list = asArray(await withTimeout(api("remote-transfer-list"), 3e3));
+    const map = /* @__PURE__ */ new Map();
+    for (const job of list) {
+      if (job && job.taskId) map.set(String(job.taskId), job);
+    }
+    remoteJobs = map;
+  } catch (error) {
+  }
+  return remoteJobs;
+}
 function stopDownloadsTimer() {
   if (downloadsTimer) {
     clearInterval(downloadsTimer);
@@ -1230,7 +1245,7 @@ function goDownloads() {
   state.previous = { route: state.route };
   state.settingsReturn = { route: state.route };
   setRoute("downloads");
-  content.innerHTML = '<div class="settings-page downloads-page"><button type="button" class="listing-back" data-back="1">'.concat(icon("back"), ' 返回设置</button><h1>下载管理</h1><div id="downloads-list"><p class="page-loading">正在加载…</p></div></div>');
+  content.innerHTML = '<div class="settings-page downloads-page"><button type="button" class="listing-back" data-back="1">'.concat(icon("back"), ' \u8FD4\u56DE\u8BBE\u7F6E</button><h1>\u4E0B\u8F7D\u7BA1\u7406</h1><div id="downloads-list"><p class="page-loading">\u6B63\u5728\u52A0\u8F7D\u2026</p></div></div>');
   refreshDownloads(token, true);
 }
 async function refreshDownloads(token, keepTimer) {
@@ -1252,6 +1267,7 @@ async function refreshDownloads(token, keepTimer) {
       nas = [];
     }
   }
+  await loadRemoteJobs();
   if (state.route !== "downloads" || routeToken !== token) return;
   const list = document.getElementById("downloads-list");
   if (!list) return;
@@ -1268,7 +1284,7 @@ function renderDownloadSection(label, tasks, kind) {
   return '<h2 class="downloads-section-title">'.concat(label, "</h2>").concat(rows);
 }
 function renderDownloadList(tasks) {
-  if (!tasks.length) return '<div class="empty-state">还没有下载内容，去详情页点击「下载」吧</div>';
+  if (!tasks.length) return '<div class="empty-state">\u8FD8\u6CA1\u6709\u4E0B\u8F7D\u5185\u5BB9\uFF0C\u53BB\u8BE6\u60C5\u9875\u70B9\u51FB\u300C\u4E0B\u8F7D\u300D\u5427</div>';
   const grouped = [];
   const byTitle = /* @__PURE__ */ new Map();
   for (const t of tasks) {
@@ -1287,11 +1303,11 @@ function renderDownloadList(tasks) {
     first.totalCount = list.reduce((s, t) => s + (Number(t.totalCount) || 0), 0);
     first.doneCount = list.reduce((s, t) => s + (Number(t.doneCount) || 0), 0);
     const anyActive = list.some(downloadTaskActive);
-    const anyReady = list.some((t) => t.status === "ready" || t.status === "failed" && (t.error || "").includes("合并失败"));
-    const anyFailed = list.some((t) => t.status === "failed" && !(t.error || "").includes("合并失败"));
+    const anyReady = list.some((t) => t.status === "ready" || t.status === "failed" && (t.error || "").includes("\u5408\u5E76\u5931\u8D25"));
+    const anyFailed = list.some((t) => t.status === "failed" && !(t.error || "").includes("\u5408\u5E76\u5931\u8D25"));
     first.status = anyActive ? "running" : anyReady ? "ready" : anyFailed ? "failed" : "done";
     first.percent = list.reduce((s, t) => s + (Number(t.percent) || 0), 0) / list.length;
-    if (!anyActive && anyReady) first.detail = "已下载 ".concat(first.doneCount, " 集，待合并");
+    if (!anyActive && anyReady) first.detail = "\u5DF2\u4E0B\u8F7D ".concat(first.doneCount, " \u96C6\uFF0C\u5F85\u5408\u5E76");
     first.children = list;
     grouped.push(first);
   }
@@ -1327,48 +1343,63 @@ function coverForTask(task) {
 function downloadTaskRow(task, kind) {
   const running = task.status === "running";
   const statusText = downloadStatusText(task, kind);
-  const sourceBadge = kind === "nas" ? '<span class="dl-source-badge nas">NAS</span>' : '<span class="dl-source-badge phone">手机</span>';
-  const output = task.output && (task.output.startsWith("content://") || task.output.startsWith("file://")) ? "已保存到系统下载目录" : task.output || "";
-  const cancelBtn = running ? '<button type="button" class="dl-cancel" data-dl-cancel="'.concat(kind, '" data-dl-id="').concat(esc(task.id), '">取消</button>') : "";
-  const retryBtn = !running && kind === "phone" && (task.status === "failed" || task.status === "canceled") && !(task.error || "").includes("合并失败") ? '<button type="button" class="dl-cancel dl-retry" data-dl-retry="phone" data-dl-id="'.concat(esc(task.id), '">重试</button>') : "";
+  const sourceBadge = kind === "nas" ? '<span class="dl-source-badge nas">NAS</span>' : '<span class="dl-source-badge phone">\u624B\u673A</span>';
+  const remoteJob = kind === "phone" ? remoteJobs.get(String(task.id)) : null;
+  const remoteText = remoteJobText(remoteJob);
+  const remoteBusy = !!(remoteJob && (remoteJob.status === "running" || remoteJob.status === "queued"));
+  const canTransfer = kind === "phone" && !running && !remoteBusy && (task.status === "done" || task.status === "ready" || task.status === "failed");
+  const transferBtn = canTransfer ? '<button type="button" class="dl-cancel dl-transfer" data-dl-transfer="'.concat(esc(task.id), '">').concat(remoteJob && remoteJob.status === "failed" ? "\u91CD\u4F20" : "\u4F20\u5230\u670D\u52A1\u5668", "</button>") : "";
+  const transferCancel = remoteJob && (remoteJob.status === "running" || remoteJob.status === "queued") ? '<button type="button" class="dl-cancel" data-dl-transfer-cancel="'.concat(esc(remoteJob.id), '">\u53D6\u6D88\u4F20\u8F93</button>') : "";
+  const output = task.output && (task.output.startsWith("content://") || task.output.startsWith("file://")) ? "\u5DF2\u4FDD\u5B58\u5230\u7CFB\u7EDF\u4E0B\u8F7D\u76EE\u5F55" : task.output || "";
+  const cancelBtn = running ? '<button type="button" class="dl-cancel" data-dl-cancel="'.concat(kind, '" data-dl-id="').concat(esc(task.id), '">\u53D6\u6D88</button>') : "";
+  const retryBtn = !running && kind === "phone" && (task.status === "failed" || task.status === "canceled") && !(task.error || "").includes("\u5408\u5E76\u5931\u8D25") ? '<button type="button" class="dl-cancel dl-retry" data-dl-retry="phone" data-dl-id="'.concat(esc(task.id), '">\u91CD\u8BD5</button>') : "";
   const failedList = task.failedEpisodes || [];
-  const srcNote = task.detail && task.detail.includes("（") ? (task.detail.match(/（([^）]*)）/) || [])[1] || "" : "";
-  const canRetryFailed = task.status === "ready" || task.status === "failed" && !(task.error || "").includes("合并失败");
-  const retryFailedBtn = !running && kind === "nas" && canRetryFailed && failedList.length > 0 ? '<button type="button" class="dl-cancel dl-retry" data-dl-retry-failed="nas" data-dl-id="'.concat(esc(task.id), '">重试失败').concat(failedList.length, "集</button>") : "";
-  const mergeBtn = !running && (task.status === "ready" || (task.status === "failed" || task.status === "done") && (task.error || "").includes("合并失败")) ? '<button type="button" class="dl-cancel dl-retry" data-dl-merge="'.concat(kind, '" data-dl-id="').concat(esc(task.id), '">合并</button>') : "";
-  const deleteBtn = !running ? '<button type="button" class="dl-cancel" data-dl-delete="'.concat(kind, '" data-dl-id="').concat(esc(task.id), '"').concat(task.children && task.children.length > 1 ? ' data-dl-siblings="'.concat(esc(task.children.map((c) => c.id).join(",")), '"') : "", ">删除</button>") : "";
-  const failedInfo = failedList.length > 0 ? '<span class="dl-error" data-dl-copy="'.concat(esc(task.id), '" data-dl-log="').concat(esc("失败集: " + failedList.map((f) => "第" + f.index + "集(" + (f.error || "") + ")").join("；")), '" title="点击复制失败明细">失败 ').concat(failedList.length, " 集：").concat(esc(failedList.slice(0, 3).map((f) => "第" + f.index + "集").join("、"))).concat(failedList.length > 3 ? " 等" : "", "</span>") : "";
+  const srcNote = task.detail && task.detail.includes("\uFF08") ? (task.detail.match(/（([^）]*)）/) || [])[1] || "" : "";
+  const canRetryFailed = task.status === "ready" || task.status === "failed" && !(task.error || "").includes("\u5408\u5E76\u5931\u8D25");
+  const retryFailedBtn = !running && kind === "nas" && canRetryFailed && failedList.length > 0 ? '<button type="button" class="dl-cancel dl-retry" data-dl-retry-failed="nas" data-dl-id="'.concat(esc(task.id), '">\u91CD\u8BD5\u5931\u8D25').concat(failedList.length, "\u96C6</button>") : "";
+  const mergeBtn = !running && (task.status === "ready" || (task.status === "failed" || task.status === "done") && (task.error || "").includes("\u5408\u5E76\u5931\u8D25")) ? '<button type="button" class="dl-cancel dl-retry" data-dl-merge="'.concat(kind, '" data-dl-id="').concat(esc(task.id), '">\u5408\u5E76</button>') : "";
+  const deleteBtn = !running ? '<button type="button" class="dl-cancel" data-dl-delete="'.concat(kind, '" data-dl-id="').concat(esc(task.id), '"').concat(task.children && task.children.length > 1 ? ' data-dl-siblings="'.concat(esc(task.children.map((c) => c.id).join(",")), '"') : "", ">\u5220\u9664</button>") : "";
+  const failedInfo = failedList.length > 0 ? '<span class="dl-error" data-dl-copy="'.concat(esc(task.id), '" data-dl-log="').concat(esc("\u5931\u8D25\u96C6: " + failedList.map((f) => "\u7B2C" + f.index + "\u96C6(" + (f.error || "") + ")").join("\uFF1B")), '" title="\u70B9\u51FB\u590D\u5236\u5931\u8D25\u660E\u7EC6">\u5931\u8D25 ').concat(failedList.length, " \u96C6\uFF1A").concat(esc(failedList.slice(0, 3).map((f) => "\u7B2C" + f.index + "\u96C6").join("\u3001"))).concat(failedList.length > 3 ? " \u7B49" : "", "</span>") : "";
   const errLog = task.error || task.debug || "";
-  const errBlock = errLog ? '<span class="dl-error" data-dl-copy="'.concat(esc(task.id), '" data-dl-log="').concat(esc(errLog.replace(/\n/g, "\\n")), '" title="点击复制全部日志">').concat(task.error ? esc(task.error.split("\n").slice(0, 4).join("<br>")) : '<span class="dl-log-link">复制合并日志</span>', "</span>") : "";
-  const detailHint = task.detail && (/片/.test(task.detail) || task.detail.includes("合并中")) ? ' · <span class="dl-detail-hint">'.concat(esc(task.detail), "</span>") : "";
+  const errBlock = errLog ? '<span class="dl-error" data-dl-copy="'.concat(esc(task.id), '" data-dl-log="').concat(esc(errLog.replace(/\n/g, "\\n")), '" title="\u70B9\u51FB\u590D\u5236\u5168\u90E8\u65E5\u5FD7">').concat(task.error ? esc(task.error.split("\n").slice(0, 4).join("<br>")) : '<span class="dl-log-link">\u590D\u5236\u5408\u5E76\u65E5\u5FD7</span>', "</span>") : "";
+  const detailHint = task.detail && (/片/.test(task.detail) || task.detail.includes("\u5408\u5E76\u4E2D")) ? ' \xB7 <span class="dl-detail-hint">'.concat(esc(task.detail), "</span>") : "";
   const playAttr = kind === "nas" ? "data-dl-play-nas" : "data-dl-play";
-  const playHint = kind === "nas" ? "播放 NAS 成品" : "本地播放";
-  const playTile = '<button type="button" class="download-cover" '.concat(playAttr, '="').concat(esc(task.id), '" aria-label="').concat(playHint, "《").concat(esc(task.title || "未知剧集"), '》">\n    <span class="poster loading"><span class="poster-letter">').concat(esc(String(task.title || "影").slice(0, 1)), '</span><img data-cover="').concat(esc(coverForTask(task)), '" alt=""></span>\n    <span class="download-cover-hint">').concat(playHint, "</span></button>");
-  return '<div class="download-card">'.concat(playTile, '<div class="download-task">\n    <div class="download-task-head"><strong>').concat(esc(task.title || "未知剧集"), "</strong>").concat(sourceBadge, '<span class="dl-status ').concat(running ? "is-running" : "", '">').concat(statusText, '</span></div>\n    <div class="download-task-meta">').concat(task.doneCount, "/").concat(task.totalCount, " 集 · ").concat(task.doneCount === task.totalCount && task.status !== "running" ? "已下载全部集" : failedList.length ? "失败 ".concat(failedList.length, " 集") : "").concat(srcNote ? ' · <b class="dl-src-note">'.concat(esc(srcNote), "</b>") : "").concat(detailHint, '</div>\n    <div class="download-track"><i style="width:').concat(Math.max(0, Math.min(100, Number(task.percent) || 0)), '%"></i></div>\n    <div class="download-task-foot">').concat(output ? '<span class="dl-output">'.concat(esc(output), "</span>") : "").concat(failedInfo).concat(errBlock).concat(mergeBtn).concat(retryFailedBtn).concat(retryBtn).concat(cancelBtn).concat(deleteBtn, "</div>\n  </div></div>");
+  const playHint = kind === "nas" ? "\u64AD\u653E NAS \u6210\u54C1" : "\u672C\u5730\u64AD\u653E";
+  const playTile = '<button type="button" class="download-cover" '.concat(playAttr, '="').concat(esc(task.id), '" aria-label="').concat(playHint, "\u300A").concat(esc(task.title || "\u672A\u77E5\u5267\u96C6"), '\u300B">\n    <span class="poster loading"><span class="poster-letter">').concat(esc(String(task.title || "\u5F71").slice(0, 1)), '</span><img data-cover="').concat(esc(coverForTask(task)), '" alt=""></span>\n    <span class="download-cover-hint">').concat(playHint, "</span></button>");
+  return '<div class="download-card">'.concat(playTile, '<div class="download-task">\n    <div class="download-task-head"><strong>').concat(esc(task.title || "\u672A\u77E5\u5267\u96C6"), "</strong>").concat(sourceBadge, '<span class="dl-status ').concat(running ? "is-running" : "", '">').concat(statusText, '</span></div>\n    <div class="download-task-meta">').concat(task.doneCount, "/").concat(task.totalCount, " \u96C6 \xB7 ").concat(task.doneCount === task.totalCount && task.status !== "running" ? "\u5DF2\u4E0B\u8F7D\u5168\u90E8\u96C6" : failedList.length ? "\u5931\u8D25 ".concat(failedList.length, " \u96C6") : "").concat(srcNote ? ' \xB7 <b class="dl-src-note">'.concat(esc(srcNote), "</b>") : "").concat(detailHint).concat(remoteText ? ' \xB7 <span class="dl-remote-note '.concat(remoteJob.status, '">').concat(esc(remoteText), "</span>") : "", '</div>\n    <div class="download-track"><i style="width:').concat(Math.max(0, Math.min(100, Number(task.percent) || 0)), '%"></i></div>\n    <div class="download-task-foot">').concat(output ? '<span class="dl-output">'.concat(esc(output), "</span>") : "").concat(failedInfo).concat(errBlock).concat(transferBtn).concat(transferCancel).concat(mergeBtn).concat(retryFailedBtn).concat(retryBtn).concat(cancelBtn).concat(deleteBtn, "</div>\n  </div></div>");
+}
+function remoteJobText(job) {
+  if (!job) return "";
+  const name = job.serverName || "\u8FDC\u7A0B\u670D\u52A1\u5668";
+  if (job.status === "running" || job.status === "queued") return "\u4F20\u8F93\u5230 ".concat(name, " ").concat(Number(job.percent) || 0, "%");
+  if (job.status === "done") return "\u5DF2\u4F20\u5230 ".concat(name);
+  if (job.status === "failed") return "\u4F20\u8F93\u5931\u8D25\uFF1A".concat(job.error || "\u672A\u77E5\u9519\u8BEF");
+  if (job.status === "canceled") return "\u4F20\u8F93\u5DF2\u53D6\u6D88";
+  return "";
 }
 function downloadStatusText(task, kind) {
   const failedCount = (task.failedEpisodes || []).length;
   if (task.status === "pulling") {
     const d = task.detail || "";
-    if (d.includes("拉取")) return d.replace(/已从 NAS /, "从 NAS ");
-    return "等待 NAS 下载";
+    if (d.includes("\u62C9\u53D6")) return d.replace(/已从 NAS /, "\u4ECE NAS ");
+    return "\u7B49\u5F85 NAS \u4E0B\u8F7D";
   }
-  if (task.status === "ready") return failedCount > 0 ? "已下载 · 失败".concat(failedCount, "集") : "已下载 · 待合并";
+  if (task.status === "ready") return failedCount > 0 ? "\u5DF2\u4E0B\u8F7D \xB7 \u5931\u8D25".concat(failedCount, "\u96C6") : "\u5DF2\u4E0B\u8F7D \xB7 \u5F85\u5408\u5E76";
   if (task.status === "done") {
-    if (kind === "nas") return "已下载 · 已合并";
-    if ((task.detail || "").includes("已合并")) return "已下载 · 已合并";
-    return "已下载";
+    if (kind === "nas") return "\u5DF2\u4E0B\u8F7D \xB7 \u5DF2\u5408\u5E76";
+    if ((task.detail || "").includes("\u5DF2\u5408\u5E76")) return "\u5DF2\u4E0B\u8F7D \xB7 \u5DF2\u5408\u5E76";
+    return "\u5DF2\u4E0B\u8F7D";
   }
-  if (task.status === "failed") return failedCount > 0 ? "失败 · 可重试".concat(failedCount, "集") : "失败";
-  if (task.status === "canceled") return "已取消";
+  if (task.status === "failed") return failedCount > 0 ? "\u5931\u8D25 \xB7 \u53EF\u91CD\u8BD5".concat(failedCount, "\u96C6") : "\u5931\u8D25";
+  if (task.status === "canceled") return "\u5DF2\u53D6\u6D88";
   const detail = task.detail || "";
-  if (detail.includes("保存")) return "保存到手机";
+  if (detail.includes("\u4FDD\u5B58")) return "\u4FDD\u5B58\u5230\u624B\u673A";
   const m = detail.match(/第\s*(\d+)\s*\/\s*(\d+)/);
-  if (m) return "下载中 ".concat(m[1], "/").concat(m[2]);
-  if (/第\s*\d+\s*集/.test(detail) && detail.includes("合并")) return "下载中 · 取流合并";
-  if (detail.includes("待合并")) return "待合并";
-  if (detail.includes("合并")) return "合并中";
-  return "下载中";
+  if (m) return "\u4E0B\u8F7D\u4E2D ".concat(m[1], "/").concat(m[2]);
+  if (/第\s*\d+\s*集/.test(detail) && detail.includes("\u5408\u5E76")) return "\u4E0B\u8F7D\u4E2D \xB7 \u53D6\u6D41\u5408\u5E76";
+  if (detail.includes("\u5F85\u5408\u5E76")) return "\u5F85\u5408\u5E76";
+  if (detail.includes("\u5408\u5E76")) return "\u5408\u5E76\u4E2D";
+  return "\u4E0B\u8F7D\u4E2D";
 }
 let downloadMode = null;
 const downloadSelection = /* @__PURE__ */ new Set();
@@ -1377,7 +1408,7 @@ function showDownloadSheet() {
   if (!state.detail) return;
   const episodes = asArray(state.detail.episodes);
   if (!episodes.length) {
-    toast("该内容暂无可选集", true);
+    toast("\u8BE5\u5185\u5BB9\u6682\u65E0\u53EF\u9009\u96C6", true);
     return;
   }
   downloadMode = "episodes";
@@ -1403,22 +1434,28 @@ function renderDownloadSheet() {
   if (!sheet) return;
   const episodes = asArray(state.detail.episodes);
   if (downloadMode === "parsing") {
-    sheet.innerHTML = '<p class="download-parsing">正在解析播放地址…<br><small>需要逐集解析，请稍候</small></p>';
+    sheet.innerHTML = '<p class="download-parsing">\u6B63\u5728\u89E3\u6790\u64AD\u653E\u5730\u5740\u2026<br><small>\u9700\u8981\u9010\u96C6\u89E3\u6790\uFF0C\u8BF7\u7A0D\u5019</small></p>';
     return;
   }
   if (downloadMode === "target") {
     const isAdmin = state.account.role === "admin";
     const canDebug = privateMode();
-    sheet.innerHTML = '<div class="download-pick">\n      <button type="button" class="download-pick-option" data-dl-pick="phone"><strong>下载到手机</strong></button>\n      <button type="button" class="download-pick-option" data-dl-pick="nas" '.concat(isAdmin ? "" : "disabled", "><strong>下载到 NAS</strong>").concat(isAdmin ? "" : "<small>仅管理员可用</small>", "</button>\n      ").concat(canDebug ? '<button type="button" class="download-pick-option" data-dl-pick="phone-debug"><strong>下载到手机（调试）</strong><small>保留 TS 与 Key，不自动合并，导出调试包</small></button>' : "", '\n      <p class="download-nas-note">').concat(state.account.loggedIn ? "" : "NAS 下载需要先登录账号。", "</p>\n    </div>");
+    const hasRemote = !!(remoteServers && remoteServers.length);
+    sheet.innerHTML = '<div class="download-pick">\n      <button type="button" class="download-pick-option" data-dl-pick="phone"><strong>\u4E0B\u8F7D\u5230\u624B\u673A</strong></button>\n      <button type="button" class="download-pick-option" data-dl-pick="remote"><strong>\u4E0B\u8F7D\u5230\u8FDC\u7A0B\u670D\u52A1\u5668</strong><small>'.concat(hasRemote ? "\u5148\u4E0B\u5230\u624B\u673A\uFF0C\u5B8C\u6210\u540E\u81EA\u52A8\u4F20\u5230\u6240\u9009\u670D\u52A1\u5668\uFF08\u6309\u5267\u540D\u5EFA\u6587\u4EF6\u5939\uFF09" : "\u8FD8\u6CA1\u914D\u7F6E\u670D\u52A1\u5668 \xB7 \u5230\u300C\u8BBE\u7F6E \u2192 \u8FDC\u7A0B\u670D\u52A1\u5668\u300D\u6DFB\u52A0", '</small></button>\n      <button type="button" class="download-pick-option" data-dl-pick="nas" ').concat(isAdmin ? "" : "disabled", "><strong>\u4E0B\u8F7D\u5230 NAS</strong>").concat(isAdmin ? "" : "<small>\u4EC5\u7BA1\u7406\u5458\u53EF\u7528</small>", "</button>\n      ").concat(canDebug ? '<button type="button" class="download-pick-option" data-dl-pick="phone-debug"><strong>\u4E0B\u8F7D\u5230\u624B\u673A\uFF08\u8C03\u8BD5\uFF09</strong><small>\u4FDD\u7559 TS \u4E0E Key\uFF0C\u4E0D\u81EA\u52A8\u5408\u5E76\uFF0C\u5BFC\u51FA\u8C03\u8BD5\u5305</small></button>' : "", '\n      <p class="download-nas-note">').concat(state.account.loggedIn ? "" : "NAS \u4E0B\u8F7D\u9700\u8981\u5148\u767B\u5F55\u8D26\u53F7\u3002", "</p>\n    </div>");
+    return;
+  }
+  if (downloadMode === "remote") {
+    const servers = asArray(remoteServers);
+    sheet.innerHTML = '<p class="dl-remote-tip">\u9009\u62E9\u8981\u4F20\u5230\u54EA\u53F0\u670D\u52A1\u5668\u3002\u4E0B\u8F7D\u5B8C\u6210\u540E\u4F1A\u81EA\u52A8\u4E0A\u4F20\uFF0C\u5E76\u5728\u670D\u52A1\u5668\u4E0A\u6309\u5267\u540D\u5EFA\u540C\u540D\u6587\u4EF6\u5939\u3002</p>\n      <div class="download-pick">'.concat(servers.map((s) => '<button type="button" class="download-pick-option" data-dl-remote="'.concat(esc(s.id), '"><strong>').concat(esc(s.name), "</strong><small>").concat(esc(s.typeName), " \xB7 ").concat(esc(s.address), "</small></button>")).join(""), '</div>\n      <div class="download-sheet-buttons"><button type="button" class="dl-secondary" data-dl-back-target="1">\u8FD4\u56DE</button></div>');
     return;
   }
   const all = episodes.map((ep) => Number(ep.number) || 0);
   const checked = all.filter((n) => downloadSelection.has(n)).length;
   const allSelected = all.length && checked === all.length;
-  sheet.innerHTML = '<div class="download-sheet-toolbar"><button type="button" class="dl-secondary" data-dl-all="1">'.concat(allSelected ? "取消全选" : "全选", "</button><span>已选 ").concat(checked, "/").concat(all.length, ' 集</span></div>\n    <div class="download-sheet-grid">').concat(episodes.map((ep) => {
+  sheet.innerHTML = '<div class="download-sheet-toolbar"><button type="button" class="dl-secondary" data-dl-all="1">'.concat(allSelected ? "\u53D6\u6D88\u5168\u9009" : "\u5168\u9009", "</button><span>\u5DF2\u9009 ").concat(checked, "/").concat(all.length, ' \u96C6</span></div>\n    <div class="download-sheet-grid">').concat(episodes.map((ep) => {
     const n = Number(ep.number) || 0;
     return '<label class="dl-ep '.concat(downloadSelection.has(n) ? "checked" : "", '" data-dl-ep="').concat(n, '"><span>').concat(n, "</span></label>");
-  }).join(""), '</div>\n    <div class="download-sheet-buttons"><button type="button" class="dl-secondary" data-dl-back="1">取消</button><button type="button" class="dl-primary" data-dl-confirm="1" ').concat(checked ? "" : "disabled", ">下载 ").concat(checked ? checked + " 集" : "", "</button></div>");
+  }).join(""), '</div>\n    <div class="download-sheet-buttons"><button type="button" class="dl-secondary" data-dl-back="1">\u53D6\u6D88</button><button type="button" class="dl-primary" data-dl-confirm="1" ').concat(checked ? "" : "disabled", ">\u4E0B\u8F7D ").concat(checked ? checked + " \u96C6" : "", "</button></div>");
 }
 async function resolveEpisodesForDownload(episodes) {
   const resolved = [];
@@ -1438,11 +1475,11 @@ async function resolveEpisodesForDownload(episodes) {
     try {
       data = await api("episode", { id: state.detail.id, episode: n });
     } catch (error) {
-      throw new Error("第 ".concat(n, " 集播放地址解析失败：").concat(error.message || "未知错误"));
+      throw new Error("\u7B2C ".concat(n, " \u96C6\u64AD\u653E\u5730\u5740\u89E3\u6790\u5931\u8D25\uFF1A").concat(error.message || "\u672A\u77E5\u9519\u8BEF"));
     }
     const source = String(data && data.source || "");
     if (!/^https?:\/\//i.test(source)) {
-      throw new Error("第 ".concat(n, " 集没有拿到有效的播放地址（").concat(source.slice(0, 40) || "为空", "），请稍后重试"));
+      throw new Error("\u7B2C ".concat(n, " \u96C6\u6CA1\u6709\u62FF\u5230\u6709\u6548\u7684\u64AD\u653E\u5730\u5740\uFF08").concat(source.slice(0, 40) || "\u4E3A\u7A7A", "\uFF09\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5"));
     }
     resolved.push({ index: n, url: source, key: data.key || "" });
   }
@@ -1451,23 +1488,23 @@ async function resolveEpisodesForDownload(episodes) {
     try {
       data = await j.p;
     } catch (error) {
-      throw new Error("第 ".concat(j.n, " 集播放地址解析失败：").concat(error.message || "未知错误"));
+      throw new Error("\u7B2C ".concat(j.n, " \u96C6\u64AD\u653E\u5730\u5740\u89E3\u6790\u5931\u8D25\uFF1A").concat(error.message || "\u672A\u77E5\u9519\u8BEF"));
     }
     const source = String(data && data.source || "");
-    if (!/^https?:\/\//i.test(source)) throw new Error("第 ".concat(j.n, " 集没有拿到有效的播放地址（").concat(source.slice(0, 40) || "为空", "），请稍后重试"));
+    if (!/^https?:\/\//i.test(source)) throw new Error("\u7B2C ".concat(j.n, " \u96C6\u6CA1\u6709\u62FF\u5230\u6709\u6548\u7684\u64AD\u653E\u5730\u5740\uFF08").concat(source.slice(0, 40) || "\u4E3A\u7A7A", "\uFF09\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5"));
     resolved.push({ index: j.n, url: source, key: "" });
   }
-  if (!resolved.length) throw new Error("没有可下载的分集");
+  if (!resolved.length) throw new Error("\u6CA1\u6709\u53EF\u4E0B\u8F7D\u7684\u5206\u96C6");
   const bad = resolved.find((r) => !/^https?:\/\//i.test(String(r.url || "")));
-  if (bad) throw new Error("第 ".concat(bad.index, " 集播放地址无效，已取消提交"));
+  if (bad) throw new Error("\u7B2C ".concat(bad.index, " \u96C6\u64AD\u653E\u5730\u5740\u65E0\u6548\uFF0C\u5DF2\u53D6\u6D88\u63D0\u4EA4"));
   return resolved;
 }
-async function submitDownloadTo(target) {
+async function submitDownloadTo(target, remoteId) {
   var _a2, _b2;
   if (downloadParsing) return;
   if (target === "nas") {
     if (!state.account.loggedIn) {
-      toast("请先登录账号", true);
+      toast("\u8BF7\u5148\u767B\u5F55\u8D26\u53F7", true);
       return;
     }
     try {
@@ -1476,13 +1513,17 @@ async function submitDownloadTo(target) {
     } catch (ignore) {
     }
     if (state.account.role !== "admin") {
-      toast("仅管理员可下载到 NAS", true);
+      toast("\u4EC5\u7BA1\u7406\u5458\u53EF\u4E0B\u8F7D\u5230 NAS", true);
       return;
     }
   }
+  if (target === "remote" && !remoteId) {
+    toast("\u8BF7\u9009\u62E9\u8981\u4F20\u5230\u54EA\u53F0\u670D\u52A1\u5668", true);
+    return;
+  }
   const episodes = asArray(state.detail.episodes).map((ep) => Number(ep.number) || 0).filter((n) => downloadSelection.has(n));
   if (!episodes.length) {
-    toast("请先选择集数", true);
+    toast("\u8BF7\u5148\u9009\u62E9\u96C6\u6570", true);
     return;
   }
   downloadParsing = true;
@@ -1491,7 +1532,7 @@ async function submitDownloadTo(target) {
   try {
     if (target === "nas") {
       await api("nas-download-start", { source: contentSource, title: state.detail.title, seriesId: String(state.detail.seriesId || state.detail.id), episodes, cover: state.detail.cover || "" });
-      toast("已提交 NAS 下载任务（后端自行解析取流）");
+      toast("\u5DF2\u63D0\u4EA4 NAS \u4E0B\u8F7D\u4EFB\u52A1\uFF08\u540E\u7AEF\u81EA\u884C\u89E3\u6790\u53D6\u6D41\uFF09");
     } else {
       let sourceNow = String(((_a2 = state.detail) == null ? void 0 : _a2.source) || "");
       if (sourceNow !== "huangguo" && sourceNow !== "hongguo") {
@@ -1508,13 +1549,15 @@ async function submitDownloadTo(target) {
         if (pmv !== null && pmv !== void 0 && pmv !== "") proxyModeNow = Number(pmv) || 3;
       } catch (ignore) {
       }
-      console.log("[dl-judge] source=".concat(sourceNow, " proxyMode=").concat(proxyModeNow, " role=").concat((_b2 = state.account) == null ? void 0 : _b2.role));
+      console.log("[dl-judge] source=".concat(sourceNow, " proxyMode=").concat(proxyModeNow, " role=").concat((_b2 = state.account) == null ? void 0 : _b2.role, " remote=").concat(remoteId || "-"));
       {
         const resolved = await resolveEpisodesForDownload(episodes);
-        if (!resolved.length) throw new Error("没有可下载的分集");
+        if (!resolved.length) throw new Error("\u6CA1\u6709\u53EF\u4E0B\u8F7D\u7684\u5206\u96C6");
         const debug = target === "phone-debug";
-        await api("download-start", { source: sourceNow, title: state.detail.title, episodes: resolved, debug, cover: state.detail.cover || "" });
-        toast(debug ? "调试模式已开始（".concat(resolved.length, " 集）：分片下完后会导出「第NN集_调试包.zip」到 Download/Veyra/").concat(state.detail.title) : "判定[源=".concat(sourceNow, " 通道=").concat(proxyModeNow, "] 已开始下载到手机（手机经代理拉源合并）"));
+        const targetRemote = target === "remote" ? String(remoteId || "") : "";
+        await api("download-start", { source: sourceNow, title: state.detail.title, episodes: resolved, debug, cover: state.detail.cover || "", remoteId: targetRemote });
+        const server = targetRemote ? asArray(remoteServers).find((s) => String(s.id) === targetRemote) : null;
+        toast(debug ? "\u8C03\u8BD5\u6A21\u5F0F\u5DF2\u5F00\u59CB\uFF08".concat(resolved.length, " \u96C6\uFF09\uFF1A\u5206\u7247\u4E0B\u5B8C\u540E\u4F1A\u5BFC\u51FA\u300C\u7B2CNN\u96C6_\u8C03\u8BD5\u5305.zip\u300D\u5230 Download/Veyra/").concat(state.detail.title) : targetRemote ? "\u5DF2\u5F00\u59CB\u4E0B\u8F7D ".concat(resolved.length, " \u96C6\uFF0C\u5B8C\u6210\u540E\u81EA\u52A8\u4F20\u5230\u300C").concat(server ? server.name : "\u8FDC\u7A0B\u670D\u52A1\u5668", "\u300D") : "\u5224\u5B9A[\u6E90=".concat(sourceNow, " \u901A\u9053=").concat(proxyModeNow, "] \u5DF2\u5F00\u59CB\u4E0B\u8F7D\u5230\u624B\u673A\uFF08\u624B\u673A\u7ECF\u4EE3\u7406\u62C9\u6E90\u5408\u5E76\uFF09"));
       }
     }
     hideDownloadSheet();
@@ -1522,16 +1565,18 @@ async function submitDownloadTo(target) {
     downloadParsing = false;
     downloadMode = "target";
     renderDownloadSheet();
-    toast("".concat(target === "nas" ? "提交失败" : "下载失败", "：").concat(error.message), true);
+    toast("".concat(target === "nas" ? "\u63D0\u4EA4\u5931\u8D25" : "\u4E0B\u8F7D\u5931\u8D25", "\uFF1A").concat(error.message), true);
   }
 }
 function renderSettings() {
-  content.innerHTML = '<div class="settings-page"><button type="button" class="listing-back" data-back="1">'.concat(icon("back"), " 返回我的</button><h1>设置</h1>\n    ").concat(window.renderAppearance ? window.renderAppearance() : "", '\n    <section><button type="button" class="settings-link" data-account-management="1"><span><strong>账号管理</strong><small>').concat(state.account.loggedIn ? esc(state.account.username) : "登录或注册账号", "</small></span>").concat(icon("arrow"), '</button></section>\n    <section><button type="button" class="settings-link" data-proxy-open><span><strong>黄果网络通道</strong><small data-proxy-summary>').concat(esc(proxySummaryText()), "</small></span>").concat(icon("arrow"), '</button></section>\n    <section><button type="button" class="settings-link" data-about-open><span><strong>关于 Veyra</strong><small>项目地址 · GPL-3.0 开源</small></span>').concat(icon("arrow"), "</button></section></div>");
+  content.innerHTML = '<div class="settings-page"><button type="button" class="listing-back" data-back="1">'.concat(icon("back"), " \u8FD4\u56DE\u6211\u7684</button><h1>\u8BBE\u7F6E</h1>\n    ").concat(window.renderAppearance ? window.renderAppearance() : "", '\n    <section><button type="button" class="settings-link" data-account-management="1"><span><strong>\u8D26\u53F7\u7BA1\u7406</strong><small>').concat(state.account.loggedIn ? esc(state.account.username) : "\u767B\u5F55\u6216\u6CE8\u518C\u8D26\u53F7", "</small></span>").concat(icon("arrow"), '</button></section>\n    <section><button type="button" class="settings-link" data-proxy-open><span><strong>\u9EC4\u679C\u7F51\u7EDC\u901A\u9053</strong><small data-proxy-summary>').concat(esc(proxySummaryText()), "</small></span>").concat(icon("arrow"), '</button></section>\n    <section><button type="button" class="settings-link" data-remote-open><span><strong>\u8FDC\u7A0B\u670D\u52A1\u5668</strong><small data-remote-summary>').concat(esc(remoteSummaryText()), "</small></span>").concat(icon("arrow"), '</button></section>\n    <section><button type="button" class="settings-link" data-about-open><span><strong>\u5173\u4E8E Veyra</strong><small>\u9879\u76EE\u5730\u5740 \xB7 GPL-3.0 \u5F00\u6E90</small></span>').concat(icon("arrow"), "</button></section></div>");
   if (window.bindAppearance) window.bindAppearance();
   api("hot-update-status").then(window.hgHotUpdateStatus).catch(() => {
   });
+  loadRemoteServers(true).catch(() => {
+  });
 }
-const PROXY_MODE_NAMES = { 1: "仅直连", 2: "仅代理", 3: "走后端转发" };
+const PROXY_MODE_NAMES = { 1: "\u4EC5\u76F4\u8FDE", 2: "\u4EC5\u4EE3\u7406", 3: "\u8D70\u540E\u7AEF\u8F6C\u53D1" };
 const roleCanUseBackend = () => {
   var _a2, _b2;
   return ((_a2 = state.account) == null ? void 0 : _a2.role) === "admin" || ((_b2 = state.account) == null ? void 0 : _b2.role) === "vip";
@@ -1541,7 +1586,7 @@ function setProxyModeLabel(mode) {
   if (state.proxyMode < 1 || state.proxyMode > 3) state.proxyMode = 3;
   if (state.proxyMode === 3 && !roleCanUseBackend()) state.proxyMode = 1;
   const label = document.getElementById("proxy-mode-label");
-  if (label) label.textContent = PROXY_MODE_NAMES[state.proxyMode] || "走后端转发";
+  if (label) label.textContent = PROXY_MODE_NAMES[state.proxyMode] || "\u8D70\u540E\u7AEF\u8F6C\u53D1";
   const menu = document.getElementById("proxy-mode-menu");
   if (menu) {
     for (const item of menu.querySelectorAll("[data-mode]")) {
@@ -1587,13 +1632,13 @@ function initProxyModeDropdown() {
       event.stopPropagation();
       const value = Number(item.dataset.mode) || 3;
       if (value === 3 && !roleCanUseBackend()) {
-        toast("走后端转发仅管理员与特权组可用，请联系管理员开通", true);
+        toast("\u8D70\u540E\u7AEF\u8F6C\u53D1\u4EC5\u7BA1\u7406\u5458\u4E0E\u7279\u6743\u7EC4\u53EF\u7528\uFF0C\u8BF7\u8054\u7CFB\u7BA1\u7406\u5458\u5F00\u901A", true);
         return;
       }
       setProxyModeLabel(value);
       close();
       api("set-proxy-mode", { value }).then(() => {
-        toast("已切换：".concat(PROXY_MODE_NAMES[value] || value), false);
+        toast("\u5DF2\u5207\u6362\uFF1A".concat(PROXY_MODE_NAMES[value] || value), false);
       }).catch((error) => {
         setProxyModeLabel(state.proxyMode);
         toast(error.message, true);
@@ -1607,22 +1652,22 @@ function initProxyModeDropdown() {
 function accountRoleInfo() {
   var _a2;
   const role = (_a2 = state.account) == null ? void 0 : _a2.role;
-  return role === "admin" ? { key: "admin", label: "管理员" } : role === "vip" ? { key: "vip", label: "特权用户" } : { key: "user", label: "普通用户" };
+  return role === "admin" ? { key: "admin", label: "\u7BA1\u7406\u5458" } : role === "vip" ? { key: "vip", label: "\u7279\u6743\u7528\u6237" } : { key: "user", label: "\u666E\u901A\u7528\u6237" };
 }
 function accountIdentityHtml() {
   const account = state.account;
   const role = accountRoleInfo();
-  return '<section class="account-identity"><button type="button" class="account-avatar-pick" data-choose-avatar="1" aria-label="点击头像从相册更换"><img src="'.concat(esc(account.avatar || "user.svg"), '" alt=""></button><div><strong>').concat(esc(account.username), '</strong><span class="account-role is-').concat(role.key, '">').concat(role.label, "</span></div></section>");
+  return '<section class="account-identity"><button type="button" class="account-avatar-pick" data-choose-avatar="1" aria-label="\u70B9\u51FB\u5934\u50CF\u4ECE\u76F8\u518C\u66F4\u6362"><img src="'.concat(esc(account.avatar || "user.svg"), '" alt=""></button><div><strong>').concat(esc(account.username), '</strong><span class="account-role is-').concat(role.key, '">').concat(role.label, "</span></div></section>");
 }
 function renderAccountManagement() {
   const account = state.account;
-  content.innerHTML = '<div class="settings-page account-page"><button type="button" class="listing-back" data-back="1">'.concat(icon("back"), " 返回设置</button><h1>账号管理</h1>\n    ").concat(account.loggedIn ? "".concat(accountIdentityHtml(), '\n      <section class="settings-account"><h2>修改密码</h2><p>先验证旧密码，再设置新密码。</p>\n        <form id="password-form" class="password-form">\n          <label for="old-password">旧密码</label><input id="old-password" type="password" autocomplete="current-password" required>\n          <label for="new-password">新密码</label><input id="new-password" type="password" autocomplete="new-password" required>\n          <p id="password-error" class="auth-error" role="alert" hidden></p><button type="submit">确认修改</button>\n        </form></section>\n      <section class="settings-account"><h2>同步与登录</h2><button type="button" data-sync-now="1">立即同步片单</button><button type="button" data-logout="1" aria-live="polite">退出登录</button></section>\n      <section class="settings-account"><h2>电视端</h2><p>电视上用手机扫码登录：扫电视屏幕上的二维码，账号直接同步过去。</p><button type="button" data-qr-login="1">扫码登录电视</button></section>') : '<section class="settings-account"><p>登录后可同步收藏和观看历史，并管理头像与密码。</p><button type="button" data-account-action="1">登录或注册</button></section>\n      <section class="settings-account"><h2>电视端</h2><p>电视上用手机扫码登录：扫电视屏幕上的二维码，账号直接同步过去。</p><button type="button" data-qr-login="1">扫码登录电视</button></section>', "</div>");
+  content.innerHTML = '<div class="settings-page account-page"><button type="button" class="listing-back" data-back="1">'.concat(icon("back"), " \u8FD4\u56DE\u8BBE\u7F6E</button><h1>\u8D26\u53F7\u7BA1\u7406</h1>\n    ").concat(account.loggedIn ? "".concat(accountIdentityHtml(), '\n      <section class="settings-account"><h2>\u4FEE\u6539\u5BC6\u7801</h2><p>\u5148\u9A8C\u8BC1\u65E7\u5BC6\u7801\uFF0C\u518D\u8BBE\u7F6E\u65B0\u5BC6\u7801\u3002</p>\n        <form id="password-form" class="password-form">\n          <label for="old-password">\u65E7\u5BC6\u7801</label><input id="old-password" type="password" autocomplete="current-password" required>\n          <label for="new-password">\u65B0\u5BC6\u7801</label><input id="new-password" type="password" autocomplete="new-password" required>\n          <p id="password-error" class="auth-error" role="alert" hidden></p><button type="submit">\u786E\u8BA4\u4FEE\u6539</button>\n        </form></section>\n      <section class="settings-account"><h2>\u540C\u6B65\u4E0E\u767B\u5F55</h2><button type="button" data-sync-now="1">\u7ACB\u5373\u540C\u6B65\u7247\u5355</button><button type="button" data-logout="1" aria-live="polite">\u9000\u51FA\u767B\u5F55</button></section>\n      <section class="settings-account"><h2>\u7535\u89C6\u7AEF</h2><p>\u7535\u89C6\u4E0A\u7528\u624B\u673A\u626B\u7801\u767B\u5F55\uFF1A\u626B\u7535\u89C6\u5C4F\u5E55\u4E0A\u7684\u4E8C\u7EF4\u7801\uFF0C\u8D26\u53F7\u76F4\u63A5\u540C\u6B65\u8FC7\u53BB\u3002</p><button type="button" data-qr-login="1">\u626B\u7801\u767B\u5F55\u7535\u89C6</button></section>') : '<section class="settings-account"><p>\u767B\u5F55\u540E\u53EF\u540C\u6B65\u6536\u85CF\u548C\u89C2\u770B\u5386\u53F2\uFF0C\u5E76\u7BA1\u7406\u5934\u50CF\u4E0E\u5BC6\u7801\u3002</p><button type="button" data-account-action="1">\u767B\u5F55\u6216\u6CE8\u518C</button></section>\n      <section class="settings-account"><h2>\u7535\u89C6\u7AEF</h2><p>\u7535\u89C6\u4E0A\u7528\u624B\u673A\u626B\u7801\u767B\u5F55\uFF1A\u626B\u7535\u89C6\u5C4F\u5E55\u4E0A\u7684\u4E8C\u7EF4\u7801\uFF0C\u8D26\u53F7\u76F4\u63A5\u540C\u6B65\u8FC7\u53BB\u3002</p><button type="button" data-qr-login="1">\u626B\u7801\u767B\u5F55\u7535\u89C6</button></section>', "</div>");
 }
 var accountPop = null;
 function buildAccountPopHtml() {
   const account = state.account;
-  const body = account.loggedIn ? "".concat(accountIdentityHtml(), '\n      <section class="settings-account"><h2>修改密码</h2><p>先验证旧密码，再设置新密码。</p>\n        <form id="password-form" class="password-form">\n          <label for="old-password">旧密码</label><input id="old-password" type="password" autocomplete="current-password" required>\n          <label for="new-password">新密码</label><input id="new-password" type="password" autocomplete="new-password" required>\n          <p id="password-error" class="auth-error" role="alert" hidden></p><button type="submit">确认修改</button>\n        </form></section>\n      <section class="settings-account"><h2>同步与登录</h2><button type="button" data-sync-now="1">立即同步片单</button><button type="button" data-logout="1" aria-live="polite">退出登录</button></section>\n      <section class="settings-account"><h2>电视端</h2><p>电视上用手机扫码登录：扫电视屏幕上的二维码，账号直接同步过去。</p><button type="button" data-qr-login="1">扫码登录电视</button></section>') : '<section class="settings-account"><p>登录后可同步收藏和观看历史，并管理头像与密码。</p><button type="button" data-account-action="1">登录或注册</button></section>\n      <section class="settings-account"><h2>电视端</h2><p>电视上用手机扫码登录：扫电视屏幕上的二维码，账号直接同步过去。</p><button type="button" data-qr-login="1">扫码登录电视</button></section>';
-  return '<div class="appearance-pop account-pop" role="dialog" aria-modal="true" aria-labelledby="account-title">\n    <div class="appearance-head"><h2 id="account-title">账号管理</h2><button type="button" class="appearance-close" data-account-close aria-label="关闭">✕</button></div>\n    '.concat(body, "</div>");
+  const body = account.loggedIn ? "".concat(accountIdentityHtml(), '\n      <section class="settings-account"><h2>\u4FEE\u6539\u5BC6\u7801</h2><p>\u5148\u9A8C\u8BC1\u65E7\u5BC6\u7801\uFF0C\u518D\u8BBE\u7F6E\u65B0\u5BC6\u7801\u3002</p>\n        <form id="password-form" class="password-form">\n          <label for="old-password">\u65E7\u5BC6\u7801</label><input id="old-password" type="password" autocomplete="current-password" required>\n          <label for="new-password">\u65B0\u5BC6\u7801</label><input id="new-password" type="password" autocomplete="new-password" required>\n          <p id="password-error" class="auth-error" role="alert" hidden></p><button type="submit">\u786E\u8BA4\u4FEE\u6539</button>\n        </form></section>\n      <section class="settings-account"><h2>\u540C\u6B65\u4E0E\u767B\u5F55</h2><button type="button" data-sync-now="1">\u7ACB\u5373\u540C\u6B65\u7247\u5355</button><button type="button" data-logout="1" aria-live="polite">\u9000\u51FA\u767B\u5F55</button></section>\n      <section class="settings-account"><h2>\u7535\u89C6\u7AEF</h2><p>\u7535\u89C6\u4E0A\u7528\u624B\u673A\u626B\u7801\u767B\u5F55\uFF1A\u626B\u7535\u89C6\u5C4F\u5E55\u4E0A\u7684\u4E8C\u7EF4\u7801\uFF0C\u8D26\u53F7\u76F4\u63A5\u540C\u6B65\u8FC7\u53BB\u3002</p><button type="button" data-qr-login="1">\u626B\u7801\u767B\u5F55\u7535\u89C6</button></section>') : '<section class="settings-account"><p>\u767B\u5F55\u540E\u53EF\u540C\u6B65\u6536\u85CF\u548C\u89C2\u770B\u5386\u53F2\uFF0C\u5E76\u7BA1\u7406\u5934\u50CF\u4E0E\u5BC6\u7801\u3002</p><button type="button" data-account-action="1">\u767B\u5F55\u6216\u6CE8\u518C</button></section>\n      <section class="settings-account"><h2>\u7535\u89C6\u7AEF</h2><p>\u7535\u89C6\u4E0A\u7528\u624B\u673A\u626B\u7801\u767B\u5F55\uFF1A\u626B\u7535\u89C6\u5C4F\u5E55\u4E0A\u7684\u4E8C\u7EF4\u7801\uFF0C\u8D26\u53F7\u76F4\u63A5\u540C\u6B65\u8FC7\u53BB\u3002</p><button type="button" data-qr-login="1">\u626B\u7801\u767B\u5F55\u7535\u89C6</button></section>';
+  return '<div class="appearance-pop account-pop" role="dialog" aria-modal="true" aria-labelledby="account-title">\n    <div class="appearance-head"><h2 id="account-title">\u8D26\u53F7\u7BA1\u7406</h2><button type="button" class="appearance-close" data-account-close aria-label="\u5173\u95ED">\u2715</button></div>\n    '.concat(body, "</div>");
 }
 function ensureAccountPop() {
   if (accountPop && document.body.contains(accountPop)) return accountPop;
@@ -1658,8 +1703,8 @@ window.__veyraAccountBack = () => {
 };
 window.__veyraAccountOpen = () => !!(accountPop && !accountPop.hidden);
 function proxySummaryText() {
-  const m = PROXY_MODE_NAMES[state.proxyMode] || "走后端转发";
-  return state.proxy ? "".concat(m, " · ").concat(state.proxy) : m;
+  const m = PROXY_MODE_NAMES[state.proxyMode] || "\u8D70\u540E\u7AEF\u8F6C\u53D1";
+  return state.proxy ? "".concat(m, " \xB7 ").concat(state.proxy) : m;
 }
 function updateProxySummary() {
   const el = document.querySelector("[data-proxy-summary]");
@@ -1667,7 +1712,7 @@ function updateProxySummary() {
 }
 var proxyPop = null;
 function buildProxyPopHtml() {
-  return '<div class="appearance-pop account-pop proxy-pop" role="dialog" aria-modal="true" aria-labelledby="proxy-title">\n    <div class="appearance-head"><h2 id="proxy-title">黄果网络通道</h2><button type="button" class="appearance-close" data-proxy-close aria-label="关闭">✕</button></div>\n    <p class="appearance-note">仅黄果/私密模式生效，红果永远直连不受影响；选择后立即生效，无需重启。</p>\n    <div class="settings-storage">'.concat(privateMode() ? '<button type="button" data-return-public>返回红果（公开模式）</button>' : '<button type="button" data-enter-private>进入私密模式</button>', '</div>\n    <div class="proxy-test-row">\n      <input id="proxy-address" class="settings-input" type="text" placeholder="代理地址 host:port，如 192.168.31.108:7893" value="').concat(esc(state.proxy || ""), '" autocomplete="off" aria-label="黄果代理地址">\n      <button type="button" id="proxy-test" class="proxy-test-btn">检测</button>\n    </div>\n    <span id="proxy-test-result" class="proxy-test-result" hidden></span>\n    <div class="proxy-mode-dd" id="proxy-mode-dd">\n      <button type="button" class="proxy-mode-dd-btn" data-mode-toggle aria-haspopup="listbox" aria-expanded="false"><span id="proxy-mode-label">').concat(esc(PROXY_MODE_NAMES[state.proxyMode] || "走后端转发"), "</span>").concat(icon("arrow"), '</button>\n      <div class="proxy-mode-dd-menu" id="proxy-mode-menu" hidden>\n        <button type="button" data-mode="1">仅直连</button>\n        <button type="button" data-mode="2">仅代理</button>\n        <button type="button" data-mode="3">走后端转发</button>\n      </div>\n    </div>\n  </div>');
+  return '<div class="appearance-pop account-pop proxy-pop" role="dialog" aria-modal="true" aria-labelledby="proxy-title">\n    <div class="appearance-head"><h2 id="proxy-title">\u9EC4\u679C\u7F51\u7EDC\u901A\u9053</h2><button type="button" class="appearance-close" data-proxy-close aria-label="\u5173\u95ED">\u2715</button></div>\n    <p class="appearance-note">\u4EC5\u9EC4\u679C/\u79C1\u5BC6\u6A21\u5F0F\u751F\u6548\uFF0C\u7EA2\u679C\u6C38\u8FDC\u76F4\u8FDE\u4E0D\u53D7\u5F71\u54CD\uFF1B\u9009\u62E9\u540E\u7ACB\u5373\u751F\u6548\uFF0C\u65E0\u9700\u91CD\u542F\u3002</p>\n    <div class="settings-storage">'.concat(privateMode() ? '<button type="button" data-return-public>\u8FD4\u56DE\u7EA2\u679C\uFF08\u516C\u5F00\u6A21\u5F0F\uFF09</button>' : '<button type="button" data-enter-private>\u8FDB\u5165\u79C1\u5BC6\u6A21\u5F0F</button>', '</div>\n    <div class="proxy-test-row">\n      <input id="proxy-address" class="settings-input" type="text" placeholder="\u4EE3\u7406\u5730\u5740 host:port\uFF0C\u5982 192.168.31.108:7893" value="').concat(esc(state.proxy || ""), '" autocomplete="off" aria-label="\u9EC4\u679C\u4EE3\u7406\u5730\u5740">\n      <button type="button" id="proxy-test" class="proxy-test-btn">\u68C0\u6D4B</button>\n    </div>\n    <span id="proxy-test-result" class="proxy-test-result" hidden></span>\n    <div class="proxy-mode-dd" id="proxy-mode-dd">\n      <button type="button" class="proxy-mode-dd-btn" data-mode-toggle aria-haspopup="listbox" aria-expanded="false"><span id="proxy-mode-label">').concat(esc(PROXY_MODE_NAMES[state.proxyMode] || "\u8D70\u540E\u7AEF\u8F6C\u53D1"), "</span>").concat(icon("arrow"), '</button>\n      <div class="proxy-mode-dd-menu" id="proxy-mode-menu" hidden>\n        <button type="button" data-mode="1">\u4EC5\u76F4\u8FDE</button>\n        <button type="button" data-mode="2">\u4EC5\u4EE3\u7406</button>\n        <button type="button" data-mode="3">\u8D70\u540E\u7AEF\u8F6C\u53D1</button>\n      </div>\n    </div>\n  </div>');
 }
 function ensureProxyPop() {
   if (proxyPop && document.body.contains(proxyPop)) return proxyPop;
@@ -1704,7 +1749,7 @@ function openProxyPop() {
     const value = input.value.trim();
     state.proxy = value;
     api("set-proxy", { value }).then(() => {
-      toast("代理地址已保存");
+      toast("\u4EE3\u7406\u5730\u5740\u5DF2\u4FDD\u5B58");
       updateProxySummary();
     }).catch((error) => toast(error.message, true));
   });
@@ -1713,22 +1758,22 @@ function openProxyPop() {
   if (testBtn && testResult) {
     testBtn.addEventListener("click", () => {
       testBtn.disabled = true;
-      testBtn.textContent = "检测中…";
+      testBtn.textContent = "\u68C0\u6D4B\u4E2D\u2026";
       testResult.hidden = true;
       api("test-proxy").then((value) => {
         const v = value || {};
-        testResult.textContent = "通 · ".concat(Number(v.ms) || "?", "ms");
+        testResult.textContent = "\u901A \xB7 ".concat(Number(v.ms) || "?", "ms");
         testResult.classList.remove("fail");
         testResult.classList.add("ok");
         testResult.hidden = false;
       }).catch((error) => {
-        testResult.textContent = "不通：".concat(error.message);
+        testResult.textContent = "\u4E0D\u901A\uFF1A".concat(error.message);
         testResult.classList.remove("ok");
         testResult.classList.add("fail");
         testResult.hidden = false;
       }).finally(() => {
         testBtn.disabled = false;
-        testBtn.textContent = "检测";
+        testBtn.textContent = "\u68C0\u6D4B";
       });
     });
   }
@@ -1749,7 +1794,7 @@ window.__veyraProxyBack = () => {
 window.__veyraProxyOpen = () => !!(proxyPop && !proxyPop.hidden);
 var aboutPop = null;
 function buildAboutPopHtml() {
-  return '<div class="appearance-pop account-pop" role="dialog" aria-modal="true" aria-labelledby="about-title">\n    <div class="appearance-head"><h2 id="about-title">关于 Veyra</h2><button type="button" class="appearance-close" data-about-close aria-label="关闭">✕</button></div>\n    <p class="appearance-note">项目地址：<button type="button" class="settings-url" data-open-url="https://github.com/gybeyond1/Veyra">github.com/gybeyond1/Veyra</button> <button type="button" data-check-update>检查更新</button></p>\n    <p class="appearance-note">Veyra 基于开源项目二次开发，遵循 GPL-3.0 开源协议发布，完整源码、自建后端与 Docker 部署说明见仓库。</p>\n  </div>';
+  return '<div class="appearance-pop account-pop" role="dialog" aria-modal="true" aria-labelledby="about-title">\n    <div class="appearance-head"><h2 id="about-title">\u5173\u4E8E Veyra</h2><button type="button" class="appearance-close" data-about-close aria-label="\u5173\u95ED">\u2715</button></div>\n    <p class="appearance-note">\u9879\u76EE\u5730\u5740\uFF1A<button type="button" class="settings-url" data-open-url="https://github.com/gybeyond1/Veyra">github.com/gybeyond1/Veyra</button> <button type="button" data-check-update>\u68C0\u67E5\u66F4\u65B0</button></p>\n    <p class="appearance-note">Veyra \u57FA\u4E8E\u5F00\u6E90\u9879\u76EE\u4E8C\u6B21\u5F00\u53D1\uFF0C\u9075\u5FAA GPL-3.0 \u5F00\u6E90\u534F\u8BAE\u53D1\u5E03\uFF0C\u5B8C\u6574\u6E90\u7801\u3001\u81EA\u5EFA\u540E\u7AEF\u4E0E Docker \u90E8\u7F72\u8BF4\u660E\u89C1\u4ED3\u5E93\u3002</p>\n  </div>';
 }
 function ensureAboutPop() {
   if (aboutPop && document.body.contains(aboutPop)) return aboutPop;
@@ -1784,9 +1829,261 @@ window.__veyraAboutBack = () => {
   return false;
 };
 window.__veyraAboutOpen = () => !!(aboutPop && !aboutPop.hidden);
+var REMOTE_TYPES = [["smb", "SMB"], ["webdav", "WebDAV"], ["ftp", "FTP"]];
+let remoteServers = null;
+let remoteEditing = null;
+let remoteDraft = null;
+let remoteTestText = "";
+let remoteTestOk = false;
+function remoteTypeName(type) {
+  const hit = REMOTE_TYPES.find((t) => t[0] === type);
+  return hit ? hit[1] : String(type || "").toUpperCase();
+}
+function remoteSummaryText() {
+  const list = asArray(remoteServers);
+  if (!list.length) return "\u672A\u914D\u7F6E \xB7 \u652F\u6301 SMB / WebDAV / FTP";
+  if (list.length === 1) return "".concat(list[0].name, " \xB7 ").concat(list[0].typeName || remoteTypeName(list[0].type));
+  return "".concat(list.length, " \u4E2A\u670D\u52A1\u5668 \xB7 ").concat(list.slice(0, 2).map((s) => s.name).join("\u3001"));
+}
+async function loadRemoteServers(force) {
+  if (remoteServers && !force) return remoteServers;
+  try {
+    remoteServers = asArray(await api("remote-list"));
+  } catch (error) {
+    if (!remoteServers) remoteServers = [];
+  }
+  const summary = document.querySelector("[data-remote-summary]");
+  if (summary) summary.textContent = remoteSummaryText();
+  return remoteServers;
+}
+var remotePop = null;
+function remoteDraftOf(server) {
+  const s = server || {};
+  return {
+    id: s.id || "",
+    type: s.type || "smb",
+    name: s.name || "",
+    host: s.host || "",
+    port: Number(s.port) || 0,
+    share: s.share || "",
+    path: s.path || "",
+    user: s.user || "",
+    pass: "",
+    hasPass: !!s.hasPass,
+    secure: !!s.secure,
+    insecure: s.insecure !== false
+  };
+}
+function buildRemoteFormHtml() {
+  const d = remoteDraft;
+  const isSmb = d.type === "smb";
+  const isWebdav = d.type === "webdav";
+  const portHint = isSmb ? "445" : isWebdav ? d.secure ? "443" : "80" : d.secure ? "990" : "21";
+  return '<div class="remote-types">'.concat(REMOTE_TYPES.map((t) => '<button type="button" data-remote-type="'.concat(t[0], '"').concat(d.type === t[0] ? ' class="active"' : "", ">").concat(t[1], "</button>")).join(""), '</div>\n    <div class="remote-row"><label class="remote-field"><span>\u5730\u5740</span><input id="remote-host" class="settings-input" type="text" placeholder="192.168.1.10" value="').concat(esc(d.host), '" autocomplete="off" inputmode="url"></label>\n      <label class="remote-field remote-field-port"><span>\u7AEF\u53E3</span><input id="remote-port" class="settings-input" type="text" placeholder="').concat(portHint, '" value="').concat(d.port ? esc(String(d.port)) : "", '" inputmode="numeric"></label></div>\n    ').concat(isSmb ? '<div class="remote-row"><label class="remote-field"><span>\u5171\u4EAB\u540D</span><input id="remote-share" class="settings-input" type="text" placeholder="video" value="'.concat(esc(d.share), '" autocomplete="off"></label>\n      <label class="remote-field"><span>\u76EE\u5F55\uFF08\u53EF\u9009\uFF09</span><input id="remote-path" class="settings-input" type="text" placeholder="/\u77ED\u5267" value="').concat(esc(d.path), '" autocomplete="off"></label></div>') : '<label class="remote-field"><span>\u76EE\u5F55\uFF08\u53EF\u9009\uFF09</span><input id="remote-path" class="settings-input" type="text" placeholder="/\u77ED\u5267" value="'.concat(esc(d.path), '" autocomplete="off"></label>'), '\n    <div class="remote-row"><label class="remote-field"><span>\u7528\u6237\u540D\uFF08\u53EF\u9009\uFF09</span><input id="remote-user" class="settings-input" type="text" value="').concat(esc(d.user), '" autocomplete="off"></label>\n      <label class="remote-field"><span>\u5BC6\u7801').concat(d.hasPass ? "\uFF08\u5DF2\u5B58\uFF0C\u7559\u7A7A\u4E0D\u6539\uFF09" : "\uFF08\u53EF\u9009\uFF09", '</span><input id="remote-pass" class="settings-input" type="password" placeholder="').concat(d.hasPass ? "\u2022\u2022\u2022\u2022\u2022\u2022" : "", '" autocomplete="new-password"></label></div>\n    <label class="remote-field"><span>\u663E\u793A\u540D\u79F0\uFF08\u53EF\u9009\uFF09</span><input id="remote-name" class="settings-input" type="text" placeholder="\u5BA2\u5385 NAS" value="').concat(esc(d.name), '" autocomplete="off"></label>\n    ').concat(isSmb ? "" : '<label class="remote-check"><input id="remote-secure" type="checkbox"'.concat(d.secure ? " checked" : "", "><span>").concat(isWebdav ? "\u4F7F\u7528 HTTPS" : "\u4F7F\u7528 FTPS\uFF08\u663E\u5F0F TLS\uFF09", "</span></label>"), "\n    ").concat(isSmb ? "" : '<label class="remote-check"><input id="remote-insecure" type="checkbox"'.concat(d.insecure ? " checked" : "", "><span>\u5FFD\u7565\u8BC1\u4E66\u6821\u9A8C\uFF08\u5BB6\u7528 NAS \u5E38\u662F\u81EA\u7B7E\u8BC1\u4E66\uFF09</span></label>"), '\n    <div class="remote-test-row"><button type="button" class="remote-secondary" data-remote-test>\u6D4B\u8BD5\u8FDE\u63A5</button><span class="remote-test-result ').concat(remoteTestOk ? "ok" : "fail", '" data-remote-result').concat(remoteTestText ? "" : " hidden", ">").concat(esc(remoteTestText), '</span></div>\n    <div class="remote-actions">\n      <button type="button" class="remote-secondary" data-remote-cancel>\u8FD4\u56DE</button>\n      ').concat(d.id ? '<button type="button" class="remote-danger" data-remote-delete="1">\u5220\u9664</button>' : "", '\n      <button type="button" class="remote-primary" data-remote-save>\u4FDD\u5B58</button>\n    </div>');
+}
+function buildRemoteListHtml() {
+  const list = asArray(remoteServers);
+  if (!list.length) {
+    return '<p class="appearance-note">\u8FD8\u6CA1\u6709\u670D\u52A1\u5668\u3002\u6DFB\u52A0\u540E\uFF0C\u4E0B\u8F7D\u5B8C\u6210\u7684\u5267\u4F1A\u6309\u5267\u540D\u5728\u670D\u52A1\u5668\u4E0A\u5EFA\u540C\u540D\u6587\u4EF6\u5939\uFF0C\u628A\u6210\u54C1\u653E\u8FDB\u53BB\u3002</p>\n      <div class="remote-actions"><button type="button" class="remote-primary" data-remote-add>\u6DFB\u52A0\u670D\u52A1\u5668</button></div>';
+  }
+  return '<p class="appearance-note">\u652F\u6301 SMB\uFF08Windows \u5171\u4EAB / NAS\uFF09\u3001WebDAV\u3001FTP\u3002\u70B9\u6761\u76EE\u53EF\u4FEE\u6539\u3002</p>\n    <div class="remote-list">'.concat(list.map((s) => '<button type="button" class="remote-item" data-remote-edit="'.concat(esc(s.id), '">\n        <span class="remote-item-main"><strong>').concat(esc(s.name), "</strong><small>").concat(esc(s.typeName || remoteTypeName(s.type)), " \xB7 ").concat(esc(s.address || ""), "</small></span>\n        ").concat(icon("arrow"), "\n      </button>")).join(""), '</div>\n    <div class="remote-actions"><button type="button" class="remote-primary" data-remote-add>\u6DFB\u52A0\u670D\u52A1\u5668</button></div>');
+}
+function renderRemotePop() {
+  if (!remotePop) return;
+  const editing = remoteEditing;
+  const title = editing === null ? "\u8FDC\u7A0B\u670D\u52A1\u5668" : editing ? "\u7F16\u8F91\u670D\u52A1\u5668" : "\u6DFB\u52A0\u670D\u52A1\u5668";
+  remotePop.innerHTML = '<div class="appearance-pop account-pop remote-pop" role="dialog" aria-modal="true" aria-labelledby="remote-title">\n    <div class="appearance-head"><h2 id="remote-title">'.concat(title, '</h2><button type="button" class="appearance-close" data-remote-close aria-label="\u5173\u95ED">\u2715</button></div>\n    ').concat(editing === null ? buildRemoteListHtml() : buildRemoteFormHtml(), "\n  </div>");
+}
+function ensureRemotePop() {
+  if (remotePop && document.body.contains(remotePop)) return remotePop;
+  remotePop = document.createElement("div");
+  remotePop.className = "appearance-scrim";
+  remotePop.hidden = true;
+  remotePop.addEventListener("click", (event) => {
+    if (event.target === remotePop || event.target.closest("[data-remote-close]")) {
+      closeRemotePop();
+      return;
+    }
+  });
+  document.body.appendChild(remotePop);
+  return remotePop;
+}
+async function openRemotePop() {
+  ensureRemotePop();
+  remoteEditing = null;
+  remoteDraft = null;
+  remoteTestText = "";
+  remoteTestOk = false;
+  remotePop.hidden = false;
+  document.body.classList.add("appearance-open");
+  await loadRemoteServers(true);
+  renderRemotePop();
+  updateBackEnabled();
+}
+function closeRemotePop() {
+  if (!remotePop || remotePop.hidden) return;
+  remotePop.hidden = true;
+  document.body.classList.remove("appearance-open");
+  remoteEditing = null;
+  remoteDraft = null;
+  updateBackEnabled();
+}
+window.__veyraRemoteBack = () => {
+  if (!remotePop || remotePop.hidden) return false;
+  if (remoteEditing !== null) {
+    remoteEditing = null;
+    renderRemotePop();
+    return true;
+  }
+  closeRemotePop();
+  return true;
+};
+window.__veyraRemoteOpen = () => !!(remotePop && !remotePop.hidden);
+function readRemoteForm() {
+  const value = (id) => {
+    const el = document.getElementById(id);
+    return el ? String(el.value || "").trim() : "";
+  };
+  const checked = (id) => {
+    const el = document.getElementById(id);
+    return !!(el && el.checked);
+  };
+  const isSmb = remoteDraft.type === "smb";
+  return {
+    id: remoteDraft.id || "",
+    type: remoteDraft.type,
+    name: value("remote-name"),
+    host: value("remote-host"),
+    port: Number(value("remote-port")) || 0,
+    share: isSmb ? value("remote-share") : "",
+    path: value("remote-path"),
+    user: value("remote-user"),
+    pass: value("remote-pass"),
+    secure: isSmb ? false : checked("remote-secure"),
+    insecure: isSmb ? true : checked("remote-insecure")
+  };
+}
+function stashRemoteForm() {
+  if (remoteEditing === null || !remoteDraft) return;
+  const form = readRemoteForm();
+  remoteDraft = Object.assign({}, remoteDraft, form, { hasPass: remoteDraft.hasPass || !!remoteDraft.pass });
+}
+async function saveRemoteForm() {
+  const server = readRemoteForm();
+  if (!server.host) {
+    toast("\u8BF7\u586B\u5199\u670D\u52A1\u5668\u5730\u5740", true);
+    return;
+  }
+  if (server.type === "smb" && !server.share) {
+    toast("\u8BF7\u586B\u5199\u5171\u4EAB\u6587\u4EF6\u5939\u540D", true);
+    return;
+  }
+  try {
+    await api("remote-save", { server });
+    remoteServers = null;
+    await loadRemoteServers(true);
+    remoteEditing = null;
+    remoteDraft = null;
+    remoteTestText = "";
+    renderRemotePop();
+    toast("\u670D\u52A1\u5668\u5DF2\u4FDD\u5B58");
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+async function testRemoteForm(button) {
+  const server = readRemoteForm();
+  const result = remotePop && remotePop.querySelector("[data-remote-result]");
+  if (!server.host) {
+    toast("\u8BF7\u586B\u5199\u670D\u52A1\u5668\u5730\u5740", true);
+    return;
+  }
+  if (button) {
+    button.disabled = true;
+    button.textContent = "\u6D4B\u8BD5\u4E2D\u2026";
+  }
+  remoteTestText = "";
+  if (result) result.hidden = true;
+  try {
+    const info = await api("remote-test", { server });
+    remoteTestOk = true;
+    remoteTestText = "\u8FDE\u63A5\u6B63\u5E38 \xB7 ".concat(Number(info && info.ms) || 0, "ms");
+    toast("\u8FDE\u63A5\u6210\u529F\uFF1A".concat(info && info.address || server.host));
+  } catch (error) {
+    remoteTestOk = false;
+    remoteTestText = "\u8FDE\u63A5\u5931\u8D25\uFF1A".concat(error.message);
+    toast("\u8FDE\u63A5\u5931\u8D25\uFF1A".concat(error.message), true);
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = "\u6D4B\u8BD5\u8FDE\u63A5";
+    }
+    if (result) {
+      result.textContent = remoteTestText;
+      result.classList.toggle("ok", remoteTestOk);
+      result.classList.toggle("fail", !remoteTestOk);
+      result.hidden = !remoteTestText;
+    }
+  }
+}
+var remotePicker = null;
+let remotePickerTaskId = "";
+function ensureRemotePicker() {
+  if (remotePicker && document.body.contains(remotePicker)) return remotePicker;
+  remotePicker = document.createElement("div");
+  remotePicker.className = "appearance-scrim";
+  remotePicker.hidden = true;
+  remotePicker.addEventListener("click", (event) => {
+    if (event.target === remotePicker || event.target.closest("[data-remote-pick-close]")) closeRemotePicker();
+  });
+  document.body.appendChild(remotePicker);
+  return remotePicker;
+}
+async function openRemotePicker(taskId, title) {
+  await loadRemoteServers(true);
+  const list = asArray(remoteServers);
+  if (!list.length) {
+    toast("\u8FD8\u6CA1\u6709\u8FDC\u7A0B\u670D\u52A1\u5668\uFF0C\u8BF7\u5148\u5230\u300C\u8BBE\u7F6E \u2192 \u8FDC\u7A0B\u670D\u52A1\u5668\u300D\u6DFB\u52A0", true);
+    return;
+  }
+  ensureRemotePicker();
+  remotePickerTaskId = String(taskId);
+  remotePicker.innerHTML = '<div class="appearance-pop account-pop remote-pop" role="dialog" aria-modal="true" aria-labelledby="remote-pick-title">\n    <div class="appearance-head"><h2 id="remote-pick-title">\u4F20\u5230\u8FDC\u7A0B\u670D\u52A1\u5668</h2><button type="button" class="appearance-close" data-remote-pick-close aria-label="\u5173\u95ED">\u2715</button></div>\n    <p class="appearance-note">\u300A'.concat(esc(title || "\u8FD9\u90E8"), '\u300B\u4F1A\u5728\u670D\u52A1\u5668\u4E0A\u5EFA\u540C\u540D\u6587\u4EF6\u5939\uFF0C\u6210\u54C1\u76F4\u63A5\u653E\u8FDB\u53BB\u3002</p>\n    <div class="remote-list">').concat(list.map((s) => '<button type="button" class="remote-item" data-remote-pick="'.concat(esc(s.id), '">\n        <span class="remote-item-main"><strong>').concat(esc(s.name), "</strong><small>").concat(esc(s.typeName || remoteTypeName(s.type)), " \xB7 ").concat(esc(s.address || ""), "</small></span>\n        ").concat(icon("arrow"), "\n      </button>")).join(""), "</div>\n  </div>");
+  remotePicker.hidden = false;
+  document.body.classList.add("appearance-open");
+  updateBackEnabled();
+}
+function closeRemotePicker() {
+  if (!remotePicker || remotePicker.hidden) return;
+  remotePicker.hidden = true;
+  document.body.classList.remove("appearance-open");
+  remotePickerTaskId = "";
+  updateBackEnabled();
+}
+window.__veyraRemotePickBack = () => {
+  if (remotePicker && !remotePicker.hidden) {
+    closeRemotePicker();
+    return true;
+  }
+  return false;
+};
+window.__veyraRemotePickOpen = () => !!(remotePicker && !remotePicker.hidden);
+async function startRemoteTransfer(taskId, remoteId) {
+  try {
+    const job = await api("remote-transfer-start", { taskId, remoteId });
+    const name = job && job.serverName || "\u8FDC\u7A0B\u670D\u52A1\u5668";
+    toast("\u5DF2\u5F00\u59CB\u4F20\u8F93\u5230 ".concat(name));
+    closeRemotePicker();
+    await loadRemoteJobs();
+    if (state.route === "library" && state.libraryTab === "downloads") renderLibraryDownloads();
+    else if (state.route === "downloads") refreshDownloads(routeToken, true);
+  } catch (error) {
+    toast(error.message || "\u4F20\u8F93\u5931\u8D25", true);
+  }
+}
 function renderSearch() {
   var _a2;
-  const filters = privateMode() ? [["all", "全部"], ["ai-duanju", "成人短剧"], ["ai-manju", "成人漫剧"], ["ai-huanlian", "AI换脸"], ["ai-mogai", "AI魔改"]] : [["all", "全部"], ["short", "短剧"], ["comic", "漫剧"]];
+  const filters = privateMode() ? [["all", "\u5168\u90E8"], ["ai-duanju", "\u6210\u4EBA\u77ED\u5267"], ["ai-manju", "\u6210\u4EBA\u6F2B\u5267"], ["ai-huanlian", "AI\u6362\u8138"], ["ai-mogai", "AI\u9B54\u6539"]] : [["all", "\u5168\u90E8"], ["short", "\u77ED\u5267"], ["comic", "\u6F2B\u5267"]];
   const all = asArray((_a2 = state.search) == null ? void 0 : _a2.items);
   const items = state.filter === "all" ? all : all.filter((item) => {
     if (item.category) return item.category === state.filter;
@@ -1798,7 +2095,7 @@ function renderSearch() {
   });
   const { blocks, singles } = seriesGroups(items);
   const cards = [...blocks.map(seriesBlock), ...singles.map(itemCard)].join("");
-  content.innerHTML = '<div class="search-page"><h1>搜索结果</h1><p>'.concat(esc(state.query), " · ").concat(items.length, " 部作品</p>").concat(searchFeedback(), '<div class="filter-row">').concat(filters.map(([id, label]) => '<button type="button" data-filter="'.concat(id, '" class="').concat(state.filter === id ? "active" : "", '">').concat(label, "</button>")).join(""), "</div>\n    ").concat(items.length ? '<div class="search-grid">'.concat(cards, "</div>") : '<div class="empty-state">没有找到匹配的影片</div>', "</div>");
+  content.innerHTML = '<div class="search-page"><h1>\u641C\u7D22\u7ED3\u679C</h1><p>'.concat(esc(state.query), " \xB7 ").concat(items.length, " \u90E8\u4F5C\u54C1</p>").concat(searchFeedback(), '<div class="filter-row">').concat(filters.map(([id, label]) => '<button type="button" data-filter="'.concat(id, '" class="').concat(state.filter === id ? "active" : "", '">').concat(label, "</button>")).join(""), "</div>\n    ").concat(items.length ? '<div class="search-grid">'.concat(cards, "</div>") : '<div class="empty-state">\u6CA1\u6709\u627E\u5230\u5339\u914D\u7684\u5F71\u7247</div>', "</div>");
   hydrateImages();
 }
 function seriesGroups(items) {
@@ -1819,22 +2116,22 @@ function seriesGroups(items) {
       return sa - sb;
     });
     const lead = seasons.find((it) => Number(it.seasonIndex) === 1) || seasons[0];
-    blocks.push({ aid, title: (lead == null ? void 0 : lead.title) || "系列", cover: (lead == null ? void 0 : lead.cover) || "", seasons });
+    blocks.push({ aid, title: (lead == null ? void 0 : lead.title) || "\u7CFB\u5217", cover: (lead == null ? void 0 : lead.cover) || "", seasons });
   }
   blocks.sort((a, b) => String(a.title).localeCompare(String(b.title), "zh"));
   return { blocks, singles };
 }
 function seriesBlock(group) {
-  const head = esc(group.title || "系列");
-  return '<section class="series-block" data-album="'.concat(esc(group.aid), '">\n    <div class="series-head"><span class="poster loading small"><img data-cover="').concat(esc(group.cover || ""), '" alt=""></span>\n    <div class="series-meta"><h3>').concat(head, "</h3><span>官方系列 · ").concat(group.seasons.length, ' 季</span></div></div>\n    <div class="series-row">').concat(group.seasons.map(itemCard).join(""), "</div></section>");
+  const head = esc(group.title || "\u7CFB\u5217");
+  return '<section class="series-block" data-album="'.concat(esc(group.aid), '">\n    <div class="series-head"><span class="poster loading small"><img data-cover="').concat(esc(group.cover || ""), '" alt=""></span>\n    <div class="series-meta"><h3>').concat(head, "</h3><span>\u5B98\u65B9\u7CFB\u5217 \xB7 ").concat(group.seasons.length, ' \u5B63</span></div></div>\n    <div class="series-row">').concat(group.seasons.map(itemCard).join(""), "</div></section>");
 }
 function listingFooter() {
   const listing = state.listing;
-  if (listing.error) return '<button type="button" data-retry-listing="1">加载失败，点击重试</button>';
-  if (listing.loading) return '<span role="status">正在加载更多…</span>';
-  if (listing.refreshing) return '<span role="status">正在更新列表…</span>';
-  if (listing.nextPage) return listing.kind === "tag-list" ? '<span class="listing-sentinel" aria-hidden="true"></span>' : '<span class="listing-sentinel">继续下滑加载更多</span>';
-  return "<span>已经到底了</span>";
+  if (listing.error) return '<button type="button" data-retry-listing="1">\u52A0\u8F7D\u5931\u8D25\uFF0C\u70B9\u51FB\u91CD\u8BD5</button>';
+  if (listing.loading) return '<span role="status">\u6B63\u5728\u52A0\u8F7D\u66F4\u591A\u2026</span>';
+  if (listing.refreshing) return '<span role="status">\u6B63\u5728\u66F4\u65B0\u5217\u8868\u2026</span>';
+  if (listing.nextPage) return listing.kind === "tag-list" ? '<span class="listing-sentinel" aria-hidden="true"></span>' : '<span class="listing-sentinel">\u7EE7\u7EED\u4E0B\u6ED1\u52A0\u8F7D\u66F4\u591A</span>';
+  return "<span>\u5DF2\u7ECF\u5230\u5E95\u4E86</span>";
 }
 function observeListingEnd() {
   var _a2;
@@ -1863,10 +2160,10 @@ function renderListing() {
     return;
   }
   const tagName = String(listing.label || listing.slug).replace(/^#+/, "");
-  const tagTitle = privateMode() ? "#".concat(tagName) : "".concat(((_a2 = listing.slug) == null ? void 0 : _a2.startsWith("comic:")) ? "漫剧" : "短剧", " · ").concat(tagName);
-  const title = listing.kind === "tag-list" ? tagTitle : listing.kind === "recommend" ? "精选推荐" : privateMode() ? "最近上新" : "热门漫剧";
-  const backLabel = listing.kind === "tag-list" && ((_b2 = state.listingReturn) == null ? void 0 : _b2.route) === "tags" ? "返回全部类型" : "返回首页";
-  content.innerHTML = '<div class="listing-page"><button class="listing-back" type="button" data-back="1">'.concat(icon("back"), " ").concat(backLabel, "</button>\n    <h1>").concat(esc(title), "</h1><p>已显示 ").concat(listing.items.length, " 部作品</p>\n    ").concat(listing.items.length ? '<div class="search-grid listing-grid">'.concat(listing.items.map(itemCard).join(""), "</div>") : '<div class="empty-state">这个标签下暂无作品</div>', '\n    <div class="listing-footer">').concat(listingFooter(), "</div></div>");
+  const tagTitle = privateMode() ? "#".concat(tagName) : "".concat(((_a2 = listing.slug) == null ? void 0 : _a2.startsWith("comic:")) ? "\u6F2B\u5267" : "\u77ED\u5267", " \xB7 ").concat(tagName);
+  const title = listing.kind === "tag-list" ? tagTitle : listing.kind === "recommend" ? "\u7CBE\u9009\u63A8\u8350" : privateMode() ? "\u6700\u8FD1\u4E0A\u65B0" : "\u70ED\u95E8\u6F2B\u5267";
+  const backLabel = listing.kind === "tag-list" && ((_b2 = state.listingReturn) == null ? void 0 : _b2.route) === "tags" ? "\u8FD4\u56DE\u5168\u90E8\u7C7B\u578B" : "\u8FD4\u56DE\u9996\u9875";
+  content.innerHTML = '<div class="listing-page"><button class="listing-back" type="button" data-back="1">'.concat(icon("back"), " ").concat(backLabel, "</button>\n    <h1>").concat(esc(title), "</h1><p>\u5DF2\u663E\u793A ").concat(listing.items.length, " \u90E8\u4F5C\u54C1</p>\n    ").concat(listing.items.length ? '<div class="search-grid listing-grid">'.concat(listing.items.map(itemCard).join(""), "</div>") : '<div class="empty-state">\u8FD9\u4E2A\u6807\u7B7E\u4E0B\u6682\u65E0\u4F5C\u54C1</div>', '\n    <div class="listing-footer">').concat(listingFooter(), "</div></div>");
   hydrateImages();
   observeListingEnd();
 }
@@ -1880,7 +2177,7 @@ function renderDetail() {
   const loading = state.detailLoading;
   (_b2 = (_a2 = window.AndroidHost) == null ? void 0 : _a2.setDetailMode) == null ? void 0 : _b2.call(_a2, true);
   const episodes = asArray(data.episodes);
-  content.innerHTML = '<div class="detail-page"><button class="detail-back" type="button" data-back="1">'.concat(icon("back"), ' 返回</button>\n    <div class="detail-art"><img data-cover="').concat(esc(data.cover), '" alt=""></div><div class="detail-copy"><h1>').concat(esc(data.title), "</h1><p>").concat(loading ? "正在获取内容…" : "".concat(esc(data.score), " ").concat(esc(data.episodeLabel)), '</p><div class="detail-desc-wrap"><p class="detail-description">').concat(esc(data.description || ""), '</p></div>\n    <div class="detail-buttons"><button class="detail-play" type="button" data-play="1" ').concat(loading ? "disabled" : "", ">").concat(loading ? "正在加载…" : "立即播放", '</button><button class="bookmark-button" type="button" data-bookmark="1" aria-label="').concat(state.bookmarked ? "取消收藏" : "收藏", '" ').concat(loading ? "disabled" : "", ">").concat(state.bookmarked ? "★" : "☆", '</button><button class="detail-download" type="button" data-download="1" ').concat(loading ? "disabled" : "", ">下载</button></div>\n    ").concat(loading ? '<div class="detail-loading" role="status">正在获取选集…</div>' : episodes.length ? '<h2>选集</h2><div class="episode-grid">'.concat(episodes.map((item, index) => '<button type="button" data-episode="'.concat(item.number, '" class="').concat(index === 0 ? "active" : "", '">').concat(item.number, "</button>")).join(""), "</div>") : "", "</div></div>");
+  content.innerHTML = '<div class="detail-page"><button class="detail-back" type="button" data-back="1">'.concat(icon("back"), ' \u8FD4\u56DE</button>\n    <div class="detail-art"><img data-cover="').concat(esc(data.cover), '" alt=""></div><div class="detail-copy"><h1>').concat(esc(data.title), "</h1><p>").concat(loading ? "\u6B63\u5728\u83B7\u53D6\u5185\u5BB9\u2026" : "".concat(esc(data.score), " ").concat(esc(data.episodeLabel)), '</p><div class="detail-desc-wrap"><p class="detail-description">').concat(esc(data.description || ""), '</p></div>\n    <div class="detail-buttons"><button class="detail-play" type="button" data-play="1" ').concat(loading ? "disabled" : "", ">").concat(loading ? "\u6B63\u5728\u52A0\u8F7D\u2026" : "\u7ACB\u5373\u64AD\u653E", '</button><button class="bookmark-button" type="button" data-bookmark="1" aria-label="').concat(state.bookmarked ? "\u53D6\u6D88\u6536\u85CF" : "\u6536\u85CF", '" ').concat(loading ? "disabled" : "", ">").concat(state.bookmarked ? "\u2605" : "\u2606", '</button><button class="detail-download" type="button" data-download="1" ').concat(loading ? "disabled" : "", ">\u4E0B\u8F7D</button></div>\n    ").concat(loading ? '<div class="detail-loading" role="status">\u6B63\u5728\u83B7\u53D6\u9009\u96C6\u2026</div>' : episodes.length ? '<h2>\u9009\u96C6</h2><div class="episode-grid">'.concat(episodes.map((item, index) => '<button type="button" data-episode="'.concat(item.number, '" class="').concat(index === 0 ? "active" : "", '">').concat(item.number, "</button>")).join(""), "</div>") : "", "</div></div>");
   hydrateImages();
   ensureDetailFilled();
 }
@@ -1905,24 +2202,24 @@ function ensureDetailFilled() {
   requestAnimationFrame(fit);
 }
 function searchFeedback() {
-  if (state.searchPending) return '<div class="search-feedback" role="status" aria-live="polite"><span class="search-spinner" aria-hidden="true"></span><span>正在更新搜索结果…</span></div>';
-  if (state.searchError) return '<div class="search-feedback search-feedback--error" role="status"><span>更新失败，当前显示缓存结果</span><button type="button" data-retry="search">重试</button></div>';
+  if (state.searchPending) return '<div class="search-feedback" role="status" aria-live="polite"><span class="search-spinner" aria-hidden="true"></span><span>\u6B63\u5728\u66F4\u65B0\u641C\u7D22\u7ED3\u679C\u2026</span></div>';
+  if (state.searchError) return '<div class="search-feedback search-feedback--error" role="status"><span>\u66F4\u65B0\u5931\u8D25\uFF0C\u5F53\u524D\u663E\u793A\u7F13\u5B58\u7ED3\u679C</span><button type="button" data-retry="search">\u91CD\u8BD5</button></div>';
   return "";
 }
 function renderSearchLoading() {
-  content.innerHTML = '<section class="search-loading" role="status" aria-live="polite" aria-busy="true"><span class="search-spinner search-spinner--large" aria-hidden="true"></span><h1>正在搜索…</h1><p>'.concat(esc(state.query), "</p></section>");
+  content.innerHTML = '<section class="search-loading" role="status" aria-live="polite" aria-busy="true"><span class="search-spinner search-spinner--large" aria-hidden="true"></span><h1>\u6B63\u5728\u641C\u7D22\u2026</h1><p>'.concat(esc(state.query), "</p></section>");
 }
 function renderSkeleton() {
-  content.innerHTML = '<div class="skeleton-home" role="status" aria-label="正在加载内容"><div class="skeleton skeleton-hero"></div><div class="skeleton skeleton-title"></div><div class="skeleton-row"><div class="skeleton skeleton-poster"></div><div class="skeleton skeleton-poster"></div><div class="skeleton skeleton-poster"></div></div><div class="skeleton skeleton-line"></div></div>';
+  content.innerHTML = '<div class="skeleton-home" role="status" aria-label="\u6B63\u5728\u52A0\u8F7D\u5185\u5BB9"><div class="skeleton skeleton-hero"></div><div class="skeleton skeleton-title"></div><div class="skeleton-row"><div class="skeleton skeleton-poster"></div><div class="skeleton skeleton-poster"></div><div class="skeleton skeleton-poster"></div></div><div class="skeleton skeleton-line"></div></div>';
 }
 function renderError(error, retry) {
   var _a2, _b2;
   if (state.route === "detail") (_b2 = (_a2 = window.AndroidHost) == null ? void 0 : _a2.setDetailMode) == null ? void 0 : _b2.call(_a2, false);
   if (/站点连接失败|站点请求失败|failed to connect|unable to resolve host|unknownhost|connectexception|sockettimeoutexception|timed? out|network is unreachable|connection reset|connection refused|网络|连接失败|无法连接/i.test((error == null ? void 0 : error.message) || "")) {
-    content.innerHTML = '<div class="error-state error-state--network" role="alert">\n      <div class="error-main">\n        <svg class="error-icon" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="24" cy="24" r="21"/><path d="m12 24 6-5 6 5 6-5 6 5"/></svg>\n        <h1>网络走丢了</h1>\n      </div>\n      <div class="error-footer"><p>请尝试使用代理网络，或联系开发者。</p><button type="button" data-retry="'.concat(esc(retry), '">重新尝试</button></div>\n    </div>');
+    content.innerHTML = '<div class="error-state error-state--network" role="alert">\n      <div class="error-main">\n        <svg class="error-icon" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="24" cy="24" r="21"/><path d="m12 24 6-5 6 5 6-5 6 5"/></svg>\n        <h1>\u7F51\u7EDC\u8D70\u4E22\u4E86</h1>\n      </div>\n      <div class="error-footer"><p>\u8BF7\u5C1D\u8BD5\u4F7F\u7528\u4EE3\u7406\u7F51\u7EDC\uFF0C\u6216\u8054\u7CFB\u5F00\u53D1\u8005\u3002</p><button type="button" data-retry="'.concat(esc(retry), '">\u91CD\u65B0\u5C1D\u8BD5</button></div>\n    </div>');
     return;
   }
-  content.innerHTML = '<div class="error-state">'.concat(esc(error.message || "加载失败，请稍后重试"), '<button type="button" data-retry="').concat(esc(retry), '">重试</button></div>');
+  content.innerHTML = '<div class="error-state">'.concat(esc(error.message || "\u52A0\u8F7D\u5931\u8D25\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5"), '<button type="button" data-retry="').concat(esc(retry), '">\u91CD\u8BD5</button></div>');
 }
 function rememberScreen() {
   if (state.route === "detail") return;
@@ -2009,8 +2306,8 @@ function setRoute(route) {
   (_d2 = (_c2 = window.AndroidHost) == null ? void 0 : _c2.setDetailMode) == null ? void 0 : _d2.call(_c2, route === "detail");
   headerSettings.hidden = route !== "library";
   window.__bingeSync && window.__bingeSync();
-  searchInput.placeholder = libraryArea ? "搜索观看历史和收藏" : privateMode() ? "搜索剧名或 #标签" : "搜索剧名";
-  searchInput.setAttribute("aria-label", libraryArea ? "搜索观看历史和收藏" : "搜索剧名或标签");
+  searchInput.placeholder = libraryArea ? "\u641C\u7D22\u89C2\u770B\u5386\u53F2\u548C\u6536\u85CF" : privateMode() ? "\u641C\u7D22\u5267\u540D\u6216 #\u6807\u7B7E" : "\u641C\u7D22\u5267\u540D";
+  searchInput.setAttribute("aria-label", libraryArea ? "\u641C\u7D22\u89C2\u770B\u5386\u53F2\u548C\u6536\u85CF" : "\u641C\u7D22\u5267\u540D\u6216\u6807\u7B7E");
   if (route === "library") searchInput.value = state.libraryQuery;
   updateBackEnabled();
   if (["home", "category", "library"].includes(route)) scheduleSwipePrefetch();
@@ -2061,7 +2358,7 @@ function clearPredictivePreview() {
 window.hgPredictiveBackStart = (fromRight) => {
   var _a2, _b2, _c2, _d2;
   clearPredictivePreview();
-  if (!downloadOverlay.hidden || window.__veyraAppearanceOpen && window.__veyraAppearanceOpen() || window.__veyraAccountOpen && window.__veyraAccountOpen() || window.__veyraProxyOpen && window.__veyraProxyOpen() || window.__veyraAboutOpen && window.__veyraAboutOpen()) return false;
+  if (!downloadOverlay.hidden || window.__veyraAppearanceOpen && window.__veyraAppearanceOpen() || window.__veyraAccountOpen && window.__veyraAccountOpen() || window.__veyraProxyOpen && window.__veyraProxyOpen() || window.__veyraAboutOpen && window.__veyraAboutOpen() || window.__veyraRemoteOpen && window.__veyraRemoteOpen() || window.__veyraRemotePickOpen && window.__veyraRemotePickOpen()) return false;
   if (state.route === "detail" && detailCard && authOverlay.hidden && confirmOverlay.hidden && updateOverlay.hidden && unlockOverlay.hidden) {
     detailCard.fromRight = fromRight;
     return detailCard.begin();
@@ -2108,7 +2405,7 @@ window.hgPredictiveBackStart = (fromRight) => {
     settings.hidden = destination !== "library";
     if (destination === "library") {
       const input = header.querySelector(".search-input");
-      input.placeholder = "搜索观看历史和收藏";
+      input.placeholder = "\u641C\u7D22\u89C2\u770B\u5386\u53F2\u548C\u6536\u85CF";
       input.value = state.libraryQuery;
     }
     header.querySelectorAll("[id]").forEach((node) => node.removeAttribute("id"));
@@ -2172,6 +2469,8 @@ window.hgPredictiveBackCommit = () => {
   if (window.__veyraAccountBack && window.__veyraAccountBack()) return true;
   if (window.__veyraProxyBack && window.__veyraProxyBack()) return true;
   if (window.__veyraAboutBack && window.__veyraAboutBack()) return true;
+  if (window.__veyraRemoteBack && window.__veyraRemoteBack()) return true;
+  if (window.__veyraRemotePickBack && window.__veyraRemotePickBack()) return true;
   if (state.route === "detail" && detailCard && downloadOverlay.hidden && authOverlay.hidden && confirmOverlay.hidden && updateOverlay.hidden && unlockOverlay.hidden) {
     detailCard.close();
     return true;
@@ -2235,7 +2534,7 @@ async function goHome() {
     state.home = fresh;
     if (firstLoad || changed) renderHome();
     else refreshMissingImages([...asArray(fresh.featured), ...asArray((_a2 = fresh.recommend) == null ? void 0 : _a2.items), ...asArray((_b2 = fresh.newest) == null ? void 0 : _b2.items)]);
-    if (changed) toast("更新成功");
+    if (changed) toast("\u66F4\u65B0\u6210\u529F");
   } catch (error) {
     if (!state.home && token === routeToken) renderError(error, "home");
   }
@@ -2274,7 +2573,7 @@ async function goTag(slug, label) {
   setRoute("listing");
   state.tab = "home";
   setNav("home");
-  searchInput.value = "#".concat(privateMode() ? "" : slug.startsWith("comic:") ? "漫剧·" : "短剧·").concat(String(label).replace(/^#+/, ""));
+  searchInput.value = "#".concat(privateMode() ? "" : slug.startsWith("comic:") ? "\u6F2B\u5267\xB7" : "\u77ED\u5267\xB7").concat(String(label).replace(/^#+/, ""));
   const refreshing = api("tag-list", { slug, page: 1 });
   const cached = await api("cached", { key: "tag:".concat(slug, ":1") }).catch(() => null);
   if (token !== routeToken) return;
@@ -2297,7 +2596,7 @@ async function goTag(slug, label) {
     else {
       state.listing.refreshing = false;
       updateListingFooter();
-      toast("列表更新失败，已显示缓存内容", true);
+      toast("\u5217\u8868\u66F4\u65B0\u5931\u8D25\uFF0C\u5DF2\u663E\u793A\u7F13\u5B58\u5185\u5BB9", true);
     }
   }
 }
@@ -2319,12 +2618,12 @@ async function goTagQuery(query) {
       state.tags = fresh;
       tags = asArray(fresh.items);
     } catch (e) {
-      toast("标签暂时无法加载，请重试", true);
+      toast("\u6807\u7B7E\u6682\u65F6\u65E0\u6CD5\u52A0\u8F7D\uFF0C\u8BF7\u91CD\u8BD5", true);
       return;
     }
   }
   const normalize = (value) => String(value || "").replace(/^#+/, "").trim().toLocaleLowerCase();
-  const matches = (item) => normalize(item.name) === normalize(name) || !privateMode() && normalize("".concat(item.group === "comic" ? "漫剧" : "短剧", "·").concat(item.name)) === normalize(name);
+  const matches = (item) => normalize(item.name) === normalize(name) || !privateMode() && normalize("".concat(item.group === "comic" ? "\u6F2B\u5267" : "\u77ED\u5267", "\xB7").concat(item.name)) === normalize(name);
   let tag = tags.find(matches);
   if (!tag) {
     try {
@@ -2335,7 +2634,7 @@ async function goTagQuery(query) {
     }
   }
   if (tag) goTag(tag.slug, tag.name);
-  else toast("没有找到这个标签", true);
+  else toast("\u6CA1\u6709\u627E\u5230\u8FD9\u4E2A\u6807\u7B7E", true);
 }
 async function openListing(kind) {
   var _a2;
@@ -2371,7 +2670,7 @@ async function openListing(kind) {
     if (!state.listing.items.length) renderError(error, "listing");
     else {
       updateListingFooter();
-      toast("列表更新失败，已显示缓存内容", true);
+      toast("\u5217\u8868\u66F4\u65B0\u5931\u8D25\uFF0C\u5DF2\u663E\u793A\u7F13\u5B58\u5185\u5BB9", true);
     }
   }
 }
@@ -2402,7 +2701,7 @@ async function loadMoreListing() {
       images.forEach((image, index) => index < 8 ? loadCoverInto(image) : observer.observe(image));
     }
     const count = content.querySelector(".listing-page > p");
-    if (count) count.textContent = "已显示 ".concat(listing.items.length, " 部作品");
+    if (count) count.textContent = "\u5DF2\u663E\u793A ".concat(listing.items.length, " \u90E8\u4F5C\u54C1");
   } catch (error) {
     if (token === routeToken && state.listing === listing && state.route === "listing") listing.error = true;
   } finally {
@@ -2458,7 +2757,7 @@ async function goCategory(tab, sub = state.sub[tab], keepCompact = false) {
         refreshMissingImages(asArray(fresh.items));
         updateCategoryFooter();
       }
-      if (changed) toast("更新成功");
+      if (changed) toast("\u66F4\u65B0\u6210\u529F");
     }
   } catch (error) {
     if (token !== routeToken) return;
@@ -2466,7 +2765,7 @@ async function goCategory(tab, sub = state.sub[tab], keepCompact = false) {
     else {
       state.category.refreshing = false;
       updateCategoryFooter();
-      toast("列表更新失败，已显示缓存内容", true);
+      toast("\u5217\u8868\u66F4\u65B0\u5931\u8D25\uFF0C\u5DF2\u663E\u793A\u7F13\u5B58\u5185\u5BB9", true);
     }
   }
 }
@@ -2545,7 +2844,7 @@ async function goSearch(query) {
   });
   try {
     const fresh = await Promise.race([refreshing, new Promise((_, reject) => {
-      timeout = setTimeout(() => reject(new Error("搜索连接超时，请重试")), 25e3);
+      timeout = setTimeout(() => reject(new Error("\u641C\u7D22\u8FDE\u63A5\u8D85\u65F6\uFF0C\u8BF7\u91CD\u8BD5")), 25e3);
     })]);
     if (token !== routeToken) return;
     state.searchPending = false;
@@ -2555,7 +2854,7 @@ async function goSearch(query) {
     if (token !== routeToken) return;
     state.searchPending = false;
     if (state.search) {
-      state.searchError = error.message || "搜索刷新失败";
+      state.searchError = error.message || "\u641C\u7D22\u5237\u65B0\u5931\u8D25";
       renderSearch();
     } else renderError(error, "search");
   } finally {
@@ -2566,7 +2865,7 @@ async function goSearch(query) {
 function sourceItem(id) {
   var _a2, _b2, _c2, _d2, _e, _f, _g, _h, _i, _j, _k, _l;
   const candidates = [(_a2 = state.listing) == null ? void 0 : _a2.items, (_b2 = state.home) == null ? void 0 : _b2.featured, (_c2 = state.home) == null ? void 0 : _c2.homepageRecommend, (_d2 = state.home) == null ? void 0 : _d2.homepageNewest, (_f = (_e = state.home) == null ? void 0 : _e.recommend) == null ? void 0 : _f.items, (_h = (_g = state.home) == null ? void 0 : _g.newest) == null ? void 0 : _h.items, (_i = state.category) == null ? void 0 : _i.items, (_j = state.search) == null ? void 0 : _j.items, (_k = state.library) == null ? void 0 : _k.bookmarks, (_l = state.library) == null ? void 0 : _l.progress].flatMap(asArray);
-  return candidates.find((item) => item.id === id) || { id, title: "剧集 ".concat(id) };
+  return candidates.find((item) => item.id === id) || { id, title: "\u5267\u96C6 ".concat(id) };
 }
 async function goDetail(id, trigger) {
   var _a2, _b2, _c2, _d2, _e, _f, _g, _h;
@@ -2703,6 +3002,8 @@ window.hgBack = () => {
   if (window.__veyraAccountBack && window.__veyraAccountBack()) return true;
   if (window.__veyraProxyBack && window.__veyraProxyBack()) return true;
   if (window.__veyraAboutBack && window.__veyraAboutBack()) return true;
+  if (window.__veyraRemoteBack && window.__veyraRemoteBack()) return true;
+  if (window.__veyraRemotePickBack && window.__veyraRemotePickBack()) return true;
   if (!downloadOverlay.hidden) {
     hideDownloadSheet();
     return true;
@@ -2722,7 +3023,7 @@ window.hgBack = () => {
   if (!updateOverlay.hidden) {
     updateOverlay.hidden = true;
     updateBackEnabled();
-    if (updateDownloading) toast("已转入后台下载，完成后会自动弹出安装", true);
+    if (updateDownloading) toast("\u5DF2\u8F6C\u5165\u540E\u53F0\u4E0B\u8F7D\uFF0C\u5B8C\u6210\u540E\u4F1A\u81EA\u52A8\u5F39\u51FA\u5B89\u88C5", true);
     return true;
   }
   if (state.binge && state.route === "home") {
@@ -2819,7 +3120,7 @@ async function loadMoreCategory() {
       [...grid.querySelectorAll("img[data-cover]")].slice(-added.length).forEach((image, index) => index < 8 ? loadCoverInto(image) : observer.observe(image));
     }
     const count = content.querySelector(".category-count");
-    if (count) count.textContent = "已显示 ".concat(category.items.length, " 部");
+    if (count) count.textContent = "\u5DF2\u663E\u793A ".concat(category.items.length, " \u90E8");
   } catch (error) {
     if (token === routeToken && state.category === category && state.route === "category") category.error = true;
   } finally {
@@ -2910,7 +3211,7 @@ function renderSearchHistory() {
     el.hidden = true;
     return;
   }
-  el.innerHTML = '<div class="search-suggest-title">搜索历史<button type="button" class="ss-clear" data-ss-clear>清空</button></div>\n    <div class="search-suggest-list">'.concat(h.map((q) => '<div class="search-suggest-item"><button type="button" class="ss-word" data-ss-word="'.concat(esc(q), '">').concat(icon("clock"), "<span>").concat(esc(q), '</span></button><button type="button" class="ss-del" data-ss-del="').concat(esc(q), '" aria-label="删除 ').concat(esc(q), '">×</button></div>')).join(""), "</div>");
+  el.innerHTML = '<div class="search-suggest-title">\u641C\u7D22\u5386\u53F2<button type="button" class="ss-clear" data-ss-clear>\u6E05\u7A7A</button></div>\n    <div class="search-suggest-list">'.concat(h.map((q) => '<div class="search-suggest-item"><button type="button" class="ss-word" data-ss-word="'.concat(esc(q), '">').concat(icon("clock"), "<span>").concat(esc(q), '</span></button><button type="button" class="ss-del" data-ss-del="').concat(esc(q), '" aria-label="\u5220\u9664 ').concat(esc(q), '">\xD7</button></div>')).join(""), "</div>");
   el.hidden = false;
 }
 async function suggestSearch(v) {
@@ -2919,7 +3220,7 @@ async function suggestSearch(v) {
   if (!el) return;
   let items = null;
   try {
-    const fresh = await Promise.race([api("search", { query: v, suggest: true }), new Promise((_, rej) => setTimeout(() => rej(new Error("联想超时")), 6e3))]);
+    const fresh = await Promise.race([api("search", { query: v, suggest: true }), new Promise((_, rej) => setTimeout(() => rej(new Error("\u8054\u60F3\u8D85\u65F6")), 6e3))]);
     if (seq !== searchSuggestSeq || searchInput.value.trim() !== v) return;
     items = asArray(fresh && (fresh.items || fresh.data && fresh.data.items));
   } catch (e) {
@@ -2930,7 +3231,7 @@ async function suggestSearch(v) {
     el.hidden = true;
     return;
   }
-  el.innerHTML = '<div class="search-suggest-title">联想结果</div><div class="search-suggest-list">'.concat(items.slice(0, 8).map((it) => '<button type="button" class="search-suggest-card" data-open-id="'.concat(esc(it.id), '" data-ss-close>').concat(it.cover ? '<span class="search-suggest-thumb"><img src="'.concat(esc(it.cover), '" alt="" loading="lazy" onerror="this.closest(\'.search-suggest-thumb\').style.display=\'none\'"></span>') : "", "<strong>").concat(esc(it.title || ""), "</strong>").concat(it.episodeLabel ? "<em>".concat(esc(it.episodeLabel), "</em>") : "", "</button>")).join(""), "</div>");
+  el.innerHTML = '<div class="search-suggest-title">\u8054\u60F3\u7ED3\u679C</div><div class="search-suggest-list">'.concat(items.slice(0, 8).map((it) => '<button type="button" class="search-suggest-card" data-open-id="'.concat(esc(it.id), '" data-ss-close>').concat(it.cover ? '<span class="search-suggest-thumb"><img src="'.concat(esc(it.cover), '" alt="" loading="lazy" onerror="this.closest(\'.search-suggest-thumb\').style.display=\'none\'"></span>') : "", "<strong>").concat(esc(it.title || ""), "</strong>").concat(it.episodeLabel ? "<em>".concat(esc(it.episodeLabel), "</em>") : "", "</button>")).join(""), "</div>");
   el.hidden = false;
 }
 document.addEventListener("focusin", (event) => {
@@ -2965,16 +3266,16 @@ document.addEventListener("submit", async (event) => {
   const button = form.querySelector('[type="submit"]');
   error.hidden = true;
   if (newPassword === oldPassword) {
-    error.textContent = "新密码不能与旧密码相同";
+    error.textContent = "\u65B0\u5BC6\u7801\u4E0D\u80FD\u4E0E\u65E7\u5BC6\u7801\u76F8\u540C";
     error.hidden = false;
     return;
   }
   button.disabled = true;
   try {
     setAccount(await api("change-password", { oldPassword, newPassword }));
-    toast("密码已修改");
+    toast("\u5BC6\u7801\u5DF2\u4FEE\u6539");
   } catch (failure) {
-    error.textContent = failure.message || "修改失败，请稍后重试";
+    error.textContent = failure.message || "\u4FEE\u6539\u5931\u8D25\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5";
     error.hidden = false;
     button.disabled = false;
   }
@@ -3207,10 +3508,10 @@ function swipeBuildSkeleton(key) {
   const wrap = document.createElement("div");
   if (String(key).indexOf("library:") === 0) {
     const cards = Array.from({ length: 4 }, () => '<div class="skeleton sk-card"></div>').join("");
-    wrap.innerHTML = '<div class="library-page swipe-skel" role="status" aria-label="正在加载内容"><div class="my-heading"><h1>我的</h1></div><div class="segmented library-tabs skeleton-tabs" role="tablist"><span class="skeleton skeleton-pill"></span><span class="skeleton skeleton-pill"></span><span class="skeleton skeleton-pill"></span></div><p class="library-count"><span class="skeleton sk-sm"></span></p>' + '<div class="sk-list">'.concat(cards, "</div></div>");
+    wrap.innerHTML = '<div class="library-page swipe-skel" role="status" aria-label="\u6B63\u5728\u52A0\u8F7D\u5185\u5BB9"><div class="my-heading"><h1>\u6211\u7684</h1></div><div class="segmented library-tabs skeleton-tabs" role="tablist"><span class="skeleton skeleton-pill"></span><span class="skeleton skeleton-pill"></span><span class="skeleton skeleton-pill"></span></div><p class="library-count"><span class="skeleton sk-sm"></span></p>' + '<div class="sk-list">'.concat(cards, "</div></div>");
   } else {
     const posters = Array.from({ length: 3 }, () => '<div class="skeleton skeleton-poster"></div>').join("");
-    wrap.innerHTML = '<div class="swipe-skel" role="status" aria-label="正在加载内容"><div class="skeleton skeleton-hero"></div><div class="skeleton skeleton-title"></div><div class="skeleton-row">' + posters + '</div><div class="skeleton-row">' + posters + "</div></div>";
+    wrap.innerHTML = '<div class="swipe-skel" role="status" aria-label="\u6B63\u5728\u52A0\u8F7D\u5185\u5BB9"><div class="skeleton skeleton-hero"></div><div class="skeleton skeleton-title"></div><div class="skeleton-row">' + posters + '</div><div class="skeleton-row">' + posters + "</div></div>";
   }
   return wrap.firstElementChild;
 }
@@ -3705,7 +4006,7 @@ document.addEventListener("click", async (event) => {
     try {
       const result = await api("check-hot-update");
       window.hgHotUpdateStatus(result);
-      toast(result.pending ? "资源已下载，返回首页空闲时会自动启用" : result.unavailable ? "暂无可用资源更新，当前使用内置资源" : "已是最新资源");
+      toast(result.pending ? "\u8D44\u6E90\u5DF2\u4E0B\u8F7D\uFF0C\u8FD4\u56DE\u9996\u9875\u7A7A\u95F2\u65F6\u4F1A\u81EA\u52A8\u542F\u7528" : result.unavailable ? "\u6682\u65E0\u53EF\u7528\u8D44\u6E90\u66F4\u65B0\uFF0C\u5F53\u524D\u4F7F\u7528\u5185\u7F6E\u8D44\u6E90" : "\u5DF2\u662F\u6700\u65B0\u8D44\u6E90");
     } catch (error) {
       toast(error.message, true);
     } finally {
@@ -3733,6 +4034,92 @@ document.addEventListener("click", async (event) => {
     openAboutPop();
     return;
   }
+  if (event.target.closest("[data-remote-open]")) {
+    openRemotePop();
+    return;
+  }
+  if (event.target.closest("[data-remote-add]")) {
+    remoteEditing = "";
+    remoteDraft = remoteDraftOf(null);
+    remoteTestText = "";
+    remoteTestOk = false;
+    renderRemotePop();
+    return;
+  }
+  if (event.target.closest("[data-remote-edit]")) {
+    const id = event.target.closest("[data-remote-edit]").dataset.remoteEdit;
+    const server = asArray(remoteServers).find((s) => String(s.id) === String(id));
+    if (!server) {
+      toast("\u8FD9\u6761\u914D\u7F6E\u4E0D\u5B58\u5728\u4E86\uFF0C\u8BF7\u91CD\u65B0\u6253\u5F00", true);
+      return;
+    }
+    remoteEditing = String(id);
+    remoteDraft = remoteDraftOf(server);
+    remoteTestText = "";
+    remoteTestOk = false;
+    renderRemotePop();
+    return;
+  }
+  if (event.target.closest("[data-remote-type]")) {
+    stashRemoteForm();
+    remoteDraft.type = event.target.closest("[data-remote-type]").dataset.remoteType;
+    remoteTestText = "";
+    renderRemotePop();
+    return;
+  }
+  if (event.target.closest("[data-remote-cancel]")) {
+    remoteEditing = null;
+    remoteDraft = null;
+    renderRemotePop();
+    return;
+  }
+  if (event.target.closest("[data-remote-save]")) {
+    saveRemoteForm();
+    return;
+  }
+  if (event.target.closest("[data-remote-test]")) {
+    testRemoteForm(event.target.closest("[data-remote-test]"));
+    return;
+  }
+  if (event.target.closest("[data-remote-delete]")) {
+    const current = remoteDraft ? remoteDraft.id : "";
+    const name = remoteDraft && remoteDraft.name ? remoteDraft.name : "\u8FD9\u53F0\u670D\u52A1\u5668";
+    askConfirmation("\u5220\u9664\u670D\u52A1\u5668", "\u786E\u5B9A\u5220\u9664\u300C".concat(name, "\u300D\u7684\u914D\u7F6E\uFF1F\u5DF2\u4F20\u8FC7\u53BB\u7684\u6587\u4EF6\u4E0D\u53D7\u5F71\u54CD\u3002"), "\u5220\u9664").then((ok) => {
+      if (!ok || !current) return;
+      api("remote-delete", { id: current }).then(async () => {
+        remoteServers = null;
+        await loadRemoteServers(true);
+        remoteEditing = null;
+        remoteDraft = null;
+        renderRemotePop();
+        toast("\u5DF2\u5220\u9664");
+      }).catch((error) => toast(error.message, true));
+    });
+    return;
+  }
+  if (event.target.closest("[data-remote-pick]")) {
+    startRemoteTransfer(remotePickerTaskId, event.target.closest("[data-remote-pick]").dataset.remotePick);
+    return;
+  }
+  if (event.target.closest("[data-remote-pick-close]")) {
+    closeRemotePicker();
+    return;
+  }
+  if (event.target.closest("[data-dl-transfer]")) {
+    const button = event.target.closest("[data-dl-transfer]");
+    const head = button.closest(".download-task");
+    const title = head ? (head.querySelector(".download-task-head strong") || {}).textContent : "";
+    openRemotePicker(button.dataset.dlTransfer, title);
+    return;
+  }
+  if (event.target.closest("[data-dl-transfer-cancel]")) {
+    const id = event.target.closest("[data-dl-transfer-cancel]").dataset.dlTransferCancel;
+    api("remote-transfer-cancel", { id }).then(() => {
+      toast("\u5DF2\u53D6\u6D88\u4F20\u8F93");
+      refreshCurrentDownloads();
+    }).catch((error) => toast(error.message, true));
+    return;
+  }
   const openUrl = event.target.closest("[data-open-url]");
   if (openUrl) {
     api("open-url", { url: openUrl.dataset.openUrl }).catch((error) => toast(error.message, true));
@@ -3751,7 +4138,28 @@ document.addEventListener("click", async (event) => {
     return;
   }
   if (event.target.closest("[data-dl-pick]")) {
-    submitDownloadTo(event.target.closest("[data-dl-pick]").dataset.dlPick);
+    const pick = event.target.closest("[data-dl-pick]").dataset.dlPick;
+    if (pick === "remote") {
+      loadRemoteServers(true).then((list) => {
+        if (!asArray(list).length) {
+          toast("\u8FD8\u6CA1\u6709\u8FDC\u7A0B\u670D\u52A1\u5668\uFF0C\u8BF7\u5148\u5230\u300C\u8BBE\u7F6E \u2192 \u8FDC\u7A0B\u670D\u52A1\u5668\u300D\u6DFB\u52A0", true);
+          return;
+        }
+        downloadMode = "remote";
+        renderDownloadSheet();
+      });
+      return;
+    }
+    submitDownloadTo(pick);
+    return;
+  }
+  if (event.target.closest("[data-dl-remote]")) {
+    submitDownloadTo("remote", event.target.closest("[data-dl-remote]").dataset.dlRemote);
+    return;
+  }
+  if (event.target.closest("[data-dl-back-target]")) {
+    downloadMode = "target";
+    renderDownloadSheet();
     return;
   }
   if (event.target.closest("[data-dl-back]")) {
@@ -3780,12 +4188,12 @@ document.addEventListener("click", async (event) => {
   }
   if (event.target.closest("[data-dl-play]")) {
     const id = event.target.closest("[data-dl-play]").dataset.dlPlay;
-    api("open-local-player", { id }).then(() => toast("正在播放本地成品")).catch((error) => toast(error.message || "本地文件不可播放", true));
+    api("open-local-player", { id }).then(() => toast("\u6B63\u5728\u64AD\u653E\u672C\u5730\u6210\u54C1")).catch((error) => toast(error.message || "\u672C\u5730\u6587\u4EF6\u4E0D\u53EF\u64AD\u653E", true));
     return;
   }
   if (event.target.closest("[data-dl-play-nas]")) {
     const id = event.target.closest("[data-dl-play-nas]").dataset.dlPlayNas;
-    api("open-nas-player", { id }).then(() => toast("正在播放 NAS 成品")).catch((error) => toast(error.message || "NAS 成品不可播放", true));
+    api("open-nas-player", { id }).then(() => toast("\u6B63\u5728\u64AD\u653E NAS \u6210\u54C1")).catch((error) => toast(error.message || "NAS \u6210\u54C1\u4E0D\u53EF\u64AD\u653E", true));
     return;
   }
   if (event.target.closest("[data-dl-cancel]")) {
@@ -3793,7 +4201,7 @@ document.addEventListener("click", async (event) => {
     const kind = button.dataset.dlCancel, id = button.dataset.dlId;
     const action = kind === "nas" ? "nas-download-cancel" : "download-cancel";
     api(action, { id }).then(() => {
-      toast("已取消任务");
+      toast("\u5DF2\u53D6\u6D88\u4EFB\u52A1");
       removeDownloadRow(kind, id);
       refreshCurrentDownloads();
     }).catch((error) => toast(error.message, true));
@@ -3803,7 +4211,7 @@ document.addEventListener("click", async (event) => {
     const node = event.target.closest("[data-dl-copy]");
     const log = (node.dataset.dlLog || "").replace(/\\n/g, "\n");
     if (log) {
-      api("copy-text", { text: log }).then(() => toast("日志已复制到剪贴板")).catch(() => toast("复制失败", true));
+      api("copy-text", { text: log }).then(() => toast("\u65E5\u5FD7\u5DF2\u590D\u5236\u5230\u526A\u8D34\u677F")).catch(() => toast("\u590D\u5236\u5931\u8D25", true));
     }
     return;
   }
@@ -3811,7 +4219,7 @@ document.addEventListener("click", async (event) => {
     const button = event.target.closest("[data-dl-retry]");
     const id = button.dataset.dlId;
     api("download-retry", { id }).then(() => {
-      toast("已重新开始下载");
+      toast("\u5DF2\u91CD\u65B0\u5F00\u59CB\u4E0B\u8F7D");
       refreshCurrentDownloads();
     }).catch((error) => toast(error.message, true));
     return;
@@ -3821,7 +4229,7 @@ document.addEventListener("click", async (event) => {
     const kind = button.dataset.dlMerge, id = button.dataset.dlId;
     const action = kind === "nas" ? "nas-download-merge" : "download-merge";
     api(action, { id }).then(() => {
-      toast("已开始合并");
+      toast("\u5DF2\u5F00\u59CB\u5408\u5E76");
       refreshCurrentDownloads();
     }).catch((error) => toast(error.message, true));
     return;
@@ -3830,7 +4238,7 @@ document.addEventListener("click", async (event) => {
     const button = event.target.closest("[data-dl-retry-failed]");
     const id = button.dataset.dlId;
     api("nas-download-retry-failed", { id }).then(() => {
-      toast("已开始重试失败集（已下载分集保留）");
+      toast("\u5DF2\u5F00\u59CB\u91CD\u8BD5\u5931\u8D25\u96C6\uFF08\u5DF2\u4E0B\u8F7D\u5206\u96C6\u4FDD\u7559\uFF09");
       refreshCurrentDownloads();
     }).catch((error) => toast(error.message, true));
     return;
@@ -3843,7 +4251,7 @@ document.addEventListener("click", async (event) => {
     ids.unshift(id);
     const chain = ids.reduce((p, cid) => p.then(() => api(action, { id: cid }).catch((e) => toast(e.message, true))), Promise.resolve());
     chain.then(() => {
-      toast("已删除下载内容");
+      toast("\u5DF2\u5220\u9664\u4E0B\u8F7D\u5185\u5BB9");
       refreshCurrentDownloads();
     }).catch(() => {
     });
@@ -3857,7 +4265,7 @@ document.addEventListener("click", async (event) => {
     const list = card2.parentElement;
     card2.remove();
     if (list && !list.querySelector(".download-task")) {
-      list.innerHTML = '<div class="empty-state">还没有下载内容，去详情页点击「下载」吧</div>';
+      list.innerHTML = '<div class="empty-state">\u8FD8\u6CA1\u6709\u4E0B\u8F7D\u5185\u5BB9\uFF0C\u53BB\u8BE6\u60C5\u9875\u70B9\u51FB\u300C\u4E0B\u8F7D\u300D\u5427</div>';
     }
   }
   function refreshCurrentDownloads() {
@@ -3880,9 +4288,9 @@ document.addEventListener("click", async (event) => {
     try {
       await api("sync");
       state.library = await api("library");
-      toast("片单已同步");
+      toast("\u7247\u5355\u5DF2\u540C\u6B65");
     } catch (error) {
-      toast("同步失败：".concat(error.message), true);
+      toast("\u540C\u6B65\u5931\u8D25\uFF1A".concat(error.message), true);
     }
     return;
   }
@@ -3892,7 +4300,7 @@ document.addEventListener("click", async (event) => {
     button.disabled = true;
     button.classList.add("is-loading");
     button.setAttribute("aria-busy", "true");
-    button.textContent = "正在退出…";
+    button.textContent = "\u6B63\u5728\u9000\u51FA\u2026";
     try {
       setAccount(await api("logout"));
       state.library = await api("library");
@@ -3900,7 +4308,7 @@ document.addEventListener("click", async (event) => {
       setRoute("settings");
       renderSettings();
       showAuth();
-      toast("已退出登录");
+      toast("\u5DF2\u9000\u51FA\u767B\u5F55");
     } catch (error) {
       toast(error.message, true);
     } finally {
@@ -3908,7 +4316,7 @@ document.addEventListener("click", async (event) => {
         button.disabled = false;
         button.classList.remove("is-loading");
         button.removeAttribute("aria-busy");
-        button.textContent = "退出登录";
+        button.textContent = "\u9000\u51FA\u767B\u5F55";
       }
     }
     return;
@@ -3932,7 +4340,7 @@ document.addEventListener("click", async (event) => {
   }
   const continueCard = event.target.closest("[data-continue-id]");
   if (continueCard) {
-    resumeFromHome(continueCard.dataset.continueId).catch((error) => toast(error.message || "续播失败，请重试", true));
+    resumeFromHome(continueCard.dataset.continueId).catch((error) => toast(error.message || "\u7EED\u64AD\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5", true));
     return;
   }
   const historyCard = event.target.closest("[data-history-id]");
@@ -3992,7 +4400,7 @@ document.addEventListener("click", async (event) => {
     try {
       state.bookmarked = await api("bookmark", state.detail);
       renderDetail();
-      toast(state.bookmarked ? "已加入我的片单" : "已取消收藏");
+      toast(state.bookmarked ? "\u5DF2\u52A0\u5165\u6211\u7684\u7247\u5355" : "\u5DF2\u53D6\u6D88\u6536\u85CF");
     } catch (error) {
       toast(error.message, true);
     }
@@ -4028,16 +4436,16 @@ document.addEventListener("click", async (event) => {
   const clear = event.target.closest("[data-clear]");
   if (clear) {
     if (clear.dataset.clear === "cache") {
-      if (!await askConfirmation("清理内容缓存", "将删除已缓存的目录和封面。收藏与观看进度会保留。", "清理")) return;
+      if (!await askConfirmation("\u6E05\u7406\u5185\u5BB9\u7F13\u5B58", "\u5C06\u5220\u9664\u5DF2\u7F13\u5B58\u7684\u76EE\u5F55\u548C\u5C01\u9762\u3002\u6536\u85CF\u4E0E\u89C2\u770B\u8FDB\u5EA6\u4F1A\u4FDD\u7559\u3002", "\u6E05\u7406")) return;
       await api("clear-content-cache");
-      toast("内容缓存已清空");
+      toast("\u5185\u5BB9\u7F13\u5B58\u5DF2\u6E05\u7A7A");
     } else if (clear.dataset.clear === "history" || clear.dataset.clear === "bookmarks") {
       const history = clear.dataset.clear === "history";
-      if (!await askConfirmation(history ? "清空观看历史" : "清空我的收藏", history ? "所有观看记录会被删除，我的收藏会保留。" : "所有收藏作品会被移除，观看历史会保留。")) return;
+      if (!await askConfirmation(history ? "\u6E05\u7A7A\u89C2\u770B\u5386\u53F2" : "\u6E05\u7A7A\u6211\u7684\u6536\u85CF", history ? "\u6240\u6709\u89C2\u770B\u8BB0\u5F55\u4F1A\u88AB\u5220\u9664\uFF0C\u6211\u7684\u6536\u85CF\u4F1A\u4FDD\u7559\u3002" : "\u6240\u6709\u6536\u85CF\u4F5C\u54C1\u4F1A\u88AB\u79FB\u9664\uFF0C\u89C2\u770B\u5386\u53F2\u4F1A\u4FDD\u7559\u3002")) return;
       await api(history ? "clear-history" : "clear-bookmarks");
       state.library = await api("library");
       renderSettings();
-      toast(history ? "观看历史已清空" : "收藏已清空");
+      toast(history ? "\u89C2\u770B\u5386\u53F2\u5DF2\u6E05\u7A7A" : "\u6536\u85CF\u5DF2\u6E05\u7A7A");
     }
   }
 });
@@ -4216,7 +4624,7 @@ scroll.addEventListener("scroll", () => {
 api("app-version").then((version) => {
   appVersion = String(version || "");
   const label = content.querySelector(".app-version-text");
-  if (label) label.textContent = "版本 v".concat(appVersion);
+  if (label) label.textContent = "\u7248\u672C v".concat(appVersion);
   setAvailableUpdate(updateAvailable);
 }).catch(() => {
 });
@@ -4240,7 +4648,7 @@ api("crash-log").then((result) => {
     api("copy-text", { text: log }).then(() => {
     }).catch(() => {
     });
-    toast("检测到上次运行发生崩溃，崩溃日志已复制到剪贴板，请粘贴发给开发者", true);
+    toast("\u68C0\u6D4B\u5230\u4E0A\u6B21\u8FD0\u884C\u53D1\u751F\u5D29\u6E83\uFF0C\u5D29\u6E83\u65E5\u5FD7\u5DF2\u590D\u5236\u5230\u526A\u8D34\u677F\uFF0C\u8BF7\u7C98\u8D34\u53D1\u7ED9\u5F00\u53D1\u8005", true);
   }
 }).catch(() => {
 });
@@ -4248,7 +4656,7 @@ document.getElementById("age-confirm").addEventListener("click", async () => {
   await api("confirm-private-age");
   location.reload();
 });
-document.getElementById("age-exit").textContent = "返回红果";
+document.getElementById("age-exit").textContent = "\u8FD4\u56DE\u7EA2\u679C";
 document.getElementById("age-exit").addEventListener("click", () => {
   document.getElementById("age-gate").hidden = true;
 });
@@ -4304,7 +4712,7 @@ window.hgHotUpdateStatus = (result) => {
   const resourceSection = (_a2 = content.querySelector("[data-resource-status]")) == null ? void 0 : _a2.closest("section");
   if (resourceSection && result.enabled === false) resourceSection.hidden = true;
   const label = content.querySelector("[data-resource-status]");
-  if (label) label.textContent = result.pending ? "资源已下载，首页空闲时自动启用。" : "当前资源：" + (result.version || "内置") + "，后台自动更新。";
+  if (label) label.textContent = result.pending ? "\u8D44\u6E90\u5DF2\u4E0B\u8F7D\uFF0C\u9996\u9875\u7A7A\u95F2\u65F6\u81EA\u52A8\u542F\u7528\u3002" : "\u5F53\u524D\u8D44\u6E90\uFF1A" + (result.version || "\u5185\u7F6E") + "\uFF0C\u540E\u53F0\u81EA\u52A8\u66F4\u65B0\u3002";
   const apply = content.querySelector("[data-apply-resources]");
   if (apply) apply.hidden = !result.pending;
   pendingResourceRevision = Number(result.pending) > Number(((_b2 = window.HotRuntime) == null ? void 0 : _b2.revision) || 0) ? Number(result.pending) : 0;
@@ -4487,14 +4895,14 @@ function startBingeEngine() {
     state.binge = false;
     saveBingePref();
     syncBinge();
-    toast(error.message || "进入刷剧模式失败", true);
+    toast(error.message || "\u8FDB\u5165\u5237\u5267\u6A21\u5F0F\u5931\u8D25", true);
   });
 }
 function enterBingeFresh() {
   if (privateMode() || state.route !== "home") return;
   const items = bingePoolItems();
   if (!items.length) {
-    toast("首页还没有推荐内容，稍后再试", true);
+    toast("\u9996\u9875\u8FD8\u6CA1\u6709\u63A8\u8350\u5185\u5BB9\uFF0C\u7A0D\u540E\u518D\u8BD5", true);
     return;
   }
   const shuffled = items.slice();
@@ -4551,7 +4959,7 @@ function updateBingePoster(info) {
   img.onload = img.onerror = null;
   img.removeAttribute("src");
   if (!cover) return;
-  img.alt = (info.title || "当前剧集") + " 海报";
+  img.alt = (info.title || "\u5F53\u524D\u5267\u96C6") + " \u6D77\u62A5";
   getCover(cover).then((src) => {
     if (!isCurrent()) return;
     img.onload = () => {

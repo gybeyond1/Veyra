@@ -10,8 +10,8 @@ android {
         applicationId 'com.veyra.gybeyond'
         minSdk 26
         targetSdk 36
-        versionCode 361
-        versionName "0.24.11"
+        versionCode 362
+        versionName "0.24.12"
         testInstrumentationRunner 'com.veyra.gybeyond.PlaybackTestRunner'
     }
 
@@ -116,4 +116,12 @@ dependencies {
     mobileImplementation "androidx.camera:camera-lifecycle:1.4.1"
     mobileImplementation "androidx.camera:camera-view:1.4.1"
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs_nio:2.0.1'
+    // 「下载/传输到远程服务器」：SMB 走 jcifs-ng（SMB1~SMB3 自动协商 + NTLMv2，匿名共享也认），
+    // FTP/FTPS 走 commons-net。WebDAV 用已有的 OkHttp，不再引依赖。
+    // 只保留真正要用的传递依赖：jcifs-ng 的 servlet-api / annotation-api 是服务端才用的。
+    implementation('eu.agno3.jcifs:jcifs-ng:2.1.10') {
+        exclude group: 'javax.servlet', module: 'javax.servlet-api'
+        exclude group: 'javax.annotation', module: 'javax.annotation-api'
+    }
+    implementation 'commons-net:commons-net:3.10.0'
 }
