@@ -110,6 +110,10 @@ jobs:
             fi
             NOTES=$(printf "## Veyra %s 更新内容\n\n%s" "$TAG" "$NOTES")
           fi
+          # 两段式发布：先建 draft 把资产传完，最后一步才正式发布。
+          # 后端是靠 release published 的 webhook 立刻开始拉包的，如果边传边发，
+          # 那一刻资产还在路上，后端只能对着 404 空转重试。draft 兜住这个时间差。
+          # 注意 --latest 不能和 --draft 同时用（gh 会报 cannot mark a draft as latest）。
           if [ -n "$NOTES" ]; then
             gh release create "$TAG" \
               "$PHONE_APK" \
@@ -117,7 +121,7 @@ jobs:
               veyra-backend-latest.tar.gz \
               --title "Veyra $TAG" \
               --notes "$NOTES" \
-              --latest
+              --draft
           else
             gh release create "$TAG" \
               "$PHONE_APK" \
@@ -125,5 +129,12 @@ jobs:
               veyra-backend-latest.tar.gz \
               --title "Veyra $TAG" \
               --generate-notes \
-              --latest
+              --draft
           fi
+          # 资产齐了才对外发布：这一步之后 webhook 才会带着完整 assets 打到后端。
+          # 拆成两步：先转正（触发发布），再标 latest。万一 --latest 出岔子，
+          # 版本也已经发出去了，不至于卡在 draft 里谁也看不见。
+          gh release edit "$TAG" --draft=false
+          gh release edit "$TAG" --latest
+          echo "Released $TAG"
+

@@ -33,6 +33,7 @@ const hgApp = require('./hongguo-app');
 const { createHongguoContent } = require('./hongguo-content');
 const { createDeviceHub } = require('./device-hub');
 const { createAppUpdater } = require('./app-updater');
+const { mountReleaseHook } = require('./release-hook');
 
 const PORT = parseInt(process.env.PORT || '8080', 10);
 // 数据目录：环境变量指定，默认 /data（docker-compose volume 挂载）。
@@ -256,7 +257,12 @@ function needUser(req, res) {
 
 const app = express();
 app.disable('x-powered-by');
-app.use(express.json({ limit: '3mb' }));
+// 顺手留一份原始 body：GitHub webhook 的 HMAC 签名必须按「收到的字节」算，
+// 解析成对象再 JSON.stringify 回去，空格、转义、键序都可能变，验签必挂。
+app.use(express.json({
+  limit: '3mb',
+  verify: (req, _res, buf) => { req.rawBody = buf; },
+}));
 
 // 状态页（WebUI：需管理员密码登录后可见全部管理与用户信息）
 app.get('/', (_req, res) => {
@@ -960,6 +966,12 @@ app.get('/api/app-update', (req, res) => {
   catch (e) { res.status(500).json({ status: 'none', error: e.message }); }
 });
 
+// ---- GitHub Release Webhook：发版瞬间开始拉包 ----
+// 定时器是 10 分钟一轮，发版后最长要等十分钟后端才有包。这里让 GitHub 主动敲门：
+// release 一 published 就当场排进下载队列，省掉整段等待。
+// 没配 GITHUB_WEBHOOK_SECRET 时这个端点等于不存在（404），公网扫描摸不到东西。
+mountReleaseHook(app, { updater: appUpdater, log: (m) => console.log(m) });
+
 // 更新包下载：只发清单里登记过的文件（fileOf 做白名单 + 路径校验），支持 Range 续传。
 app.get('/api/app-download/:channel/:file', (req, res) => {
   const file = appUpdater.fileOf(req.params.channel, req.params.file);
@@ -978,6 +990,8 @@ app.get('/api/health', (_req, res) => {
     update: update ? { version: update.version, channels: Object.keys(update.channels || {}) } : null,
     // 正在拉的包进度（几段、第几轮、已下多少）—— 排查「为什么一直没好」全靠它
     updateProgress: appUpdater.progress(),
+    // webhook 拉起来的快车道：有值说明正按 5 秒一轮在追这一版
+    updateWake: appUpdater.wakeState,
   });
 });
 

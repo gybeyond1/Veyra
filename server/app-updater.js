@@ -39,6 +39,15 @@ const POLL_MS = parseInt(process.env.APP_UPDATE_POLL_MS || String(10 * 60 * 1000
 const FIRST_DELAY_MS = parseInt(process.env.APP_UPDATE_FIRST_DELAY_MS || '20000', 10);
 /** 有渠道没拉到时，隔多久再试（比 POLL_MS 短得多：半截包留着，早一轮就早一点下完）。 */
 const RETRY_MS = parseInt(process.env.APP_UPDATE_RETRY_MS || '60000', 10);
+/**
+ * Webhook 快车道：GitHub 一说「发版了」就按这个间隔连打几轮。
+ * 正常一轮 10 分钟太久了 —— 而且 release 刚创建时资产往往还在传，第一枪常常扑空，
+ * 所以这里必须是秒级重试，打在「资产上传完」的那一刻。
+ */
+const WAKE_RETRY_MS = parseInt(process.env.APP_UPDATE_WAKE_RETRY_MS || '5000', 10);
+const WAKE_ROUNDS = parseInt(process.env.APP_UPDATE_WAKE_ROUNDS || '24', 10);
+/** 被唤醒后这段时间内按 tag 精确查 API（atom 有 CDN 缓存，可能还看不到新版本）。 */
+const WAKE_API_WINDOW_MS = 120_000;
 const MAX_BYTES = 120 * 1024 * 1024;
 const KEEP_VERSIONS = 2;
 /** 分几段并发下。8 段在丢包链路上提升明显，再多容易把家宽连接数打满。 */
@@ -83,6 +92,13 @@ function compareVersion(a, b) {
 /** 渠道 → 附件名。约定优于配置：发布流水线一直用这两个名字。 */
 function fileName(channel, version) {
   return channel === 'tv' ? `Veyra-TV-${version}.apk` : `Veyra-${version}.apk`;
+}
+
+/** 一组 asset 里两个渠道的包是不是都已经传上去了。 */
+function hasApks(assets, version) {
+  if (!Array.isArray(assets) || !assets.length || !version) return false;
+  const names = new Set(assets.map(a => (a && a.name) || ''));
+  return CHANNELS.every(channel => names.has(fileName(channel, version)));
 }
 
 function curl(args, timeoutMs) {
@@ -164,6 +180,13 @@ async function probeRemote(url, proxy) {
     const result = await curl(args, 45_000);
     if (result.error) continue;
     const header = String(result.stdout || '');
+    // 先看最终状态码：资产还没传上来时 GitHub 会给 404，
+    // 那是张错误页而不是 APK，但它的 Content-Length 照样能被解析成「包大小」，
+    // 于是后面的分片下载会把错误页拼成一个 40 字节的假包。
+    let status = 0, st;
+    const statusRe = /HTTP\/[\d.]+\s+(\d{3})/g;
+    while ((st = statusRe.exec(header))) status = Number(st[1]);
+    if (status !== 200 && status !== 206) continue;
     // 可能经过多次跳转，头有好几段，取最后出现的那个
     let m, last = null;
     const re = /content-range:\s*bytes\s+0-0\/(\d+)/gi;
@@ -253,6 +276,8 @@ function createAppUpdater(options) {
   const dataDir = options.dataDir;
   const getProxy = options.getProxy || (() => '');
   const log = options.log || (() => { });
+  // 单测用：wake 只记账、不真的联网
+  const autoPoll = options.autoPoll !== false;
   const root = path.join(dataDir, 'app-update');
   const manifestFile = path.join(root, 'latest.json');
 
@@ -260,6 +285,12 @@ function createAppUpdater(options) {
   let timer = null;
   let retryTimer = null;
   let polling = false;
+  /**
+   * Webhook 送来的「要拉哪一版」。
+   * 有它的时候 poll 走快车道：不查 atom、秒级重试，直到两个渠道都落地才清掉。
+   */
+  let wakeHint = null;
+  let wakeRound = 0;
   /** 正在下载的进度，给 /api/health 看，方便判断到底卡在哪一段。 */
   let progressState = null;
 
@@ -297,8 +328,30 @@ function createAppUpdater(options) {
     return found.sort((a, b) => compareVersion(b.version, a.version));
   }
 
-  async function discover() {
+  /** 按 tag 精确查一次 release。webhook 带了 tag，就没必要求助 atom 的缓存。 */
+  async function releaseByTag(tag, proxy) {
+    const json = await fetchText(
+      `https://api.github.com/repos/${REPO}/releases/tags/${encodeURIComponent(tag)}`, proxy, 15000);
+    const release = JSON.parse(json);
+    const name = String(release.tag_name || '').trim();
+    if (!/^v\d+\.\d+\.\d+$/.test(name)) throw new Error('release tag 格式异常');
+    return {
+      tag: name, version: versionOf(name), notes: htmlToText(release.body || ''),
+      assets: Array.isArray(release.assets) ? release.assets : [],
+    };
+  }
+
+  async function discover(hint) {
     const proxy = getProxy() || '';
+    // webhook 带来的一手资产列表：两个包都在就直接用，一个外部请求都不用发。
+    if (hint && hasApks(hint.assets, hint.version)) {
+      return { tag: hint.tag, version: hint.version, notes: hint.notes, assets: hint.assets };
+    }
+    // 刚被唤醒的两分钟内按 tag 精确查：atom 走 CDN，新版本常常要几十秒才出现。
+    if (hint && Date.now() - hint.at < WAKE_API_WINDOW_MS) {
+      try { return await releaseByTag(hint.tag, proxy); }
+      catch (error) { log(`[update] 按 tag 查 ${hint.tag} 失败：${error.message}`); }
+    }
     // 首选 atom：体积小、不吃 API 限流、反代也更容易代理
     try {
       const xml = await fetchText(`https://github.com/${REPO}/releases.atom`, proxy, 20000);
@@ -431,6 +484,15 @@ function createAppUpdater(options) {
       fs.rmSync(apk, { force: true });
       throw new Error(`${channel} 大小不符（${size} != ${total}）`);
     }
+    // APK 本质是 zip，头两个字节一定是 "PK"。反代维护页、404 错误页都过不了这关，
+    // 比 sha 更早挡住「把一坨 HTML 当安装包缓存下来」。
+    const head = Buffer.alloc(2);
+    const fd = fs.openSync(apk, 'r');
+    try { fs.readSync(fd, head, 0, 2, 0); } finally { fs.closeSync(fd); }
+    if (head[0] !== 0x50 || head[1] !== 0x4b) {
+      fs.rmSync(apk, { force: true });
+      throw new Error(`${channel} 下到的不是 APK（开头不是 PK），已丢弃`);
+    }
     if (expectSha && sha !== expectSha) {
       fs.rmSync(apk, { force: true });
       throw new Error(`${channel} sha256 校验失败，已丢弃`);
@@ -465,38 +527,45 @@ function createAppUpdater(options) {
     if (polling) return;
     polling = true;
     try {
-      const info = await discover();
+      const info = await discover(wakeHint);
       const previous = manifest && manifest.version;
-      if (!manifest || !manifest.version || compareVersion(info.version, manifest.version) > 0) {
-        manifest = { version: info.version, tag: info.tag, notes: info.notes || '', fetchedAt: Date.now(), channels: {} };
+      // webhook 会重复投递（GitHub 没收到 2xx 就重试），也可能有人手滑点了旧版本的发布。
+      // 旧 tag 不能把清单倒回去，更不能为此白下一个 40MB 的旧包。
+      if (manifest && manifest.version && compareVersion(info.version, manifest.version) < 0) {
+        log(`[update] 忽略旧版本 ${info.version}（当前已是 ${manifest.version}）`);
+        if (wakeHint && compareVersion(wakeHint.version, manifest.version) < 0) wakeHint = null;
       } else {
-        manifest.notes = info.notes || manifest.notes || '';
-        manifest.tag = info.tag;
-      }
-      for (const channel of CHANNELS) {
-        // 已经在盘上（含手动投递）就不重复下
-        const local = localVersions(channel)[0];
-        if (local && compareVersion(local.version, info.version) === 0) {
-          manifest.channels[channel] = {
-            file: local.file, size: local.size,
-            sha256: await sha256OfFile(path.join(channelDir(channel), local.file)),
-          };
-          continue;
+        if (!manifest || !manifest.version || compareVersion(info.version, manifest.version) > 0) {
+          manifest = { version: info.version, tag: info.tag, notes: info.notes || '', fetchedAt: Date.now(), channels: {} };
+        } else {
+          manifest.notes = info.notes || manifest.notes || '';
+          manifest.tag = info.tag;
         }
-        try {
-          manifest.channels[channel] = await fetchChannel(channel, info.version, info.tag, info.assets);
-        } catch (error) {
-          log(`[update] ${channel} 拉取失败：${error.message}`);
-          // 保留上一版记录，清掉不属于当前版本的条目
-          if (manifest.channels[channel] && manifest.channels[channel].file.indexOf(info.version) < 0) {
-            delete manifest.channels[channel];
+        for (const channel of CHANNELS) {
+          // 已经在盘上（含手动投递）就不重复下
+          const local = localVersions(channel)[0];
+          if (local && compareVersion(local.version, info.version) === 0) {
+            manifest.channels[channel] = {
+              file: local.file, size: local.size,
+              sha256: await sha256OfFile(path.join(channelDir(channel), local.file)),
+            };
+            continue;
+          }
+          try {
+            manifest.channels[channel] = await fetchChannel(channel, info.version, info.tag, info.assets);
+          } catch (error) {
+            log(`[update] ${channel} 拉取失败：${error.message}`);
+            // 保留上一版记录，清掉不属于当前版本的条目
+            if (manifest.channels[channel] && manifest.channels[channel].file.indexOf(info.version) < 0) {
+              delete manifest.channels[channel];
+            }
           }
         }
+        manifest.fetchedAt = Date.now();
+        saveManifest();
+        prune();
+        if (previous !== manifest.version) log(`[update] 当前最新版本 ${manifest.version}`);
       }
-      manifest.fetchedAt = Date.now();
-      saveManifest();
-      prune();
-      if (previous !== manifest.version) log(`[update] 当前最新版本 ${manifest.version}`);
     } catch (error) {
       log(`[update] 检查失败：${error.message}`);
     } finally {
@@ -507,7 +576,24 @@ function createAppUpdater(options) {
         const entry = manifest && manifest.channels && manifest.channels[channel];
         return entry && entry.file && fs.existsSync(path.join(channelDir(channel), entry.file));
       });
-      if (!ready) scheduleRetry(RETRY_MS);
+      let quick = false;
+      if (wakeHint) {
+        // 两个渠道都落到这版（或磁盘上已有更新的版本）就算收工，回到常规节奏
+        const done = ready && manifest && compareVersion(manifest.version, wakeHint.version) >= 0;
+        if (done) {
+          log(`[update] ${wakeHint.version} 已就绪，退出快车道`);
+          wakeHint = null;
+        } else if (wakeRound >= WAKE_ROUNDS) {
+          log(`[update] ${wakeHint.version} 快车道跑了 ${WAKE_ROUNDS} 轮还没齐，交回常规轮询`);
+          wakeHint = null;
+        } else {
+          wakeRound++;
+          quick = true;
+          scheduleRetry(WAKE_RETRY_MS);
+        }
+      }
+      // 快车道已经在排队了就别再叠一个常规重试（scheduleRetry 里也会去重）
+      if (!ready && !quick) scheduleRetry(RETRY_MS);
     }
   }
 
@@ -528,7 +614,36 @@ function createAppUpdater(options) {
       total: progressState.total,
       done: progressState.done,
       percent: progressState.total ? Math.round((progressState.done / progressState.total) * 100) : 0,
+      // 是不是 webhook 拉起来的快车道（5 秒一轮），排查「为什么现在在下载」用
+      quick: !!wakeHint,
     };
+  }
+
+  /**
+   * GitHub Release Webhook 的入口：发版瞬间把这一版排上队，不用等 10 分钟一轮的定时器。
+   *
+   * 只应该用「已经正式发布」的 release 调用 —— draft 的资产用公开 URL 下不到，会 404。
+   * payload 里的 assets 如果有两个 APK 就直接拿来用：一个外部请求都不用发，
+   * 也绕开了 atom 走 CDN 缓存、新版本迟迟不出现的延迟。
+   */
+  function wake(release) {
+    if (!release || typeof release !== 'object') return false;
+    const tag = String(release.tag_name || '').trim();
+    if (!/^v\d+\.\d+\.\d+$/.test(tag)) return false;
+    const assets = Array.isArray(release.assets) ? release.assets : [];
+    wakeHint = {
+      tag,
+      version: versionOf(tag),
+      notes: htmlToText(release.body || ''),
+      assets,
+      at: Date.now(),
+    };
+    wakeRound = 0;
+    log(`[update] webhook 触发 ${tag}（附件 ${assets.length} 个`
+      + (hasApks(assets, wakeHint.version) ? '，两个包都在' : '，还缺包，秒级重试') + '）');
+    // 正在 poll 也没关系：当前这轮收尾时会看到 wakeHint 并接着打
+    if (autoPoll) poll();
+    return true;
   }
 
   function status(channel, currentVersion) {
@@ -593,7 +708,14 @@ function createAppUpdater(options) {
     if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
   }
 
-  return { start, stop, poll, status, fileOf, progress, get manifest() { return manifest || loadManifest(); } };
+  return {
+    start, stop, poll, wake, status, fileOf, progress,
+    get manifest() { return manifest || loadManifest(); },
+    /** 快车道状态（webhook 拉起的那一版），给 /api/health 和测试看。 */
+    get wakeState() {
+      return wakeHint ? { tag: wakeHint.tag, version: wakeHint.version, round: wakeRound, at: wakeHint.at } : null;
+    },
+  };
 }
 
-module.exports = { createAppUpdater, compareVersion, fileName, parseAtom, probeRemote, fetchRange };
+module.exports = { createAppUpdater, compareVersion, fileName, hasApks, parseAtom, probeRemote, fetchRange };
