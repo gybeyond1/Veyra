@@ -170,10 +170,20 @@ async function sha256OfFile(file) {
  * 探测远端大小、以及是否支持 Range。
  * 用 `-r 0-0` 发一个只要 1 字节的请求：拿得到 206 + Content-Range 才算支持分段，
  * 只回 200 + Content-Length 的源（不少公共反代就这样）只能整包下。
+ *
+ * opts.limit / opts.offset：快车道用。资产还没传完时一轮要探 4 个源，
+ * 每个源光等超时就十几秒，5 秒的节奏会被拖成 40 秒。所以快车道只探 2 个源，
+ * 并且每轮从不同的源起头，轮着把 4 个源都试到。
  */
-async function probeRemote(url, proxy) {
-  for (const prefix of mirrors()) {
-    const args = ['-sS', '-L', '--connect-timeout', '15', '--max-time', '40',
+async function probeRemote(url, proxy, opts) {
+  const all = mirrors();
+  const limit = opts && opts.limit ? Math.min(opts.limit, all.length) : all.length;
+  const offset = (opts && opts.offset) || 0;
+  const list = [];
+  for (let i = 0; i < limit; i++) list.push(all[(offset + i) % all.length]);
+  const maxTime = limit < all.length ? '12' : '40';
+  for (const prefix of list) {
+    const args = ['-sS', '-L', '--connect-timeout', '8', '--max-time', maxTime,
       '-r', '0-0', '-D', '-', '-o', '/dev/null', '-A', UA];
     if (proxy) args.push('-x', proxy);
     args.push(prefix + url);
@@ -377,7 +387,7 @@ function createAppUpdater(options) {
    * 每轮结束统计进度，只要还有推进就继续，最多 MAX_ROUNDS 轮；
    * 不再「试一轮全失败就等 10 分钟」。
    */
-  async function fetchChannel(channel, version, tag, assets) {
+  async function fetchChannel(channel, version, tag, assets, quick) {
     const dir = channelDir(channel);
     const name = fileName(channel, version);
     const apk = path.join(dir, name);
@@ -400,7 +410,7 @@ function createAppUpdater(options) {
     const url = `https://github.com/${REPO}/releases/download/${tag}/${encodeURIComponent(assetName)}`;
     const proxy = getProxy() || '';
 
-    const remote = await probeRemote(url, proxy);
+    const remote = await probeRemote(url, proxy, quick);
     if (!remote || !remote.size) throw new Error('所有源都探测不到包大小');
     const total = remote.size;
     if (total > MAX_BYTES) throw new Error(`更新包过大：${total} 字节`);
@@ -552,7 +562,9 @@ function createAppUpdater(options) {
             continue;
           }
           try {
-            manifest.channels[channel] = await fetchChannel(channel, info.version, info.tag, info.assets);
+            manifest.channels[channel] = await fetchChannel(channel, info.version, info.tag, info.assets,
+              // 快车道：只探两个源，每轮换个起点，别让超时把 5 秒的节奏拖没
+              wakeHint ? { limit: 2, offset: wakeRound } : null);
           } catch (error) {
             log(`[update] ${channel} 拉取失败：${error.message}`);
             // 保留上一版记录，清掉不属于当前版本的条目
