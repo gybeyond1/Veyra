@@ -1020,6 +1020,38 @@ app.post('/api/devices/ack', auth, (req, res) => {
   } catch (e) { res.status(e.statusCode || 400).json({ error: e.message }); }
 });
 
+// 手机端「投到电视」：列同账号设备 + 下发一条 cast 指令
+// 指令里只放「哪部剧、第几集、第几秒」，播放地址仍由电视端自己解析 ——
+// 和下载指令一样，不把带签名的播放链接交给第三方设备。
+app.get('/api/devices', auth, (req, res) => {
+  res.json({ devices: deviceHub.list(req.user.id) });
+});
+app.post('/api/devices/cast', auth, (req, res) => {
+  const body = req.body || {};
+  const deviceId = String(body.deviceId || '').trim();
+  const seriesId = String(body.seriesId || '').trim();
+  const episode = Number(body.episode);
+  if (!deviceId) return res.status(400).json({ error: '请选择电视' });
+  if (!seriesId) return res.status(400).json({ error: '缺少剧集 id' });
+  if (!Number.isInteger(episode) || episode < 1 || episode > 999)
+    return res.status(400).json({ error: '集数不合法' });
+  const target = deviceHub.list(req.user.id).find(d => d.id === deviceId);
+  if (!target) return res.status(404).json({ error: '电视不在这个账号下，重新扫码登录' });
+  if (!target.online) return res.status(409).json({ error: '电视当前离线' });
+  try {
+    const command = deviceHub.createCommand(deviceId, {
+      source: String(body.source || 'hongguo') === 'huangguo' ? 'huangguo' : 'hongguo',
+      seriesId,
+      title: String(body.title || '').slice(0, 120),
+      cover: String(body.cover || '').slice(0, 500),
+      episode,
+      position: Math.max(0, Math.min(24 * 3600 * 1000, Number(body.position) || 0)),
+      duration: Math.max(0, Math.min(24 * 3600 * 1000, Number(body.duration) || 0)),
+    }, 'cast');
+    res.json({ ok: true, id: command.id, device: target.name });
+  } catch (e) { res.status(e.statusCode || 400).json({ error: e.message }); }
+});
+
 // 管理台侧（WebUI 管理员会话鉴权）
 app.get('/api/admin/devices', requireAdmin, (req, res) => {
   const userId = String(req.query.userId || '').trim();

@@ -59,7 +59,9 @@ var state = {
   update: null,         /* 检查更新查到的可更新版本 */
   focusKey: '',
   lastRailKey: 'nav:home',
-  lastContentKey: ''       /* 从侧栏按右回来时，回到刚才那张卡 */
+  lastContentKey: '',      /* 从侧栏按右回来时，回到刚才那张卡 */
+  memory: {},              /* 每个页面离开时的滚动位置与焦点：进详情再返回要回到原地 */
+  pendingRestore: null     /* 数据还没回来时先存着，渲染完再定位 */
 };
 
 var EP_PAGE = 20;
@@ -72,6 +74,9 @@ var updateLayer = document.getElementById('tv-update');
 var toastEl = document.getElementById('toast');
 var railAccount = document.getElementById('rail-account');
 var railAvatar = document.getElementById('rail-avatar');
+var themePanel = document.getElementById('theme');
+var themeGrid = document.getElementById('theme-grid');
+var railVeil = document.getElementById('rail-veil');
 
 function esc(value) {
   return String(value == null ? '' : value)
@@ -88,6 +93,65 @@ function toast(message, isError) {
   toastEl.style.color = isError ? '#ffb4a8' : '';
   clearTimeout(toastTimer);
   toastTimer = setTimeout(function () { toastEl.className = ''; }, 2400);
+}
+
+/* ---------------- 主题 ----------------
+   八套固定配色。首页背景不再用海报模糊，换主题只是换 body 上的一个属性，
+   CSS 变量跟着变，零图片、零滤镜 —— 遥控器连着按也不会掉帧。 */
+var THEMES = [
+  { key: 'clean',  name: '简洁白', color: '#f4f5f7' },
+  { key: 'pink',   name: '少女粉', color: '#ff6fa5' },
+  { key: 'dark',   name: '主题黑', color: '#0d1013' },
+  { key: 'red',    name: '高能红', color: '#ff4438' },
+  { key: 'yellow', name: '咸蛋黄', color: '#f2c14e' },
+  { key: 'green',  name: '早苗绿', color: '#5fd068' },
+  { key: 'blue',   name: '宝石蓝', color: '#3d8bfd' },
+  { key: 'purple', name: '罗兰紫', color: '#8c5cf6' }
+];
+var THEME_STORE = 'veyra.tv.theme';
+
+function themeExists(key) {
+  for (var i = 0; i < THEMES.length; i++) if (THEMES[i].key === key) return true;
+  return false;
+}
+function currentTheme() {
+  var saved = '';
+  try { saved = localStorage.getItem(THEME_STORE) || ''; } catch (error) { saved = ''; }
+  return themeExists(saved) ? saved : 'dark';
+}
+function applyTheme(key) {
+  var next = themeExists(key) ? key : 'dark';
+  document.body.setAttribute('data-tv-theme', next);
+  try { localStorage.setItem(THEME_STORE, next); } catch (error) { }
+  return next;
+}
+function renderThemeGrid() {
+  if (!themeGrid) return;
+  var active = currentTheme();
+  var html = '';
+  for (var i = 0; i < THEMES.length; i++) {
+    var t = THEMES[i];
+    html += '<button type="button" class="theme-swatch' + (t.key === active ? ' is-active' : '') + '"'
+      + ' data-theme-key="' + t.key + '" data-focusable data-key="theme:' + t.key + '">'
+      + '<span class="dot" style="background:' + t.color + '"></span>'
+      + '<span class="name">' + esc(t.name) + '</span>'
+      + '<span class="tick">' + (t.key === active ? '✓ 使用中' : '') + '</span>'
+      + '</button>';
+  }
+  themeGrid.innerHTML = html;
+}
+function openTheme() {
+  if (!themePanel) return;
+  renderThemeGrid();
+  themePanel.hidden = false;
+  state.focusKey = 'theme:' + currentTheme();
+  restoreFocus();
+}
+function closeTheme() {
+  if (!themePanel) return;
+  themePanel.hidden = true;
+  state.focusKey = 'acct:theme';
+  restoreFocus();
 }
 
 /* ---------------- 封面：走原生桥，避免直接命中防盗链 ---------------- */
@@ -125,7 +189,10 @@ function paintCovers(root) {
   }
 }
 
-/* ---------------- 模糊背景 ---------------- */
+/* ---------------- 背景 ----------------
+   只有详情页用海报模糊底；首页/搜索/我的走主题纯色。
+   以前每张卡被选中都换一次背景大图，电视盒子每按一下方向键就全屏重绘一次，
+   选中框的延迟感就是那里来的。 */
 var backdropSrc = '';
 function setBackdrop(src) {
   var img = document.getElementById('tv-bg-img');
@@ -133,28 +200,41 @@ function setBackdrop(src) {
   backdropSrc = src;
   img.src = src;
 }
+function applyBackdropMode() {
+  if (!document.body) return;
+  if (state.route === 'detail') document.body.setAttribute('data-backdrop', 'poster');
+  else document.body.removeAttribute('data-backdrop');
+}
 function syncBackdrop(el) {
-  if (!el) return;
+  if (state.route !== 'detail' || !el) return;
   var img = el.classList && el.classList.contains('card') ? el.querySelector('.art img') : null;
   if (img && img.src) setBackdrop(img.src);
 }
 function syncBackdropFromFocus() {
-  var focused = document.querySelector('.is-focused');
-  if (focused) { syncBackdrop(focused); if (backdropSrc) return; }
-  if (state.route === 'detail') {
-    var art = view.querySelector('.detail-art img');
-    if (art && art.src) setBackdrop(art.src);
-    return;
-  }
-  var first = view.querySelector('.grid .card .art img');
-  if (first && first.src) setBackdrop(first.src);
+  if (state.route !== 'detail') return;
+  var art = view.querySelector('.detail-art img');
+  if (art && art.src) { setBackdrop(art.src); return; }
+  var focused = document.querySelector('.card.is-focused');
+  if (focused) syncBackdrop(focused);
 }
 
 /* ---------------- 焦点 ---------------- */
 function inRail(el) { return !!(el && el.closest && el.closest('#rail')); }
 
+/* 侧栏平时在屏幕外，只有 rail-open 时才参与焦点导航 */
+function railOpen() { return document.body.classList.contains('rail-open'); }
+function openRail() {
+  if (railOpen()) return;
+  document.body.classList.add('rail-open');
+}
+function closeRail() {
+  if (!railOpen()) return;
+  document.body.classList.remove('rail-open');
+}
+
 /* 有浮层盖着时，焦点只在浮层里转，别跑到背后的卡片上 */
 function activeOverlay() {
+  if (themePanel && !themePanel.hidden) return themePanel;
   if (updateLayer && !updateLayer.hidden) return updateLayer;
   if (loginLayer && !loginLayer.hidden) return loginLayer;
   if (accountPanel && !accountPanel.hidden) return accountPanel;
@@ -168,6 +248,9 @@ function focusables() {
   for (var i = 0; i < nodes.length; i++) {
     var el = nodes[i];
     if (el.hidden || el.disabled) continue;
+    /* 收起的侧栏还占着布局尺寸，但视觉上在屏幕外：不排除的话
+       内容区按左会「选中」一个看不见的图标 */
+    if (!railOpen() && inRail(el)) continue;
     var box = el.getBoundingClientRect();
     if (box.width < 2 || box.height < 2) continue;
     out.push(el);
@@ -203,7 +286,10 @@ function restoreFocus() {
       if (all[i].dataset.key === state.focusKey) { target = all[i]; break; }
     }
   }
-  focusElement(target || all[0], false);
+  /* 侧栏收起后没有「首页图标」可以停：没有记录就落在第一张海报上，
+     别落在分类条 —— 分类条在标题下面，选中它会把页面往下带一截 */
+  if (!target) target = view.querySelector('.card') || all[0];
+  focusElement(target, false);
 }
 
 /* 侧栏和内容区是两套焦点：内容区里按左右只在内容里走，只在最左一列
@@ -216,14 +302,18 @@ function railKeyForRoute() {
   return 'nav:home';
 }
 
+/* 呼出侧栏：内容区走到最左一列还继续按左，侧栏从左边滑出来，
+   焦点直接落在当前页对应的图标上（首页/搜索/我的）。 */
 function enterRail(from) {
+  if (from && from.dataset && from.dataset.key && !inRail(from)) state.lastContentKey = from.dataset.key;
+  openRail();
   var target = document.querySelector('#rail [data-key="' + railKeyForRoute() + '"]');
   if (!target) target = document.querySelector('#rail [data-focusable]');
   if (!target) return;
-  if (from && from.dataset && from.dataset.key && !inRail(from)) state.lastContentKey = from.dataset.key;
   focusElement(target);
 }
 
+/* 收回侧栏：焦点回到刚才那张卡，页面位置不动 */
 function leaveRail() {
   var target = null;
   if (state.lastContentKey) target = document.querySelector('[data-key="' + state.lastContentKey + '"]');
@@ -231,10 +321,11 @@ function leaveRail() {
     var all = focusables();
     for (var i = 0; i < all.length; i++) if (!inRail(all[i])) { target = all[i]; break; }
   }
+  closeRail();
   if (target) focusElement(target);
 }
 
-/* 第一排的卡被选中时，把这一块的标题头（「继续观看」/「全部作品」）滚进画面。
+/* 第一排的卡被选中时，把这一块的标题头（「全部作品」）滚进画面。
    否则往下翻过之后按回来，标题头一直藏在屏幕上边。 */
 function revealSectionHead(el) {
   if (!el || !el.closest) return;
@@ -310,8 +401,8 @@ function move(direction) {
 
   var onRail = inRail(current);
   if (onRail) {
-    if (direction === 'right') { leaveRail(); return; }
-    if (direction === 'left') return;
+    /* 侧栏是临时呼出来的：按右回内容区，再按左也收回 */
+    if (direction === 'right' || direction === 'left') { leaveRail(); return; }
   }
 
   var from = current.getBoundingClientRect();
@@ -324,14 +415,13 @@ function move(direction) {
 
   if (direction === 'left') { enterRail(current); return; }
   if (direction === 'up') {
-    /* 上面还有没露出来的内容（标题头、上一排）就先往上滚，滚到顶再进侧栏 */
+    /* 上面还有没露出来的内容（标题头、上一排）就先往上滚一屏；
+       到顶就停住 —— 侧栏只由「最左边再按左」呼出，上键不再跳到侧栏 */
     if (stage.scrollTop > 1) {
       var step = Math.max(120, from.height + 60);
       stage.scrollTop = Math.max(0, stage.scrollTop - step);
       revealSectionHead(current);
-      return;
     }
-    enterRail(current);
   }
 }
 
@@ -367,10 +457,9 @@ function filterList() {
 }
 
 /* ---------------- 首页 ----------------
-   三块：继续观看（看过的）、分类条、全部作品瀑布流（原「剧场」的内容）。
-   没有「为你推荐」—— 那个区跟下面重复，还占掉首屏。 */
+   两块：分类条 + 全部作品瀑布流（原「剧场」的内容）。
+   「继续观看」已删 —— 「我的」里本来就有观看记录，首页留白给海报墙。 */
 function renderHome() {
-  var browsing = list(state.library && state.library.progress);
   var cats = categoryList();
   var active = state.feedId || cats[0][0];
   var chips = '<div class="chips">';
@@ -386,22 +475,19 @@ function renderHome() {
   else body = gridMarkup(feed.items, '这个分类下暂时没有内容');
 
   var html = '<h1 class="page-title">首页</h1>';
-  if (browsing.length) {
-    html += '<section class="section"><div class="section-head"><h2>继续观看</h2><span>' + browsing.length + ' 部</span></div>'
-      + gridMarkup(browsing.slice(0, 10), '还没有观看记录') + '</section>';
-  }
   html += '<section class="section" data-feed="1"><div class="section-head"><h2>全部作品</h2><span data-feed-count="1">'
     + (feed ? feed.items.length : 0) + ' 部</span></div>' + chips + body + '</section>';
   view.innerHTML = html;
   paintCovers(view);
   restoreFocus();
+  applyPendingRestore();
   syncBackdropFromFocus();
 }
 
 var feedToken = 0;
 /* focusChip=false：这是开机/切页触发的加载，焦点留在原处（侧栏图标）——
    以前不管谁调用都把焦点塞给分类条，分类条在首屏下方，浏览器为了露出它
-   会把页面往下滚 100 多像素，「首页」标题和「继续观看」标题头一进去就被顶没了。 */
+   会把页面往下滚 100 多像素，「首页」标题头一进去就被顶没了。 */
 function loadFeed(id, reset, focusChip) {
   var target = id || state.feedId || categoryList()[0][0];
   var switched = target !== state.feedId;
@@ -596,6 +682,7 @@ function renderSearch() {
     };
   }
   restoreFocus();
+  applyPendingRestore();
 }
 
 /* 搜索结果落地：电视端搜索一次要按半天遥控器，下次开机还留着上次那批结果 */
@@ -698,12 +785,15 @@ function renderLibrary() {
   paintCovers(view);
   syncBackdropFromFocus();
   restoreFocus();
+  applyPendingRestore();
 }
 
 function loadLibrary() {
   api('library').then(function (data) {
     state.library = data || { bookmarks: [], progress: [] };
-    if (state.route === 'library' || state.route === 'home') renderHomeOr();
+    /* 首页已经不放观看记录，library 数据只影响「我的」——
+       以前这里连首页一起重渲染，从详情返回会把整面海报墙重建一遍（闪一下） */
+    if (state.route === 'library') renderLibrary();
   }).catch(function () {
     state.library = { bookmarks: [], progress: [] };
   });
@@ -807,9 +897,29 @@ function clock(ms) {
   return (h > 0 ? h + ':' + mm : m) + ':' + ss;
 }
 
+/* 记住当前页看到哪儿、选中谁 —— 从详情返回时原样还原 */
+function rememberRoute() {
+  if (!state.route) return;
+  state.memory[state.route] = { scrollTop: stage.scrollTop, focusKey: state.focusKey };
+}
+/* 数据没回来时先挂起；渲染完成后由各 render 函数再调一次 */
+function applyPendingRestore() {
+  var pending = state.pendingRestore;
+  if (!pending) return;
+  var all = focusables();
+  var target = null;
+  for (var i = 0; i < all.length; i++) {
+    if (all[i].dataset.key === pending.focusKey) { target = all[i]; break; }
+  }
+  if (!target) return;                 /* 列表还没出来，等下一次渲染 */
+  state.pendingRestore = null;
+  focusElement(target, false);
+  stage.scrollTop = pending.scrollTop;
+}
+
 function openDetail(id) {
   if (id == null) return;
-  if (state.route !== 'detail') state.detailFrom = state.route;
+  if (state.route !== 'detail') { state.detailFrom = state.route; rememberRoute(); }
   state.route = 'detail';
   state.detail = null;
   state.detailProgress = null;
@@ -817,6 +927,7 @@ function openDetail(id) {
   state.epGroup = 0;
   state.focusKey = 'play';
   stage.scrollTop = 0;
+  applyBackdropMode();
   renderDetail();
   api('detail', { id: String(id) }).then(function (data) {
     if (state.route !== 'detail') return;
@@ -845,7 +956,7 @@ function openDetail(id) {
 }
 
 /* ---------------- 动作 ---------------- */
-function play(detail, episode, restart) {
+function play(detail, episode, restart, position) {
   if (!detail || !detail.id) return;
   var episodes = list(detail.episodes);
   var item = { id: detail.id, title: detail.title, cover: detail.cover };
@@ -857,9 +968,43 @@ function play(detail, episode, restart) {
     index: 0,
     group: '',
     episode: episode || 1,
-    restart: !!restart
+    restart: !!restart,
+    /* 投屏时手机已经播到第几秒，电视从同一位置接上；普通起播传 0 */
+    position: Math.max(0, Number(position) || 0)
   }).catch(function (error) { toast(error.message || '无法播放', true); });
 }
+
+/* 手机投屏：原生轮询拿到 cast 指令后调这里。
+   详情/选集/连播全部走上面 play()，不另起一套播放逻辑。 */
+window.hgTvCast = function (cmd) {
+  if (!cmd) return;
+  var id = String(cmd.seriesId || '');
+  var episode = Number(cmd.episode) || 1;
+  var position = Number(cmd.position) || 0;
+  if (!id) return;
+  closeRail();
+  if (themePanel) themePanel.hidden = true;
+  if (accountPanel) accountPanel.hidden = true;
+  state.detailFrom = state.route === 'detail' ? state.detailFrom : 'home';
+  state.route = 'detail';
+  state.detail = null;
+  state.detailProgress = null;
+  state.epGroup = Math.floor((episode - 1) / EP_PAGE);
+  state.focusKey = 'play';
+  stage.scrollTop = 0;
+  applyBackdropMode();
+  view.innerHTML = '<p class="empty">正在接收手机投屏…</p>';
+  api('detail', { id: id }).then(function (data) {
+    if (!data) throw new Error('没有取到剧集信息');
+    if (state.route !== 'detail') return;
+    state.detail = data;
+    renderDetail();
+    play(data, episode, false, position);
+  }).catch(function (error) {
+    toast('投屏失败：' + ((error && error.message) || '网络异常'), true);
+    go('home');
+  });
+};
 function toggleBookmark() {
   var data = state.detail;
   if (!data || !data.id) return;
@@ -879,25 +1024,33 @@ function setActiveNav(tab) {
   }
 }
 
-function go(tab) {
+/* restore=true：从详情返回，用离开时记下的滚动位置与焦点。
+   以前每次回首页都 scrollTop=0 + 焦点归位首页图标，翻了几十张海报再回来
+   等于白翻。 */
+function go(tab, restore) {
   if (tab === 'adult' || tab === 'category') tab = 'home';   /* 剧场已并进首页 */
-  stage.scrollTop = 0;
+  closeRail();
+  var mem = (restore && state.memory[tab]) ? state.memory[tab] : null;
+  state.pendingRestore = mem ? { scrollTop: mem.scrollTop || 0, focusKey: mem.focusKey || '' } : null;
+  if (!mem) stage.scrollTop = 0;
   if (tab === 'home') {
     state.route = 'home';
-    state.focusKey = 'nav:home';
+    state.focusKey = mem ? mem.focusKey : '';
     setActiveNav('home'); renderHome();
     if (!state.feed) loadFeed(state.feedId || categoryList()[0][0], true, false);
   } else if (tab === 'search') {
     state.route = 'search';
-    state.focusKey = 'search-box';
+    state.focusKey = mem ? mem.focusKey : 'search-box';
     setActiveNav('search'); renderSearch();
   } else if (tab === 'library') {
     state.route = 'library';
-    state.focusKey = 'tab:' + state.libraryTab;
+    state.focusKey = mem ? mem.focusKey : ('tab:' + state.libraryTab);
     setActiveNav('library'); renderLibrary();
     loadLibrary();
     if (state.libraryTab === 'nas') loadNas();
   }
+  applyBackdropMode();
+  applyPendingRestore();
 }
 
 function renderHomeOr() {
@@ -932,6 +1085,7 @@ window.veyraTvKey = function (code) {
 };
 
 window.hgBack = function () {
+  if (themePanel && !themePanel.hidden) { closeTheme(); return true; }
   if (updateLayer && !updateLayer.hidden) { closeUpdatePanel(); return true; }
   if (!loginLayer.hidden) { loginLayer.hidden = true; return true; }
   if (accountPanel && !accountPanel.hidden) { accountPanel.hidden = true; state.focusKey = 'nav:account'; restoreFocus(); return true; }
@@ -941,11 +1095,13 @@ window.hgBack = function () {
     try { window.AndroidHost.setTvCapture(true); } catch (error) { }
     return true;
   }
+  /* 侧栏是临时呼出的：开着的时候先按返回 = 收回去，不是退页面 */
+  if (railOpen()) { leaveRail(); return true; }
   if (state.route === 'detail') {
     var back = state.detailFrom || 'home';
     state.route = back;
     state.focusKey = '';
-    go(back === 'search' ? 'search' : back === 'library' ? 'library' : back === 'category' ? 'adult' : 'home');
+    go(back === 'search' ? 'search' : back === 'library' ? 'library' : back === 'category' ? 'adult' : 'home', true);
     return true;
   }
   if (state.route !== 'home') { go('home'); return true; }
@@ -1020,6 +1176,19 @@ document.addEventListener('click', function (event) {
   if (episode) { play(state.detail, Number(episode.dataset.episode)); return; }
 
   if (target.closest('[data-account]')) { openAccount(); return; }
+  if (target.closest('#account-theme')) { openTheme(); return; }
+  if (target.closest('#theme-close')) { closeTheme(); return; }
+  var swatch = target.closest('[data-theme-key]');
+  if (swatch) {
+    var picked = applyTheme(swatch.dataset.themeKey);
+    renderThemeGrid();
+    state.focusKey = 'theme:' + picked;
+    restoreFocus();
+    for (var ti = 0; ti < THEMES.length; ti++) {
+      if (THEMES[ti].key === picked) { toast('已切换：' + THEMES[ti].name); break; }
+    }
+    return;
+  }
   if (target.closest('#account-close')) { closeAccount(); return; }
   if (target.closest('#account-mode')) { switchMode(); return; }
   if (target.closest('#account-logout')) { logout(); return; }
@@ -1311,7 +1480,7 @@ window.veyraRelayFill = function (text) {
    原生的 onResume 会调这个（MainActivity 里一直有，但电视端页面没实现，
    等于什么都没做）。从播放器退回来、或切后台再回来时，必须重新取一遍：
    · 详情页的「继续播放」—— 否则看完三集回来，按钮还停在进来之前那一集
-   · 首页「继续观看」/「我的」—— 否则列表是上次进页面时的旧数据 */
+   · 「我的」—— 否则收藏/观看记录是上次进页面时的旧数据 */
 window.hgResume = function () {
   if (state.route === 'detail' && state.detail) {
     var id = String(state.detail.id);
@@ -1334,6 +1503,9 @@ window.hgResume = function () {
 /* ---------------- 启动 ---------------- */
 function boot() {
   view.innerHTML = '<p class="empty">正在启动…</p>';
+  /* 主题必须在首屏渲染前定下来，否则会先闪一下默认配色 */
+  applyTheme(currentTheme());
+  applyBackdropMode();
   try { window.AndroidHost.setTvCapture(true); } catch (error) { }
   if (window.__tvApplyScale) window.__tvApplyScale();
   restoreSearch();

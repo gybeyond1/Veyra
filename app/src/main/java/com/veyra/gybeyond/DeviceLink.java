@@ -66,7 +66,8 @@ final class DeviceLink {
                 .put("name", displayName())
                 .put("model", Build.MODEL == null ? "" : Build.MODEL)
                 .put("brand", Build.MANUFACTURER == null ? "" : Build.MANUFACTURER)
-                .put("platform", "android")
+                // 电视端单独标出来：手机投屏时只列 tv，不会把自己也列进去
+                .put("platform", DeviceProfile.isTv(context) ? "tv" : "android")
                 .put("android", Build.VERSION.RELEASE == null ? "" : Build.VERSION.RELEASE)
                 .put("appVersion", appVersion());
         return account.postJson("api/devices/register", body);

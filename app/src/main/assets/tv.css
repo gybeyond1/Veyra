@@ -13,6 +13,7 @@
 
 :root{
   --bg:#0d1013;
+  --bg-2:#161c23;
   --panel:#181c21;
   --panel-2:#232a32;
   --text:#ece7db;
@@ -20,6 +21,35 @@
   --accent:#c89b3c;
   --accent-ink:#231a06;
   --focus:#ffd277;
+  /* 首页底色用的光晕；浅色主题会把它压得很淡 */
+  --glow:rgba(200,155,60,.26);
+  --rail-bg:rgba(255,255,255,.06);
+  --rail-ink:#b9c1ca;
+  --chip-bg:rgba(255,255,255,.08);
+  --chip-ink:#c2c9d2;
+  --scrim:rgba(8,10,13,.62);
+}
+
+/* ---------------- 主题 ----------------
+   首页不再拿海报做模糊底（每按一次方向键换一张大图 + 高斯模糊，电视上就是
+   一次全屏重绘，选中框自然卡）。改成固定的主题底色，换主题只是换几个变量，
+   零图片、零滤镜。详情页仍然保留海报模糊背景（只换一次，不影响翻页）。 */
+body[data-tv-theme="pink"]{--bg:#191016;--bg-2:#2a1822;--accent:#ff6fa5;--accent-ink:#2a0716;--focus:#ffa9c7;--glow:rgba(255,111,165,.28)}
+body[data-tv-theme="red"]{--bg:#160f0f;--bg-2:#291616;--accent:#ff4438;--accent-ink:#2a0703;--focus:#ff8b82;--glow:rgba(255,68,56,.26)}
+body[data-tv-theme="yellow"]{--bg:#151208;--bg-2:#241f10;--accent:#f2c14e;--accent-ink:#241a03;--focus:#ffdf8a;--glow:rgba(242,193,78,.26)}
+body[data-tv-theme="green"]{--bg:#0b1410;--bg-2:#13241b;--accent:#5fd068;--accent-ink:#06210b;--focus:#a2ecaa;--glow:rgba(95,208,104,.24)}
+body[data-tv-theme="blue"]{--bg:#0a1019;--bg-2:#122036;--accent:#3d8bfd;--accent-ink:#04162e;--focus:#8dbcfd;--glow:rgba(61,139,253,.28)}
+body[data-tv-theme="purple"]{--bg:#100c1a;--bg-2:#1d1630;--accent:#8c5cf6;--accent-ink:#150733;--focus:#bda1fb;--glow:rgba(140,92,246,.28)}
+
+/* 简洁白：唯一一套浅色。文字/描边/卡片底色全部跟着变量走 */
+body[data-tv-theme="clean"]{
+  --bg:#f4f5f7;--bg-2:#ffffff;--panel:#e7eaef;--panel-2:#dfe3e9;
+  --text:#14181d;--muted:#5f6a76;
+  --accent:#1f6feb;--accent-ink:#ffffff;--focus:#1f6feb;
+  --glow:rgba(31,111,235,.12);
+  --rail-bg:rgba(20,24,29,.07);--rail-ink:#3c4653;
+  --chip-bg:rgba(20,24,29,.07);--chip-ink:#3c4653;
+  --scrim:rgba(244,245,247,.78);
 }
 
 [hidden]{display:none !important}
@@ -42,61 +72,79 @@ img{display:block;border:0}
 
 #app{position:relative;width:100%;height:100%;overflow:hidden}
 
-/* ---------------- 模糊背景 ----------------
-   当前聚焦/正在看的那部剧的封面，放大 1.1 倍 + 高斯模糊铺满整屏，盖一层暗色渐变
-   保证文字可读。纯静态元素（只在切换作品时换 src），不会每帧重算。
-   filter:blur 是 Chrome 18 就有的属性，电视老内核也能吃。 */
+/* ---------------- 背景 ----------------
+   两种模式，由 body[data-backdrop] 切换：
+     theme  —— 首页/搜索/我的：主题渐变，没有图片、没有模糊；
+     poster —— 详情页：当前这部剧的封面放大 + 高斯模糊（只在进详情时换一次）。
+   以前首页也用海报模糊，每按一下方向键就换一张大图重做全屏模糊，
+   电视盒子上就是一次全屏重绘 —— 选中框卡顿的主因。 */
 #tv-bg{
   position:absolute;left:0;right:0;top:0;bottom:0;z-index:0;
-  overflow:hidden;background:#0d1013;
+  overflow:hidden;
+  background:
+    radial-gradient(120% 100% at 10% 0%,var(--glow) 0%,rgba(0,0,0,0) 62%),
+    linear-gradient(165deg,var(--bg-2) 0%,var(--bg) 56%,var(--bg) 100%);
 }
 #tv-bg img{
   position:absolute;left:-4%;top:-4%;width:108%;height:108%;
-  object-fit:cover;opacity:.96;
-  /* 模糊从 46px 降到 20px：46px 只剩一片糊墙，看不出是海报；20px 还能认出画面 */
-  -webkit-filter:blur(20px) saturate(1.18);
-  filter:blur(20px) saturate(1.18);
+  object-fit:cover;opacity:0;
+  -webkit-filter:blur(22px) saturate(1.15);
+  filter:blur(22px) saturate(1.15);
   transform:translateZ(0);
-  transition:opacity .28s linear;
+  transition:opacity .25s linear;
 }
 #tv-bg img.is-dim{opacity:0}
-/* 遮罩只压左边（侧栏和标题压在那边）和底部，中间露出来 */
+body[data-backdrop="poster"] #tv-bg{background:#0d1013}
+body[data-backdrop="poster"] #tv-bg img{opacity:.96}
+/* 遮罩只压左边（标题压在那边）和底部，中间露出来 */
 #tv-bg .veil{
   position:absolute;left:0;right:0;top:0;bottom:0;
+  opacity:0;transition:opacity .25s linear;
   background:
     linear-gradient(90deg,rgba(8,10,13,.74) 0%,rgba(8,10,13,.40) 34%,rgba(8,10,13,.20) 100%),
     linear-gradient(180deg,rgba(8,10,13,.26) 0%,rgba(8,10,13,0) 34%,rgba(8,10,13,.58) 100%);
 }
+body[data-backdrop="poster"] #tv-bg .veil{opacity:1}
 
-/* ---------------- 左侧图标导航 ----------------
-   只留三个图标，宽度收到「放得下图标」的程度（5.2rem）：左侧整条不再占版面，
-   内容区从 12rem 一路挪到 7.8rem。
-   不做整条深色底：背景已经铺满整屏，rail 只是浮在上面的一列按钮。 */
+/* 侧栏呼出时压住左边一条，避免图标压在海报上看不清 */
+#rail-veil{
+  position:absolute;left:0;top:0;bottom:0;width:20rem;z-index:4;
+  pointer-events:none;opacity:0;transition:opacity .18s linear;
+  background:linear-gradient(90deg,var(--scrim) 0%,rgba(0,0,0,0) 100%);
+}
+body.rail-open #rail-veil{opacity:1}
+
+/* ---------------- 左侧图标导航（默认收起） ----------------
+   内容页占满整屏；侧栏平时整个滑出屏幕外，只有遥控器在最左一列继续按左
+   才把它拉出来。拉出来时焦点直接落到当前页的图标上，按右/返回收回。 */
 #rail{
   position:absolute;left:1.5rem;top:4.4rem;bottom:2.6rem;width:5.2rem;z-index:5;
   display:flex;flex-direction:column;align-items:center;
+  transform:translateX(-140%);opacity:0;pointer-events:none;
+  transition:transform .18s ease-out,opacity .18s linear;
 }
+body.rail-open #rail{transform:translateX(0);opacity:1;pointer-events:auto}
 .rail-item{
   width:5.2rem;height:5.2rem;border-radius:1.5rem;
   margin-bottom:1.2rem;
   display:flex;align-items:center;justify-content:center;
-  color:#b9c1ca;background:rgba(255,255,255,.05);
+  color:var(--rail-ink);background:var(--rail-bg);
   transition:background .12s linear,color .12s linear;
 }
 .rail-item svg{width:2.8rem;height:2.8rem;fill:currentColor}
-.rail-item.is-active{color:#fff;background:rgba(255,255,255,.16)}
+.rail-item.is-active{color:var(--text);background:var(--chip-bg)}
 .rail-item.is-focused{color:var(--accent-ink);background:var(--accent)}
 
 /* 左下角账号：只放头像，点开账号面板 */
 .rail-account{
   margin-top:auto;width:5.2rem;height:5.2rem;border-radius:50%;
   display:flex;align-items:center;justify-content:center;
-  background:rgba(255,255,255,.08);
+  background:var(--rail-bg);
   overflow:hidden;
 }
 .rail-account .avatar{
   display:block;width:100%;height:100%;line-height:5.2rem;
-  text-align:center;font-size:2.2rem;font-weight:700;color:#fff;
+  text-align:center;font-size:2.2rem;font-weight:700;color:var(--text);
   white-space:nowrap;overflow:hidden;
 }
 /* 手机端设置的头像：铺满整个圆 */
@@ -104,11 +152,12 @@ img{display:block;border:0}
 .rail-account.is-focused{background:var(--accent);outline:none;box-shadow:0 0 0 .3rem var(--focus)}
 .rail-account.is-focused .avatar{color:var(--accent-ink)}
 
-/* ---------------- 主区域 ---------------- */
+/* ---------------- 主区域 ----------------
+   侧栏收起后内容铺满整屏，只留 4.6rem 的左边距给标题呼吸。 */
 #stage{
-  position:absolute;left:7.8rem;right:0;top:0;bottom:0;z-index:2;
+  position:absolute;left:0;right:0;top:0;bottom:0;z-index:2;
   overflow-y:auto;overflow-x:hidden;
-  padding:4.2rem 4.4rem 8rem 1.2rem;
+  padding:4.2rem 5.2rem 8rem 4.6rem;
   scrollbar-width:none;
 }
 #stage::-webkit-scrollbar{display:none}
@@ -170,7 +219,6 @@ img{display:block;border:0}
    套在圆角海报/胶囊按钮外面就是「傻大粗的一个方框」。 */
 .card.is-focused .art{
   box-shadow:0 0 0 .35rem var(--focus);
-  transform:scale(1.03);
 }
 
 /* ---------------- 分类条 ---------------- */
@@ -180,13 +228,13 @@ img{display:block;border:0}
   height:5rem;line-height:5rem;
   padding:0 2.4rem;margin:0 1.2rem 1.2rem 0;
   border-radius:2.5rem;
-  background:rgba(255,255,255,.08);color:#c2c9d2;
+  background:var(--chip-bg);color:var(--chip-ink);
   font-size:2rem;
   transition:background .12s linear,color .12s linear;
 }
 .chip.is-active{background:var(--accent);color:var(--accent-ink);font-weight:700}
 /* 胶囊外框也用 box-shadow：跟随圆角，不再是方形描边 */
-.chip.is-focused{box-shadow:0 0 0 .3rem rgba(8,10,13,.92),0 0 0 .7rem var(--focus);color:#fff}
+.chip.is-focused{box-shadow:0 0 0 .3rem rgba(8,10,13,.92),0 0 0 .7rem var(--focus);color:var(--text)}
 .chip.is-active.is-focused{color:var(--accent-ink)}
 
 /* ---------------- 详情 ---------------- */
@@ -207,7 +255,7 @@ img{display:block;border:0}
 .detail h1{font-size:4.2rem;line-height:1.2;margin:0 0 1.2rem}
 .detail .meta{font-size:2rem;color:var(--muted);margin:0 0 2rem}
 .detail .desc{
-  font-size:1.9rem;line-height:1.75;color:#c6ccd4;
+  font-size:1.9rem;line-height:1.75;color:var(--chip-ink);
   margin:0 0 2.8rem;max-width:96rem;
   display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;
 }
@@ -217,11 +265,11 @@ img{display:block;border:0}
   height:6rem;line-height:6rem;
   padding:0 3.2rem;margin-right:1.4rem;
   border-radius:1rem;
-  background:rgba(255,255,255,.12);font-size:2.1rem;color:var(--text);
+  background:var(--chip-bg);font-size:2.1rem;color:var(--text);
   vertical-align:middle;
 }
 .btn.primary{background:var(--accent);color:var(--accent-ink);font-weight:700}
-.btn.ghost{background:transparent;border:1px solid #3a434e;color:var(--muted)}
+.btn.ghost{background:transparent;border:1px solid var(--panel-2);color:var(--muted)}
 .btn.is-focused{box-shadow:0 0 0 .4rem rgba(8,10,13,.92),0 0 0 .8rem var(--focus)}
 /* 重头播放：圆形图标按钮，跟「继续播放」并排 */
 .btn.icon-only{
@@ -246,7 +294,7 @@ img{display:block;border:0}
 }
 .eps button{
   height:5.6rem;line-height:5.6rem;
-  border-radius:.8rem;background:rgba(255,255,255,.09);color:var(--text);
+  border-radius:.8rem;background:var(--chip-bg);color:var(--text);
   font-size:2rem;text-align:center;white-space:nowrap;
 }
 .eps button.is-focused{
@@ -261,7 +309,7 @@ img{display:block;border:0}
 .search-box{
   display:block;position:relative;
   height:6.8rem;
-  background:rgba(255,255,255,.10);border-radius:1rem;
+  background:var(--chip-bg);border-radius:1rem;
   padding:0 2.4rem;
 }
 .search-box input{
@@ -380,7 +428,7 @@ img{display:block;border:0}
 .resume-line{
   display:inline-block;
   font-size:1.8rem;color:var(--accent);
-  background:rgba(200,155,60,.14);
+  background:var(--glow);
   border-radius:.6rem;padding:.4rem 1rem;
   margin:0 0 1.4rem;
 }
@@ -388,3 +436,45 @@ img{display:block;border:0}
 .card.is-dim .art img{opacity:.42}
 .card.is-dim .badge{background:rgba(0,0,0,.55);color:#cfd5dc}
 .nas-panel .empty .tip{font-size:1.8rem;color:#77808a}
+
+/* ---------------- 主题设置 ----------------
+   左下角账号 → 主题设置。八个固定配色，只换 CSS 变量，
+   不触发任何图片加载与模糊重算，遥控器怎么按都不会卡。 */
+#theme{
+  position:absolute;left:0;right:0;top:0;bottom:0;z-index:29;
+  background:rgba(6,8,10,.94);
+  display:flex;align-items:center;justify-content:center;
+}
+.theme-box{
+  width:92rem;padding:3.4rem 4rem 3rem;
+  background:var(--panel);border-radius:1.4rem;
+}
+.theme-box h1{font-size:3.2rem;margin:0 0 .8rem}
+.theme-box .theme-sub{font-size:1.8rem;color:var(--muted);margin:0 0 2.4rem;line-height:1.5}
+.theme-grid{
+  display:grid;grid-template-columns:repeat(4,1fr);
+  grid-column-gap:1.4rem;grid-row-gap:1.4rem;
+}
+.theme-swatch{
+  display:block;width:100%;text-align:left;
+  padding:1.2rem;border-radius:1rem;
+  background:var(--chip-bg);
+  transition:box-shadow .12s linear;
+}
+.theme-swatch .dot{
+  display:block;height:5.4rem;border-radius:.7rem;
+  border:1px solid rgba(128,128,128,.35);
+}
+.theme-swatch .name{
+  display:block;margin-top:1rem;
+  font-size:1.9rem;color:var(--text);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.theme-swatch .tick{
+  display:block;margin-top:.3rem;height:1.7rem;
+  font-size:1.6rem;color:var(--accent);font-weight:700;
+}
+.theme-swatch.is-focused{box-shadow:0 0 0 .35rem var(--focus)}
+.theme-swatch.is-active{box-shadow:inset 0 0 0 .15rem var(--accent)}
+.theme-actions{margin-top:2.6rem;text-align:right}
+.theme-actions .btn{margin-right:0;min-width:16rem;text-align:center}

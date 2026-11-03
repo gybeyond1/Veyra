@@ -32,6 +32,7 @@
 <div id="app">
   <!-- 背景层：当前选中作品的海报做模糊底，替代原来那片纯黑 -->
   <div id="tv-bg" aria-hidden="true"><img id="tv-bg-img" alt=""><span class="veil"></span></div>
+  <div id="rail-veil" aria-hidden="true"></div>
 
   <nav id="rail">
     <button class="rail-item is-active" type="button" data-nav="home" data-key="nav:home" data-focusable aria-label="首页" title="首页">
@@ -67,9 +68,21 @@
       <p class="account-version" id="account-version">版本 —</p>
       <div class="account-actions">
         <button id="account-mode" class="btn" type="button" data-focusable data-key="acct:mode">进入私密模式</button>
+        <button id="account-theme" class="btn" type="button" data-focusable data-key="acct:theme">主题设置</button>
         <button id="account-logout" class="btn" type="button" data-focusable data-key="acct:logout">退出登录</button>
         <button id="account-update" class="btn ghost" type="button" data-focusable data-key="acct:update">检查更新</button>
         <button id="account-close" class="btn ghost" type="button" data-focusable data-key="acct:close">关闭</button>
+      </div>
+    </section>
+  </div>
+
+  <div id="theme" hidden>
+    <section class="theme-box">
+      <h1>主题颜色</h1>
+      <p class="theme-sub">固定底色，不跟着首页海报换图，遥控器怎么按都不卡</p>
+      <div class="theme-grid" id="theme-grid"></div>
+      <div class="theme-actions">
+        <button id="theme-close" class="btn ghost" type="button" data-focusable data-key="theme:close">关闭</button>
       </div>
     </section>
   </div>

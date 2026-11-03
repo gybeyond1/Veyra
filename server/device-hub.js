@@ -116,15 +116,21 @@ function createDeviceHub(options) {
     return true;
   }
 
-  function createCommand(deviceId, payload) {
+  function createCommand(deviceId, payload, type) {
     const device = state.devices[deviceId];
     if (!device) { const e = new Error('设备不在线或未注册'); e.statusCode = 404; throw e; }
+    const kind = type === 'cast' ? 'cast' : 'download';
+    // 投屏是「当前状态」而不是任务：连着点两部剧，只该播最后点的那部，
+    // 所以新的 cast 把旧的未领取 cast 直接作废，别在电视上排队播一遍。
+    if (kind === 'cast') {
+      state.commands = state.commands.filter(c => !(c.deviceId === deviceId && c.type === 'cast' && c.status === 'pending'));
+    }
     const pending = state.commands.filter(c => c.deviceId === deviceId && c.status === 'pending').length;
-    if (pending >= MAX_PENDING_PER_DEVICE) { const e = new Error('该设备待领取的下载指令过多，请稍后'); e.statusCode = 429; throw e; }
+    if (pending >= MAX_PENDING_PER_DEVICE) { const e = new Error('该设备待领取的指令过多，请稍后'); e.statusCode = 429; throw e; }
     const command = {
       id: crypto.randomBytes(8).toString('hex'),
       deviceId, userId: device.userId, username: device.username,
-      type: 'download', status: 'pending',
+      type: kind, status: 'pending',
       payload, createdAt: Date.now(), updatedAt: Date.now(), deliveredAt: 0, error: '',
     };
     state.commands.push(command);

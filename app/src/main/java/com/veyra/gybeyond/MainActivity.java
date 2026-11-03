@@ -597,7 +597,9 @@ public final class MainActivity extends Activity {
         @Override public void run() {
             if (!deviceLoopRunning) return;
             pollDeviceCommands();
-            if (deviceLoopRunning) deviceHandler.postDelayed(this, 40_000);
+            // 投屏要求「按下去几秒内电视就有反应」，40 秒一轮回显然不行；
+            // 电视常年插电、只在前台轮询，5 秒一次可以接受。手机维持 40 秒（只领下载指令）。
+            if (deviceLoopRunning) deviceHandler.postDelayed(this, DeviceProfile.isTv(MainActivity.this) ? 5_000 : 40_000);
         }
     };
 
@@ -616,6 +618,11 @@ public final class MainActivity extends Activity {
                     JSONObject command = commands.optJSONObject(i);
                     if (command == null) continue;
                     String id = command.optString("id");
+                    String type = command.optString("type", "download");
+                    if ("cast".equals(type)) {
+                        handleCastCommand(id, command.optJSONObject("payload"), link);
+                        continue;
+                    }
                     try {
                         JSONObject task = startPushedDownload(command.optJSONObject("payload"));
                         link.ack(id, true, "");
@@ -634,6 +641,25 @@ public final class MainActivity extends Activity {
                 Log.d(TAG, "设备心跳稍后重试", error);
             }
         });
+    }
+
+    /**
+     * 手机「投到电视」：只把剧 id / 集数 / 进度交给页面，
+     * 详情、播放地址、预取、连播全部复用电视端已有的播放链路（open-player 同一套 payload）。
+     */
+    private void handleCastCommand(String commandId, JSONObject payload, DeviceLink link) {
+        if (payload == null) { link.ack(commandId, false, "投屏内容为空"); return; }
+        if (!DeviceProfile.isTv(this)) { link.ack(commandId, false, "这台设备不是电视"); return; }
+        String seriesId = payload.optString("seriesId").trim();
+        int episode = payload.optInt("episode", 0);
+        if (seriesId.isEmpty() || episode < 1) { link.ack(commandId, false, "投屏内容不完整"); return; }
+        String script = "window.hgTvCast && window.hgTvCast(" + payload.toString() + ")";
+        runOnUiThread(() -> {
+            if (isDestroyed() || webView == null) return;
+            webView.evaluateJavascript(script, null);
+        });
+        link.ack(commandId, true, "");
+        toast("手机投屏：" + payload.optString("title", "当前剧集") + " 第 " + episode + " 集");
     }
 
     /** 按指令里的剧集号在本机取流，再交给本地 DownloadManager（合并逻辑与手动下载一致）。 */

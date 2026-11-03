@@ -52,8 +52,11 @@ import androidx.media3.ui.AspectRatioFrameLayout;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.Set;
 import java.util.concurrent.Future;
 import android.view.TextureView;
 import java.util.Map;
@@ -68,7 +71,11 @@ public final class PlayerActivity extends Activity {
     private final Map<String, JSONObject> episodeCache = new LinkedHashMap<String, JSONObject>() {
         @Override protected boolean removeEldestEntry(Map.Entry<String, JSONObject> eldest) { return size() > 32; }
     };
-    private final ExecutorService prefetchWorker = Executors.newSingleThreadExecutor();
+    /* 预取/预热各用独立线程池：单线程时只要有一集取流卡住（接口超时 20s），
+       后面所有预取都排在它后面，表现就是「这几集怎么切都转圈」 */
+    private final ExecutorService prefetchWorker = Executors.newFixedThreadPool(2);
+    private final ExecutorService warmWorker = Executors.newFixedThreadPool(2);
+    private final Set<String> warming = Collections.synchronizedSet(new HashSet<String>());
     private Future<?> sourceTask;
     private Future<?> sequelTask;
     private final Map<String, JSONArray> sequelCache = new HashMap<>();
@@ -89,9 +96,14 @@ public final class PlayerActivity extends Activity {
     private String standbyKey;
     private String standbySource;
     private String failedStandbyKey;
+    private long failedStandbyAt;
+    private long standbyPreparedAt;
     private boolean standbyFirstFrame;
     /** 「从头播放」：只在本次起播的第一集生效，用来跳过 resumePosition */
     private boolean restartPending;
+    /** 手机投屏带过来的起播位置：只在第一集生效，之后照常按本地进度续播 */
+    private boolean startPositionPending;
+    private long startPosition;
     private PlayerView activeView;
     private PlayerView standbyView;
     private final Map<String, Bitmap> posterCache = new HashMap<>();
@@ -122,6 +134,7 @@ public final class PlayerActivity extends Activity {
     private ImageButton volumeButton;
     private ImageButton fullscreenButton;
     private ImageButton bookmarkButton;
+    private ImageButton castButton;
     private LinearLayout titleBar;
     private LinearLayout controls;
     private FrameLayout miniProgress;
@@ -283,6 +296,8 @@ public final class PlayerActivity extends Activity {
             currentId = currentItem.optString("id");
             currentEpisode = payload.optInt("episode", 1);
             restartPending = payload.optBoolean("restart", false);
+            startPosition = Math.max(0, payload.optLong("position", 0));
+            startPositionPending = startPosition > 0;
         } catch (Exception error) { finish(); return; }
 
         buildUi();
@@ -328,6 +343,7 @@ public final class PlayerActivity extends Activity {
                 /* 首帧一到就先问一次预取：电视端看短剧基本不会等满 5 秒缓冲，
                    只在 tick 里碰运气的话常常整集都没预取到下一集。 */
                 maybePrepareNext();
+                scheduleWarmNeighbors();
                 Log.d("HuangGuoPlayback", "first-frame " + cacheKey(currentId, currentEpisode)
                         + " after " + (SystemClock.elapsedRealtime() - switchStartedAt) + "ms");
             }
@@ -344,6 +360,7 @@ public final class PlayerActivity extends Activity {
             @Override public void onPlayerError(PlaybackException error) {
                 if (engine == standbyPlayer) {
                     failedStandbyKey = standbyKey;
+                    failedStandbyAt = SystemClock.elapsedRealtime();
                     releaseStandby();
                     Log.w("HuangGuoPlayback", "Next episode preparation failed", error);
                     return;
@@ -637,6 +654,10 @@ public final class PlayerActivity extends Activity {
             @Override public void onStopTrackingTouch(SeekBar bar) { revealControls(); }
         });
         buttons.addView(volumeSeek, new LinearLayout.LayoutParams(dp(68), dp(38)));
+        castButton = icon(R.drawable.player_cast, "投到电视");
+        castButton.setBackgroundColor(Color.TRANSPARENT);
+        castButton.setOnClickListener(v -> { showCastDevices(); revealControls(); });
+        buttons.addView(castButton, new LinearLayout.LayoutParams(dp(36), dp(38)));
         fullscreenButton = icon(R.drawable.player_fullscreen, "全屏");
         fullscreenButton.setBackgroundColor(Color.TRANSPARENT);
         fullscreenButton.setOnClickListener(v -> setFullscreenMode(!fullscreenMode));
@@ -1117,6 +1138,7 @@ public final class PlayerActivity extends Activity {
     private long resumePosition(String id, int episode) {
         // 详情页按了「从头播放」：这一集忽略历史进度，播完这集之后照旧续播
         if (restartPending) { restartPending = false; return 0; }
+        if (startPositionPending) { startPositionPending = false; return startPosition; }
         JSONObject progress = store.getProgress(id, episode);
         if (progress == null || progress.optBoolean("completed")) return 0;
         long position = progress.optLong("position");
@@ -1136,6 +1158,15 @@ public final class PlayerActivity extends Activity {
         if (sourceTask != null) sourceTask.cancel(true);
         stopSeekPreview();
         boolean reuse = key.equals(standbyKey) && standbyPlayer != null && standbyPlayer.getPlayerError() == null;
+        /* 预取到的播放地址是有时效的。停了很久再切过去，standby 里的地址可能已经过期，
+           prepare 直接失败 —— 表现就是「这一集一直转圈」。超过 2 分半就丢掉重取。 */
+        if (reuse && standbyPreparedAt > 0 && SystemClock.elapsedRealtime() - standbyPreparedAt > 150_000) {
+            synchronized (episodeCache) { episodeCache.remove(key); }
+            releaseStandby();
+            reuse = false;
+            Log.d("HuangGuoPlayback", "standby stale, refetch " + key);
+        }
+        Log.d("HuangGuoPlayback", "open " + key + " standby=" + key.equals(standbyKey) + " reuse=" + reuse);
         float volume = player.getVolume();
         player.pause();
         currentSource = null;
@@ -1223,6 +1254,56 @@ public final class PlayerActivity extends Activity {
         });
     }
 
+    /**
+     * 取流预热：把当前集前后几集的播放地址先解析好放进 episodeCache。
+     *
+     * 切集慢的一大半不是解码，是切过去才开始调 episode 接口解析地址（一次几百 ms 到几秒，
+     * 还要签名/风控）。预取播放器只提前准备「下一集」，往回切、跳两集都赶不上，
+     * 所以单独预热一圈 —— 只解析地址，不建播放器、不占解码器，几乎不吃带宽。
+     */
+    private int warmToken;
+    private void scheduleWarmNeighbors() {
+        final String id = currentId;
+        final int episode = currentEpisode;
+        if (id == null || id.isEmpty()) return;
+        final int token = ++warmToken;
+        handler.postDelayed(() -> {
+            if (token != warmToken || destroyed || isFinishing()) return;
+            warmEpisode(id, episode + 1);
+            warmEpisode(id, episode + 2);
+            warmEpisode(id, episode - 1);
+        }, 1_500);
+    }
+
+    private boolean hasEpisode(int number) {
+        for (int i = 0; i < episodes.length(); i++) {
+            if (episodes.optJSONObject(i).optInt("number") == number) return true;
+        }
+        return false;
+    }
+
+    private void warmEpisode(String id, int number) {
+        if (number < 1 || !hasEpisode(number)) return;
+        final String key = cacheKey(id, number);
+        synchronized (episodeCache) {
+            if (episodeCache.containsKey(key)) return;
+        }
+        if (!warming.add(key)) return;
+        warmWorker.execute(() -> {
+            try {
+                JSONObject data = repository.episode(id, number);
+                if (data != null) {
+                    synchronized (episodeCache) { episodeCache.put(key, data); }
+                    Log.d("HuangGuoPlayback", "warm " + key + " ok");
+                }
+            } catch (Exception error) {
+                Log.d("HuangGuoPlayback", "warm " + key + " failed: " + error.getMessage());
+            } finally {
+                warming.remove(key);
+            }
+        });
+    }
+
     private void maybePrepareNext() {
         if (!foreground || destroyed || seeking || previewPlayer != null || switching || player == null
                 || currentSource == null || !activeFirstFrame || player.getPlaybackState() != Player.STATE_READY) return;
@@ -1230,7 +1311,9 @@ public final class PlayerActivity extends Activity {
         long duration = player.getDuration();
         boolean fullyBuffered = duration > 0 && player.getBufferedPosition() >= duration;
         // 缓冲真的见底才把预取撤掉（原来是 2 秒，稍微抖一下就撤，撤了又建，来回拉锯）
-        if (!fullyBuffered && ahead < 800 && standbyPlayer != null) cancelPrefetch();
+        /* 150ms 见底才撤。800ms 太敏感：短剧在网络稍抖时会被来回撤/建，
+           预取永远建不完，切集只能从头拉。 */
+        if (!fullyBuffered && ahead < 150 && standbyPlayer != null) cancelPrefetch();
         // 快播完了就别再等 10 秒缓冲：短剧一集才一两分钟，等 10 秒等于等掉半集
         boolean nearEnd = duration > 0 && duration - player.getCurrentPosition() < 25_000;
         // 短剧（4 分钟以内）1.2 秒就开始预取下一集：等 5 秒的话一集才 60 秒，
@@ -1241,7 +1324,10 @@ public final class PlayerActivity extends Activity {
         if (next == null) return;
         String id = next.item.optString("id");
         String key = cacheKey(id, next.episode);
-        if (standbyPlayer != null || prefetchTask != null || key.equals(failedStandbyKey)) return;
+        if (standbyPlayer != null || prefetchTask != null) return;
+        /* 失败只退避 5 秒。以前是永久屏蔽：某一集取流失败一次，之后再也不预取，
+           每次切到它都要现拉地址，看起来就是「这一集永远卡」。 */
+        if (key.equals(failedStandbyKey) && SystemClock.elapsedRealtime() - failedStandbyAt < 5_000) return;
         int token = ++prefetchToken;
         int selectionToken = loadToken;
         prefetchTask = prefetchWorker.submit(() -> {
@@ -1266,6 +1352,7 @@ public final class PlayerActivity extends Activity {
                     standbySource = ready.optString("source");
                     standbyMime = ready.optString("mimeType", MimeTypes.APPLICATION_M3U8);
                     standbyFirstFrame = false;
+                    standbyPreparedAt = SystemClock.elapsedRealtime();
                     standbyPlayer = createEpisodePlayer(true);
                     standbyPlayer.setVolume(0f);
                     standbyPlayer.setPlayWhenReady(false);
@@ -1297,6 +1384,7 @@ public final class PlayerActivity extends Activity {
         standbyKey = null;
         standbySource = null;
         standbyFirstFrame = false;
+        standbyPreparedAt = 0;
     }
 
     private void cancelPrefetch() {
@@ -1607,6 +1695,97 @@ public final class PlayerActivity extends Activity {
         root.requestApplyInsets();
         updateSystemBars();
         if (seasonEnded) showSequelEnd(false);
+    }
+
+    /**
+     * 手机「投到电视」：不是 Chromecast/DLNA，而是把「哪部剧、第几集、第几秒」
+     * 推给同一账号下在线的电视端。电视端拿到后仍走它自己的 open-player（同一个
+     * PlayerActivity），详情、选集、自动连播、预取全部复用，没有第二套播放器。
+     */
+    private void showCastDevices() {
+        if (ContentMode.PRIVATE.equals(ContentMode.get(this).active())) {
+            toast("私密内容暂不支持投屏，切回公开内容再试");
+            return;
+        }
+        if (currentItem == null) return;
+        final AccountService cloud = new AccountService(getApplicationContext(), store);
+        if (!cloud.isLoggedIn()) { toast("登录后才能投屏"); return; }
+        toast("正在找同一账号的电视…");
+        worker.execute(() -> {
+            JSONArray devices = new JSONArray();
+            String error = null;
+            try {
+                JSONObject data = cloud.getJson("api/devices");
+                JSONArray all = data.optJSONArray("devices");
+                for (int i = 0; all != null && i < all.length(); i++) {
+                    JSONObject device = all.optJSONObject(i);
+                    if (device == null) continue;
+                    if (!"tv".equals(device.optString("platform"))) continue;
+                    if (!device.optBoolean("online")) continue;
+                    devices.put(device);
+                }
+            } catch (Exception failure) {
+                error = failure.getMessage() == null ? "网络异常" : failure.getMessage();
+            }
+            final JSONArray found = devices;
+            final String failure = error;
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                if (failure != null) { toast("读取设备失败：" + failure); return; }
+                if (found.length() == 0) {
+                    toast("没有在线的电视：确认电视端已打开并登录同一账号");
+                    return;
+                }
+                String[] labels = new String[found.length()];
+                for (int i = 0; i < found.length(); i++) {
+                    JSONObject device = found.optJSONObject(i);
+                    labels[i] = device.optString("name", "电视") + " · 在线";
+                }
+                new AlertDialog.Builder(this)
+                        .setTitle("投到电视")
+                        .setItems(labels, (dialog, which) -> {
+                            JSONObject device = found.optJSONObject(which);
+                            if (device != null) castTo(device, cloud);
+                        })
+                        .setNegativeButton("取消", null)
+                        .show();
+            });
+        });
+    }
+
+    private void castTo(JSONObject device, AccountService cloud) {
+        if (device == null) return;
+        final String name = device.optString("name", "电视");
+        final int episode = currentEpisode;
+        long position = player == null ? 0 : player.getCurrentPosition();
+        long duration = player == null ? 45000 : player.getDuration();
+        JSONObject body = new JSONObject();
+        try {
+            body.put("deviceId", device.optString("id"));
+            body.put("source", ContentMode.get(this).active());
+            body.put("seriesId", currentId);
+            body.put("title", currentItem == null ? "" : currentItem.optString("title"));
+            body.put("cover", currentItem == null ? "" : currentItem.optString("cover"));
+            body.put("episode", episode);
+            body.put("position", position);
+            body.put("duration", duration);
+        } catch (Exception ignored) { }
+        toast("正在投到 " + name + "…");
+        worker.execute(() -> {
+            try {
+                cloud.postJson("api/devices/cast", body);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    toast("已投到 " + name + " · 第 " + episode + " 集");
+                    // 声音只从电视出：手机上先停住，用户还能接着点播放
+                    if (player != null) player.pause();
+                    revealControls();
+                });
+            } catch (Exception failure) {
+                String message = failure.getMessage() == null ? "投屏失败" : failure.getMessage();
+                runOnUiThread(() -> toast(message));
+            }
+        });
     }
 
     private void updateMiniProgress(long position, long duration) {
