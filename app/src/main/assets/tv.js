@@ -287,62 +287,91 @@ function focusElement(el, remember) {
 }
 
 /* 剧名跑马灯。
-   原来是把整个 .name 元素往左推，元素本身跑出裁剪区，第一个字会滑到左边那张
-   海报下面去；位移量又只算到"刚好装下"，末尾那个字被右边界切掉一半。
-   现在改成：.name 固定在原位负责裁剪，里面塞一份 track，track 里放两份标题、
-   中间留 MARQUEE_GAP 的空白，平移「一份 + 空白」后正好接上第二份，无缝循环。 */
+   电视端 WebView 内核老（Android TV 普遍 Chrome 60 上下），两个新特性都不认：
+   1) flex 的 gap —— 所以两份文本会贴在一起，看起来就是 abcdefgabcdefg；
+   2) @keyframes 里用 var() —— to 的位移值直接失效，动画到头就跳回起点，也就是闪。
+   所以这里不用 CSS 动画：文本 + 一个真实宽度的空档 span + 文本，位移由 rAF 逐帧
+   累加并对总长度取模，老内核一样跑，且永远不会「跳回起点」。 */
 var MARQUEE_CHARS = 3.5;     /* 字，尾部与下一轮第一个字之间隔三四个字符 */
 var MARQUEE_SPEED = 34;      /* px/秒，街边 LED 广告牌那种不紧不慢的节奏 */
+
+var mqState = null;          /* {name, track, total, pos} */
+var mqRaf = 0;
+var mqLast = 0;
+
+function mqStop() {
+  if (mqRaf) { cancelAnimationFrame(mqRaf); mqRaf = 0; }
+  mqState = null;
+  mqLast = 0;
+}
+
+function mqTick(ts) {
+  if (!mqState) { mqRaf = 0; return; }
+  /* 卡片被页面重建掉了还继续跑就是白烧 CPU，直接收摊 */
+  if (!document.body.contains(mqState.track)) { mqStop(); return; }
+  var dt = mqLast ? Math.min(64, ts - mqLast) : 16;
+  mqLast = ts;
+  mqState.pos += MARQUEE_SPEED * dt / 1000;
+  /* 取模而不是归零：超过一轮就从 total 里减掉，位移永远连续，接缝处看不到跳 */
+  while (mqState.pos >= mqState.total) mqState.pos -= mqState.total;
+  mqState.track.style.transform = 'translateX(' + (-Math.round(mqState.pos * 10) / 10) + 'px)';
+  mqRaf = requestAnimationFrame(mqTick);
+}
+
+function mqStart(name, track, total) {
+  mqStop();
+  mqState = { name: name, track: track, total: total, pos: 0 };
+  track.style.transform = 'translateX(0)';
+  mqRaf = requestAnimationFrame(mqTick);
+}
 
 function resetMarquee(card) {
   var name = card && card.querySelector ? card.querySelector('.name') : null;
   if (!name) return;
   if (!name.classList.contains('is-scrolling') && !name.querySelector('.mq-track')) return;
+  if (mqState && mqState.name === name) mqStop();
   var text = name.getAttribute('data-mq-text');
   if (text != null) name.textContent = text;
   name.classList.remove('is-scrolling');
   name.removeAttribute('data-mq-text');
-  name.style.removeProperty('--mq-shift');
-  name.style.removeProperty('--mq-dur');
-  name.style.removeProperty('--mq-gap');
 }
 
 function updateMarquee(prev, next) {
   if (prev !== next) resetMarquee(prev);
   var name = next && next.querySelector ? next.querySelector('.name') : null;
   if (!name) return;
-  /* 已经在滚、文字也没变：直接复用现有 track。
-     绝不能在聚焦时重建——重建会把 transform 归零，看起来就是"闪一下从头开始"。 */
-  var current = name.getAttribute('data-mq-text');
-  if (current != null && name.classList.contains('is-scrolling')) return;
+  /* 已经在滚就直接复用，重建会把位移归零，看起来就是闪一下从头开始 */
+  if (name.getAttribute('data-mq-text') != null) return;
   resetMarquee(next);
   /* 还没套 track 时才量得到真实溢出：overflow:hidden + ellipsis 下 scrollWidth 仍是全宽 */
   if (name.scrollWidth - name.clientWidth < 4) return;
   var text = name.textContent;
   if (!text) return;
-  name.setAttribute('data-mq-text', text);
+  var fontSize = parseFloat(window.getComputedStyle(name).fontSize) || 30;
+  var gap = Math.round(fontSize * MARQUEE_CHARS);
   var track = document.createElement('span');
   track.className = 'mq-track';
   var copy = document.createElement('span');
+  copy.className = 'mq-seg';
   copy.textContent = text;
-  track.appendChild(copy);
+  var blank = document.createElement('span');
+  blank.className = 'mq-blank';
+  blank.style.width = gap + 'px';     /* 真实占位，不依赖 flex gap */
   var tail = document.createElement('span');
+  tail.className = 'mq-seg';
   tail.textContent = text;
   tail.setAttribute('aria-hidden', 'true');
+  track.appendChild(copy);
+  track.appendChild(blank);
   track.appendChild(tail);
+  name.setAttribute('data-mq-text', text);
   name.textContent = '';
   name.appendChild(track);
-  /* offsetWidth 同步强制布局，拿到的才是真实像素宽；量到 0 说明卡片还没上屏，
-     此时启动动画会得到一轮极短的循环，表现就是疯狂闪回，直接放弃这次。 */
-  var fontSize = parseFloat(window.getComputedStyle(name).fontSize) || 30;
+  /* offsetWidth 同步强制布局；量到 0 说明卡片还没上屏，这一轮放弃，等下次聚焦再量 */
   var width = copy.offsetWidth || 0;
   if (width < 4) { resetMarquee(next); return; }
-  var gap = Math.round(fontSize * MARQUEE_CHARS);
-  var cycle = width + gap;
-  name.style.setProperty('--mq-gap', gap + 'px');
-  name.style.setProperty('--mq-shift', (-cycle) + 'px');
-  name.style.setProperty('--mq-dur', Math.max(6, cycle / MARQUEE_SPEED).toFixed(2) + 's');
   name.classList.add('is-scrolling');
+  mqStart(name, track, width + gap);
 }
 
 function restoreFocus() {

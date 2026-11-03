@@ -331,22 +331,19 @@ body.rail-open #rail{
 }
 .card.is-focused .name{transform:translateY(1.3rem)}
 /* 标题超长：选中后跑马灯。
-   外层 .name 负责裁剪（overflow:hidden 一直留着，文字不会跑到左边海报底下），
-   内层 .mq-track 放两份同样的标题、中间留一道空白，整体向左平移「一份+空白」的距离，
-   到头正好接上第二份 —— 第一字从左边淡出，末尾字从右边补进来，无缝循环。 */
+   外层 .name 负责裁剪；内层 .mq-track 用 inline-block（电视端老内核也稳），
+   里面是三段：文本 / 固定宽度的空档 / 文本。空档用真实 span 占位，
+   不依赖 flex gap（Chrome 84 以下没有）。位移由 JS 的 rAF 逐帧累加，不用 CSS 动画。 */
 .card .name .mq-track{
-  display:inline-flex;align-items:baseline;
-  gap:var(--mq-gap,4.2rem);white-space:nowrap;will-change:transform;
-  backface-visibility:hidden;
+  display:inline-block;white-space:nowrap;will-change:transform;
+}
+.card .name .mq-track > span{
+  display:inline-block;vertical-align:baseline;white-space:nowrap;
+}
+.card .name .mq-blank{
+  height:1px;font-size:0;line-height:0;overflow:hidden;
 }
 .card .name.is-scrolling{text-overflow:clip}
-.card .name.is-scrolling .mq-track{
-  animation:tv-marquee var(--mq-dur,8s) linear infinite;
-}
-@keyframes tv-marquee{
-  from{transform:translateX(0)}
-  to{transform:translateX(var(--mq-shift,0))}
-}
 
 /* ---------------- 分类条 ---------------- */
 .chips{display:block;margin-bottom:2.4rem}
