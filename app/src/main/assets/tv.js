@@ -291,7 +291,7 @@ function focusElement(el, remember) {
    海报下面去；位移量又只算到"刚好装下"，末尾那个字被右边界切掉一半。
    现在改成：.name 固定在原位负责裁剪，里面塞一份 track，track 里放两份标题、
    中间留 MARQUEE_GAP 的空白，平移「一份 + 空白」后正好接上第二份，无缝循环。 */
-var MARQUEE_GAP = 88;        /* px，末尾字与下一轮第一个字之间的空隙 */
+var MARQUEE_CHARS = 3.5;     /* 字，尾部与下一轮第一个字之间隔三四个字符 */
 var MARQUEE_SPEED = 34;      /* px/秒，街边 LED 广告牌那种不紧不慢的节奏 */
 
 function resetMarquee(card) {
@@ -304,16 +304,22 @@ function resetMarquee(card) {
   name.removeAttribute('data-mq-text');
   name.style.removeProperty('--mq-shift');
   name.style.removeProperty('--mq-dur');
+  name.style.removeProperty('--mq-gap');
 }
 
 function updateMarquee(prev, next) {
-  resetMarquee(prev);
+  if (prev !== next) resetMarquee(prev);
   var name = next && next.querySelector ? next.querySelector('.name') : null;
   if (!name) return;
+  /* 已经在滚、文字也没变：直接复用现有 track。
+     绝不能在聚焦时重建——重建会把 transform 归零，看起来就是"闪一下从头开始"。 */
+  var current = name.getAttribute('data-mq-text');
+  if (current != null && name.classList.contains('is-scrolling')) return;
   resetMarquee(next);
   /* 还没套 track 时才量得到真实溢出：overflow:hidden + ellipsis 下 scrollWidth 仍是全宽 */
   if (name.scrollWidth - name.clientWidth < 4) return;
   var text = name.textContent;
+  if (!text) return;
   name.setAttribute('data-mq-text', text);
   var track = document.createElement('span');
   track.className = 'mq-track';
@@ -326,13 +332,16 @@ function updateMarquee(prev, next) {
   track.appendChild(tail);
   name.textContent = '';
   name.appendChild(track);
-  var width = copy.getBoundingClientRect().width;
-  /* 间隔拉到一个视口宽度的 0.6 倍：前一份最后一个字完全滚出左边、留一小段空档，
-     下一份的第一个字才从右边进来，循环往复——街边 LED 就是这节奏 */
-  var gap = Math.max(MARQUEE_GAP, Math.round(name.clientWidth * 0.6));
+  /* offsetWidth 同步强制布局，拿到的才是真实像素宽；量到 0 说明卡片还没上屏，
+     此时启动动画会得到一轮极短的循环，表现就是疯狂闪回，直接放弃这次。 */
+  var fontSize = parseFloat(window.getComputedStyle(name).fontSize) || 30;
+  var width = copy.offsetWidth || 0;
+  if (width < 4) { resetMarquee(next); return; }
+  var gap = Math.round(fontSize * MARQUEE_CHARS);
   var cycle = width + gap;
+  name.style.setProperty('--mq-gap', gap + 'px');
   name.style.setProperty('--mq-shift', (-cycle) + 'px');
-  name.style.setProperty('--mq-dur', Math.max(8, cycle / MARQUEE_SPEED).toFixed(2) + 's');
+  name.style.setProperty('--mq-dur', Math.max(6, cycle / MARQUEE_SPEED).toFixed(2) + 's');
   name.classList.add('is-scrolling');
 }
 
