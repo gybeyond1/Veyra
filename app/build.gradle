@@ -10,8 +10,8 @@ android {
         applicationId 'com.veyra.gybeyond'
         minSdk 26
         targetSdk 36
-        versionCode 366
-        versionName "0.24.16"
+        versionCode 367
+        versionName "0.25.0"
         testInstrumentationRunner 'com.veyra.gybeyond.PlaybackTestRunner'
     }
 
@@ -22,11 +22,14 @@ android {
     productFlavors {
         mobile {
             dimension 'form'
+            resValue "string", "app_name", "Veyra"
         }
         tv {
             dimension 'form'
             // 电视独立包：单独包名，能和手机包装在同一台设备上互不覆盖
             applicationIdSuffix '.tv'
+            // 桌面/应用列表里叫 Veyra TV，跟手机版分得开
+            resValue "string", "app_name", "Veyra TV"
         }
     }
 
@@ -41,6 +44,11 @@ android {
             keyAlias System.getenv('CHENGZI_KEY_ALIAS') ?: 'chengzi'
             keyPassword kp
         }
+    }
+
+    // resValue 在 AGP 8 里默认关闭，需要在 buildFeatures 打开（电视包靠它改应用名）
+    buildFeatures {
+        resValues true
     }
 
     buildTypes {

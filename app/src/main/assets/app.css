@@ -916,3 +916,14 @@ html[data-theme=dark] .remote-test-result.fail,html[data-theme=dark] .dl-remote-
 .remote-row .remote-field{flex:1;min-width:0}
 .remote-row .remote-field-port{flex:0 0 84px}
 .remote-field-port .settings-input{text-align:center;padding:0 6px}
+
+/* 详情页「从头播放」小圆钮：跟继续播放并排，只在有进度时出现 */
+.detail-restart{
+  width:45px;height:45px;flex:0 0 45px;
+  display:grid;place-items:center;
+  border:1px solid var(--line);
+  border-radius:calc(11px * var(--corner-scale,1));
+  background:var(--panel);color:var(--text);
+}
+.detail-restart svg{width:20px;height:20px}
+.detail-restart[hidden]{display:none}

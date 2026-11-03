@@ -8,6 +8,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
@@ -468,6 +469,39 @@ public final class LocalPlayerActivity extends Activity {
         if (nasMode) return s.isEmpty() ? null : s;
         if (s.isEmpty()) return null;
         return resolveLocalPath(s);
+    }
+
+    // ---- 遥控器 ----
+    /* 电视上没有触屏：OK 暂停/继续，左右快退快进 10 秒，上下切上一集/下一集。
+       手机端保持原样（走手势，不进这里）。 */
+    @Override public boolean dispatchKeyEvent(KeyEvent event) {
+        if (event.getAction() != KeyEvent.ACTION_DOWN) return super.dispatchKeyEvent(event);
+        if (!DeviceProfile.isTv(this)) return super.dispatchKeyEvent(event);
+        int code = event.getKeyCode();
+        boolean center = code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER
+                || code == KeyEvent.KEYCODE_NUMPAD_ENTER || code == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE;
+        if (center) {
+            if (player != null) {
+                if (player.isPlaying()) player.pause(); else player.play();
+            }
+            revealControls();
+            return true;
+        }
+        if (code == KeyEvent.KEYCODE_DPAD_LEFT) { seekBy(-10_000); return true; }
+        if (code == KeyEvent.KEYCODE_DPAD_RIGHT) { seekBy(10_000); return true; }
+        if (code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_MEDIA_PREVIOUS) { advance(-1); return true; }
+        if (code == KeyEvent.KEYCODE_DPAD_DOWN || code == KeyEvent.KEYCODE_MEDIA_NEXT) { advance(1); return true; }
+        return super.dispatchKeyEvent(event);
+    }
+
+    private void seekBy(long delta) {
+        if (player == null) return;
+        long duration = player.getDuration();
+        long target = Math.max(0, player.getCurrentPosition() + delta);
+        if (duration > 0 && target > duration - 1000) target = Math.max(0, duration - 1000);
+        player.seekTo(target);
+        refreshTime();
+        revealControls();
     }
 
     // ---- 控制栏显隐 ----

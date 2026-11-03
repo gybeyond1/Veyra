@@ -107,7 +107,8 @@ const state = {
   sourceGroup: "",
   sourceQueue: [],
   previous: null,
-  compactHeld: false
+  compactHeld: false,
+  detailProgress: null
 };
 contentReady = api("content-status").then((status) => {
   contentSource = status.source || "hongguo";
@@ -158,7 +159,8 @@ const icon = (name) => {
     play: '<path d="m8 5 11 7-11 7z"/>',
     arrow: '<path d="m9 5 7 7-7 7"/>',
     back: '<path d="m15 5-7 7 7 7"/>',
-    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    restart: '<path d="M3.5 12a8.5 8.5 0 1 0 2.7-6.2"/><path d="M3.5 4.5V10h5.5"/>'
   };
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`;
 };
@@ -2335,7 +2337,7 @@ function renderDetail() {
   const episodes = asArray(data.episodes);
   content.innerHTML = `<div class="detail-page"><button class="detail-back" type="button" data-back="1">${icon("back")} \u8FD4\u56DE</button>
     <div class="detail-art"><img data-cover="${esc(data.cover)}" alt=""></div><div class="detail-copy"><h1>${esc(data.title)}</h1><p>${loading ? "\u6B63\u5728\u83B7\u53D6\u5185\u5BB9\u2026" : `${esc(data.score)} ${esc(data.episodeLabel)}`}</p><div class="detail-desc-wrap"><p class="detail-description">${esc(data.description || "")}</p></div>
-    <div class="detail-buttons"><button class="detail-play" type="button" data-play="1" ${loading ? "disabled" : ""}>${loading ? "\u6B63\u5728\u52A0\u8F7D\u2026" : "\u7ACB\u5373\u64AD\u653E"}</button><button class="bookmark-button" type="button" data-bookmark="1" aria-label="${state.bookmarked ? "\u53D6\u6D88\u6536\u85CF" : "\u6536\u85CF"}" ${loading ? "disabled" : ""}>${state.bookmarked ? "\u2605" : "\u2606"}</button><button class="detail-download" type="button" data-download="1" ${loading ? "disabled" : ""}>\u4E0B\u8F7D</button></div>
+    <div class="detail-buttons"><button class="detail-play" type="button" data-play="1" ${loading ? "disabled" : ""}>${loading ? "\u6B63\u5728\u52A0\u8F7D\u2026" : resumeLabel()}</button><button class="detail-restart" type="button" data-restart="1" aria-label="\u4ECE\u5934\u64AD\u653E" title="\u4ECE\u5934\u64AD\u653E" ${resumeReady() ? "" : "hidden"}>${icon("restart")}</button><button class="bookmark-button" type="button" data-bookmark="1" aria-label="${state.bookmarked ? "\u53D6\u6D88\u6536\u85CF" : "\u6536\u85CF"}" ${loading ? "disabled" : ""}>${state.bookmarked ? "\u2605" : "\u2606"}</button><button class="detail-download" type="button" data-download="1" ${loading ? "disabled" : ""}>\u4E0B\u8F7D</button></div>
     ${loading ? '<div class="detail-loading" role="status">\u6B63\u5728\u83B7\u53D6\u9009\u96C6\u2026</div>' : episodes.length ? `<h2>\u9009\u96C6</h2><div class="episode-grid">${episodes.map((item, index) => `<button type="button" data-episode="${item.number}" class="${index === 0 ? "active" : ""}">${item.number}</button>`).join("")}</div>` : ""}</div></div>`;
   hydrateImages();
   ensureDetailFilled();
@@ -3115,6 +3117,13 @@ async function goDetail(id, trigger) {
     }
   }).catch(() => {
   });
+  state.detailProgress = null;
+  api("latest-progress", { id }).then((progress) => {
+    if (token !== routeToken) return;
+    state.detailProgress = progress || null;
+    if (state.detail) renderDetail();
+  }).catch(() => {
+  });
   try {
     const fresh = await refreshing;
     if (token === routeToken) {
@@ -3249,14 +3258,29 @@ window.hgResume = () => {
   });
   window.__bingeSync && window.__bingeSync();
 };
-async function openPlayer(episode = 1) {
+function resumeReady() {
+  const progress = state.detailProgress;
+  if (!progress || progress.completed) return false;
+  const episode = Number(progress.episode);
+  const position = Number(progress.position);
+  const duration = Number(progress.duration);
+  if (!(episode >= 1) || !(position > 5e3)) return false;
+  return !(duration > 0 && position >= duration - 5e3);
+}
+function resumeEpisode() {
+  return resumeReady() ? Number(state.detailProgress.episode) : 1;
+}
+function resumeLabel() {
+  return resumeReady() ? `\u7EE7\u7EED\u64AD\u653E \u7B2C${state.detailProgress.episode}\u96C6` : "\u7ACB\u5373\u64AD\u653E";
+}
+async function openPlayer(episode = 1, restart = false) {
   const detail = state.detail;
   if (!detail) return;
   const item = { ...state.sourceItem, ...detail };
   const queue = state.sourceQueue.length ? [...state.sourceQueue] : [item];
   if (!queue.some((candidate) => candidate.id === item.id)) queue.unshift(item);
   const index = queue.findIndex((candidate) => candidate.id === item.id);
-  await api("open-player", { item, detail, episodes: asArray(detail.episodes), queue, index, group: state.sourceGroup, episode });
+  await api("open-player", { item, detail, episodes: asArray(detail.episodes), queue, index, group: state.sourceGroup, episode, restart });
 }
 async function loadMoreCategory() {
   var _a2;
@@ -4562,7 +4586,11 @@ document.addEventListener("click", async (event) => {
     return;
   }
   if (event.target.closest("[data-play]")) {
-    openPlayer(1);
+    openPlayer(resumeEpisode());
+    return;
+  }
+  if (event.target.closest("[data-restart]")) {
+    openPlayer(1, true);
     return;
   }
   if (event.target.closest("[data-bookmark]")) {

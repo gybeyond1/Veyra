@@ -1236,6 +1236,8 @@ public final class MainActivity extends Activity {
             }
             case "bookmark-state": return store.hasBookmark(args.optString("id"));
             case "get-progress": return store.getProgress(args.optString("id"), args.optInt("episode", 1));
+            // 详情页「继续播放」：取这部剧最近一次看到哪集、哪一秒
+            case "latest-progress": return store.latestProgress(args.optString("id"));
             case "clear-history": store.clearHistory(); if (account.isLoggedIn()) requests.execute(() -> { try { account.sync(); } catch (Exception ignored) { } }); return true;
             case "clear-bookmarks": store.clearBookmarks(); if (account.isLoggedIn()) requests.execute(() -> { try { account.sync(); } catch (Exception ignored) { } }); return true;
             case "clear-content-cache": store.clearCache(); repository.clearCovers(); return true;

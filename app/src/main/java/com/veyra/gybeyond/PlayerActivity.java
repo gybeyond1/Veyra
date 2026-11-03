@@ -90,6 +90,8 @@ public final class PlayerActivity extends Activity {
     private String standbySource;
     private String failedStandbyKey;
     private boolean standbyFirstFrame;
+    /** 「从头播放」：只在本次起播的第一集生效，用来跳过 resumePosition */
+    private boolean restartPending;
     private PlayerView activeView;
     private PlayerView standbyView;
     private final Map<String, Bitmap> posterCache = new HashMap<>();
@@ -280,6 +282,7 @@ public final class PlayerActivity extends Activity {
             queueIndex = payload.optInt("index", 0);
             currentId = currentItem.optString("id");
             currentEpisode = payload.optInt("episode", 1);
+            restartPending = payload.optBoolean("restart", false);
         } catch (Exception error) { finish(); return; }
 
         buildUi();
@@ -304,7 +307,9 @@ public final class PlayerActivity extends Activity {
                     maybePrepareNext();
                 } else if (state == Player.STATE_BUFFERING) {
                     loading.setVisibility(View.VISIBLE);
-                    cancelPrefetch();
+                    // 这里原来会 cancelPrefetch()：主播放器稍一卡顿，刚预取好的下一集就被丢掉，
+                    // 切集时只能从头重新拉，表现就是「切下一集要等很久」。standby 自己有
+                    // 5s / 4MB 的上限，不会无限抢带宽，留着它更划算。
                 } else if (state == Player.STATE_ENDED) {
                     saveProgress(true);
                     if (!isAiQueue()) {
@@ -1107,6 +1112,8 @@ public final class PlayerActivity extends Activity {
     }
 
     private long resumePosition(String id, int episode) {
+        // 详情页按了「从头播放」：这一集忽略历史进度，播完这集之后照旧续播
+        if (restartPending) { restartPending = false; return 0; }
         JSONObject progress = store.getProgress(id, episode);
         if (progress == null || progress.optBoolean("completed")) return 0;
         long position = progress.optLong("position");
@@ -1217,9 +1224,13 @@ public final class PlayerActivity extends Activity {
         if (!foreground || destroyed || seeking || previewPlayer != null || switching || player == null
                 || currentSource == null || !activeFirstFrame || player.getPlaybackState() != Player.STATE_READY) return;
         long ahead = player.getBufferedPosition() - player.getCurrentPosition();
-        boolean fullyBuffered = player.getDuration() > 0 && player.getBufferedPosition() >= player.getDuration();
-        if (!fullyBuffered && ahead < 2_000 && standbyPlayer != null) cancelPrefetch();
-        if (ahead < 10_000 && !fullyBuffered) return;
+        long duration = player.getDuration();
+        boolean fullyBuffered = duration > 0 && player.getBufferedPosition() >= duration;
+        // 缓冲真的见底才把预取撤掉（原来是 2 秒，稍微抖一下就撤，撤了又建，来回拉锯）
+        if (!fullyBuffered && ahead < 800 && standbyPlayer != null) cancelPrefetch();
+        // 快播完了就别再等 10 秒缓冲：短剧一集才一两分钟，等 10 秒等于等掉半集
+        boolean nearEnd = duration > 0 && duration - player.getCurrentPosition() < 25_000;
+        if (ahead < 5_000 && !fullyBuffered && !nearEnd) return;
         Selection next = adjacent(1);
         if (next == null) return;
         String id = next.item.optString("id");
@@ -1294,6 +1305,16 @@ public final class PlayerActivity extends Activity {
         if (standbyFirstFrame && cacheKey(selection.item.optString("id"), selection.episode).equals(standbyKey)
                 && standbyView.getVideoSurfaceView() instanceof TextureView) {
             Bitmap frame = ((TextureView) standbyView.getVideoSurfaceView()).getBitmap();
+            if (frame != null) {
+                incoming.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                incoming.setImageBitmap(frame);
+                return;
+            }
+        }
+        /* 没预取到下一集时，先用当前这一集的画面顶上，切过去再等首帧 ——
+           比直接闪一张海报自然，也不会让人觉得「点了没反应」。 */
+        if (activeView.getVideoSurfaceView() instanceof TextureView) {
+            Bitmap frame = ((TextureView) activeView.getVideoSurfaceView()).getBitmap();
             if (frame != null) {
                 incoming.setScaleType(ImageView.ScaleType.FIT_CENTER);
                 incoming.setImageBitmap(frame);

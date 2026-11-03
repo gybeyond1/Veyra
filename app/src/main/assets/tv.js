@@ -41,14 +41,18 @@ var state = {
   unlocked: false,
   home: null,
   homeError: '',
-  category: null,       /* { id, items, nextPage, loading } */
-  categoryId: '',
-  search: { query: '', items: null, filter: 'all', pending: false },
+  /* 首页瀑布流：原「剧场」的内容整体搬到这里，滚动到底自动续页 */
+  feed: null,           /* { id, items, nextPage, loading, error } */
+  feedId: '',
+  search: { query: '', items: null, filter: 'all', pending: false, lastQuery: '' },
   library: null,
   libraryTab: 'history',
+  nas: null,            /* NAS 下载任务列表 */
+  nasError: '',
   detail: null,
   detailFrom: 'home',
   detailLoading: false,
+  detailProgress: null, /* 上次看到的集与位置，用来把「立即播放」改成「继续播放」 */
   epGroup: 0,           /* 剧集分组：每 20 集一组 */
   account: { loggedIn: false },
   version: '',
@@ -66,7 +70,7 @@ var accountPanel = document.getElementById('account');
 var updateLayer = document.getElementById('tv-update');
 var toastEl = document.getElementById('toast');
 var railAccount = document.getElementById('rail-account');
-var railWho = document.getElementById('rail-who');
+var railAvatar = document.getElementById('rail-avatar');
 
 function esc(value) {
   return String(value == null ? '' : value)
@@ -97,13 +101,52 @@ function cover(url) {
 }
 function paintCovers(root) {
   var nodes = root.querySelectorAll('img[data-cover]');
+  if (!nodes.length) return;
+  var pending = nodes.length;
+  function done() {
+    if (--pending > 0) return;
+    /* 图都到位了再决定首屏背景：这时第一张卡已经有 src */
+    syncBackdropFromFocus();
+  }
   for (var i = 0; i < nodes.length; i++) {
     (function (node) {
       var url = node.getAttribute('data-cover');
-      if (!url) return;
-      cover(url).then(function (src) { if (src && node.parentNode) node.src = src; }).catch(function () { });
+      if (!url) { done(); return; }
+      cover(url).then(function (src) {
+        if (!src || !node.parentNode) { done(); return; }
+        node.src = src;
+        /* 焦点已经停在这张卡上时，背景也跟着换成它 */
+        var card = node.closest ? node.closest('.card.is-focused') : null;
+        if (card || (state.route === 'detail' && node.closest('.detail-art'))) setBackdrop(src);
+        done();
+      }).catch(done);
     })(nodes[i]);
   }
+}
+
+/* ---------------- 模糊背景 ---------------- */
+var backdropSrc = '';
+function setBackdrop(src) {
+  var img = document.getElementById('tv-bg-img');
+  if (!img || !src || src === backdropSrc) return;
+  backdropSrc = src;
+  img.src = src;
+}
+function syncBackdrop(el) {
+  if (!el) return;
+  var img = el.classList && el.classList.contains('card') ? el.querySelector('.art img') : null;
+  if (img && img.src) setBackdrop(img.src);
+}
+function syncBackdropFromFocus() {
+  var focused = document.querySelector('.is-focused');
+  if (focused) { syncBackdrop(focused); if (backdropSrc) return; }
+  if (state.route === 'detail') {
+    var art = view.querySelector('.detail-art img');
+    if (art && art.src) setBackdrop(art.src);
+    return;
+  }
+  var first = view.querySelector('.grid .card .art img');
+  if (first && first.src) setBackdrop(first.src);
 }
 
 /* ---------------- 焦点 ---------------- */
@@ -145,6 +188,7 @@ function focusElement(el, remember) {
   var stageBox = stage.getBoundingClientRect();
   if (box.top < stageBox.top + 8) stage.scrollTop -= (stageBox.top + 8 - box.top);
   else if (box.bottom > stageBox.bottom - 40) stage.scrollTop += (box.bottom - (stageBox.bottom - 40));
+  syncBackdrop(el);
 }
 
 function restoreFocus() {
@@ -194,9 +238,11 @@ function move(direction) {
 /* ---------------- 卡片 ---------------- */
 function cardMarkup(item, index) {
   var key = 'card:' + (item.id || index);
+  /* 观看记录用「第N集」当角标，普通作品用评分 */
+  var badge = item.episode ? ('第' + item.episode + '集') : (item.score || '');
   return '<button type="button" class="card" data-focusable data-key="' + esc(key) + '" data-id="' + esc(item.id) + '">'
     + '<span class="art"><img data-cover="' + esc(item.cover || '') + '" alt="">'
-    + (item.score ? '<i class="badge">' + esc(item.score) + '</i>' : '')
+    + (badge ? '<i class="badge">' + esc(badge) + '</i>' : '')
     + '</span><span class="name">' + esc(item.title || '') + '</span></button>';
 }
 function gridMarkup(items, emptyText) {
@@ -220,95 +266,92 @@ function filterList() {
   return [['all', '全部'], ['short', '短剧'], ['comic', '漫剧']];
 }
 
-/* ---------------- 首页 ---------------- */
+/* ---------------- 首页 ----------------
+   三块：继续观看（看过的）、分类条、全部作品瀑布流（原「剧场」的内容）。
+   没有「为你推荐」—— 那个区跟下面重复，还占掉首屏。 */
 function renderHome() {
-  if (state.homeError) {
-    view.innerHTML = '<h1 class="page-title">首页</h1><p class="empty">加载失败：' + esc(state.homeError) + '</p>';
-    return;
-  }
-  if (!state.home) {
-    view.innerHTML = '<h1 class="page-title">首页</h1><p class="empty">正在加载…</p>';
-    return;
-  }
-  var home = state.home;
-  /* 和安卓端同样的兜底顺序：homepageRecommend 空了就用 recommend.items */
-  var recommend = list(home.homepageRecommend);
-  if (!recommend.length) recommend = list(home.recommend && home.recommend.items);
-  var newest = list(home.homepageNewest);
-  if (!newest.length) newest = list(home.newest && home.newest.items);
   var browsing = list(state.library && state.library.progress);
+  var cats = categoryList();
+  var active = state.feedId || cats[0][0];
+  var chips = '<div class="chips">';
+  for (var i = 0; i < cats.length; i++) {
+    chips += '<button type="button" class="chip' + (cats[i][0] === active ? ' is-active' : '') + '" data-focusable data-key="chip:' + esc(cats[i][0]) + '" data-chip="' + esc(cats[i][0]) + '">' + esc(cats[i][1]) + '</button>';
+  }
+  chips += '</div>';
+
+  var feed = state.feed;
+  var body;
+  if (!feed) body = '<p class="empty">正在加载…</p>';
+  else if (feed.error) body = '<p class="empty">加载失败，按 OK 重试</p>';
+  else body = gridMarkup(feed.items, '这个分类下暂时没有内容');
 
   var html = '<h1 class="page-title">首页</h1>';
   if (browsing.length) {
     html += '<section class="section"><div class="section-head"><h2>继续观看</h2><span>' + browsing.length + ' 部</span></div>'
-      + gridMarkup(browsing.slice(0, 6)) + '</section>';
+      + gridMarkup(browsing.slice(0, 10), '还没有观看记录') + '</section>';
   }
-  html += '<section class="section"><div class="section-head"><h2>为你推荐</h2><span>' + recommend.length + ' 部</span></div>'
-    + gridMarkup(recommend, '推荐列表是空的') + '</section>'
-    + '<section class="section"><div class="section-head"><h2>' + (state.source === 'huangguo' ? '最近上新' : '热门短剧') + '</h2><span>' + newest.length + ' 部</span></div>'
-    + gridMarkup(newest, '暂时没有新内容') + '</section>';
+  html += '<section class="section" data-feed="1"><div class="section-head"><h2>全部作品</h2><span data-feed-count="1">'
+    + (feed ? feed.items.length : 0) + ' 部</span></div>' + chips + body + '</section>';
   view.innerHTML = html;
   paintCovers(view);
   restoreFocus();
+  syncBackdropFromFocus();
 }
 
-/* ---------------- 剧场 ---------------- */
-function renderCategory() {
-  var cats = categoryList();
-  var chips = '<div class="chips">';
-  for (var i = 0; i < cats.length; i++) {
-    var active = cats[i][0] === state.categoryId;
-    chips += '<button type="button" class="chip' + (active ? ' is-active' : '') + '" data-focusable data-key="chip:' + esc(cats[i][0]) + '" data-chip="' + esc(cats[i][0]) + '">' + esc(cats[i][1]) + '</button>';
+var feedToken = 0;
+function loadFeed(id, reset) {
+  var target = id || state.feedId || categoryList()[0][0];
+  var switched = target !== state.feedId;
+  state.feedId = target;
+  if (reset || switched) {
+    state.feed = null;
+    state.focusKey = 'chip:' + target;
+    if (state.route === 'home') renderHome();
+  } else if (state.feed && (state.feed.loading || !state.feed.nextPage)) {
+    return;
   }
-  chips += '</div>';
-
-  var items = state.category ? list(state.category.items) : [];
-  var body;
-  if (!state.category) body = '<p class="empty">正在加载…</p>';
-  else body = gridMarkup(items, '这个分类下暂时没有内容');
-
-  view.innerHTML = '<h1 class="page-title">剧场</h1>' + chips + body;
-  paintCovers(view);
-  restoreFocus();
-  observeStageEnd();
-}
-
-function loadCategory(id, append) {
-  state.categoryId = id || state.categoryId || categoryList()[0][0];
-  if (!append) {
-    state.category = null;
-    state.focusKey = 'chip:' + state.categoryId;
-    renderCategory();
-  } else if (state.category) {
-    state.category.loading = true;
-  }
-  var pageNo = append && state.category ? (state.category.nextPage || 2) : 1;
-  api('category', { id: state.categoryId, page: pageNo }).then(function (data) {
-    if (state.route !== 'category') return;
+  var pageNo = state.feed && state.feed.nextPage ? state.feed.nextPage : 1;
+  var token = ++feedToken;
+  if (state.feed) state.feed.loading = true;
+  api('category', { id: target, page: pageNo }).then(function (data) {
+    if (token !== feedToken || state.route !== 'home') return;
     var incoming = list(data && data.items);
-    if (append && state.category) {
-      state.category.items = state.category.items.concat(incoming);
-      state.category.nextPage = data && data.nextPage ? data.nextPage : null;
-      state.category.loading = false;
-      renderCategory();
+    var nextPage = data && data.nextPage ? data.nextPage : null;
+    if (!state.feed || pageNo === 1) {
+      state.feed = { id: target, items: incoming, nextPage: nextPage, loading: false, error: false };
+      renderHome();
     } else {
-      state.category = { id: state.categoryId, items: incoming, nextPage: (data && data.nextPage) || null, loading: false };
-      renderCategory();
+      state.feed.items = state.feed.items.concat(incoming);
+      state.feed.nextPage = nextPage;
+      state.feed.loading = false;
+      appendFeed(incoming);
     }
   }).catch(function (error) {
-    if (state.route !== 'category') return;
-    if (append && state.category) { state.category.loading = false; return; }
-    state.category = { id: state.categoryId, items: [], nextPage: null, loading: false };
-    renderCategory();
+    if (token !== feedToken || state.route !== 'home') return;
+    if (state.feed) { state.feed.loading = false; if (pageNo === 1) state.feed.error = true; renderHome(); }
+    else { state.feed = { id: target, items: [], nextPage: null, loading: false, error: true }; renderHome(); }
     toast(error.message || '加载失败', true);
   });
 }
 
+/* 续页只往末尾插卡片，不整页重绘 —— 整页重绘会把遥控器焦点打回第一张 */
+function appendFeed(items) {
+  if (!items.length || !state.feed) return;
+  var grid = view.querySelector('[data-feed] .grid');
+  if (!grid) { renderHome(); return; }
+  var html = '';
+  for (var i = 0; i < items.length; i++) html += cardMarkup(items[i], state.feed.items.length - items.length + i);
+  grid.insertAdjacentHTML('beforeend', html);
+  paintCovers(grid);
+  var count = view.querySelector('[data-feed-count]');
+  if (count) count.textContent = state.feed.items.length + ' 部';
+}
+
+/* 滚到底自动续页（电视上不用点“加载更多”） */
 function observeStageEnd() {
-  /* 滚到底自动续一页，电视上不用点“加载更多” */
   stage.onscroll = function () {
-    if (state.route !== 'category' || !state.category || state.category.loading || !state.category.nextPage) return;
-    if (stage.scrollTop + stage.clientHeight >= stage.scrollHeight - 400) loadCategory(state.categoryId, true);
+    if (state.route !== 'home' || !state.feed || state.feed.loading || !state.feed.nextPage) return;
+    if (stage.scrollTop + stage.clientHeight >= stage.scrollHeight - 500) loadFeed(state.feedId, false);
   };
 }
 
@@ -385,6 +428,7 @@ function renderSearch() {
   var query = state.search.query;
   var items = filteredSearchItems();
   var loading = state.search.items === null;
+  var hasResults = !!(state.search.items && state.search.items.length);
 
   var html = '<h1 class="page-title">搜索</h1>'
     + '<div class="search-head">'
@@ -407,10 +451,24 @@ function renderSearch() {
     html += chips;
   }
   if (loading && query) html += '<p class="empty">正在搜索「' + esc(query) + '」…</p>';
-  else if (!query) html += '<p class="empty">输入关键词开始搜索</p>';
+  else if (!query) {
+    /* 没搜过时别留一整页黑：把搜过的关键词摆出来，按一下就能重搜 */
+    var recent = recentSearches();
+    if (recent.length) {
+      html += '<p class="search-count">最近搜索</p><div class="chips">';
+      for (var r = 0; r < recent.length; r++) {
+        html += '<button type="button" class="chip" data-focusable data-key="recent:' + esc(recent[r]) + '" data-recent="' + esc(recent[r]) + '">' + esc(recent[r]) + '</button>';
+      }
+      html += '</div>';
+    } else {
+      html += '<p class="empty">输入关键词开始搜索</p>';
+    }
+  }
   else if (!items.length) html += '<p class="empty">没有找到「' + esc(query) + '」</p>';
   else {
-    html += '<p class="search-count">' + esc(query) + ' · ' + items.length + ' 部作品</p>';
+    /* 上次的结果一直留在页面上，直到下次搜索覆盖它 */
+    html += '<p class="search-count">' + esc(query) + ' · ' + items.length + ' 部作品'
+      + (loading ? ' · 正在更新…' : '') + '</p>';
     var grouped = seriesGroups(items);
     if (grouped.blocks.length) {
       for (var b = 0; b < grouped.blocks.length; b++) {
@@ -423,6 +481,7 @@ function renderSearch() {
   }
   view.innerHTML = html;
   paintCovers(view);
+  syncBackdropFromFocus();
 
   var input = document.getElementById('search-input');
   if (input) {
@@ -436,15 +495,57 @@ function renderSearch() {
   restoreFocus();
 }
 
+/* 搜索结果落地：电视端搜索一次要按半天遥控器，下次开机还留着上次那批结果 */
+var SEARCH_STORE = 'veyra.tv.search';
+var RECENT_STORE = 'veyra.tv.recent';
+function recentSearches() {
+  try {
+    var raw = window.localStorage.getItem(RECENT_STORE);
+    var arr = raw ? JSON.parse(raw) : [];
+    return Object.prototype.toString.call(arr) === '[object Array]' ? arr : [];
+  } catch (error) { return []; }
+}
+function rememberSearch(query) {
+  try {
+    var old = recentSearches();
+    var next = [query];
+    for (var i = 0; i < old.length && next.length < 8; i++) if (old[i] !== query) next.push(old[i]);
+    window.localStorage.setItem(RECENT_STORE, JSON.stringify(next));
+  } catch (error) { }
+}
+function saveSearch(query, items) {
+  rememberSearch(query);
+  try {
+    var slim = [];
+    for (var i = 0; i < items.length && i < 60; i++) {
+      var it = items[i];
+      slim.push({ id: it.id, title: it.title, cover: it.cover, score: it.score, albumId: it.albumId, seasonIndex: it.seasonIndex, category: it.category, episodeLabel: it.episodeLabel });
+    }
+    window.localStorage.setItem(SEARCH_STORE, JSON.stringify({ query: query, items: slim, at: Date.now() }));
+  } catch (error) { }
+}
+function restoreSearch() {
+  try {
+    var raw = window.localStorage.getItem(SEARCH_STORE);
+    if (!raw) return;
+    var saved = JSON.parse(raw);
+    if (!saved || !saved.query || !saved.items || !saved.items.length) return;
+    state.search.query = String(saved.query);
+    state.search.items = saved.items;
+  } catch (error) { }
+}
+
 function runSearch(query) {
   if (!query) { toast('先输入剧名'); return; }
+  /* 新搜索开始：旧结果先留在屏幕上，等新结果回来再整体覆盖 */
+  state.search.lastQuery = state.search.query;
   state.search.query = query;
-  state.search.items = null;
   state.search.filter = 'all';
   renderSearch();
   api('search', { query: query }).then(function (data) {
     if (state.search.query !== query) return;
     state.search.items = list(data && data.items);
+    saveSearch(query, state.search.items);
     if (state.route === 'search') renderSearch();
   }).catch(function (error) {
     if (state.search.query !== query) return;
@@ -455,19 +556,79 @@ function runSearch(query) {
 }
 
 /* ---------------- 我的 ---------------- */
+function nextWorkMarkup(item, index) {
+  var key = 'nas:' + (item.id || index);
+  var ready = item.status === 'done' || item.status === 'ready';
+  var badge = ready ? (item.episodeCount ? ('全 ' + item.episodeCount + ' 集') : '已下载') : '下载中';
+  return '<button type="button" class="card' + (ready ? '' : ' is-dim') + '" data-focusable data-key="' + esc(key) + '" data-nas="' + esc(item.id) + '" data-nas-ready="' + (ready ? '1' : '') + '">'
+    + '<span class="art"><img data-cover="' + esc(item.cover || '') + '" alt="">'
+    + '<i class="badge">' + esc(badge) + '</i>'
+    + '</span><span class="name">' + esc(item.title || '') + '</span></button>';
+}
+
 function renderLibrary() {
   var data = state.library || { bookmarks: [], progress: [] };
   var history = list(data.progress);
   var bookmarks = list(data.bookmarks);
-  var items = state.libraryTab === 'history' ? history : bookmarks;
-  view.innerHTML = '<h1 class="page-title">我的</h1>'
-    + '<div class="tabs">'
-    + '<button type="button" class="chip' + (state.libraryTab === 'history' ? ' is-active' : '') + '" data-focusable data-key="tab:history" data-tab="history">观看记录</button>'
-    + '<button type="button" class="chip' + (state.libraryTab === 'bookmarks' ? ' is-active' : '') + '" data-focusable data-key="tab:bookmarks" data-tab="bookmarks">收藏</button>'
-    + '</div>'
-    + gridMarkup(items, state.libraryTab === 'history' ? '还没有观看记录' : '还没有收藏');
+  var tab = state.libraryTab;
+  var html = '<h1 class="page-title">我的</h1>'
+    + '<div class="tabs chips">'
+    + '<button type="button" class="chip' + (tab === 'history' ? ' is-active' : '') + '" data-focusable data-key="tab:history" data-tab="history">观看记录</button>'
+    + '<button type="button" class="chip' + (tab === 'bookmarks' ? ' is-active' : '') + '" data-focusable data-key="tab:bookmarks" data-tab="bookmarks">收藏</button>'
+    + '<button type="button" class="chip' + (tab === 'nas' ? ' is-active' : '') + '" data-focusable data-key="tab:nas" data-tab="nas">NAS</button>'
+    + '</div>';
+  if (tab === 'nas') {
+    html += '<div class="nas-panel">';
+    if (state.nasError) html += '<p class="empty">' + esc(state.nasError) + '</p>';
+    else if (!state.nas) html += '<p class="empty">正在读取 NAS 下载…</p>';
+    else if (!state.nas.length) html += '<p class="empty">还没有下载到 NAS 的作品<br><span class="tip">在手机端「我的下载」里把作品传到 NAS 后，这里就能直接播放</span></p>';
+    else {
+      html += '<div class="grid">';
+      for (var i = 0; i < state.nas.length; i++) html += nextWorkMarkup(state.nas[i], i);
+      html += '</div>';
+    }
+    html += '</div>';
+  } else {
+    html += gridMarkup(tab === 'history' ? history : bookmarks, tab === 'history' ? '还没有观看记录' : '还没有收藏');
+  }
+  view.innerHTML = html;
   paintCovers(view);
+  syncBackdropFromFocus();
   restoreFocus();
+}
+
+function loadLibrary() {
+  api('library').then(function (data) {
+    state.library = data || { bookmarks: [], progress: [] };
+    if (state.route === 'library' || state.route === 'home') renderHomeOr();
+  }).catch(function () {
+    state.library = { bookmarks: [], progress: [] };
+  });
+}
+
+function loadNas() {
+  if (!state.account || !state.account.loggedIn) {
+    state.nas = [];
+    state.nasError = '登录后才能看 NAS 上的作品';
+    if (state.route === 'library') renderLibrary();
+    return;
+  }
+  state.nasError = '';
+  api('nas-download-list').then(function (data) {
+    state.nas = list(data && data.tasks);
+    if (state.route === 'library' && state.libraryTab === 'nas') renderLibrary();
+  }).catch(function (error) {
+    state.nas = [];
+    state.nasError = '读取失败：' + ((error && error.message) || '网络异常');
+    if (state.route === 'library' && state.libraryTab === 'nas') renderLibrary();
+  });
+}
+
+function playNas(id) {
+  var task = null;
+  for (var i = 0; i < list(state.nas).length; i++) if (String(state.nas[i].id) === String(id)) task = state.nas[i];
+  if (task && task.status !== 'done' && task.status !== 'ready') { toast('这部还没下载完，等它下载好再播'); return; }
+  api('open-nas-player', { id: String(id) }).catch(function (error) { toast((error && error.message) || 'NAS 视频打不开', true); });
 }
 
 /* ---------------- 详情 ---------------- */
@@ -509,18 +670,38 @@ function renderDetail() {
     eps += '</div>';
   }
 
+  var resume = state.detailProgress;
+  /* 有真实进度才叫「继续播放」：判定条件是看了至少 5 秒、没看完 */
+  var resumeValid = !!(resume && resume.episode >= 1 && resume.position > 5000
+    && !resume.completed && (!resume.duration || resume.position < resume.duration - 5000));
+  var playText = state.detailLoading ? '正在加载…' : (resumeValid ? ('继续播放 · 第' + resume.episode + '集') : '立即播放');
+
   view.innerHTML = '<div class="detail">'
     + '<div class="detail-art"><img data-cover="' + esc(data.cover || '') + '" alt=""></div>'
     + '<div class="detail-info">'
     + '<h1>' + esc(data.title || '') + '</h1>'
     + '<p class="meta">' + esc(data.score || '') + '　' + esc(data.episodeLabel || '') + '</p>'
+    + (resumeValid ? '<p class="resume-line">上次看到第 ' + resume.episode + ' 集 · ' + clock(resume.position) + '</p>' : '')
     + '<p class="desc">' + esc(data.description || '') + '</p>'
-    + '<div class="actions">'
-    + '<button type="button" class="btn primary" data-focusable data-key="play" data-play="1"' + (state.detailLoading ? ' disabled' : '') + '>' + (state.detailLoading ? '正在加载…' : '立即播放') + '</button>'
+    + '<div class="actions detail-actions">'
+    + '<button type="button" class="btn primary" data-focusable data-key="play" data-play="1"' + (state.detailLoading ? ' disabled' : '') + '>' + playText + '</button>'
+    + (resumeValid ? '<button type="button" class="btn icon-only" data-focusable data-key="restart" data-restart="1" aria-label="从头播放" title="从头播放">'
+      + '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V1L7 6l5 5V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z"/></svg></button>' : '')
     + '<button type="button" class="btn" data-focusable data-key="bookmark" data-bookmark="1">' + (data.bookmarked ? '已收藏' : '收藏') + '</button>'
     + '</div>' + eps + '</div></div>';
   paintCovers(view);
   restoreFocus();
+  syncBackdropFromFocus();
+}
+
+function clock(ms) {
+  var total = Math.max(0, Math.round((Number(ms) || 0) / 1000));
+  var h = Math.floor(total / 3600);
+  var m = Math.floor((total % 3600) / 60);
+  var s = total % 60;
+  var mm = (m < 10 && h > 0 ? '0' : '') + m;
+  var ss = (s < 10 ? '0' : '') + s;
+  return (h > 0 ? h + ':' + mm : m) + ':' + ss;
 }
 
 function openDetail(id) {
@@ -528,6 +709,7 @@ function openDetail(id) {
   if (state.route !== 'detail') state.detailFrom = state.route;
   state.route = 'detail';
   state.detail = null;
+  state.detailProgress = null;
   state.detailLoading = true;
   state.epGroup = 0;
   state.focusKey = 'play';
@@ -548,10 +730,16 @@ function openDetail(id) {
     state.detailLoading = false;
     view.innerHTML = '<p class="empty">打开失败：' + esc(error.message || '网络异常') + '</p>';
   });
+  /* 上次看到哪集哪一秒：拿到来就把按钮换成「继续播放」 */
+  api('latest-progress', { id: String(id) }).then(function (progress) {
+    if (state.route !== 'detail' || !state.detail) return;
+    state.detailProgress = progress || null;
+    renderDetail();
+  }).catch(function () { });
 }
 
 /* ---------------- 动作 ---------------- */
-function play(detail, episode) {
+function play(detail, episode, restart) {
   if (!detail || !detail.id) return;
   var episodes = list(detail.episodes);
   var item = { id: detail.id, title: detail.title, cover: detail.cover };
@@ -562,7 +750,8 @@ function play(detail, episode) {
     queue: [item],
     index: 0,
     group: '',
-    episode: episode || 1
+    episode: episode || 1,
+    restart: !!restart
   }).catch(function (error) { toast(error.message || '无法播放', true); });
 }
 function toggleBookmark() {
@@ -585,17 +774,13 @@ function setActiveNav(tab) {
 }
 
 function go(tab) {
+  if (tab === 'adult' || tab === 'category') tab = 'home';   /* 剧场已并进首页 */
   stage.scrollTop = 0;
   if (tab === 'home') {
     state.route = 'home';
     state.focusKey = 'nav:home';
     setActiveNav('home'); renderHome();
-    if (!state.home && !state.homeError) loadHome();
-  } else if (tab === 'adult') {
-    state.route = 'category';
-    setActiveNav('adult');
-    if (!state.category || state.category.id !== (state.categoryId || categoryList()[0][0])) loadCategory(state.categoryId || categoryList()[0][0], false);
-    else { state.focusKey = state.focusKey || 'chip:' + state.categoryId; renderCategory(); }
+    if (!state.feed) loadFeed(state.feedId || categoryList()[0][0], true);
   } else if (tab === 'search') {
     state.route = 'search';
     state.focusKey = 'search-box';
@@ -605,27 +790,10 @@ function go(tab) {
     state.focusKey = 'tab:' + state.libraryTab;
     setActiveNav('library'); renderLibrary();
     loadLibrary();
+    if (state.libraryTab === 'nas') loadNas();
   }
 }
 
-function loadHome() {
-  state.homeError = '';
-  api('home').then(function (home) {
-    state.home = home || {};
-    if (state.route === 'home') renderHome();
-  }).catch(function (error) {
-    state.homeError = error.message || '网络异常';
-    if (state.route === 'home') renderHome();
-  });
-}
-function loadLibrary() {
-  api('library').then(function (data) {
-    state.library = data || { bookmarks: [], progress: [] };
-    if (state.route === 'library' || state.route === 'home') renderHomeOr();
-  }).catch(function () {
-    state.library = { bookmarks: [], progress: [] };
-  });
-}
 function renderHomeOr() {
   if (state.route === 'library') renderLibrary();
   else if (state.route === 'home') renderHome();
@@ -687,7 +855,7 @@ document.addEventListener('click', function (event) {
   if (nav) { go(nav.dataset.nav); return; }
 
   var chip = target.closest('[data-chip]');
-  if (chip) { loadCategory(chip.dataset.chip, false); return; }
+  if (chip) { loadFeed(chip.dataset.chip, true); return; }
 
   var epGroup = target.closest('[data-epgroup]');
   if (epGroup) {
@@ -709,10 +877,35 @@ document.addEventListener('click', function (event) {
   }
 
   var tab = target.closest('[data-tab]');
-  if (tab) { state.libraryTab = tab.dataset.tab; state.focusKey = 'tab:' + state.libraryTab; renderLibrary(); return; }
+  if (tab) {
+    state.libraryTab = tab.dataset.tab;
+    state.focusKey = 'tab:' + state.libraryTab;
+    renderLibrary();
+    if (state.libraryTab === 'nas') loadNas();
+    return;
+  }
 
   var playButton = target.closest('[data-play]');
-  if (playButton) { play(state.detail, 1); return; }
+  if (playButton) {
+    var saved = state.detailProgress;
+    var canResume = !!(saved && saved.episode >= 1 && saved.position > 5000
+      && !saved.completed && (!saved.duration || saved.position < saved.duration - 5000));
+    play(state.detail, canResume ? saved.episode : 1, false);
+    return;
+  }
+
+  var restart = target.closest('[data-restart]');
+  if (restart) { play(state.detail, 1, true); return; }
+
+  var recent = target.closest('[data-recent]');
+  if (recent) { runSearch(recent.dataset.recent); return; }
+
+  var nasCard = target.closest('[data-nas]');
+  if (nasCard) {
+    if (nasCard.dataset.nasReady !== '1') { toast('这部还没下载完，等它下载好再播'); return; }
+    playNas(nasCard.dataset.nas);
+    return;
+  }
 
   var bookmark = target.closest('[data-bookmark]');
   if (bookmark) { toggleBookmark(); return; }
@@ -738,8 +931,10 @@ document.addEventListener('click', function (event) {
 /* ---------------- 登录 ---------------- */
 function setAccount(profile) {
   state.account = profile || { loggedIn: false };
-  var name = state.account.loggedIn ? (state.account.username || '已登录') : '未登录';
-  if (railWho) railWho.textContent = name;
+  var name = state.account.loggedIn ? (state.account.username || '已登录') : '';
+  if (railAvatar) {
+    railAvatar.textContent = name ? name.slice(0, 1).toUpperCase() : '?';
+  }
 }
 
 function showLoginQr() {
@@ -776,7 +971,8 @@ window.hgTvLogin = function (ok) {
     if (profile && profile.loggedIn) {
       loginLayer.hidden = true;
       toast('已登录');
-      if (!state.home) loadHome();
+      if (!state.feed) loadFeed(state.feedId || categoryList()[0][0], true);
+      loadLibrary();
       state.focusKey = 'nav:home';
       restoreFocus();
     }
@@ -929,8 +1125,9 @@ function applyMode(status, fallback) {
   state.source = (status && status.source) || fallback;
   if (typeof (status && status.unlocked) === 'boolean') state.unlocked = status.unlocked;
   state.home = null;
-  state.category = null;
+  state.feed = null;
   state.library = null;
+  state.nas = null;
   state.detail = null;
   if (accountPanel) accountPanel.hidden = true;
   toast(state.source === 'huangguo' ? '已进入私密内容' : '已返回公开内容');
@@ -938,7 +1135,7 @@ function applyMode(status, fallback) {
   state.focusKey = 'nav:home';
   setActiveNav('home');
   renderHome();
-  loadHome();
+  loadFeed(state.feedId || categoryList()[0][0], true);
 }
 
 function switchMode() {
@@ -964,14 +1161,15 @@ function logout() {
     if (accountPanel) accountPanel.hidden = true;
     state.home = null;
     state.library = null;
-    state.category = null;
+    state.feed = null;
+    state.nas = null;
     state.detail = null;
     toast('已退出登录');
     state.route = 'home';
     state.focusKey = 'nav:home';
     setActiveNav('home');
     renderHome();
-    loadHome();
+    loadFeed(state.feedId || categoryList()[0][0], true);
     loginLayer.hidden = false;
     showLoginQr();
     state.focusKey = 'login:guest';
@@ -992,6 +1190,8 @@ function boot() {
   view.innerHTML = '<p class="empty">正在启动…</p>';
   try { window.AndroidHost.setTvCapture(true); } catch (error) { }
   if (window.__tvApplyScale) window.__tvApplyScale();
+  restoreSearch();
+  observeStageEnd();
   /* 版本号：账号面板里显示，检查更新时也拿它兜底显示「当前版本」 */
   api('app-version').then(function (version) {
     state.version = String(version || '');

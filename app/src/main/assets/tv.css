@@ -42,56 +42,74 @@ img{display:block;border:0}
 
 #app{position:relative;width:100%;height:100%;overflow:hidden}
 
-/* ---------------- 左侧竖导航 ---------------- */
-#rail{
-  position:absolute;left:0;top:0;bottom:0;width:22rem;
-  background:#090c0e;border-right:1px solid #1b2127;
-  padding:5.6rem 1.6rem 3rem;
-  display:flex;flex-direction:column;
+/* ---------------- 模糊背景 ----------------
+   当前聚焦/正在看的那部剧的封面，放大 1.1 倍 + 高斯模糊铺满整屏，盖一层暗色渐变
+   保证文字可读。纯静态元素（只在切换作品时换 src），不会每帧重算。
+   filter:blur 是 Chrome 18 就有的属性，电视老内核也能吃。 */
+#tv-bg{
+  position:absolute;left:0;right:0;top:0;bottom:0;z-index:0;
+  overflow:hidden;background:#0d1013;
 }
-.brand{
-  font-size:3.2rem;font-weight:800;color:var(--accent);
-  padding:0 1.4rem;margin-bottom:3.4rem;letter-spacing:.04em;
+#tv-bg img{
+  position:absolute;left:-5%;top:-5%;width:110%;height:110%;
+  object-fit:cover;opacity:.72;
+  -webkit-filter:blur(46px) saturate(1.25);
+  filter:blur(46px) saturate(1.25);
+  transform:translateZ(0);
+  transition:opacity .28s linear;
 }
-.rail-item{
-  display:block;width:100%;text-align:left;
-  height:6.4rem;line-height:6.4rem;
-  padding:0 1.8rem;margin-bottom:.8rem;
-  border-radius:1rem;
-  font-size:2.4rem;color:var(--muted);
-  white-space:nowrap;overflow:hidden;
-}
-.rail-item.is-active{color:var(--text);background:var(--panel);font-weight:600}
-.rail-item.is-focused{
-  color:var(--text);background:var(--panel-2);
-  outline:.3rem solid var(--focus);outline-offset:-.3rem;
+#tv-bg img.is-dim{opacity:0}
+#tv-bg .veil{
+  position:absolute;left:0;right:0;top:0;bottom:0;
+  background:
+    linear-gradient(90deg,rgba(8,10,13,.88) 0%,rgba(8,10,13,.56) 40%,rgba(8,10,13,.34) 100%),
+    linear-gradient(180deg,rgba(8,10,13,.42) 0%,rgba(8,10,13,.04) 30%,rgba(8,10,13,.76) 100%);
 }
 
-/* 左下角账号：做成按钮，遥控器能选中，点开账号面板 */
+/* ---------------- 左侧图标导航 ----------------
+   只留三个图标往边缘收，标题栏宽度从 22rem 降到 8rem，内容区多出 140px。
+   不做整条深色底：背景已经铺满整屏，rail 只是浮在上面的一列按钮。 */
+#rail{
+  position:absolute;left:2.2rem;top:4rem;bottom:3rem;width:8rem;z-index:5;
+  display:flex;flex-direction:column;align-items:center;
+}
+.brand{
+  width:6.4rem;height:6.4rem;line-height:6.4rem;
+  margin-bottom:2.6rem;border-radius:1.6rem;
+  text-align:center;font-size:3.2rem;font-weight:800;color:var(--accent);
+  letter-spacing:.02em;background:rgba(255,255,255,.06);
+}
+.rail-item{
+  width:6.4rem;height:6.4rem;border-radius:1.8rem;
+  margin-bottom:1.4rem;
+  display:flex;align-items:center;justify-content:center;
+  color:#b9c1ca;background:rgba(255,255,255,.05);
+  transition:background .12s linear,color .12s linear;
+}
+.rail-item svg{width:3.1rem;height:3.1rem;fill:currentColor}
+.rail-item.is-active{color:#fff;background:rgba(255,255,255,.16)}
+.rail-item.is-focused{color:var(--accent-ink);background:var(--accent)}
+
+/* 左下角账号：只放头像，点开账号面板 */
 .rail-account{
-  margin-top:auto;width:100%;text-align:left;
-  padding:1.4rem 1.6rem;border-radius:1rem;
-  background:var(--panel);
-  display:block;
+  margin-top:auto;width:6.4rem;height:6.4rem;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  background:rgba(255,255,255,.08);
+  overflow:hidden;
 }
-.rail-account .who{
-  display:block;font-size:2rem;color:var(--text);
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+.rail-account .avatar{
+  display:block;width:100%;height:100%;line-height:6.4rem;
+  text-align:center;font-size:2.4rem;font-weight:700;color:#fff;
+  white-space:nowrap;overflow:hidden;
 }
-.rail-account .hint{
-  display:block;margin-top:.6rem;
-  font-size:1.6rem;color:var(--muted);
-}
-.rail-account.is-focused{
-  background:var(--panel-2);
-  outline:.3rem solid var(--focus);outline-offset:-.3rem;
-}
+.rail-account.is-focused{background:var(--accent);outline:none;box-shadow:0 0 0 .3rem var(--focus)}
+.rail-account.is-focused .avatar{color:var(--accent-ink)}
 
 /* ---------------- 主区域 ---------------- */
 #stage{
-  position:absolute;left:22rem;right:0;top:0;bottom:0;
+  position:absolute;left:12rem;right:0;top:0;bottom:0;z-index:2;
   overflow-y:auto;overflow-x:hidden;
-  padding:4.2rem 6rem 9rem;
+  padding:4.2rem 5.6rem 9rem;
   scrollbar-width:none;
 }
 #stage::-webkit-scrollbar{display:none}
@@ -112,17 +130,21 @@ img{display:block;border:0}
   padding:6rem 0;line-height:1.6;
 }
 
-/* ---------------- 海报墙 ---------------- */
+/* ---------------- 海报墙 ----------------
+   auto-fill + minmax：按可用宽度自动决定列数（1080p / 720p 都是 5 列，
+   4K 也是 5 列），绝不超过右边界，不会再出现「最后一张只露一半」。
+   30rem 是 1080p 下 5 列的下限（5×300 + 4×18 = 1572 < 1688 可用宽）。 */
 .grid{
   display:grid;
-  grid-template-columns:repeat(6,1fr);
+  grid-template-columns:repeat(auto-fill,minmax(30rem,1fr));
   grid-column-gap:1.8rem;
-  grid-row-gap:3.2rem;
+  grid-row-gap:2.8rem;
+  max-width:100%;
 }
 /* min-width:0 必须写：grid 的 1fr 等于 minmax(auto,1fr)，长剧名会把
    自动最小宽度撑大，同一行里各列宽窄不一，就是“封面大小不一”的来源 */
 .card{
-  display:block;width:100%;min-width:0;overflow:hidden;
+  display:block;width:100%;max-width:100%;min-width:0;overflow:hidden;
   text-align:left;border-radius:.8rem;
 }
 /* 1:1.4 的比例用 padding-top 撑：宽度随列自适应，高度永远跟着走 */
@@ -139,29 +161,33 @@ img{display:block;border:0}
   padding:.3rem .8rem;border-radius:.5rem;
 }
 .card .name{
-  display:block;margin-top:1rem;
+  display:block;width:100%;margin-top:1rem;
   font-size:1.9rem;line-height:1.35;color:var(--text);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
-/* 焦点只作用在海报上：整卡放大会把剧名糊掉，描边也会框住文字 */
+/* 焦点只作用在海报上：整卡放大会把剧名糊掉，描边也会框住文字。
+   用 box-shadow 画框而不是 outline —— outline 永远是直角矩形，
+   套在圆角海报/胶囊按钮外面就是「傻大粗的一个方框」。 */
 .card.is-focused .art{
-  /* 描边画在海报内侧：往外画会压到下面那行剧名上 */
-  outline:.4rem solid var(--focus);outline-offset:-.4rem;
+  box-shadow:0 0 0 .4rem var(--focus);
   transform:scale(1.04);
 }
 
 /* ---------------- 分类条 ---------------- */
-.chips{display:block;margin-bottom:2.8rem}
+.chips{display:block;margin-bottom:2.4rem}
 .chip{
   display:inline-block;vertical-align:top;
-  height:5.4rem;line-height:5.4rem;
+  height:5rem;line-height:5rem;
   padding:0 2.4rem;margin:0 1.2rem 1.2rem 0;
-  border-radius:2.7rem;
-  background:var(--panel);color:var(--muted);
-  font-size:2.1rem;
+  border-radius:2.5rem;
+  background:rgba(255,255,255,.08);color:#c2c9d2;
+  font-size:2rem;
+  transition:background .12s linear,color .12s linear;
 }
 .chip.is-active{background:var(--accent);color:var(--accent-ink);font-weight:700}
-.chip.is-focused{outline:.3rem solid var(--focus);outline-offset:.2rem}
+/* 胶囊外框也用 box-shadow：跟随圆角，不再是方形描边 */
+.chip.is-focused{box-shadow:0 0 0 .3rem rgba(8,10,13,.92),0 0 0 .7rem var(--focus);color:#fff}
+.chip.is-active.is-focused{color:var(--accent-ink)}
 
 /* ---------------- 详情 ---------------- */
 .detail{
@@ -189,13 +215,23 @@ img{display:block;border:0}
 .btn{
   display:inline-block;
   height:6rem;line-height:6rem;
-  padding:0 3.2rem;margin-right:1.6rem;
+  padding:0 3.2rem;margin-right:1.4rem;
   border-radius:1rem;
-  background:var(--panel-2);font-size:2.1rem;color:var(--text);
+  background:rgba(255,255,255,.12);font-size:2.1rem;color:var(--text);
+  vertical-align:middle;
 }
 .btn.primary{background:var(--accent);color:var(--accent-ink);font-weight:700}
-.btn.ghost{background:transparent;border:1px solid #333c46;color:var(--muted)}
-.btn.is-focused{outline:.4rem solid var(--focus);outline-offset:.3rem}
+.btn.ghost{background:transparent;border:1px solid #3a434e;color:var(--muted)}
+.btn.is-focused{box-shadow:0 0 0 .4rem rgba(8,10,13,.92),0 0 0 .8rem var(--focus)}
+/* 重头播放：圆形图标按钮，跟「继续播放」并排 */
+.btn.icon-only{
+  width:6rem;padding:0;margin-right:1.6rem;
+  border-radius:50%;
+  display:inline-flex;align-items:center;justify-content:center;
+  background:rgba(255,255,255,.12);
+}
+.btn.icon-only svg{width:3rem;height:3rem;fill:currentColor}
+.detail-actions{display:flex;align-items:center;flex-wrap:wrap}
 
 .eps-title{font-size:2.4rem;margin:0 0 1.6rem;font-weight:700}
 .eps-title span{font-size:1.8rem;color:var(--muted);margin-left:1.4rem;font-weight:400}
@@ -205,17 +241,17 @@ img{display:block;border:0}
 .ep-groups .chip{height:4.6rem;line-height:4.6rem;padding:0 1.8rem;font-size:1.9rem}
 .eps{
   display:grid;grid-template-columns:repeat(8,1fr);
-  grid-column-gap:1.4rem;grid-row-gap:1.4rem;
+  grid-column-gap:1.2rem;grid-row-gap:1.2rem;
   max-width:112rem;
 }
 .eps button{
   height:5.6rem;line-height:5.6rem;
-  border-radius:.8rem;background:var(--panel);color:var(--text);
+  border-radius:.8rem;background:rgba(255,255,255,.09);color:var(--text);
   font-size:2rem;text-align:center;white-space:nowrap;
 }
 .eps button.is-focused{
-  outline:.4rem solid var(--focus);outline-offset:-.4rem;
-  background:var(--panel-2);font-weight:700;
+  box-shadow:0 0 0 .4rem var(--focus);
+  background:var(--accent);color:var(--accent-ink);font-weight:700;
 }
 
 /* ---------------- 搜索 ---------------- */
@@ -225,7 +261,7 @@ img{display:block;border:0}
 .search-box{
   display:block;position:relative;
   height:6.8rem;
-  background:var(--panel);border-radius:1rem;
+  background:rgba(255,255,255,.10);border-radius:1rem;
   padding:0 2.4rem;
 }
 .search-box input{
@@ -234,7 +270,7 @@ img{display:block;border:0}
   color:var(--text);font-size:2.2rem;
 }
 .search-box input::placeholder{color:var(--muted)}
-.search-box.is-focused{outline:.3rem solid var(--focus);outline-offset:.2rem}
+.search-box.is-focused{box-shadow:0 0 0 .3rem rgba(8,10,13,.92),0 0 0 .7rem var(--focus)}
 .search-hint{font-size:1.7rem;color:var(--muted);margin:1.2rem 0 0}
 
 .search-qr{width:24rem;flex:0 0 24rem;text-align:center}
@@ -338,3 +374,17 @@ img{display:block;border:0}
 }
 #tv-update-percent{display:block;font-size:1.8rem;color:var(--muted);margin:0 0 2.4rem}
 .update-actions .btn{margin:0 1rem}
+
+/* ---------------- 继续播放 / NAS ----------------
+   详情页「上次看到第 N 集 · 12:34」一行，以及旁边的重头播放圆按钮。 */
+.resume-line{
+  display:inline-block;
+  font-size:1.8rem;color:var(--accent);
+  background:rgba(200,155,60,.14);
+  border-radius:.6rem;padding:.4rem 1rem;
+  margin:0 0 1.4rem;
+}
+/* NAS 里还没下载完的任务：压暗，选中时提示 */
+.card.is-dim .art img{opacity:.42}
+.card.is-dim .badge{background:rgba(0,0,0,.55);color:#cfd5dc}
+.nas-panel .empty .tip{font-size:1.8rem;color:#77808a}

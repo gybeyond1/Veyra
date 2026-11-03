@@ -56,7 +56,8 @@ const state = {
   search: null, searchPending: false, searchError: '', query: '', filter: 'all', banner: 0, categoryBanner: 0,
   listing: null, tags: null, tagsReturn: null, listingReturn: null, settingsReturn: null,
   libraryTab: 'history', libraryQuery: '', accountReturn: null, account: { loggedIn: false },
-  sourceGroup: '', sourceQueue: [], previous: null, compactHeld: false
+  sourceGroup: '', sourceQueue: [], previous: null, compactHeld: false,
+  detailProgress: null
 };
 contentReady = api('content-status').then(status => {
   contentSource = status.source || 'hongguo';
@@ -104,7 +105,8 @@ const icon = name => {
     play: '<path d="m8 5 11 7-11 7z"/>',
     arrow: '<path d="m9 5 7 7-7 7"/>',
     back: '<path d="m15 5-7 7 7 7"/>',
-    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    restart: '<path d="M3.5 12a8.5 8.5 0 1 0 2.7-6.2"/><path d="M3.5 4.5V10h5.5"/>'
   };
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`;
 };
@@ -2138,7 +2140,7 @@ function renderDetail() {
   const episodes = asArray(data.episodes);
   content.innerHTML = `<div class="detail-page"><button class="detail-back" type="button" data-back="1">${icon('back')} 返回</button>
     <div class="detail-art"><img data-cover="${esc(data.cover)}" alt=""></div><div class="detail-copy"><h1>${esc(data.title)}</h1><p>${loading ? '正在获取内容…' : `${esc(data.score)} ${esc(data.episodeLabel)}`}</p><div class="detail-desc-wrap"><p class="detail-description">${esc(data.description || '')}</p></div>
-    <div class="detail-buttons"><button class="detail-play" type="button" data-play="1" ${loading ? 'disabled' : ''}>${loading ? '正在加载…' : '立即播放'}</button><button class="bookmark-button" type="button" data-bookmark="1" aria-label="${state.bookmarked ? '取消收藏' : '收藏'}" ${loading ? 'disabled' : ''}>${state.bookmarked ? '★' : '☆'}</button><button class="detail-download" type="button" data-download="1" ${loading ? 'disabled' : ''}>下载</button></div>
+    <div class="detail-buttons"><button class="detail-play" type="button" data-play="1" ${loading ? 'disabled' : ''}>${loading ? '正在加载…' : resumeLabel()}</button><button class="detail-restart" type="button" data-restart="1" aria-label="从头播放" title="从头播放" ${resumeReady() ? '' : 'hidden'}>${icon('restart')}</button><button class="bookmark-button" type="button" data-bookmark="1" aria-label="${state.bookmarked ? '取消收藏' : '收藏'}" ${loading ? 'disabled' : ''}>${state.bookmarked ? '★' : '☆'}</button><button class="detail-download" type="button" data-download="1" ${loading ? 'disabled' : ''}>下载</button></div>
     ${loading ? '<div class="detail-loading" role="status">正在获取选集…</div>' : episodes.length ? `<h2>选集</h2><div class="episode-grid">${episodes.map((item, index) => `<button type="button" data-episode="${item.number}" class="${index === 0 ? 'active' : ''}">${item.number}</button>`).join('')}</div>` : ''}</div></div>`;
   hydrateImages();
   ensureDetailFilled();
@@ -2796,6 +2798,13 @@ async function goDetail(id, trigger) {
   let hasDetailData = Boolean(cached?.data);
   if (hasDetailData) { state.detail = cached.data; state.detailLoading = false; renderDetail(); }
   api('bookmark-state', { id }).then(saved => { if (token === routeToken) { state.bookmarked = saved; if (state.detail) renderDetail(); } }).catch(() => {});
+  // 上次看到哪集哪一秒：拿到来就把「立即播放」换成「继续播放」，旁边再挂一个从头播放
+  state.detailProgress = null;
+  api('latest-progress', { id }).then(progress => {
+    if (token !== routeToken) return;
+    state.detailProgress = progress || null;
+    if (state.detail) renderDetail();
+  }).catch(() => {});
   try { const fresh = await refreshing; if (token === routeToken) { state.detail = fresh; state.detailLoading = false; renderDetail(); } }
   catch (error) { if (!hasDetailData && token === routeToken) { state.detailLoading = false; renderError(error, 'detail'); } }
 }
@@ -2862,14 +2871,31 @@ window.hgResume = () => {
   window.__bingeSync && window.__bingeSync();
 };
 
-async function openPlayer(episode = 1) {
+/** 上次看到一半（超过 5 秒、没看完）才算「继续播放」 */
+function resumeReady() {
+  const progress = state.detailProgress;
+  if (!progress || progress.completed) return false;
+  const episode = Number(progress.episode);
+  const position = Number(progress.position);
+  const duration = Number(progress.duration);
+  if (!(episode >= 1) || !(position > 5000)) return false;
+  return !(duration > 0 && position >= duration - 5000);
+}
+function resumeEpisode() {
+  return resumeReady() ? Number(state.detailProgress.episode) : 1;
+}
+function resumeLabel() {
+  return resumeReady() ? `继续播放 第${state.detailProgress.episode}集` : '立即播放';
+}
+
+async function openPlayer(episode = 1, restart = false) {
   const detail = state.detail;
   if (!detail) return;
   const item = { ...state.sourceItem, ...detail };
   const queue = state.sourceQueue.length ? [...state.sourceQueue] : [item];
   if (!queue.some(candidate => candidate.id === item.id)) queue.unshift(item);
   const index = queue.findIndex(candidate => candidate.id === item.id);
-  await api('open-player', { item, detail, episodes: asArray(detail.episodes), queue, index, group: state.sourceGroup, episode });
+  await api('open-player', { item, detail, episodes: asArray(detail.episodes), queue, index, group: state.sourceGroup, episode, restart });
 }
 
 async function loadMoreCategory() {
@@ -4003,7 +4029,8 @@ function refreshCurrentDownloads() {
   if (event.target.closest('[data-back]')) { window.hgBack(); return; }
   const episode = event.target.closest('[data-episode]');
   if (episode) { openPlayer(Number(episode.dataset.episode)); return; }
-  if (event.target.closest('[data-play]')) { openPlayer(1); return; }
+  if (event.target.closest('[data-play]')) { openPlayer(resumeEpisode()); return; }
+  if (event.target.closest('[data-restart]')) { openPlayer(1, true); return; }
   if (event.target.closest('[data-bookmark]')) {
     if (!state.detail) return;
     try { state.bookmarked = await api('bookmark', state.detail); renderDetail(); toast(state.bookmarked ? '已加入我的片单' : '已取消收藏'); }
