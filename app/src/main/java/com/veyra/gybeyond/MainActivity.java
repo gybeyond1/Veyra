@@ -9,6 +9,7 @@ import android.content.ActivityNotFoundException;
 import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
 import android.graphics.Color;
+import android.graphics.Typeface;
 import android.os.Build;
 import android.os.Bundle;
 import android.net.Uri;
@@ -34,6 +35,8 @@ import android.window.OnBackInvokedCallback;
 import android.window.OnBackInvokedDispatcher;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.TextView;
 import android.widget.ProgressBar;
 import androidx.core.content.FileProvider;
 import androidx.webkit.WebViewAssetLoader;
@@ -130,7 +133,7 @@ public final class MainActivity extends Activity {
     private volatile boolean tvCapture = true;
     private LanTextRelay textRelay;
     /** 电视端退出确认弹窗（只在返回键落到首页时出现）。 */
-    private AlertDialog exitDialog;
+    private android.app.Dialog exitDialog;
     /** 扫码登录：电视这边二维码里的一次性码（4 分钟内复用，避免重渲染就换码）。 */
     private volatile String activeLoginCode = "";
     private volatile long activeLoginCodeAt;
@@ -859,13 +862,9 @@ public final class MainActivity extends Activity {
     /** 电视端退出确认：遥控器方向键 + 确定键就能选，不需要触摸。 */
     private void showExitConfirm() {
         if (exitDialog != null && exitDialog.isShowing()) return;
-        exitDialog = new AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
-                .setTitle("退出 Veyra")
-                .setMessage("确定要退出应用吗？")
-                .setPositiveButton("退出", (dialog, which) -> exitApplication())
-                .setNegativeButton("取消", null)
-                .setOnDismissListener(dialog -> exitDialog = null)
-                .create();
+        exitDialog = VeyraDialog.confirm(this, "退出 Veyra", "确定要退出应用吗？",
+                "退出", "取消", this::exitApplication);
+        exitDialog.setOnDismissListener(dialog -> exitDialog = null);
         exitDialog.show();
     }
 
@@ -934,16 +933,52 @@ public final class MainActivity extends Activity {
         FrameLayout layer = new FrameLayout(this);
         layer.setBackgroundColor(0xFF17181A);
         layer.setClickable(true);
+
+        LinearLayout stack = new LinearLayout(this);
+        stack.setOrientation(LinearLayout.VERTICAL);
+        stack.setGravity(Gravity.CENTER_HORIZONTAL);
+        layer.addView(stack, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
+
         ImageView mark = new ImageView(this);
         mark.setImageResource(R.drawable.launch_logo);
-        layer.addView(mark, new FrameLayout.LayoutParams(
-                Math.round(86 * density), Math.round(86 * density), Gravity.CENTER));
+        int markSize = Math.round(88 * density);
+        stack.addView(mark, new LinearLayout.LayoutParams(markSize, markSize));
+
+        /* 光一个 V 太单薄：下面把全名排出来，字距稍微拉开一点看着才像品牌页 */
+        TextView name = new TextView(this);
+        name.setText("Veyra TV");
+        name.setTextSize(27);
+        name.setTextColor(0xFFF2F3F5);
+        name.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        name.setLetterSpacing(0.22f);
+        name.setGravity(Gravity.CENTER);
+        name.setIncludeFontPadding(false);
+        LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(-2, -2);
+        nameParams.topMargin = Math.round(20 * density);
+        stack.addView(name, nameParams);
+
         ProgressBar wait = new ProgressBar(this, null, android.R.attr.progressBarStyleSmall);
         wait.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(0xFFC89B3C));
-        FrameLayout.LayoutParams waitParams = new FrameLayout.LayoutParams(
-                Math.round(26 * density), Math.round(26 * density), Gravity.CENTER);
-        waitParams.topMargin = Math.round(132 * density);
-        layer.addView(wait, waitParams);
+        LinearLayout.LayoutParams waitParams = new LinearLayout.LayoutParams(
+                Math.round(22 * density), Math.round(22 * density));
+        waitParams.topMargin = Math.round(30 * density);
+        waitParams.gravity = Gravity.CENTER_HORIZONTAL;
+        stack.addView(wait, waitParams);
+
+        /* 入场：V 淡入并轻微放大，名字随后浮上来，转圈最后出现 */
+        mark.setAlpha(0f);
+        mark.setScaleX(.86f);
+        mark.setScaleY(.86f);
+        name.setAlpha(0f);
+        name.setTranslationY(14 * density);
+        wait.setAlpha(0f);
+        mark.animate().alpha(1f).scaleX(1f).scaleY(1f)
+                .setDuration(420).setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+        name.animate().alpha(1f).translationY(0f)
+                .setDuration(460).setStartDelay(130)
+                .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+        wait.animate().alpha(1f).setDuration(300).setStartDelay(300).start();
+
         splash = layer;
         root.addView(layer, new FrameLayout.LayoutParams(-1, -1));
     }
@@ -1520,6 +1555,10 @@ public final class MainActivity extends Activity {
         }
 
         /** 页面接管/交还方向键：输入框聚焦时交还给系统，避免吃掉软键盘里的方向键。 */
+        @JavascriptInterface public void setTvTheme(String key) {
+            TvTheme.save(MainActivity.this, key);
+        }
+
         @JavascriptInterface public void setTvCapture(boolean enabled) {
             tvCapture = enabled;
         }

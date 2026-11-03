@@ -330,15 +330,21 @@ body.rail-open #rail{
   box-shadow:0 0 0 .34rem var(--focus),0 .9rem 2.4rem rgba(0,0,0,.42);
 }
 .card.is-focused .name{transform:translateY(1.3rem)}
-/* 标题超长：选中后左右跑马灯，滚到末尾停一下再回来。
-   位移量由 JS 按实际溢出像素写进 --marquee-shift。 */
-.card .name.is-scrolling{
-  text-overflow:clip;
-  animation:tv-marquee 6.4s ease-in-out infinite alternate;
+/* 标题超长：选中后跑马灯。
+   外层 .name 负责裁剪（overflow:hidden 一直留着，文字不会跑到左边海报底下），
+   内层 .mq-track 放两份同样的标题、中间留一道空白，整体向左平移「一份+空白」的距离，
+   到头正好接上第二份 —— 第一字从左边淡出，末尾字从右边补进来，无缝循环。 */
+.card .name .mq-track{
+  display:inline-flex;align-items:baseline;
+  gap:4.8rem;white-space:nowrap;will-change:transform;
+}
+.card .name.is-scrolling{text-overflow:clip}
+.card .name.is-scrolling .mq-track{
+  animation:tv-marquee var(--mq-dur,8s) linear infinite;
 }
 @keyframes tv-marquee{
-  0%,16%{transform:translate(0,1.3rem)}
-  84%,100%{transform:translate(var(--marquee-shift,0),1.3rem)}
+  from{transform:translateX(0)}
+  to{transform:translateX(var(--mq-shift,0))}
 }
 
 /* ---------------- 分类条 ---------------- */

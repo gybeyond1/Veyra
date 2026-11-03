@@ -129,6 +129,8 @@ function applyTheme(key) {
   var next = themeExists(key) ? key : 'dark';
   document.body.setAttribute('data-tv-theme', next);
   try { localStorage.setItem(THEME_STORE, next); } catch (error) { }
+  /* 原生层也存一份：播放器里的退出确认框要按当前主题取强调色 */
+  try { if (window.AndroidHost && window.AndroidHost.setTvTheme) window.AndroidHost.setTvTheme(next); } catch (error) { }
   return next;
 }
 function renderThemeGrid() {
@@ -284,19 +286,50 @@ function focusElement(el, remember) {
   syncBackdrop(el);
 }
 
-/* 剧名放不下时，选中后跑马灯：把溢出宽度写进 --marquee-shift，
-   交给 CSS 动画左右滚；切走就把上一次的动画停掉，避免多张卡同时滚。 */
+/* 剧名跑马灯。
+   原来是把整个 .name 元素往左推，元素本身跑出裁剪区，第一个字会滑到左边那张
+   海报下面去；位移量又只算到"刚好装下"，末尾那个字被右边界切掉一半。
+   现在改成：.name 固定在原位负责裁剪，里面塞一份 track，track 里放两份标题、
+   中间留 MARQUEE_GAP 的空白，平移「一份 + 空白」后正好接上第二份，无缝循环。 */
+var MARQUEE_GAP = 48;        /* px，末尾字与下一轮第一个字之间的空隙 */
+var MARQUEE_SPEED = 62;      /* px/秒，慢一点才看得清 */
+
+function resetMarquee(card) {
+  var name = card && card.querySelector ? card.querySelector('.name') : null;
+  if (!name) return;
+  if (!name.classList.contains('is-scrolling') && !name.querySelector('.mq-track')) return;
+  var text = name.getAttribute('data-mq-text');
+  if (text != null) name.textContent = text;
+  name.classList.remove('is-scrolling');
+  name.removeAttribute('data-mq-text');
+  name.style.removeProperty('--mq-shift');
+  name.style.removeProperty('--mq-dur');
+}
+
 function updateMarquee(prev, next) {
-  var oldName = prev && prev.querySelector ? prev.querySelector('.name') : null;
-  if (oldName) {
-    oldName.classList.remove('is-scrolling');
-    oldName.style.removeProperty('--marquee-shift');
-  }
+  resetMarquee(prev);
   var name = next && next.querySelector ? next.querySelector('.name') : null;
-  if (!name || name.classList.contains('is-scrolling')) return;
-  var over = name.scrollWidth - name.clientWidth;
-  if (over < 4) return;
-  name.style.setProperty('--marquee-shift', (-(over + 14)) + 'px');
+  if (!name) return;
+  resetMarquee(next);
+  /* 还没套 track 时才量得到真实溢出：overflow:hidden + ellipsis 下 scrollWidth 仍是全宽 */
+  if (name.scrollWidth - name.clientWidth < 4) return;
+  var text = name.textContent;
+  name.setAttribute('data-mq-text', text);
+  var track = document.createElement('span');
+  track.className = 'mq-track';
+  var copy = document.createElement('span');
+  copy.textContent = text;
+  track.appendChild(copy);
+  var tail = document.createElement('span');
+  tail.textContent = text;
+  tail.setAttribute('aria-hidden', 'true');
+  track.appendChild(tail);
+  name.textContent = '';
+  name.appendChild(track);
+  var width = copy.getBoundingClientRect().width;
+  var cycle = width + MARQUEE_GAP;
+  name.style.setProperty('--mq-shift', (-cycle) + 'px');
+  name.style.setProperty('--mq-dur', Math.max(5, cycle / MARQUEE_SPEED).toFixed(2) + 's');
   name.classList.add('is-scrolling');
 }
 
@@ -1111,7 +1144,8 @@ window.hgBack = function () {
   if (otpPanel && !otpPanel.hidden) { closeOtp(); state.focusKey = 'acct:mode'; restoreFocus(); return true; }
   if (themePanel && !themePanel.hidden) { closeTheme(); return true; }
   if (updateLayer && !updateLayer.hidden) { closeUpdatePanel(); return true; }
-  if (!loginLayer.hidden) { loginLayer.hidden = true; return true; }
+  /* 没登录就停在登录页：返回直接交给原生弹退出确认，不能靠返回键绕过去 */
+  if (!loginLayer.hidden) return false;
   if (accountPanel && !accountPanel.hidden) { accountPanel.hidden = true; state.focusKey = 'nav:account'; restoreFocus(); return true; }
   var active = document.activeElement;
   if (active && active.tagName === 'INPUT') {
@@ -1221,7 +1255,6 @@ document.addEventListener('click', function (event) {
   if (target.closest('#tv-update-later')) { closeUpdatePanel(); return; }
 
   if (target.closest('#login-retry')) { showLoginQr(); return; }
-  if (target.closest('#login-guest')) { loginLayer.hidden = true; restoreFocus(); return; }
 
   var card = target.closest('[data-id]');
   if (card && card.dataset.id) { openDetail(card.dataset.id); return; }
@@ -1556,7 +1589,7 @@ function logout() {
     loadFeed(state.feedId || categoryList()[0][0], true, false);
     loginLayer.hidden = false;
     showLoginQr();
-    state.focusKey = 'login:guest';
+    state.focusKey = 'login:retry';
     restoreFocus();
   }).catch(function (error) { toast(error.message || '退出失败', true); });
 }
@@ -1627,7 +1660,7 @@ function boot() {
     if (!results[1] || !results[1].loggedIn) {
       loginLayer.hidden = false;
       showLoginQr();
-      state.focusKey = 'login:guest';
+      state.focusKey = 'login:retry';
       restoreFocus();
     } else {
       loadLibrary();
