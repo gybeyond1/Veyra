@@ -12,48 +12,134 @@
    =================================================================== */
 
 :root{
-  --bg:#0d1013;
-  --bg-2:#161c23;
-  --panel:#181c21;
-  --panel-2:#232a32;
-  --text:#ece7db;
-  --muted:#99a2ac;
+  /* 主题黑（默认） */
+  --bg:#17181A;
+  --bg-2:#212226;
+  --panel:#232528;
+  --panel-2:rgba(255,255,255,.20);
+  --text:#E7E9EB;
+  --muted:rgba(231,233,235,.66);
   --accent:#c89b3c;
   --accent-ink:#231a06;
-  --focus:#ffd277;
-  /* 首页底色用的光晕；浅色主题会把它压得很淡 */
-  --glow:rgba(200,155,60,.26);
-  --rail-bg:rgba(255,255,255,.06);
-  --rail-ink:#b9c1ca;
-  --chip-bg:rgba(255,255,255,.08);
-  --chip-ink:#c2c9d2;
+  --accent-bright:#ffd277;
+  --focus:#FFFFFF;
+  --halo:rgba(8,10,13,.92);
+  --glow:rgba(200,155,60,.22);
+  --pill:rgba(255,255,255,.12);
+  --rail-bg:rgba(255,255,255,.07);
+  --rail-ink:#E7E9EB;
+  --chip-bg:rgba(255,255,255,.10);
+  --chip-ink:#E7E9EB;
   --scrim:rgba(8,10,13,.62);
-  --drawer:rgba(4,6,9,.56);
-  --rail-panel:#0b0e13;
+  --drawer:rgba(6,8,11,.60);
+  --rail-panel:#17181A;
 }
 
 /* ---------------- 主题 ----------------
-   首页不再拿海报做模糊底（每按一次方向键换一张大图 + 高斯模糊，电视上就是
-   一次全屏重绘，选中框自然卡）。改成固定的主题底色，换主题只是换几个变量，
-   零图片、零滤镜。详情页仍然保留海报模糊背景（只换一次，不影响翻页）。 */
-body[data-tv-theme="pink"]{--bg:#191016;--bg-2:#2a1822;--accent:#ff6fa5;--accent-ink:#2a0716;--focus:#ffa9c7;--glow:rgba(255,111,165,.28)}
-body[data-tv-theme="red"]{--bg:#160f0f;--bg-2:#291616;--accent:#ff4438;--accent-ink:#2a0703;--focus:#ff8b82;--glow:rgba(255,68,56,.26)}
-body[data-tv-theme="yellow"]{--bg:#151208;--bg-2:#241f10;--accent:#f2c14e;--accent-ink:#241a03;--focus:#ffdf8a;--glow:rgba(242,193,78,.26)}
-body[data-tv-theme="green"]{--bg:#0b1410;--bg-2:#13241b;--accent:#5fd068;--accent-ink:#06210b;--focus:#a2ecaa;--glow:rgba(95,208,104,.24)}
-body[data-tv-theme="blue"]{--bg:#0a1019;--bg-2:#122036;--accent:#3d8bfd;--accent-ink:#04162e;--focus:#8dbcfd;--glow:rgba(61,139,253,.28)}
-body[data-tv-theme="purple"]{--bg:#100c1a;--bg-2:#1d1630;--accent:#8c5cf6;--accent-ink:#150733;--focus:#bda1fb;--glow:rgba(140,92,246,.28)}
-
-/* 简洁白：唯一一套浅色。文字/描边/卡片底色全部跟着变量走 */
+   八套底色就是面板上那八个色（#FFFFFF / #FF6699 / #17181A / #F44336 /
+   #FFC107 / #8BC34A / #2196F3 / #9C27B0），整页直接铺这个色，
+   不再压暗、不再叠灰黑遮罩。
+   文字色按配色表走：简洁白用 #18191C，其余七套一律 #FFFFFF。 */
+body[data-tv-theme="pink"]{
+  --bg:#FF6699;--bg-2:#FF7CA6;--panel:rgba(0,0,0,.12);--panel-2:rgba(0,0,0,.22);
+  --text:#FFFFFF;--muted:rgba(255,255,255,.82);
+  --accent:#8E0B3F;--accent-ink:#FFFFFF;--accent-bright:#FFD1E1;
+  --focus:#FFFFFF;--halo:rgba(0,0,0,.55);
+  --glow:rgba(255,255,255,.40);--pill:rgba(0,0,0,.14);
+  --rail-bg:rgba(0,0,0,.14);--rail-ink:#FFFFFF;
+  --chip-bg:rgba(0,0,0,.15);--chip-ink:#FFFFFF;
+  --scrim:rgba(255,250,252,.80);--drawer:rgba(255,238,245,.70);
+  --rail-panel:#FF5C93;
+}
+body[data-tv-theme="red"]{
+  --bg:#F44336;--bg-2:#F55B4F;--panel:rgba(0,0,0,.12);--panel-2:rgba(0,0,0,.22);
+  --text:#FFFFFF;--muted:rgba(255,255,255,.82);
+  --accent:#6E0C06;--accent-ink:#FFFFFF;--accent-bright:#FFC9C4;
+  --focus:#FFFFFF;--halo:rgba(0,0,0,.55);
+  --glow:rgba(255,255,255,.34);--pill:rgba(0,0,0,.14);
+  --rail-bg:rgba(0,0,0,.14);--rail-ink:#FFFFFF;
+  --chip-bg:rgba(0,0,0,.15);--chip-ink:#FFFFFF;
+  --scrim:rgba(255,249,248,.80);--drawer:rgba(255,233,231,.70);
+  --rail-panel:#EC3B2E;
+}
+body[data-tv-theme="yellow"]{
+  --bg:#FFC107;--bg-2:#FFCB2B;--panel:rgba(0,0,0,.10);--panel-2:rgba(0,0,0,.20);
+  --text:#FFFFFF;--muted:rgba(255,255,255,.88);
+  --accent:#7A4E00;--accent-ink:#FFFFFF;--accent-bright:#FFEBA8;
+  --focus:#FFFFFF;--halo:rgba(0,0,0,.55);
+  --glow:rgba(255,255,255,.40);--pill:rgba(0,0,0,.14);
+  --rail-bg:rgba(0,0,0,.12);--rail-ink:#FFFFFF;
+  --chip-bg:rgba(0,0,0,.13);--chip-ink:#FFFFFF;
+  --scrim:rgba(255,252,241,.82);--drawer:rgba(255,247,220,.72);
+  --rail-panel:#F5B800;
+}
+body[data-tv-theme="green"]{
+  --bg:#8BC34A;--bg-2:#97C95C;--panel:rgba(0,0,0,.10);--panel-2:rgba(0,0,0,.20);
+  --text:#FFFFFF;--muted:rgba(255,255,255,.85);
+  --accent:#255A10;--accent-ink:#FFFFFF;--accent-bright:#DDF5C9;
+  --focus:#FFFFFF;--halo:rgba(0,0,0,.55);
+  --glow:rgba(255,255,255,.36);--pill:rgba(0,0,0,.14);
+  --rail-bg:rgba(0,0,0,.12);--rail-ink:#FFFFFF;
+  --chip-bg:rgba(0,0,0,.13);--chip-ink:#FFFFFF;
+  --scrim:rgba(251,255,247,.80);--drawer:rgba(240,250,230,.72);
+  --rail-panel:#7FBA3C;
+}
+body[data-tv-theme="blue"]{
+  --bg:#2196F3;--bg-2:#389FF4;--panel:rgba(0,0,0,.12);--panel-2:rgba(0,0,0,.22);
+  --text:#FFFFFF;--muted:rgba(255,255,255,.84);
+  --accent:#08335F;--accent-ink:#FFFFFF;--accent-bright:#CFE4FF;
+  --focus:#FFFFFF;--halo:rgba(0,0,0,.55);
+  --glow:rgba(255,255,255,.34);--pill:rgba(0,0,0,.14);
+  --rail-bg:rgba(0,0,0,.13);--rail-ink:#FFFFFF;
+  --chip-bg:rgba(0,0,0,.14);--chip-ink:#FFFFFF;
+  --scrim:rgba(248,252,255,.80);--drawer:rgba(232,244,255,.72);
+  --rail-panel:#1C8CE8;
+}
+body[data-tv-theme="purple"]{
+  --bg:#9C27B0;--bg-2:#A836BA;--panel:rgba(0,0,0,.14);--panel-2:rgba(255,255,255,.24);
+  --text:#FFFFFF;--muted:rgba(255,255,255,.80);
+  --accent:#FFD9F2;--accent-ink:#3A0B44;--accent-bright:#F0C7FF;
+  --focus:#FFFFFF;--halo:rgba(0,0,0,.55);
+  --glow:rgba(255,255,255,.26);--pill:rgba(0,0,0,.16);
+  --rail-bg:rgba(0,0,0,.16);--rail-ink:#FFFFFF;
+  --chip-bg:rgba(0,0,0,.16);--chip-ink:#FFFFFF;
+  --scrim:rgba(60,14,70,.68);--drawer:rgba(30,6,36,.60);
+  --rail-panel:#96249F;
+}
+/* 简洁白：唯一一套白底深字 */
 body[data-tv-theme="clean"]{
-  --bg:#f4f5f7;--bg-2:#ffffff;--panel:#e7eaef;--panel-2:#dfe3e9;
-  --text:#14181d;--muted:#5f6a76;
-  --accent:#1f6feb;--accent-ink:#ffffff;--focus:#1f6feb;
-  --glow:rgba(31,111,235,.12);
-  --rail-bg:rgba(20,24,29,.07);--rail-ink:#3c4653;
-  --chip-bg:rgba(20,24,29,.07);--chip-ink:#3c4653;
-  --scrim:rgba(244,245,247,.78);
-  --drawer:rgba(240,242,245,.76);
-  --rail-panel:#f7f8fa;
+  --bg:#FFFFFF;--bg-2:#F5F7FA;--panel:rgba(20,24,29,.06);--panel-2:rgba(20,24,29,.16);
+  --text:#18191C;--muted:#5F6A76;
+  --accent:#1F6FEB;--accent-ink:#FFFFFF;--accent-bright:#7FB0FF;
+  --focus:#1F6FEB;--halo:rgba(255,255,255,.92);
+  --glow:rgba(31,111,235,.10);--pill:rgba(20,24,29,.08);
+  --rail-bg:rgba(20,24,29,.06);--rail-ink:#3C4653;
+  --chip-bg:rgba(20,24,29,.07);--chip-ink:#3C4653;
+  --scrim:rgba(255,255,255,.82);--drawer:rgba(248,250,252,.78);
+  --rail-panel:#FFFFFF;
+}
+
+/* 彩色底 + 白字：加一层极淡的暗投影，远看不会糊进底色里。
+   白底深字（简洁白）和深底（主题黑/罗兰紫）本身对比够，不加。 */
+body[data-tv-theme="pink"] #stage,
+body[data-tv-theme="red"] #stage,
+body[data-tv-theme="yellow"] #stage,
+body[data-tv-theme="green"] #stage,
+body[data-tv-theme="blue"] #stage{text-shadow:0 1px 3px rgba(0,0,0,.38)}
+
+/* 详情页：背景换成海报模糊，底色一定是深的 —— 文字固定浅色，
+   否则白底主题下会出现「深字压深底」直接看不见。 */
+body[data-backdrop="poster"]{
+  --bg:#0d1013;--bg-2:#161c23;
+  --text:#F2F3F5;--muted:rgba(255,255,255,.70);
+  --panel:rgba(255,255,255,.10);--panel-2:rgba(255,255,255,.24);
+  --chip-bg:rgba(255,255,255,.14);--chip-ink:#F2F3F5;
+  --accent:var(--accent-bright,#ffd277);--accent-ink:#14181d;
+  --focus:#FFFFFF;--halo:rgba(8,10,13,.92);
+  --glow:rgba(255,210,119,.18);--pill:rgba(255,255,255,.14);
+  --rail-bg:rgba(255,255,255,.10);--rail-ink:#F2F3F5;
+  --scrim:rgba(8,10,13,.62);--drawer:rgba(4,6,9,.56);
+  --rail-panel:#0b0e13;
 }
 
 [hidden]{display:none !important}
@@ -204,15 +290,18 @@ body.rail-open #rail{
 }
 /* min-width:0 必须写：grid 的 1fr 等于 minmax(auto,1fr)，长剧名会把
    自动最小宽度撑大，同一行里各列宽窄不一，就是“封面大小不一”的来源 */
+/* overflow 必须 visible：焦点描边画在海报外圈，父级一旦 hidden 就会被裁掉，
+   上一版遥控器选剧时「只剩底下一道横线」就是被 .card 裁掉的后果。 */
 .card{
-  display:block;width:100%;max-width:100%;min-width:0;overflow:hidden;
+  display:block;width:100%;max-width:100%;min-width:0;overflow:visible;
+  position:relative;
   text-align:left;border-radius:.8rem;
 }
 /* 1:1.4 的比例用 padding-top 撑：宽度随列自适应，高度永远跟着走 */
 .card .art{
   position:relative;display:block;height:0;padding-top:140%;
   border-radius:.8rem;overflow:hidden;background:var(--panel);
-  transition:transform .12s linear;
+  transition:transform .16s cubic-bezier(.22,.61,.36,1),box-shadow .16s linear;
 }
 .card .art img{position:absolute;left:0;top:0;width:100%;height:100%;object-fit:cover}
 .card .art .badge{
@@ -225,13 +314,19 @@ body.rail-open #rail{
   display:block;width:100%;margin-top:.8rem;
   font-size:1.55rem;line-height:1.35;color:var(--text);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  transition:transform .16s cubic-bezier(.22,.61,.36,1);
 }
-/* 焦点只作用在海报上：整卡放大会把剧名糊掉，描边也会框住文字。
-   用 box-shadow 画框而不是 outline —— outline 永远是直角矩形，
-   套在圆角海报/胶囊按钮外面就是「傻大粗的一个方框」。 */
+/* 焦点：整张海报放大 + 四边完整描边。
+   以前只描一圈 0.35rem 的白边、不放大，遥控器选剧时几乎看不出焦点在哪；
+   现在海报按 1.08 倍撑开、描边加粗，并抬到相邻卡片上层，
+   放大后的边缘才不会被旁边那张压住。剧名不缩放（缩放会糊字），
+   只整体下移一点，让出海报放大的高度。 */
+.card.is-focused{z-index:8}
 .card.is-focused .art{
-  box-shadow:0 0 0 .35rem var(--focus);
+  transform:scale(1.08);
+  box-shadow:0 0 0 .42rem var(--focus),0 1rem 2.6rem rgba(0,0,0,.45);
 }
+.card.is-focused .name{transform:translateY(.75rem)}
 
 /* ---------------- 分类条 ---------------- */
 .chips{display:block;margin-bottom:2.4rem}
@@ -246,7 +341,7 @@ body.rail-open #rail{
 }
 .chip.is-active{background:var(--accent);color:var(--accent-ink);font-weight:700}
 /* 胶囊外框也用 box-shadow：跟随圆角，不再是方形描边 */
-.chip.is-focused{box-shadow:0 0 0 .3rem rgba(8,10,13,.92),0 0 0 .7rem var(--focus);color:var(--text)}
+.chip.is-focused{box-shadow:0 0 0 .3rem var(--halo),0 0 0 .7rem var(--focus);color:var(--text)}
 .chip.is-active.is-focused{color:var(--accent-ink)}
 
 /* ---------------- 详情 ---------------- */
@@ -282,7 +377,7 @@ body.rail-open #rail{
 }
 .btn.primary{background:var(--accent);color:var(--accent-ink);font-weight:700}
 .btn.ghost{background:transparent;border:1px solid var(--panel-2);color:var(--muted)}
-.btn.is-focused{box-shadow:0 0 0 .4rem rgba(8,10,13,.92),0 0 0 .8rem var(--focus)}
+.btn.is-focused{box-shadow:0 0 0 .4rem var(--halo),0 0 0 .8rem var(--focus)}
 /* 重头播放：圆形图标按钮，跟「继续播放」并排 */
 .btn.icon-only{
   width:6rem;padding:0;margin-right:1.6rem;
@@ -308,10 +403,14 @@ body.rail-open #rail{
   height:5.6rem;line-height:5.6rem;
   border-radius:.8rem;background:var(--chip-bg);color:var(--text);
   font-size:2rem;text-align:center;white-space:nowrap;
+  transition:transform .14s cubic-bezier(.22,.61,.36,1),box-shadow .14s linear;
 }
+/* 选集格子同样放大 + 双环包裹，方向键走过的每一格都看得见 */
 .eps button.is-focused{
-  box-shadow:0 0 0 .4rem var(--focus);
+  transform:scale(1.1);
+  box-shadow:0 0 0 .35rem var(--halo),0 0 0 .75rem var(--focus);
   background:var(--accent);color:var(--accent-ink);font-weight:700;
+  position:relative;z-index:4;
 }
 
 /* ---------------- 搜索 ---------------- */
@@ -330,7 +429,7 @@ body.rail-open #rail{
   color:var(--text);font-size:2.2rem;
 }
 .search-box input::placeholder{color:var(--muted)}
-.search-box.is-focused{box-shadow:0 0 0 .3rem rgba(8,10,13,.92),0 0 0 .7rem var(--focus)}
+.search-box.is-focused{box-shadow:0 0 0 .3rem var(--halo),0 0 0 .7rem var(--focus)}
 .search-hint{font-size:1.7rem;color:var(--muted);margin:1.2rem 0 0}
 
 .search-qr{width:24rem;flex:0 0 24rem;text-align:center}
@@ -358,13 +457,30 @@ body.rail-open #rail{
   position:absolute;left:50%;bottom:6rem;
   margin-left:-20rem;width:40rem;
   text-align:center;
-  background:rgba(0,0,0,.88);color:var(--text);
+  background:rgba(0,0,0,.88);color:#fff;
   padding:1.4rem 2rem;border-radius:1rem;
   font-size:1.9rem;line-height:1.5;
   opacity:0;transition:opacity .16s linear;
   pointer-events:none;
 }
 #toast.show{opacity:1}
+
+/* 弹层（登录 / 账号 / 主题 / 更新）统一走深色底 + 浅色字。
+   主题底色可能是白/黄/粉，弹层如果沿用主题文字色会出现「深字压深底」
+   直接看不见 —— 简洁白下打开主题面板就是这个情况。 */
+#login,#account,#theme{
+  color:#F2F3F5;
+  --text:#F2F3F5;
+  --muted:rgba(255,255,255,.66);
+  --panel:#1B1F24;
+  --panel-2:rgba(255,255,255,.24);
+  --chip-bg:rgba(255,255,255,.13);
+  --chip-ink:#E7E9EB;
+  --accent:var(--accent-bright,#ffd277);
+  --accent-ink:#14181D;
+  --focus:#FFFFFF;
+  --halo:rgba(8,10,13,.92);
+}
 
 #login,#account{
   position:absolute;left:0;right:0;top:0;bottom:0;z-index:30;

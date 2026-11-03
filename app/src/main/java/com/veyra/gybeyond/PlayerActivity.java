@@ -89,6 +89,27 @@ public final class PlayerActivity extends Activity {
     private boolean destroyed;
     private boolean activeFirstFrame;
     private boolean switching;
+    /**
+     * 复用预取播放器的看门狗。
+     *
+     * 预取的播放器（standby）在后台已经 prepare 到 READY，切集时直接提升为主播放器，
+     * 省掉重建解码器的时间。但电视盒子上复用一个「一直是暂停状态」的播放器时，
+     * 提升后偶尔不输出首帧，界面就永远停在加载中 —— 切回上一集再切回来（走重建
+     * 路径）又好了，正是这个原因。这里放一个 2.5 秒的兜底：到点还没出首帧，
+     * 立刻退回「重建播放器 + 已解析好的地址」，保证不会一直转圈。
+     */
+    private ExoPlayer reuseGuardPlayer;
+    private final Runnable reuseGuard = new Runnable() {
+        @Override public void run() {
+            ExoPlayer guarded = reuseGuardPlayer;
+            reuseGuardPlayer = null;
+            if (guarded == null || destroyed || isFinishing()) return;
+            if (guarded != player || activeFirstFrame) return;
+            Log.w("HuangGuoPlayback", "reuse-timeout " + cacheKey(currentId, currentEpisode)
+                    + " state=" + guarded.getPlaybackState());
+            rebuildCurrentEpisode();
+        }
+    };
     private long switchStartedAt;
     private int incomingDirection;
     private ExoPlayer standbyPlayer;
@@ -339,6 +360,7 @@ public final class PlayerActivity extends Activity {
                 if (engine == standbyPlayer) { standbyFirstFrame = true; return; }
                 if (engine != player || currentSource == null) return;
                 activeFirstFrame = true;
+                disarmReuseGuard();
                 showActiveFrame();
                 /* 首帧一到就先问一次预取：电视端看短剧基本不会等满 5 秒缓冲，
                    只在 tick 里碰运气的话常常整集都没预取到下一集。 */
@@ -349,6 +371,7 @@ public final class PlayerActivity extends Activity {
             }
             @Override public void onIsPlayingChanged(boolean playing) {
                 if (engine != player || destroyed) return;
+                if (playing) disarmReuseGuard();
                 playButton.setImageResource(playing ? R.drawable.player_pause : R.drawable.player_play);
                 centerToggle.setImageResource(playing ? R.drawable.player_pause : R.drawable.player_play);
                 revealControls();
@@ -736,11 +759,12 @@ public final class PlayerActivity extends Activity {
         updateSystemBars();
         updateControlLayout();
         if (tvMode) {
-            /* 起播先露 4 秒标题，之后自动收掉；想再看按一下确定键 */
+            /* 起播先露 4 秒标题，之后自动收掉；想再看按一下确定键。
+               底部那条常显的黄进度条不再画：整块压在画面上太破坏沉浸感，
+               拖进度时靠标题条 + 左右键松开后的时间气泡做反馈。 */
             tvInfoShown = true;
             updateTitleVisibility();
             handler.postDelayed(hideTvInfo, 4000);
-            miniProgress.setVisibility(View.VISIBLE);
         }
     }
 
@@ -1146,6 +1170,7 @@ public final class PlayerActivity extends Activity {
     }
 
     private void loadSelection() {
+        disarmReuseGuard();
         hideSequelEnd();
         seasonEnded = false;
         openingSequel = false;
@@ -1157,7 +1182,11 @@ public final class PlayerActivity extends Activity {
         switchStartedAt = SystemClock.elapsedRealtime();
         if (sourceTask != null) sourceTask.cancel(true);
         stopSeekPreview();
-        boolean reuse = key.equals(standbyKey) && standbyPlayer != null && standbyPlayer.getPlayerError() == null;
+        boolean reuse = key.equals(standbyKey) && standbyPlayer != null
+                && standbyPlayer.getPlayerError() == null
+                /* 还没 READY 的预取播放器不要复用：它的缓冲只到一半，提升过来
+                   还得接着等，等于把「预取完成」和「从零开始」的坏处各吃一遍 */
+                && standbyPlayer.getPlaybackState() == Player.STATE_READY;
         /* 预取到的播放地址是有时效的。停了很久再切过去，standby 里的地址可能已经过期，
            prepare 直接失败 —— 表现就是「这一集一直转圈」。超过 2 分半就丢掉重取。 */
         if (reuse && standbyPreparedAt > 0 && SystemClock.elapsedRealtime() - standbyPreparedAt > 150_000) {
@@ -1212,7 +1241,9 @@ public final class PlayerActivity extends Activity {
             if (activeFirstFrame) showActiveFrame();
             else loadPoster(currentItem, poster);
             player.setPlayWhenReady(foreground);
-            Log.d("HuangGuoPlayback", "reuse " + key + " firstFrame=" + activeFirstFrame);
+            armReuseGuard(player);
+            Log.d("HuangGuoPlayback", "reuse " + key + " firstFrame=" + activeFirstFrame
+                    + " state=" + player.getPlaybackState());
             maybePrepareNext();
             return;
         }
@@ -1304,6 +1335,33 @@ public final class PlayerActivity extends Activity {
         });
     }
 
+    private void armReuseGuard(ExoPlayer engine) {
+        reuseGuardPlayer = engine;
+        handler.removeCallbacks(reuseGuard);
+        handler.postDelayed(reuseGuard, 2_500);
+    }
+
+    private void disarmReuseGuard() {
+        reuseGuardPlayer = null;
+        handler.removeCallbacks(reuseGuard);
+    }
+
+    /**
+     * 预取播放器提升后不出帧时的兜底：丢掉它，用 episodeCache 里已经解析好的
+     * 播放地址重新建一个播放器。这条路径和手动切集完全一样，不会再卡。
+     */
+    private void rebuildCurrentEpisode() {
+        if (destroyed || isFinishing() || player == null) return;
+        float volume = player.getVolume();
+        ExoPlayer stalled = player;
+        player = createEpisodePlayer(false);
+        activeView.setPlayer(player);
+        player.setVolume(volume);
+        stalled.release();
+        releaseStandby();
+        loadSelection();
+    }
+
     private void maybePrepareNext() {
         if (!foreground || destroyed || seeking || previewPlayer != null || switching || player == null
                 || currentSource == null || !activeFirstFrame || player.getPlaybackState() != Player.STATE_READY) return;
@@ -1341,27 +1399,12 @@ public final class PlayerActivity extends Activity {
                 runOnUiThread(() -> {
                     if (token != prefetchToken || selectionToken != loadToken || destroyed) return;
                     prefetchTask = null;
-                    if (!foreground || seeking || switching || player.getPlaybackState() != Player.STATE_READY) return;
-                    long buffered = player.getBufferedPosition();
-                    // 原来是 10 秒：短剧根本攒不到 10 秒缓冲，standby 永远建不起来，
-                    // 预取形同虚设。standby 自己只吃 5s/4MB，早点建更划算。
-                    long warmGate = player.getDuration() > 0 && player.getDuration() < 240_000 ? 1_500 : 6_000;
-                    if (buffered - player.getCurrentPosition() < warmGate
-                            && (player.getDuration() <= 0 || buffered < player.getDuration())) return;
-                    standbyKey = key;
-                    standbySource = ready.optString("source");
-                    standbyMime = ready.optString("mimeType", MimeTypes.APPLICATION_M3U8);
-                    standbyFirstFrame = false;
-                    standbyPreparedAt = SystemClock.elapsedRealtime();
-                    standbyPlayer = createEpisodePlayer(true);
-                    standbyPlayer.setVolume(0f);
-                    standbyPlayer.setPlayWhenReady(false);
-                    standbyView.setAlpha(0f);
-                    standbyView.setPlayer(standbyPlayer);
-                    standbyPlayer.setMediaItem(new MediaItem.Builder().setUri(standbySource).setMediaId(key)
-                            .setMimeType(standbyMime).build(), resumePosition(id, next.episode));
-                    standbyPlayer.prepare();
-                    Log.d("HuangGuoPlayback", "prepare-next " + key);
+                    /* 只预热「播放地址」，不再提前建一个 standby 播放器。
+                       提前建播放器确实能省掉 prepare 的两三百毫秒，但电视盒子上
+                       把它提升为主播放器后经常不出首帧，界面一直停在加载中 ——
+                       切回上一集再切回来（走重建）又好了。宁可按确定的路径重建，
+                       地址已经在 episodeCache 里，切集不会再走网络解析。 */
+                    Log.d("HuangGuoPlayback", "prefetch-address " + key + " ok");
                 });
             } catch (Exception error) {
                 runOnUiThread(() -> {
@@ -2012,7 +2055,7 @@ public final class PlayerActivity extends Activity {
        左 / 右 = 后退 / 前进 10 秒（按住连发）
        确定    = 播放/暂停，顺便把标题浮现 3 秒
        返回    = 弹确认，确认后才退出
-       画面里只常显底部那条黄进度条，没有控件栏、没有可聚焦的按钮。 */
+       画面上不常驻任何东西：控件栏、底部进度条都不要，只在按键后浮 3 秒标题。 */
 
     private void showTvInfo() {
         if (!tvMode) return;

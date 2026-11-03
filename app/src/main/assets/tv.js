@@ -99,14 +99,14 @@ function toast(message, isError) {
    八套固定配色。首页背景不再用海报模糊，换主题只是换 body 上的一个属性，
    CSS 变量跟着变，零图片、零滤镜 —— 遥控器连着按也不会掉帧。 */
 var THEMES = [
-  { key: 'clean',  name: '简洁白', color: '#f4f5f7' },
-  { key: 'pink',   name: '少女粉', color: '#ff6fa5' },
-  { key: 'dark',   name: '主题黑', color: '#0d1013' },
-  { key: 'red',    name: '高能红', color: '#ff4438' },
-  { key: 'yellow', name: '咸蛋黄', color: '#f2c14e' },
-  { key: 'green',  name: '早苗绿', color: '#5fd068' },
-  { key: 'blue',   name: '宝石蓝', color: '#3d8bfd' },
-  { key: 'purple', name: '罗兰紫', color: '#8c5cf6' }
+  { key: 'clean',  name: '简洁白', color: '#FFFFFF' },
+  { key: 'pink',   name: '少女粉', color: '#FF6699' },
+  { key: 'dark',   name: '主题黑', color: '#17181A' },
+  { key: 'red',    name: '高能红', color: '#F44336' },
+  { key: 'yellow', name: '高能黄', color: '#FFC107' },
+  { key: 'green',  name: '早苗绿', color: '#8BC34A' },
+  { key: 'blue',   name: '宝石蓝', color: '#2196F3' },
+  { key: 'purple', name: '罗兰紫', color: '#9C27B0' }
 ];
 var THEME_STORE = 'veyra.tv.theme';
 
