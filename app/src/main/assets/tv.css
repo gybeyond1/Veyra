@@ -198,12 +198,8 @@ body[data-backdrop="poster"] #tv-bg .veil{opacity:1}
 
 /* 侧栏呼出 = 抽屉打开：整页压暗，焦点只在左边那一列图标上。
    只压左边一条的话，图标会直接叠在标题和分类条上，看起来像没对齐。 */
-#rail-veil{
-  position:absolute;left:0;top:0;right:0;bottom:0;z-index:4;
-  pointer-events:none;opacity:0;transition:opacity .18s linear;
-  background:var(--drawer);
-}
-body.rail-open #rail-veil{opacity:1}
+/* 不做整屏遮罩：主界面颜色保持不变，只靠侧栏自己亮一档区分层次 */
+#rail-veil{display:none}
 
 /* ---------------- 左侧图标导航（默认收起） ----------------
    内容页占满整屏；侧栏平时整个滑出屏幕外，只有遥控器在最左一列继续按左
@@ -220,7 +216,9 @@ body.rail-open #rail-veil{opacity:1}
 body.rail-open #rail{
   transform:translateX(0);opacity:1;pointer-events:auto;
   background:var(--rail-panel);
-  box-shadow:0 0 4rem 0 rgba(0,0,0,.42);
+  /* 叠一层 10% 白把侧栏提亮，比主界面亮一点点就够，不再压暗整页 */
+  background-image:linear-gradient(rgba(255,255,255,.10),rgba(255,255,255,.10));
+  box-shadow:0 0 3rem 0 rgba(0,0,0,.26);
 }
 .rail-item{
   width:5.2rem;height:5.2rem;border-radius:1.5rem;
@@ -332,6 +330,16 @@ body.rail-open #rail{
   box-shadow:0 0 0 .34rem var(--focus),0 .9rem 2.4rem rgba(0,0,0,.42);
 }
 .card.is-focused .name{transform:translateY(1.3rem)}
+/* 标题超长：选中后左右跑马灯，滚到末尾停一下再回来。
+   位移量由 JS 按实际溢出像素写进 --marquee-shift。 */
+.card .name.is-scrolling{
+  text-overflow:clip;
+  animation:tv-marquee 6.4s ease-in-out infinite alternate;
+}
+@keyframes tv-marquee{
+  0%,16%{transform:translate(0,1.3rem)}
+  84%,100%{transform:translate(var(--marquee-shift,0),1.3rem)}
+}
 
 /* ---------------- 分类条 ---------------- */
 .chips{display:block;margin-bottom:2.4rem}

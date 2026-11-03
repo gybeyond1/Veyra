@@ -263,6 +263,7 @@ function focusElement(el, remember) {
   var current = document.querySelector('.is-focused');
   if (current && current !== el) current.classList.remove('is-focused');
   el.classList.add('is-focused');
+  updateMarquee(current, el);
   try { el.focus({ preventScroll: true }); } catch (error) { try { el.focus(); } catch (e2) { } }
   if (remember !== false && el.dataset) {
     state.focusKey = el.dataset.key || '';
@@ -275,6 +276,22 @@ function focusElement(el, remember) {
   else if (box.bottom > stageBox.bottom - 40) stage.scrollTop += (box.bottom - (stageBox.bottom - 40));
   if (!inRail(el)) revealSectionHead(el);
   syncBackdrop(el);
+}
+
+/* 剧名放不下时，选中后跑马灯：把溢出宽度写进 --marquee-shift，
+   交给 CSS 动画左右滚；切走就把上一次的动画停掉，避免多张卡同时滚。 */
+function updateMarquee(prev, next) {
+  var oldName = prev && prev.querySelector ? prev.querySelector('.name') : null;
+  if (oldName) {
+    oldName.classList.remove('is-scrolling');
+    oldName.style.removeProperty('--marquee-shift');
+  }
+  var name = next && next.querySelector ? next.querySelector('.name') : null;
+  if (!name || name.classList.contains('is-scrolling')) return;
+  var over = name.scrollWidth - name.clientWidth;
+  if (over < 4) return;
+  name.style.setProperty('--marquee-shift', (-(over + 14)) + 'px');
+  name.classList.add('is-scrolling');
 }
 
 function restoreFocus() {
