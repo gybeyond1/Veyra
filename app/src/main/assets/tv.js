@@ -291,8 +291,8 @@ function focusElement(el, remember) {
    海报下面去；位移量又只算到"刚好装下"，末尾那个字被右边界切掉一半。
    现在改成：.name 固定在原位负责裁剪，里面塞一份 track，track 里放两份标题、
    中间留 MARQUEE_GAP 的空白，平移「一份 + 空白」后正好接上第二份，无缝循环。 */
-var MARQUEE_GAP = 48;        /* px，末尾字与下一轮第一个字之间的空隙 */
-var MARQUEE_SPEED = 62;      /* px/秒，慢一点才看得清 */
+var MARQUEE_GAP = 88;        /* px，末尾字与下一轮第一个字之间的空隙 */
+var MARQUEE_SPEED = 34;      /* px/秒，街边 LED 广告牌那种不紧不慢的节奏 */
 
 function resetMarquee(card) {
   var name = card && card.querySelector ? card.querySelector('.name') : null;
@@ -327,9 +327,12 @@ function updateMarquee(prev, next) {
   name.textContent = '';
   name.appendChild(track);
   var width = copy.getBoundingClientRect().width;
-  var cycle = width + MARQUEE_GAP;
+  /* 间隔拉到一个视口宽度的 0.6 倍：前一份最后一个字完全滚出左边、留一小段空档，
+     下一份的第一个字才从右边进来，循环往复——街边 LED 就是这节奏 */
+  var gap = Math.max(MARQUEE_GAP, Math.round(name.clientWidth * 0.6));
+  var cycle = width + gap;
   name.style.setProperty('--mq-shift', (-cycle) + 'px');
-  name.style.setProperty('--mq-dur', Math.max(5, cycle / MARQUEE_SPEED).toFixed(2) + 's');
+  name.style.setProperty('--mq-dur', Math.max(8, cycle / MARQUEE_SPEED).toFixed(2) + 's');
   name.classList.add('is-scrolling');
 }
 

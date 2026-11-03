@@ -924,11 +924,11 @@ public final class MainActivity extends Activity {
      * 只拦这几颗键，音量、菜单、返回等仍按系统默认走；手机/平板完全不进这个分支。
      */
     /**
-     * 启动页：深色底 + 金色 V + 一个细转圈，盖在 WebView 之上。
-     * 系统 windowBackground 只负责进程起来那一帧；WebView 是透明的，页面首帧之前
-     * 一直能看见这层，所以这里再把 logo 画一遍，页面可见后淡出。
+     * 启动页：只有电视端才铺一层，手机端直接进页面（性能足够，不需要等人看动画）。
+     * 电视端深色底 + 大号 "Veyra TV" + 细转圈，页面首帧可见后淡出。
      */
     private void buildSplash() {
+        if (!DeviceProfile.isTv(this)) return;
         float density = getResources().getDisplayMetrics().density;
         FrameLayout layer = new FrameLayout(this);
         layer.setBackgroundColor(0xFF17181A);
@@ -939,45 +939,33 @@ public final class MainActivity extends Activity {
         stack.setGravity(Gravity.CENTER_HORIZONTAL);
         layer.addView(stack, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
 
-        ImageView mark = new ImageView(this);
-        mark.setImageResource(R.drawable.launch_logo);
-        int markSize = Math.round(88 * density);
-        stack.addView(mark, new LinearLayout.LayoutParams(markSize, markSize));
-
-        /* 光一个 V 太单薄：下面把全名排出来，字距稍微拉开一点看着才像品牌页 */
+        /* 名字直接当主视觉：去掉那个跟产品没关系的 V，字号拉到电视上够看的尺寸 */
         TextView name = new TextView(this);
         name.setText("Veyra TV");
-        name.setTextSize(27);
+        name.setTextSize(52);
         name.setTextColor(0xFFF2F3F5);
         name.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        name.setLetterSpacing(0.22f);
+        name.setLetterSpacing(0.14f);
         name.setGravity(Gravity.CENTER);
         name.setIncludeFontPadding(false);
-        LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(-2, -2);
-        nameParams.topMargin = Math.round(20 * density);
-        stack.addView(name, nameParams);
+        stack.addView(name, new LinearLayout.LayoutParams(-2, -2));
 
         ProgressBar wait = new ProgressBar(this, null, android.R.attr.progressBarStyleSmall);
         wait.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(0xFFC89B3C));
         LinearLayout.LayoutParams waitParams = new LinearLayout.LayoutParams(
-                Math.round(22 * density), Math.round(22 * density));
-        waitParams.topMargin = Math.round(30 * density);
+                Math.round(26 * density), Math.round(26 * density));
+        waitParams.topMargin = Math.round(34 * density);
         waitParams.gravity = Gravity.CENTER_HORIZONTAL;
         stack.addView(wait, waitParams);
 
-        /* 入场：V 淡入并轻微放大，名字随后浮上来，转圈最后出现 */
-        mark.setAlpha(0f);
-        mark.setScaleX(.86f);
-        mark.setScaleY(.86f);
+        /* 入场：名字放大淡入，转圈随后浮现 */
         name.setAlpha(0f);
-        name.setTranslationY(14 * density);
+        name.setScaleX(.92f);
+        name.setScaleY(.92f);
         wait.setAlpha(0f);
-        mark.animate().alpha(1f).scaleX(1f).scaleY(1f)
+        name.animate().alpha(1f).scaleX(1f).scaleY(1f)
                 .setDuration(420).setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
-        name.animate().alpha(1f).translationY(0f)
-                .setDuration(460).setStartDelay(130)
-                .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
-        wait.animate().alpha(1f).setDuration(300).setStartDelay(300).start();
+        wait.animate().alpha(1f).setDuration(300).setStartDelay(260).start();
 
         splash = layer;
         root.addView(layer, new FrameLayout.LayoutParams(-1, -1));

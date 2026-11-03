@@ -1,14 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 冷启动第一帧：深色底 + 居中金色 V，替代系统默认的白屏 -->
+<!-- 冷启动第一帧：只铺深色底压掉系统白屏，不放任何图形。
+     电视端随后由 MainActivity 的 splash 铺 "Veyra TV"；手机端直接进页面。 -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape android:shape="rectangle">
             <solid android:color="#17181A" />
         </shape>
     </item>
-    <item
-        android:drawable="@drawable/launch_logo"
-        android:gravity="center"
-        android:width="86dp"
-        android:height="86dp" />
 </layer-list>
