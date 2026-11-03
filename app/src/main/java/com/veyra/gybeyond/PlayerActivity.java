@@ -325,6 +325,9 @@ public final class PlayerActivity extends Activity {
                 if (engine != player || currentSource == null) return;
                 activeFirstFrame = true;
                 showActiveFrame();
+                /* 首帧一到就先问一次预取：电视端看短剧基本不会等满 5 秒缓冲，
+                   只在 tick 里碰运气的话常常整集都没预取到下一集。 */
+                maybePrepareNext();
                 Log.d("HuangGuoPlayback", "first-frame " + cacheKey(currentId, currentEpisode)
                         + " after " + (SystemClock.elapsedRealtime() - switchStartedAt) + "ms");
             }
@@ -1230,7 +1233,10 @@ public final class PlayerActivity extends Activity {
         if (!fullyBuffered && ahead < 800 && standbyPlayer != null) cancelPrefetch();
         // 快播完了就别再等 10 秒缓冲：短剧一集才一两分钟，等 10 秒等于等掉半集
         boolean nearEnd = duration > 0 && duration - player.getCurrentPosition() < 25_000;
-        if (ahead < 5_000 && !fullyBuffered && !nearEnd) return;
+        // 短剧（4 分钟以内）1.2 秒就开始预取下一集：等 5 秒的话一集才 60 秒，
+        // 预取还没起来就已经播完了，切下一集只能从头拉，就是「切集要转圈好几秒」。
+        long warmAhead = duration > 0 && duration < 240_000 ? 1_200 : 5_000;
+        if (ahead < warmAhead && !fullyBuffered && !nearEnd) return;
         Selection next = adjacent(1);
         if (next == null) return;
         String id = next.item.optString("id");
@@ -1251,7 +1257,10 @@ public final class PlayerActivity extends Activity {
                     prefetchTask = null;
                     if (!foreground || seeking || switching || player.getPlaybackState() != Player.STATE_READY) return;
                     long buffered = player.getBufferedPosition();
-                    if (buffered - player.getCurrentPosition() < 10_000
+                    // 原来是 10 秒：短剧根本攒不到 10 秒缓冲，standby 永远建不起来，
+                    // 预取形同虚设。standby 自己只吃 5s/4MB，早点建更划算。
+                    long warmGate = player.getDuration() > 0 && player.getDuration() < 240_000 ? 1_500 : 6_000;
+                    if (buffered - player.getCurrentPosition() < warmGate
                             && (player.getDuration() <= 0 || buffered < player.getDuration())) return;
                     standbyKey = key;
                     standbySource = ready.optString("source");

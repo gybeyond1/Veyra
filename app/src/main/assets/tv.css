@@ -51,95 +51,95 @@ img{display:block;border:0}
   overflow:hidden;background:#0d1013;
 }
 #tv-bg img{
-  position:absolute;left:-5%;top:-5%;width:110%;height:110%;
-  object-fit:cover;opacity:.72;
-  -webkit-filter:blur(46px) saturate(1.25);
-  filter:blur(46px) saturate(1.25);
+  position:absolute;left:-4%;top:-4%;width:108%;height:108%;
+  object-fit:cover;opacity:.96;
+  /* 模糊从 46px 降到 20px：46px 只剩一片糊墙，看不出是海报；20px 还能认出画面 */
+  -webkit-filter:blur(20px) saturate(1.18);
+  filter:blur(20px) saturate(1.18);
   transform:translateZ(0);
   transition:opacity .28s linear;
 }
 #tv-bg img.is-dim{opacity:0}
+/* 遮罩只压左边（侧栏和标题压在那边）和底部，中间露出来 */
 #tv-bg .veil{
   position:absolute;left:0;right:0;top:0;bottom:0;
   background:
-    linear-gradient(90deg,rgba(8,10,13,.88) 0%,rgba(8,10,13,.56) 40%,rgba(8,10,13,.34) 100%),
-    linear-gradient(180deg,rgba(8,10,13,.42) 0%,rgba(8,10,13,.04) 30%,rgba(8,10,13,.76) 100%);
+    linear-gradient(90deg,rgba(8,10,13,.74) 0%,rgba(8,10,13,.40) 34%,rgba(8,10,13,.20) 100%),
+    linear-gradient(180deg,rgba(8,10,13,.26) 0%,rgba(8,10,13,0) 34%,rgba(8,10,13,.58) 100%);
 }
 
 /* ---------------- 左侧图标导航 ----------------
-   只留三个图标往边缘收，标题栏宽度从 22rem 降到 8rem，内容区多出 140px。
+   只留三个图标，宽度收到「放得下图标」的程度（5.2rem）：左侧整条不再占版面，
+   内容区从 12rem 一路挪到 7.8rem。
    不做整条深色底：背景已经铺满整屏，rail 只是浮在上面的一列按钮。 */
 #rail{
-  position:absolute;left:2.2rem;top:4rem;bottom:3rem;width:8rem;z-index:5;
+  position:absolute;left:1.5rem;top:4.4rem;bottom:2.6rem;width:5.2rem;z-index:5;
   display:flex;flex-direction:column;align-items:center;
 }
-.brand{
-  width:6.4rem;height:6.4rem;line-height:6.4rem;
-  margin-bottom:2.6rem;border-radius:1.6rem;
-  text-align:center;font-size:3.2rem;font-weight:800;color:var(--accent);
-  letter-spacing:.02em;background:rgba(255,255,255,.06);
-}
 .rail-item{
-  width:6.4rem;height:6.4rem;border-radius:1.8rem;
-  margin-bottom:1.4rem;
+  width:5.2rem;height:5.2rem;border-radius:1.5rem;
+  margin-bottom:1.2rem;
   display:flex;align-items:center;justify-content:center;
   color:#b9c1ca;background:rgba(255,255,255,.05);
   transition:background .12s linear,color .12s linear;
 }
-.rail-item svg{width:3.1rem;height:3.1rem;fill:currentColor}
+.rail-item svg{width:2.8rem;height:2.8rem;fill:currentColor}
 .rail-item.is-active{color:#fff;background:rgba(255,255,255,.16)}
 .rail-item.is-focused{color:var(--accent-ink);background:var(--accent)}
 
 /* 左下角账号：只放头像，点开账号面板 */
 .rail-account{
-  margin-top:auto;width:6.4rem;height:6.4rem;border-radius:50%;
+  margin-top:auto;width:5.2rem;height:5.2rem;border-radius:50%;
   display:flex;align-items:center;justify-content:center;
   background:rgba(255,255,255,.08);
   overflow:hidden;
 }
 .rail-account .avatar{
-  display:block;width:100%;height:100%;line-height:6.4rem;
-  text-align:center;font-size:2.4rem;font-weight:700;color:#fff;
+  display:block;width:100%;height:100%;line-height:5.2rem;
+  text-align:center;font-size:2.2rem;font-weight:700;color:#fff;
   white-space:nowrap;overflow:hidden;
 }
+/* 手机端设置的头像：铺满整个圆 */
+.rail-account .avatar img{width:100%;height:100%;object-fit:cover;border-radius:50%}
 .rail-account.is-focused{background:var(--accent);outline:none;box-shadow:0 0 0 .3rem var(--focus)}
 .rail-account.is-focused .avatar{color:var(--accent-ink)}
 
 /* ---------------- 主区域 ---------------- */
 #stage{
-  position:absolute;left:12rem;right:0;top:0;bottom:0;z-index:2;
+  position:absolute;left:7.8rem;right:0;top:0;bottom:0;z-index:2;
   overflow-y:auto;overflow-x:hidden;
-  padding:4.2rem 5.6rem 9rem;
+  padding:4.2rem 4.4rem 8rem 1.2rem;
   scrollbar-width:none;
 }
 #stage::-webkit-scrollbar{display:none}
 
 .page-title{
-  font-size:3.6rem;font-weight:700;
-  margin:0 0 2.6rem;letter-spacing:.01em;
+  font-size:3.2rem;font-weight:700;
+  margin:0 0 2.2rem;letter-spacing:.01em;
 }
-.section{margin-bottom:4.4rem}
+.section{margin-bottom:4rem}
 .section-head{
   display:flex;align-items:baseline;
-  margin-bottom:1.8rem;
+  margin-bottom:1.4rem;
 }
-.section-head h2{font-size:2.8rem;margin:0;font-weight:700}
-.section-head span{font-size:1.8rem;color:var(--muted);margin-left:1.4rem}
+.section-head h2{font-size:2.5rem;margin:0;font-weight:700}
+.section-head span{font-size:1.7rem;color:var(--muted);margin-left:1.2rem}
 .empty{
   font-size:2.1rem;color:var(--muted);
   padding:6rem 0;line-height:1.6;
 }
 
 /* ---------------- 海报墙 ----------------
-   auto-fill + minmax：按可用宽度自动决定列数（1080p / 720p 都是 5 列，
-   4K 也是 5 列），绝不超过右边界，不会再出现「最后一张只露一半」。
-   30rem 是 1080p 下 5 列的下限（5×300 + 4×18 = 1572 < 1688 可用宽）。 */
+   固定 6 列：不再用 auto-fill 猜列数（30rem 的下限在不同分辨率下会算出 4/5 列，
+   右边还会被切掉一截）。repeat(6, minmax(0,1fr)) 是硬约束 —— 一屏永远 6 张，
+   每张宽度正好是可用宽度的 1/6，绝不会溢出到右边界外面。
+   跟同屏另一个 TV 软件的密度对齐（一行 6 张，不截断）。 */
 .grid{
   display:grid;
-  grid-template-columns:repeat(auto-fill,minmax(30rem,1fr));
-  grid-column-gap:1.8rem;
-  grid-row-gap:2.8rem;
-  max-width:100%;
+  grid-template-columns:repeat(6,minmax(0,1fr));
+  grid-column-gap:1.6rem;
+  grid-row-gap:2.4rem;
+  width:100%;max-width:100%;
 }
 /* min-width:0 必须写：grid 的 1fr 等于 minmax(auto,1fr)，长剧名会把
    自动最小宽度撑大，同一行里各列宽窄不一，就是“封面大小不一”的来源 */
@@ -155,22 +155,22 @@ img{display:block;border:0}
 }
 .card .art img{position:absolute;left:0;top:0;width:100%;height:100%;object-fit:cover}
 .card .art .badge{
-  position:absolute;left:.8rem;bottom:.8rem;
+  position:absolute;left:.6rem;bottom:.6rem;
   background:rgba(0,0,0,.72);color:#ffe08a;
-  font-size:1.6rem;font-weight:700;
-  padding:.3rem .8rem;border-radius:.5rem;
+  font-size:1.4rem;font-weight:700;
+  padding:.2rem .6rem;border-radius:.4rem;
 }
 .card .name{
-  display:block;width:100%;margin-top:1rem;
-  font-size:1.9rem;line-height:1.35;color:var(--text);
+  display:block;width:100%;margin-top:.8rem;
+  font-size:1.55rem;line-height:1.35;color:var(--text);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
 /* 焦点只作用在海报上：整卡放大会把剧名糊掉，描边也会框住文字。
    用 box-shadow 画框而不是 outline —— outline 永远是直角矩形，
    套在圆角海报/胶囊按钮外面就是「傻大粗的一个方框」。 */
 .card.is-focused .art{
-  box-shadow:0 0 0 .4rem var(--focus);
-  transform:scale(1.04);
+  box-shadow:0 0 0 .35rem var(--focus);
+  transform:scale(1.03);
 }
 
 /* ---------------- 分类条 ---------------- */

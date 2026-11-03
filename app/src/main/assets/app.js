@@ -2867,7 +2867,25 @@ window.hgResume = () => {
   retryFailedImages(true);
   if (state.route === 'library') goLibrary(state.libraryTab);
   if (state.route === 'home') refreshHomeHistory();
-  if (state.route === 'detail' && state.detail) api('bookmark-state', { id: state.detail.id }).then(value => { state.bookmarked = value; renderDetail(); });
+  if (state.route === 'detail' && state.detail) {
+    const id = String(state.detail.id);
+    const token = routeToken;
+    // 详情页停在下面看了一集又一集，回来时「继续播放」必须跟着变：
+    // 只刷收藏状态是不够的，进度也要重取（否则一直停在进来前那一集，
+    // 进来时没进度的话更是永远「立即播放」）。
+    api('latest-progress', { id }).then(progress => {
+      if (token !== routeToken || state.route !== 'detail' || !state.detail || String(state.detail.id) !== id) return;
+      const before = JSON.stringify(state.detailProgress || null);
+      state.detailProgress = progress || null;
+      if (JSON.stringify(state.detailProgress) !== before) renderDetail();
+    }).catch(() => {});
+    api('bookmark-state', { id }).then(value => {
+      if (token !== routeToken || state.route !== 'detail' || !state.detail) return;
+      if (state.bookmarked === value) return;
+      state.bookmarked = value;
+      renderDetail();
+    }).catch(() => {});
+  }
   window.__bingeSync && window.__bingeSync();
 };
 

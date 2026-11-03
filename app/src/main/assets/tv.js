@@ -58,7 +58,8 @@ var state = {
   version: '',
   update: null,         /* 检查更新查到的可更新版本 */
   focusKey: '',
-  lastRailKey: 'nav:home'
+  lastRailKey: 'nav:home',
+  lastContentKey: ''       /* 从侧栏按右回来时，回到刚才那张卡 */
 };
 
 var EP_PAGE = 20;
@@ -183,11 +184,13 @@ function focusElement(el, remember) {
   if (remember !== false && el.dataset) {
     state.focusKey = el.dataset.key || '';
     if (inRail(el)) state.lastRailKey = state.focusKey;
+    else if (state.focusKey) state.lastContentKey = state.focusKey;
   }
   var box = el.getBoundingClientRect();
   var stageBox = stage.getBoundingClientRect();
   if (box.top < stageBox.top + 8) stage.scrollTop -= (stageBox.top + 8 - box.top);
   else if (box.bottom > stageBox.bottom - 40) stage.scrollTop += (box.bottom - (stageBox.bottom - 40));
+  if (!inRail(el)) revealSectionHead(el);
   syncBackdrop(el);
 }
 
@@ -203,22 +206,86 @@ function restoreFocus() {
   focusElement(target || all[0], false);
 }
 
-function move(direction) {
-  var all = focusables();
-  if (!all.length) return;
-  var current = document.querySelector('.is-focused');
-  if (!current || all.indexOf(current) < 0) { focusElement(all[0]); return; }
+/* 侧栏和内容区是两套焦点：内容区里按左右只在内容里走，只在最左一列
+   继续按左才进侧栏；侧栏里按右回到刚才那张卡。原来的做法是纯按距离算，
+   第一排的卡上面没东西时，最近的目标反而是左上角那排图标 —— 于是
+   「往上按一下」直接跳到侧栏，标题头永远看不到。 */
+function railKeyForRoute() {
+  if (state.route === 'search') return 'nav:search';
+  if (state.route === 'library') return 'nav:library';
+  return 'nav:home';
+}
 
+function enterRail(from) {
+  var target = document.querySelector('#rail [data-key="' + railKeyForRoute() + '"]');
+  if (!target) target = document.querySelector('#rail [data-focusable]');
+  if (!target) return;
+  if (from && from.dataset && from.dataset.key && !inRail(from)) state.lastContentKey = from.dataset.key;
+  focusElement(target);
+}
+
+function leaveRail() {
+  var target = null;
+  if (state.lastContentKey) target = document.querySelector('[data-key="' + state.lastContentKey + '"]');
+  if (!target) {
+    var all = focusables();
+    for (var i = 0; i < all.length; i++) if (!inRail(all[i])) { target = all[i]; break; }
+  }
+  if (target) focusElement(target);
+}
+
+/* 第一排的卡被选中时，把这一块的标题头（「继续观看」/「全部作品」）滚进画面。
+   否则往下翻过之后按回来，标题头一直藏在屏幕上边。 */
+function revealSectionHead(el) {
+  if (!el || !el.closest) return;
+  var grid = el.closest('.grid');
+  if (!grid) return;
+  var cards = grid.querySelectorAll('.card');
+  var top = Infinity;
+  for (var i = 0; i < cards.length; i++) {
+    var t = cards[i].getBoundingClientRect().top;
+    if (t < top) top = t;
+  }
+  var box = el.getBoundingClientRect();
+  if (Math.abs(box.top - top) > 6) return;            /* 不是第一排 */
+  var section = el.closest('.section');
+  var head = section && section.querySelector('.section-head');
+  if (!head) return;
+  var stageBox = stage.getBoundingClientRect();
+  var headBox = head.getBoundingClientRect();
+  var pad = 10;
+  if (headBox.top < stageBox.top + pad) stage.scrollTop -= (stageBox.top + pad - headBox.top);
+}
+
+/* 同一「排」的判定：左右移动只认竖直方向有重叠的目标。
+   否则最左边那张卡按左，最近的目标反而是它斜上方的分类条（x 稍微靠左一点点），
+   于是永远进不了侧栏。 */
+function sameBand(a, b) {
+  var overlap = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+  return overlap > Math.min(a.height, b.height) * 0.5;
+}
+function sameColumn(a, b) {
+  var overlap = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+  return overlap > 0;
+}
+
+function pickNearest(current, all, direction, banded) {
   var from = current.getBoundingClientRect();
   var cx = (from.left + from.right) / 2;
   var cy = (from.top + from.bottom) / 2;
   var best = null;
   var bestScore = Infinity;
-
+  var onRail = inRail(current);
   for (var i = 0; i < all.length; i++) {
     var el = all[i];
     if (el === current) continue;
+    /* 侧栏与内容区互不参与距离比较，只有显式的左/右才能跨过去 */
+    if (inRail(el) !== onRail) continue;
     var box = el.getBoundingClientRect();
+    if (banded) {
+      if ((direction === 'left' || direction === 'right') && !sameBand(from, box)) continue;
+      if ((direction === 'up' || direction === 'down') && !sameColumn(from, box)) continue;
+    }
     var ex = (box.left + box.right) / 2;
     var ey = (box.top + box.bottom) / 2;
     var dx = ex - cx;
@@ -232,7 +299,40 @@ function move(direction) {
     var score = primary + secondary * 2.4;
     if (score < bestScore) { bestScore = score; best = el; }
   }
-  if (best) focusElement(best);
+  return best;
+}
+
+function move(direction) {
+  var all = focusables();
+  if (!all.length) return;
+  var current = document.querySelector('.is-focused');
+  if (!current || all.indexOf(current) < 0) { focusElement(all[0]); return; }
+
+  var onRail = inRail(current);
+  if (onRail) {
+    if (direction === 'right') { leaveRail(); return; }
+    if (direction === 'left') return;
+  }
+
+  var from = current.getBoundingClientRect();
+  var best = pickNearest(current, all, direction, true);
+  /* 上下允许放宽：不同区块宽度不一致时（分类条、按钮、剧集格），
+     严格对齐会把人卡死，所以放宽再找一次。左右不放宽 —— 放宽就会斜着跳。 */
+  if (!best && (direction === 'up' || direction === 'down')) best = pickNearest(current, all, direction, false);
+  if (best) { focusElement(best); return; }
+  if (onRail) return;
+
+  if (direction === 'left') { enterRail(current); return; }
+  if (direction === 'up') {
+    /* 上面还有没露出来的内容（标题头、上一排）就先往上滚，滚到顶再进侧栏 */
+    if (stage.scrollTop > 1) {
+      var step = Math.max(120, from.height + 60);
+      stage.scrollTop = Math.max(0, stage.scrollTop - step);
+      revealSectionHead(current);
+      return;
+    }
+    enterRail(current);
+  }
 }
 
 /* ---------------- 卡片 ---------------- */
@@ -299,13 +399,16 @@ function renderHome() {
 }
 
 var feedToken = 0;
-function loadFeed(id, reset) {
+/* focusChip=false：这是开机/切页触发的加载，焦点留在原处（侧栏图标）——
+   以前不管谁调用都把焦点塞给分类条，分类条在首屏下方，浏览器为了露出它
+   会把页面往下滚 100 多像素，「首页」标题和「继续观看」标题头一进去就被顶没了。 */
+function loadFeed(id, reset, focusChip) {
   var target = id || state.feedId || categoryList()[0][0];
   var switched = target !== state.feedId;
   state.feedId = target;
   if (reset || switched) {
     state.feed = null;
-    state.focusKey = 'chip:' + target;
+    if (focusChip !== false) state.focusKey = 'chip:' + target;
     if (state.route === 'home') renderHome();
   } else if (state.feed && (state.feed.loading || !state.feed.nextPage)) {
     return;
@@ -730,11 +833,14 @@ function openDetail(id) {
     state.detailLoading = false;
     view.innerHTML = '<p class="empty">打开失败：' + esc(error.message || '网络异常') + '</p>';
   });
-  /* 上次看到哪集哪一秒：拿到来就把按钮换成「继续播放」 */
-  api('latest-progress', { id: String(id) }).then(function (progress) {
-    if (state.route !== 'detail' || !state.detail) return;
+  /* 上次看到哪集哪一秒：拿到来就把按钮换成「继续播放」。
+     注意以前这里要求 state.detail 已经到货，本地进度通常比详情接口先回来，
+     结果进度被直接丢掉 —— 电视端详情页因此永远显示「立即播放」。 */
+  var wanted = String(id);
+  api('latest-progress', { id: wanted }).then(function (progress) {
+    if (state.route !== 'detail') return;
     state.detailProgress = progress || null;
-    renderDetail();
+    if (state.detail && String(state.detail.id) === wanted) renderDetail();
   }).catch(function () { });
 }
 
@@ -780,7 +886,7 @@ function go(tab) {
     state.route = 'home';
     state.focusKey = 'nav:home';
     setActiveNav('home'); renderHome();
-    if (!state.feed) loadFeed(state.feedId || categoryList()[0][0], true);
+    if (!state.feed) loadFeed(state.feedId || categoryList()[0][0], true, false);
   } else if (tab === 'search') {
     state.route = 'search';
     state.focusKey = 'search-box';
@@ -932,7 +1038,19 @@ document.addEventListener('click', function (event) {
 function setAccount(profile) {
   state.account = profile || { loggedIn: false };
   var name = state.account.loggedIn ? (state.account.username || '已登录') : '';
-  if (railAvatar) {
+  if (!railAvatar) return;
+  /* 手机端设置过头像的话，账号资料里带 avatar（jpeg 的 data URL），
+     直接铺满左下角那个圆；没有头像才退回首字母。 */
+  var avatar = state.account.loggedIn ? String(state.account.avatar || '') : '';
+  if (avatar) {
+    railAvatar.innerHTML = '<img alt="">';
+    var img = railAvatar.querySelector('img');
+    img.onerror = function () {
+      railAvatar.textContent = name ? name.slice(0, 1).toUpperCase() : '?';
+    };
+    img.src = avatar;
+  } else {
+    railAvatar.innerHTML = '';
     railAvatar.textContent = name ? name.slice(0, 1).toUpperCase() : '?';
   }
 }
@@ -966,12 +1084,16 @@ function showLoginQr() {
 
 window.hgTvLogin = function (ok) {
   if (!ok) { toast('登录没成功，重新扫一次', true); showLoginQr(); return; }
-  api('account').then(function (profile) {
+  /* 扫码登录是服务端才知道账号，顺手把头像一起拉下来 */
+  api('refresh-account').then(function (profile) {
+    if (!profile || !profile.loggedIn) return api('account');
+    return profile;
+  }).then(function (profile) {
     setAccount(profile);
     if (profile && profile.loggedIn) {
       loginLayer.hidden = true;
       toast('已登录');
-      if (!state.feed) loadFeed(state.feedId || categoryList()[0][0], true);
+      if (!state.feed) loadFeed(state.feedId || categoryList()[0][0], true, false);
       loadLibrary();
       state.focusKey = 'nav:home';
       restoreFocus();
@@ -1135,7 +1257,7 @@ function applyMode(status, fallback) {
   state.focusKey = 'nav:home';
   setActiveNav('home');
   renderHome();
-  loadFeed(state.feedId || categoryList()[0][0], true);
+  loadFeed(state.feedId || categoryList()[0][0], true, false);
 }
 
 function switchMode() {
@@ -1169,7 +1291,7 @@ function logout() {
     state.focusKey = 'nav:home';
     setActiveNav('home');
     renderHome();
-    loadFeed(state.feedId || categoryList()[0][0], true);
+    loadFeed(state.feedId || categoryList()[0][0], true, false);
     loginLayer.hidden = false;
     showLoginQr();
     state.focusKey = 'login:guest';
@@ -1183,6 +1305,30 @@ window.veyraRelayFill = function (text) {
   var input = document.getElementById('search-input');
   if (input) input.value = text || '';
   if (text) runSearch(String(text).trim());
+};
+
+/* ---------------- 回到前台 ----------------
+   原生的 onResume 会调这个（MainActivity 里一直有，但电视端页面没实现，
+   等于什么都没做）。从播放器退回来、或切后台再回来时，必须重新取一遍：
+   · 详情页的「继续播放」—— 否则看完三集回来，按钮还停在进来之前那一集
+   · 首页「继续观看」/「我的」—— 否则列表是上次进页面时的旧数据 */
+window.hgResume = function () {
+  if (state.route === 'detail' && state.detail) {
+    var id = String(state.detail.id);
+    api('latest-progress', { id: id }).then(function (progress) {
+      if (state.route !== 'detail' || !state.detail || String(state.detail.id) !== id) return;
+      var before = JSON.stringify(state.detailProgress || null);
+      state.detailProgress = progress || null;
+      if (JSON.stringify(state.detailProgress) !== before) renderDetail();
+    }).catch(function () { });
+    api('bookmark-state', { id: id }).then(function (saved) {
+      if (state.route !== 'detail' || !state.detail || String(state.detail.id) !== id) return;
+      if (!!state.detail.bookmarked === !!saved) return;
+      state.detail.bookmarked = !!saved;
+      renderDetail();
+    }).catch(function () { });
+  }
+  if (state.route === 'home' || state.route === 'library') loadLibrary();
 };
 
 /* ---------------- 启动 ---------------- */
@@ -1205,6 +1351,13 @@ function boot() {
     if (status && status.source) state.source = status.source;
     if (status && typeof status.unlocked === 'boolean') state.unlocked = status.unlocked;
     setAccount(results[1]);
+    /* 头像只存在手机上：本地资料里没有就向服务端要一次（refresh-account 会顺带把
+       头像图下下来，返回 base64），下到了再换掉左下角那个字母。 */
+    if (results[1] && results[1].loggedIn) {
+      api('refresh-account').then(function (profile) {
+        if (profile && profile.loggedIn) setAccount(profile);
+      }).catch(function () { });
+    }
     go('home');
     if (!results[1] || !results[1].loggedIn) {
       loginLayer.hidden = false;
