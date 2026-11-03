@@ -985,6 +985,13 @@ public final class MainActivity extends Activity {
             return super.dispatchKeyEvent(event);
         }
         int code = event.getKeyCode();
+        /* 外接键盘没有独立的返回键，ESC 是最接近的一个。不显式接住它会直接落到
+           系统手里把 Activity 干掉，看起来就是"按 ESC 秒退桌面"。
+           这里统一按返回处理：有弹层先关弹层，在首页才弹退出确认。 */
+        if (code == KeyEvent.KEYCODE_ESCAPE) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN) handleBack(false);
+            return true;
+        }
         boolean navigational = code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN
                 || code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT
                 || code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER

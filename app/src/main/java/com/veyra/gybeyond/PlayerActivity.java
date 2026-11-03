@@ -2485,7 +2485,8 @@ public final class PlayerActivity extends Activity {
         if (action == android.view.KeyEvent.ACTION_DOWN) {
             /* 返回键必须排在面板前面：面板原来把 BACK 一起吃了，
                于是弹窗关不掉、人也退不出去。先收面板，再收控件条，都没有才走退出确认。 */
-            if (code == android.view.KeyEvent.KEYCODE_BACK) {
+            if (code == android.view.KeyEvent.KEYCODE_BACK
+                    || code == android.view.KeyEvent.KEYCODE_ESCAPE) {
                 if (tvEpPanel != null) { closeTvEpisodes(); showTvBar(); return true; }
                 if (tvBarShown) { hideTvBar(); return true; }
                 return super.dispatchKeyEvent(event);
