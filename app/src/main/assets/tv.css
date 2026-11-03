@@ -295,15 +295,21 @@ body.rail-open #rail{
 .card{
   display:block;width:100%;max-width:100%;min-width:0;overflow:visible;
   position:relative;
-  text-align:left;border-radius:.8rem;
+  text-align:left;border-radius:1.1rem;
 }
 /* 1:1.4 的比例用 padding-top 撑：宽度随列自适应，高度永远跟着走 */
 .card .art{
   position:relative;display:block;height:0;padding-top:140%;
-  border-radius:.8rem;overflow:hidden;background:var(--panel);
+  border-radius:1.1rem;overflow:hidden;background:var(--panel);
   transition:transform .16s cubic-bezier(.22,.61,.36,1),box-shadow .16s linear;
 }
-.card .art img{position:absolute;left:0;top:0;width:100%;height:100%;object-fit:cover}
+/* 圆角必须同时写在 img 上：选中态 .art 有 transform，成了独立合成层，
+   老内核下父级的 overflow:hidden + border-radius 就不再裁子元素 ——
+   这就是「没选中是圆角、一选中变直角」的原因。 */
+.card .art img{
+  position:absolute;left:0;top:0;width:100%;height:100%;object-fit:cover;
+  border-radius:1.1rem;
+}
 .card .art .badge{
   position:absolute;left:.6rem;bottom:.6rem;
   background:rgba(0,0,0,.72);color:#ffe08a;
@@ -311,22 +317,21 @@ body.rail-open #rail{
   padding:.2rem .6rem;border-radius:.4rem;
 }
 .card .name{
-  display:block;width:100%;margin-top:.8rem;
-  font-size:1.55rem;line-height:1.35;color:var(--text);
+  display:block;width:100%;margin-top:1.3rem;
+  font-size:1.95rem;line-height:1.4;color:var(--text);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
   transition:transform .16s cubic-bezier(.22,.61,.36,1);
 }
 /* 焦点：整张海报放大 + 四边完整描边。
-   以前只描一圈 0.35rem 的白边、不放大，遥控器选剧时几乎看不出焦点在哪；
-   现在海报按 1.08 倍撑开、描边加粗，并抬到相邻卡片上层，
-   放大后的边缘才不会被旁边那张压住。剧名不缩放（缩放会糊字），
-   只整体下移一点，让出海报放大的高度。 */
+   描边比上一版细一点、圆角放大到 1.1rem，跟海报本身同一个轮廓，不会出现
+   「圆角框套一个直角图」的割裂感。放大后海报下沿会多吃掉约 1.7rem，
+   剧名跟着下移 1.1rem，才不会贴着框底。 */
 .card.is-focused{z-index:8}
 .card.is-focused .art{
   transform:scale(1.08);
-  box-shadow:0 0 0 .42rem var(--focus),0 1rem 2.6rem rgba(0,0,0,.45);
+  box-shadow:0 0 0 .34rem var(--focus),0 .9rem 2.4rem rgba(0,0,0,.42);
 }
-.card.is-focused .name{transform:translateY(.75rem)}
+.card.is-focused .name{transform:translateY(1.3rem)}
 
 /* ---------------- 分类条 ---------------- */
 .chips{display:block;margin-bottom:2.4rem}
