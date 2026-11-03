@@ -1,48 +1,67 @@
 # Veyra
 
-Veyra 是一个**短剧聚合播放器**：Android 客户端（APK）+ 自建 Node 后端（Docker），支持红果 / 黄果短剧的在线播放、私密模式鉴权、代理绕行，以及**手机端 / NAS 端下载合并**。
+自建短剧播放系统：**Android 手机 + Android TV 双端客户端 + Node.js 后端**。
 
-> 本项目脱胎于 [MrSsg/HuangguoAPP-for-Andriod](https://github.com/MrSsg/HuangguoAPP-for-Andriod)（GPL-3.0），但已独立演进为 **Veyra** 品牌：独立包名、独立后端镜像、独立数据目录。内容版权归各内容源所有，本项目仅提供技术实现，请勿用于非法用途。
+不是套壳聚合——片源接入、下载合并、账号权限、双端界面、热更新，都在这一个仓库里。
+
+> 派生自 [MrSsg/HuangguoAPP-for-Andriod](https://github.com/MrSsg/HuangguoAPP-for-Andriod)（GPL-3.0），已独立为 Veyra 品牌：独立包名、独立后端镜像、独立数据目录。
+> 内容版权归各源站所有，本项目只提供技术实现，请勿用于商业或传播用途。
 
 ---
 
+## 能力清单
 
-## 功能特性
+### 手机端（`mobile` flavor，包名 `com.veyra.gybeyond`）
 
-- **多源播放**：红果 / 黄果短剧在线播放；后端地址由用户在登录 / 注册页自填，**不内置任何私有域名**。
-- **账号体系**：登录 / 注册（注册开关在 WebUI 动态控制），注册需管理员动态码（OTP），账号与设备无关。
-- **私密模式**：需后端动态码（OTP，鉴权一次、跟账号走）；管理员账号免动态码直进。
-- **代理绕行**：设置中可配置代理端口（仅黄果生效），代理不通自动经后端转发，红果不受影响。
-- **后端代理**：WebUI 可配置后端出站代理（`http://ip:port`），后端抓取黄果资源时走该代理；proxy-test 用 `google.com/generate_204` 检测代理连通性。
-- **角色权限**：普通用户只能下载到手机；管理员可下载到 NAS。
-- **下载与合并**：
-  - 手机端：并发下载（10 路）→ 本地规范化 + 合并为单文件；合并失败自动降级保留分集，可重试 / 重新合并。
-  - NAS 端：后端 ffmpeg 下载、解密并合并（avc3/hev1 + 时间基统一），产物直接可播。
-  - 手机端合并引擎为**自研 NDK 移植 ffmpeg + 手写 JNI**（C 层解密 / 规范化 / concat），与后端下载器 `server/downloader.js` 语义 1:1 对齐。
-- **WebUI 管理台**：用户列表、角色切换、删除用户、注册开关、动态码显示 / 重置、后端代理配置——进入需管理员密码（`ADMIN_PASSWORD`）。
+| 模块 | 实际情况 |
+|---|---|
+| 浏览 | 首页推荐、分类、标签、搜索、详情、观看记录、收藏 |
+| 播放 | Media3 / ExoPlayer；红果 CENC 加密流本地解密播放，黄果直连或经后端中继 |
+| 下载 | **10 路并发**；单集失败不拖垮整批，失败集可单独重试；已下载分集重试时直接复用 |
+| 合并 | 自研 NDK ffmpeg（`cpp/ffconcat_jni.c` + 手写 JNI）：C 层解密、时间基统一、concat，产出单文件 |
+| 落地 | 本地 / NAS / **SMB / WebDAV / FTP** 直传，传完校验大小再删本地 |
+| 账号 | 登录注册；注册开关由后端控制，注册需管理员动态码 |
+| 私密模式 | 每次进入都校验动态码（OTP） |
+| 主题 | 8 套：简洁白 / 少女粉 / 主题黑 / 高能红 / 高能黄 / 早苗绿 / 宝石蓝 / 罗兰紫 |
+| 更新 | 前端资源热更新（签名校验 + 原子切换），改界面不用重装 APK |
 
-## 项目结构
+### 电视端（`tv` flavor，包名 `com.veyra.gybeyond.tv`）
+
+TV 端是**独立的一套前端**（`assets/tv.html` / `tv.js` / `tv.css`），不是把手机页面放大：
+
+- 遥控器焦点：整卡放大 + 描边，海报圆角不破
+- 长按连续移动：首页选剧、详情选集共用一套连发逻辑
+- 播放页：暂停即出控件条，6 项一字贴底（播放 · 上一集 · 下一集 · 选集 · 倍速 · 收藏），选集 20 集一组
+- 左右长按快进快退；上下不长按跳集
+- 长标题选中后跑马灯（rAF 逐帧位移，接缝不跳）
+- 私密模式每次进入都要动态码
+- **扫码输入**：遥控器打字难，电视上弹二维码，手机扫码后直接往当前输入框灌字（局域网 ServerSocket + 一次性 token）
+- 8 套主题，跟随手机端选择
+
+### 后端（`server/`，Node.js 无框架，单镜像）
+
+- 账号与角色：普通用户只能下到手机，管理员才能下 NAS
+- 动态码（OTP）：签发 / 校验 / 重置
+- 下载任务队列：ffmpeg 解密 + 合并（avc3 / hev1 时间基统一，产物直接可播）
+- 设备联动：`devices/register · poll · cast · ack`，手机找片 → 电视播
+- 管理台 WebUI：用户管理、角色切换、注册开关、动态码、出站代理配置与连通性测试
+- 片源转发：红果直连 / 中继，黄果走可配置代理
+
+---
+
+## 结构
 
 ```
-├── app/                      # Android 客户端（Java + WebView UI）
-│   └── src/main/
-│       ├── java/com/veyra/gybeyond/   # 主程序（播放 / 下载 / 合并 / 账号 / 代理 / 热更新）
-│       ├── cpp/ffconcat_jni.c         # 自研合并引擎 JNI（解密 / 规范化 / 统一音轨转码 / concat）
-│       ├── jniLibs/                   # 预编译 libffconcat.so（arm64-v8a）
-│       └── assets/                     # WebView 前端（app.js / html / css）
-├── server/                   # 自建后端（Node.js，无框架）
-│   ├── index.js              # API：账号 / 动态码 / 下载任务 / 用户管理 / 管理台 / 黄果转发
-│   ├── downloader.js         # 下载器 + ffmpeg 解密 + 合并（手机端合并的对照基准）
-│   ├── hongguo-decrypt.js    # 红果 CENC 解密
-│   └── Dockerfile            # 后端镜像
-├── third_party/hongguo/      # 红果内容接入层（Kotlin，含分享链接解析）
-├── docker-compose.yaml       # 后端一键部署
-└── docs/                     # 部署与交接文档
+app/                         Android 客户端（17k 行 Java + 8k 行前端）
+  src/main/java/             播放 / 下载 / 合并 / 账号 / 设备联动 / 热更
+  src/main/cpp/              自研合并引擎 JNI
+  src/main/assets/           app.*（手机前端） / tv.*（电视前端）
+server/                      API + 下载器 + 管理台
+third_party/hongguo/         红果内容接入层
+docker-compose.yaml
 ```
 
-## 部署后端（Docker Compose）
-
-**推荐 `network_mode: host`**：后端容器需要访问局域网内的代理（如 `http://192.168.x.x:7890`）来抓取黄果资源，bridge 模式下容器网络可能无法路由到局域网代理地址，导致所有出站请求超时并拖死服务。host 模式直接共享宿主机网络栈，无此问题。
+## 部署
 
 ```yaml
 services:
@@ -50,63 +69,34 @@ services:
     image: gybeyond/veyra-backend:latest
     container_name: veyra
     restart: unless-stopped
-    network_mode: host          # 推荐：容器直接用宿主机网络，可访问局域网代理
+    network_mode: host          # 需要访问局域网代理时用 host
     environment:
       - PORT=8888
       - DATA_DIR=/data
-      - ADMIN_PASSWORD=change-me   # WebUI 管理台密码（务必修改）
+      - ADMIN_PASSWORD=change-me
     volumes:
-      - ./data:/data            # 用户 / 任务 / 头像等数据（备份此目录）
-      - /volume1/your/video:/video  # NAS 下载合并产物（固定 /video 挂载）
+      - ./data:/data
+      - /volume1/your/video:/video
 ```
-
-> 如果坚持用 bridge 模式（`ports: ["8888:8888"]`），确保代理跑在容器可路由的地址上（如 `host.docker.internal:7890` 或 Docker 网桥网关 `172.17.0.1:7890`），否则 WebUI 后端代理会连不通。
-
-- 端口默认 `8888`（host 模式下直接监听宿主机 8888；bridge 模式用 `ports` 映射，APK 登录时填 `http://<NAS-IP>:8888`）。
-- **Docker Hub 拉不动**（国内网络）时：配置 Docker daemon 代理（`/etc/systemd/system/docker.service.d/http-proxy.conf`）或在 GitHub Release 页下载离线 tar 包 `docker load -i`。
-- 健康检查：`curl http://<NAS-IP>:8888/api/health` → `{"status":"ok"}`。
-- 升级：`docker compose pull && docker compose up -d`。
-
-### WebUI 后端代理配置
-
-1. 启动后访问 `http://<服务器>:8888/`，用 `ADMIN_PASSWORD` 登录。
-2. 在"后端代理"处填代理地址（如 `http://192.168.x.x:7890`），点"检测"验证连通性。
-3. proxy-test 访问 `google.com/generate_204`（204 空响应），8 秒超时，与黄果站本身是否可达无关。
-4. 保存后，后端抓取黄果资源（`/api/huangguo-proxy`）时自动走该代理。
-
-## APK 使用
-
-1. 安装 `app-release.apk`（GitHub Releases 或自行构建）。
-2. 首次打开进入登录 / 注册页，**填写你自己的后端地址**（如 `http://192.168.x.x:8888`）。
-3. 注册：填账号 / 密码 / 服务器地址 + 管理员动态码（WebUI 首页显示，30 秒刷新）。
-4. 公开模式直接看红果；设置 → 进入私密模式需输入后端动态码（管理员免输）。
-5. 设置 → 黄果网络代理：填 `host:port`（仅黄果走代理，代理不通自动后端绕行）。
-6. 详情页 → 下载：选择集数 → 下载到手机（本地，合并优先）或下载到 NAS（管理员）。
-
-## 构建 APK
 
 ```bash
-export ANDROID_HOME=/path/to/android-sdk
-export CHENGZI_KEYSTORE=/path/to/your-release.keystore
-export CHENGZI_STORE_PASS=your-store-pass
-export CHENGZI_KEY_PASS=your-key-pass
-export CHENGZI_KEY_ALIAS=your-alias
-cd app && ./gradlew :app:assembleRelease
+docker compose up -d
+curl http://<NAS-IP>:8888/api/health     # {"status":"ok"}
 ```
 
-产物：`app/build/outputs/apk/release/app-release.apk`
+APK 首次打开填后端地址（`http://<NAS-IP>:8888`），注册或登录即可。
 
-> 手机合并引擎是 NDK C 源码（`app/src/main/cpp/ffconcat_jni.c`），仓库已带预编译 `libffconcat.so`（arm64-v8a），无需本地 ffmpeg 工具链即可构建。
+## 构建
 
-## WebUI 管理台
+```bash
+./gradlew assembleMobileRelease   # 手机包
+./gradlew assembleTvRelease       # 电视包
+```
 
-后端启动后访问 `http://<服务器>:8888/`，输入环境变量 `ADMIN_PASSWORD` 设置的管理员密码进入。
+需要 JDK 17、Android SDK、NDK（合并引擎）。
 
-- 用户管理：查看注册用户、切换角色（普通 / 管理员）、删除用户。
-- 注册开关：随时开 / 关开放注册。
-- 动态码：实时显示当前 OTP（30 秒刷新），可手动重置。
-- 后端代理：配置后端出站代理地址并检测连通性。
+## 说明
 
-## 开源协议
-
-本项目遵循 **GPL-3.0** 协议开源（见 [LICENSE](./LICENSE)）。第三方组件与内容源的协议以各自声明为准。
+- 后端不内置任何片源域名，地址由使用者自填。
+- 所有数据在 `DATA_DIR`，备份这一个目录即可。
+- 仅供个人自建自用。
