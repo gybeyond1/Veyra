@@ -170,7 +170,7 @@ html[data-theme=dark] .download-track i{background:var(--accent)}
 *{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 input,textarea{user-select:text;-webkit-user-select:text;-webkit-touch-callout:default}
 /* ---- 下载目标选择 ---- */
-.download-pick{display:flex;flex-direction:column;gap:11px}
+.download-pick{display:flex;flex-direction:column;gap:11px}.download-pick+.download-sheet-buttons{margin-top:16px}
 .download-pick-option{display:flex;flex-direction:column;align-items:flex-start;gap:5px;padding:16px 17px;border:1px solid var(--line);border-radius:calc(14px * var(--corner-scale,1));background:var(--panel);color:var(--text);text-align:left}
 .download-pick-option strong{font-size:15px}
 .download-pick-option small{font-size:11px;color:var(--muted);line-height:1.5}

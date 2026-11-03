@@ -3455,6 +3455,7 @@ let swiping = false;
 let swipeStart = null;
 let swipeAxis = null;
 let swipeTrack = null;
+let touching = false;
 const swipePageCache = /* @__PURE__ */ new Map();
 let swipePrefetchBusy = false;
 let swipeSaveGuard = false;
@@ -3875,7 +3876,7 @@ function swipeOpenTrack(delta, dx) {
   routeToken++;
   swipeLayTrack(dx);
   swipeTrack.guard = setTimeout(() => {
-    if (swipeTrack) swipeCloseTrack(false);
+    if (swipeTrack && !touching) swipeCloseTrack(false);
   }, 1500);
   return true;
 }
@@ -4022,6 +4023,7 @@ function swipeSettleBack() {
   }, 180);
 }
 scroll.addEventListener("touchstart", (event) => {
+  touching = true;
   const touch = event.touches[0];
   if (!touch || swiping || swipeBlocked() || document.querySelector(".card-transition-stage") || !DOCK_ORDER.includes(state.route === "category" ? state.tab : state.route)) {
     swipeStart = null;
@@ -4060,6 +4062,7 @@ scroll.addEventListener("touchmove", (event) => {
   else scroll.style.transform = `translateX(${dx * 0.3}px)`;
 }, { passive: false });
 scroll.addEventListener("touchend", (event) => {
+  touching = false;
   const start = swipeStart;
   const axis = swipeAxis, track = swipeTrack;
   swipeStart = null;
@@ -4079,6 +4082,7 @@ scroll.addEventListener("touchend", (event) => {
   swipeSettleBack();
 }, { passive: true });
 scroll.addEventListener("touchcancel", () => {
+  touching = false;
   const track = swipeTrack, axis = swipeAxis;
   swipeStart = null;
   swipeAxis = null;

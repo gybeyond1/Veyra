@@ -3042,6 +3042,7 @@ let swiping = false;
 let swipeStart = null;
 let swipeAxis = null;
 let swipeTrack = null;
+let touching = false;   // 手指是否仍按在屏幕上：切页轨道的兜底定时器只在非触摸时才收尾
 
 // 目标页 DOM 缓存：key -> 节点克隆。滑动提交后写入，命中即免骨架。
 const swipePageCache = new Map();
@@ -3474,7 +3475,7 @@ function swipeOpenTrack(delta, dx) {
   swipeTrack = track;
   routeToken++;   // 作废未落地的异步渲染，防止拖动中 content 被覆盖
   swipeLayTrack(dx);
-  swipeTrack.guard = setTimeout(() => { if (swipeTrack) swipeCloseTrack(false); }, 1500);
+  swipeTrack.guard = setTimeout(() => { if (swipeTrack && !touching) swipeCloseTrack(false); }, 1500);
   return true;
 }
 
@@ -3610,6 +3611,7 @@ function swipeSettleBack() {
 }
 
 scroll.addEventListener('touchstart', event => {
+  touching = true;
   const touch = event.touches[0];
   if (!touch || swiping || swipeBlocked() || document.querySelector('.card-transition-stage')
     || !DOCK_ORDER.includes(state.route === 'category' ? state.tab : state.route)) {
@@ -3641,6 +3643,7 @@ scroll.addEventListener('touchmove', event => {
 }, { passive: false });
 
 scroll.addEventListener('touchend', event => {
+  touching = false;
   const start = swipeStart;
   const axis = swipeAxis, track = swipeTrack;
   swipeStart = null; swipeAxis = null;
@@ -3659,6 +3662,7 @@ scroll.addEventListener('touchend', event => {
 }, { passive: true });
 
 scroll.addEventListener('touchcancel', () => {
+  touching = false;
   const track = swipeTrack, axis = swipeAxis;
   swipeStart = null; swipeAxis = null;
   if (track) swipeCloseTrack(false);
