@@ -75,14 +75,21 @@ final class VeyraDialog {
         TextView negative = actionButton(context, density,
                 negativeText == null ? "关闭" : negativeText, ghostStates, 0xFFFFFFFF, 0xFF12161A);
 
-        /* 主按钮：强调色实心，聚焦时加一圈白边 */
+        /* 主按钮：常态只给一层淡强调色（描边 + 薄底），聚焦时才实心。
+           原来是常态实心蓝、次按钮聚焦又是整块白，两颗都像"选中"，遥控器上根本
+           分不出停在哪；现在亮块永远只有一颗。 */
+        int accentR = Color.red(accent);
+        int accentG = Color.green(accent);
+        int accentB = Color.blue(accent);
+        GradientDrawable primaryNormal = round(density, Color.argb(0x2A, accentR, accentG, accentB));
+        primaryNormal.setStroke(Math.max(1, px(density, 1)),
+                Color.argb(0xB0, accentR, accentG, accentB));
         StateListDrawable primaryStates = new StateListDrawable();
         GradientDrawable primaryFocused = ring(density, accent, 0xFFFFFFFF);
-        GradientDrawable primaryNormal = round(density, accent);
         primaryStates.addState(new int[]{android.R.attr.state_focused}, primaryFocused);
         primaryStates.addState(new int[]{}, primaryNormal);
         TextView positive = actionButton(context, density, positiveText,
-                primaryStates, accentInk, accentInk);
+                primaryStates, accent, accentInk);
 
         LinearLayout.LayoutParams negativeParams = new LinearLayout.LayoutParams(
                 px(density, 124), px(density, 46));

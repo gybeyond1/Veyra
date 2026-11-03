@@ -846,7 +846,12 @@ function runSearch(query) {
 function nextWorkMarkup(item, index) {
   var key = 'nas:' + (item.id || index);
   var ready = item.status === 'done' || item.status === 'ready';
-  var badge = ready ? (item.episodeCount ? ('全 ' + item.episodeCount + ' 集') : '已下载') : '下载中';
+  /* done 是合并完成（分集已清理，只剩一个整片），ready 才是还按集摆着的；
+     合并过的再写「全 N 集」会让人以为还能选集，直接标「已合并」 */
+  var badge;
+  if (item.status === 'done') badge = '已合并';
+  else if (!ready) badge = '下载中';
+  else badge = item.episodeCount ? ('全 ' + item.episodeCount + ' 集') : '已下载';
   return '<button type="button" class="card' + (ready ? '' : ' is-dim') + '" data-focusable data-key="' + esc(key) + '" data-nas="' + esc(item.id) + '" data-nas-ready="' + (ready ? '1' : '') + '">'
     + '<span class="art"><img data-cover="' + esc(item.cover || '') + '" alt="">'
     + '<i class="badge">' + esc(badge) + '</i>'
