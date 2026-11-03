@@ -167,6 +167,18 @@ public final class PlayerActivity extends Activity {
     private View episodeScrim;
     private TextView episodeTrigger;
     private TextView speedTrigger;
+    /* ---- 电视端：暂停后的控件条 / 分组选集面板（遥控器专用，手机端不创建） ---- */
+    private LinearLayout tvBar;
+    private final java.util.List<TextView> tvBarItems = new java.util.ArrayList<>();
+    private int tvBarIndex;
+    private boolean tvBarShown;
+    private LinearLayout tvEpPanel;
+    private final java.util.List<TextView> tvEpGroups = new java.util.ArrayList<>();
+    private final java.util.List<TextView> tvEpCells = new java.util.ArrayList<>();
+    private int tvEpFocusArea;   /* 0 = 分组条，1 = 集数网格 */
+    private int tvEpIndex;
+    private int tvEpGroup;
+    private static final int TV_EP_PAGE = 20;
     private View speedScrim;
     private LinearLayout speedPanel;
     private JSONArray queue;
@@ -765,6 +777,7 @@ public final class PlayerActivity extends Activity {
             tvInfoShown = true;
             updateTitleVisibility();
             handler.postDelayed(hideTvInfo, 4000);
+            buildTvBar();
         }
     }
 
@@ -2040,7 +2053,13 @@ public final class PlayerActivity extends Activity {
     }
 
     private void handlePlayerBack() {
-        if (tvMode) { confirmExitPlayback(); return; }
+        if (tvMode) {
+            /* 面板 / 控件条先收，再退播放器 */
+            if (tvEpPanel != null) { closeTvEpisodes(); showTvBar(); return; }
+            if (tvBarShown) { hideTvBar(); return; }
+            confirmExitPlayback();
+            return;
+        }
         if (fullscreenMode) {
             if (speedPanel != null) closeSpeedPanel();
             if (episodesOpen) closeEpisodes();
@@ -2056,6 +2075,323 @@ public final class PlayerActivity extends Activity {
        确定    = 播放/暂停，顺便把标题浮现 3 秒
        返回    = 弹确认，确认后才退出
        画面上不常驻任何东西：控件栏、底部进度条都不要，只在按键后浮 3 秒标题。 */
+
+
+    /* ================= 电视端：暂停后的控件条 =================
+       播放中方向键仍是「左右拖进度 / 上下切集」，不弹控件；
+       一旦暂停，方向键改为在控件条里走，确定键执行。 */
+
+    private static final String[] TV_BAR_LABELS = {
+            "播放/暂停", "上一集", "下一集", "选集",
+            "倍速", "收藏", "静音", "投屏"
+    };
+
+    private void buildTvBar() {
+        if (!tvMode || tvBar != null) return;
+        tvBar = new LinearLayout(this);
+        tvBar.setOrientation(LinearLayout.VERTICAL);
+        tvBar.setGravity(Gravity.CENTER_HORIZONTAL);
+        tvBar.setPadding(dp(10), dp(8), dp(10), dp(8));
+        GradientDrawable panel = background(0xE616181B, 18);
+        panel.setStroke(dp(1), 0x33FFFFFF);
+        tvBar.setBackground(panel);
+        tvBar.setElevation(dp(18));
+        LinearLayout row1 = new LinearLayout(this);
+        row1.setGravity(Gravity.CENTER);
+        LinearLayout row2 = new LinearLayout(this);
+        row2.setGravity(Gravity.CENTER);
+        for (int i = 0; i < TV_BAR_LABELS.length; i++) {
+            final int index = i;
+            TextView item = label(TV_BAR_LABELS[i], 15, Color.WHITE);
+            item.setGravity(Gravity.CENTER);
+            item.setTypeface(null, Typeface.BOLD);
+            item.setClickable(true);
+            item.setOnClickListener(v -> tvBarAction(index));
+            LinearLayout.LayoutParams itemParams = new LinearLayout.LayoutParams(dp(116), dp(62));
+            itemParams.setMargins(dp(5), dp(4), dp(5), dp(4));
+            (index < 4 ? row1 : row2).addView(item, itemParams);
+            tvBarItems.add(item);
+        }
+        tvBar.addView(row1, new LinearLayout.LayoutParams(-2, -2));
+        tvBar.addView(row2, new LinearLayout.LayoutParams(-2, -2));
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        params.bottomMargin = navigationInsetBottom + dp(52);
+        root.addView(tvBar, params);
+        tvBar.setVisibility(View.GONE);
+        paintTvBar();
+    }
+
+    private void paintTvBar() {
+        for (int i = 0; i < tvBarItems.size(); i++) {
+            TextView item = tvBarItems.get(i);
+            boolean on = i == tvBarIndex;
+            item.setBackground(background(on ? 0xFFFFFFFF : 0x22FFFFFF, 12));
+            item.setTextColor(on ? 0xFF14181D : 0xFFFFFFFF);
+            item.setScaleX(on ? 1.06f : 1f);
+            item.setScaleY(on ? 1.06f : 1f);
+        }
+        if (tvBarItems.size() > 6) {
+            tvBarItems.get(4).setText("倍速 " + speedLabel(manualSpeed));
+            boolean muted = player != null && player.getVolume() <= 0;
+            tvBarItems.get(6).setText(muted ? "已静音" : "静音");
+        }
+    }
+
+    private void showTvBar() {
+        if (tvBar == null) return;
+        tvBarIndex = 0;
+        tvBarShown = true;
+        paintTvBar();
+        tvBar.setVisibility(View.VISIBLE);
+        tvBar.setAlpha(0f);
+        tvBar.animate().alpha(1f).setDuration(160).start();
+        showTvInfo();
+    }
+
+    private void hideTvBar() {
+        tvBarShown = false;
+        if (tvBar != null) tvBar.setVisibility(View.GONE);
+    }
+
+    private void tvBarAction(int index) {
+        switch (index) {
+            case 0:
+                tvTogglePlay();
+                hideTvBar();
+                break;
+            case 1:
+                tvSwitchEpisode(-1);
+                hideTvBar();
+                break;
+            case 2:
+                tvSwitchEpisode(1);
+                hideTvBar();
+                break;
+            case 3:
+                showTvEpisodes();
+                break;
+            case 4: {
+                float[] speeds = {1f, 1.25f, 1.5f, 2f, .75f};
+                int at = 0;
+                for (int i = 0; i < speeds.length; i++) if (Math.abs(speeds[i] - manualSpeed) < .01f) at = i;
+                manualSpeed = speeds[(at + 1) % speeds.length];
+                applyPlaybackSpeed(manualSpeed);
+                paintTvBar();
+                showTvInfo();
+                break;
+            }
+            case 5:
+                if (bookmarkButton != null) bookmarkButton.performClick();
+                paintTvBar();
+                break;
+            case 6:
+                if (player != null) {
+                    boolean mute = player.getVolume() > 0;
+                    player.setVolume(mute ? 0f : 1f);
+                    paintTvBar();
+                    toast(mute ? "已静音" : "已恢复音量");
+                }
+                break;
+            case 7:
+                if (castButton != null) castButton.performClick();
+                break;
+            default:
+                break;
+        }
+    }
+
+    private boolean tvBarKey(int code) {
+        int next = tvBarIndex;
+        if (code == android.view.KeyEvent.KEYCODE_DPAD_LEFT) {
+            if (tvBarIndex % 4 > 0) next = tvBarIndex - 1;
+        } else if (code == android.view.KeyEvent.KEYCODE_DPAD_RIGHT) {
+            if (tvBarIndex % 4 < 3) next = tvBarIndex + 1;
+        } else if (code == android.view.KeyEvent.KEYCODE_DPAD_UP) {
+            if (tvBarIndex >= 4) next = tvBarIndex - 4;
+        } else if (code == android.view.KeyEvent.KEYCODE_DPAD_DOWN) {
+            if (tvBarIndex < 4) next = tvBarIndex + 4;
+        } else if (code == android.view.KeyEvent.KEYCODE_DPAD_CENTER || code == android.view.KeyEvent.KEYCODE_ENTER
+                || code == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER) {
+            tvBarAction(tvBarIndex);
+            return true;
+        }
+        if (next != tvBarIndex) {
+            tvBarIndex = next;
+            paintTvBar();
+            showTvInfo();
+        }
+        return true;
+    }
+
+    /* ---------------- 选集：和详情页一样 20 集一组 ---------------- */
+
+    private void showTvEpisodes() {
+        if (episodes == null || episodes.length() == 0 || isAiQueue()) { toast("当前作品没有选集"); return; }
+        hideTvBar();
+        tvEpGroup = Math.max(0, (currentEpisode - 1) / TV_EP_PAGE);
+        tvEpFocusArea = 1;   /* 打开先落在当前集那一格，不用再按一次下 */
+        buildTvEpPanel();
+    }
+
+    private void buildTvEpPanel() {
+        if (tvEpPanel != null) { root.removeView(tvEpPanel); tvEpPanel = null; }
+        tvEpGroups.clear();
+        tvEpCells.clear();
+
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(22), dp(20), dp(22), dp(20));
+        GradientDrawable bg = background(0xF216181B, 20);
+        bg.setStroke(dp(1), 0x33FFFFFF);
+        panel.setBackground(bg);
+        panel.setElevation(dp(24));
+        panel.setClickable(true);
+
+        int total = episodes.length();
+        int groups = (total + TV_EP_PAGE - 1) / TV_EP_PAGE;
+        int start = tvEpGroup * TV_EP_PAGE;
+        int end = Math.min(total, start + TV_EP_PAGE);
+
+        TextView head = label("选集", 24, Color.WHITE);
+        head.setTypeface(null, Typeface.BOLD);
+        LinearLayout headRow = new LinearLayout(this);
+        headRow.setGravity(Gravity.CENTER_VERTICAL);
+        headRow.addView(head, new LinearLayout.LayoutParams(-2, -2));
+        TextView sub = label("　第 " + (start + 1) + "-" + end + " 集 / 共 " + total + " 集", 14, 0xFFC9C4B8);
+        headRow.addView(sub, new LinearLayout.LayoutParams(-2, -2));
+        panel.addView(headRow, new LinearLayout.LayoutParams(-1, dp(40)));
+
+        if (groups > 1) {
+            LinearLayout groupRow = new LinearLayout(this);
+            groupRow.setGravity(Gravity.CENTER_VERTICAL);
+            for (int g = 0; g < groups; g++) {
+                final int target = g;
+                int from = g * TV_EP_PAGE + 1;
+                int to = Math.min(total, (g + 1) * TV_EP_PAGE);
+                TextView chip = label(from + "-" + to, 13, Color.WHITE);
+                chip.setGravity(Gravity.CENTER);
+                chip.setClickable(true);
+                chip.setOnClickListener(v -> { tvEpGroup = target; buildTvEpPanel(); tvEpFocusArea = 1; paintTvEp(); });
+                LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(dp(88), dp(44));
+                chipParams.setMargins(dp(4), dp(4), dp(4), dp(4));
+                groupRow.addView(chip, chipParams);
+                tvEpGroups.add(chip);
+            }
+            panel.addView(groupRow, new LinearLayout.LayoutParams(-1, dp(58)));
+        } else {
+            panel.addView(new View(this), new LinearLayout.LayoutParams(-1, dp(10)));
+        }
+
+        android.widget.GridLayout grid = new android.widget.GridLayout(this);
+        grid.setColumnCount(8);
+        for (int i = start; i < end; i++) {
+            JSONObject item = episodes.optJSONObject(i);
+            if (item == null) continue;
+            int number = item.optInt("number");
+            TextView cell = label(String.valueOf(number), 16, Color.WHITE);
+            cell.setGravity(Gravity.CENTER);
+            cell.setClickable(true);
+            cell.setOnClickListener(v -> playTvEpisode(number));
+            android.widget.GridLayout.LayoutParams cellParams = new android.widget.GridLayout.LayoutParams();
+            cellParams.width = dp(88); cellParams.height = dp(58);
+            cellParams.setMargins(dp(4), dp(4), dp(4), dp(4));
+            grid.addView(cell, cellParams);
+            tvEpCells.add(cell);
+        }
+        panel.addView(grid, new LinearLayout.LayoutParams(-2, -2));
+
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER);
+        root.addView(panel, params);
+        tvEpPanel = panel;
+
+        tvEpIndex = Math.max(0, Math.min(tvEpCells.size() - 1, currentEpisode - start - 1));
+        paintTvEp();
+        panel.setAlpha(0f);
+        panel.setScaleX(.94f);
+        panel.setScaleY(.94f);
+        panel.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(180).start();
+    }
+
+    private void paintTvEp() {
+        for (int g = 0; g < tvEpGroups.size(); g++) {
+            TextView chip = tvEpGroups.get(g);
+            boolean on = g == tvEpGroup;
+            boolean focused = on && tvEpFocusArea == 0;
+            chip.setBackground(background(focused ? 0xFFFFFFFF : (on ? 0xFFC89B3C : 0x22FFFFFF), 10));
+            chip.setTextColor(focused ? 0xFF14181D : (on ? 0xFF231A06 : 0xFFFFFFFF));
+        }
+        for (int i = 0; i < tvEpCells.size(); i++) {
+            TextView cell = tvEpCells.get(i);
+            int number = currentEpisode;   /* 当前正在播的集，金色底 */
+            String text = cell.getText().toString();
+            boolean playing = text.equals(String.valueOf(number));
+            boolean focused = i == tvEpIndex && tvEpFocusArea == 1;
+            cell.setBackground(background(focused ? 0xFFFFFFFF : (playing ? 0xFFC89B3C : 0x22FFFFFF), 10));
+            cell.setTextColor(focused ? 0xFF14181D : (playing ? 0xFF231A06 : 0xFFFFFFFF));
+            cell.setScaleX(focused ? 1.08f : 1f);
+            cell.setScaleY(focused ? 1.08f : 1f);
+        }
+    }
+
+    private void playTvEpisode(int number) {
+        int total = episodes == null ? 0 : episodes.length();
+        closeTvEpisodes();
+        if (total > 0) {
+            if (number == currentEpisode) { hideTvBar(); return; }
+            Selection target = new Selection(currentItem, queueIndex, number);
+            switchTo(target);
+        }
+    }
+
+    private void closeTvEpisodes() {
+        if (tvEpPanel != null) { root.removeView(tvEpPanel); tvEpPanel = null; }
+        tvEpGroups.clear();
+        tvEpCells.clear();
+        tvEpFocusArea = 0;
+    }
+
+    private boolean tvEpKey(int code) {
+        int columns = 8;
+        if (tvEpFocusArea == 0) {
+            if (code == android.view.KeyEvent.KEYCODE_DPAD_LEFT && tvEpGroup > 0) {
+                tvEpGroup--;
+                buildTvEpPanel();
+                tvEpFocusArea = 0;
+                paintTvEp();
+            } else if (code == android.view.KeyEvent.KEYCODE_DPAD_RIGHT
+                    && tvEpGroup < (episodes.length() + TV_EP_PAGE - 1) / TV_EP_PAGE - 1) {
+                tvEpGroup++;
+                buildTvEpPanel();
+                tvEpFocusArea = 0;
+                paintTvEp();
+            } else if (code == android.view.KeyEvent.KEYCODE_DPAD_DOWN
+                    || code == android.view.KeyEvent.KEYCODE_DPAD_CENTER
+                    || code == android.view.KeyEvent.KEYCODE_ENTER) {
+                tvEpFocusArea = 1;
+                tvEpIndex = 0;
+                paintTvEp();
+            }
+            return true;
+        }
+        if (code == android.view.KeyEvent.KEYCODE_DPAD_LEFT) {
+            if (tvEpIndex > 0) tvEpIndex--;
+        } else if (code == android.view.KeyEvent.KEYCODE_DPAD_RIGHT) {
+            if (tvEpIndex < tvEpCells.size() - 1) tvEpIndex++;
+        } else if (code == android.view.KeyEvent.KEYCODE_DPAD_UP) {
+            if (tvEpIndex >= columns) tvEpIndex -= columns;
+            else if (!tvEpGroups.isEmpty()) { tvEpFocusArea = 0; }
+        } else if (code == android.view.KeyEvent.KEYCODE_DPAD_DOWN) {
+            if (tvEpIndex + columns < tvEpCells.size()) tvEpIndex += columns;
+        } else if (code == android.view.KeyEvent.KEYCODE_DPAD_CENTER
+                || code == android.view.KeyEvent.KEYCODE_ENTER
+                || code == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER) {
+            if (tvEpIndex >= 0 && tvEpIndex < tvEpCells.size())
+                playTvEpisode(Integer.parseInt(tvEpCells.get(tvEpIndex).getText().toString()));
+            return true;
+        }
+        paintTvEp();
+        return true;
+    }
 
     private void showTvInfo() {
         if (!tvMode) return;
@@ -2116,6 +2452,17 @@ public final class PlayerActivity extends Activity {
         int action = event.getAction();
 
         if (action == android.view.KeyEvent.ACTION_DOWN) {
+            /* 选集面板 / 暂停控件条优先吃按键，别让方向键漏到下面的快进、切集 */
+            if (tvEpPanel != null) return tvEpKey(code);
+            if (tvBarShown) return tvBarKey(code);
+            boolean paused = player != null && player.getPlaybackState() == Player.STATE_READY
+                    && !player.getPlayWhenReady();
+            boolean direction = code == android.view.KeyEvent.KEYCODE_DPAD_UP
+                    || code == android.view.KeyEvent.KEYCODE_DPAD_DOWN
+                    || code == android.view.KeyEvent.KEYCODE_DPAD_LEFT
+                    || code == android.view.KeyEvent.KEYCODE_DPAD_RIGHT;
+            /* 暂停时方向键用来选控件，不拖进度也不切集 */
+            if (paused && direction) { showTvBar(); return true; }
             switch (code) {
                 case android.view.KeyEvent.KEYCODE_DPAD_CENTER:
                 case android.view.KeyEvent.KEYCODE_ENTER:

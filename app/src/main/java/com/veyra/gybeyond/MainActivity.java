@@ -14,6 +14,7 @@ import android.os.Bundle;
 import android.net.Uri;
 import android.provider.Settings;
 import android.util.Log;
+import android.view.Gravity;
 import android.view.View;
 import android.view.KeyEvent;
 import android.view.WindowInsets;
@@ -32,6 +33,8 @@ import android.window.OnBackAnimationCallback;
 import android.window.OnBackInvokedCallback;
 import android.window.OnBackInvokedDispatcher;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
+import android.widget.ProgressBar;
 import androidx.core.content.FileProvider;
 import androidx.webkit.WebViewAssetLoader;
 import android.os.Handler;
@@ -61,6 +64,7 @@ public final class MainActivity extends Activity {
     private final ExecutorService coverRequests = Executors.newFixedThreadPool(2);
     private WebView webView;
     private FrameLayout root;
+    private View splash;
     private FrameLayout bingeVideoLayer;
     // 玻璃底板层：夹在原生视频层与 WebView 之间，负责把视频糊掉后透出给 WebView 里的玻璃板
     private BingeEngine bingeEngine;
@@ -294,7 +298,9 @@ public final class MainActivity extends Activity {
         webView = new WebView(this);
         webView.setBackgroundColor(Color.TRANSPARENT);
         root.addView(webView, new FrameLayout.LayoutParams(-1, -1));
+        buildSplash();
         setContentView(root);
+        hotHandler.postDelayed(this::hideSplash, 9000);
         startTextRelay();
         UiRefreshRate.apply(this, webView);
         if (Build.VERSION.SDK_INT >= 30) getWindow().setDecorFitsSystemWindows(false);
@@ -349,6 +355,10 @@ public final class MainActivity extends Activity {
                     hotHandler.removeCallbacks(resourceTimeout);
                     if (hotSession.trial) hotHandler.postDelayed(resourceTimeout, 15_000);
                 }
+            }
+            @Override public void onPageCommitVisible(WebView view, String url) {
+                /* 页面首帧已经画出来了：撤掉启动页，别让用户对着 logo 等数据 */
+                hideSplash();
             }
             @Override public void onPageFinished(WebView view, String url) {
                 if (migratingOrigin && "file:///android_asset/app.html".equals(url)) {
@@ -914,6 +924,39 @@ public final class MainActivity extends Activity {
      * 电视遥控：方向键与确认键转给页面做焦点导航（页面的 veyraTvKey 负责移动高亮、滚动、触发点击）。
      * 只拦这几颗键，音量、菜单、返回等仍按系统默认走；手机/平板完全不进这个分支。
      */
+    /**
+     * 启动页：深色底 + 金色 V + 一个细转圈，盖在 WebView 之上。
+     * 系统 windowBackground 只负责进程起来那一帧；WebView 是透明的，页面首帧之前
+     * 一直能看见这层，所以这里再把 logo 画一遍，页面可见后淡出。
+     */
+    private void buildSplash() {
+        float density = getResources().getDisplayMetrics().density;
+        FrameLayout layer = new FrameLayout(this);
+        layer.setBackgroundColor(0xFF17181A);
+        layer.setClickable(true);
+        ImageView mark = new ImageView(this);
+        mark.setImageResource(R.drawable.launch_logo);
+        layer.addView(mark, new FrameLayout.LayoutParams(
+                Math.round(86 * density), Math.round(86 * density), Gravity.CENTER));
+        ProgressBar wait = new ProgressBar(this, null, android.R.attr.progressBarStyleSmall);
+        wait.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(0xFFC89B3C));
+        FrameLayout.LayoutParams waitParams = new FrameLayout.LayoutParams(
+                Math.round(26 * density), Math.round(26 * density), Gravity.CENTER);
+        waitParams.topMargin = Math.round(132 * density);
+        layer.addView(wait, waitParams);
+        splash = layer;
+        root.addView(layer, new FrameLayout.LayoutParams(-1, -1));
+    }
+
+    private void hideSplash() {
+        final View layer = splash;
+        if (layer == null) return;
+        splash = null;
+        layer.animate().alpha(0f).setDuration(220).withEndAction(() -> {
+            try { root.removeView(layer); } catch (Exception ignored) { }
+        }).start();
+    }
+
     @Override public boolean dispatchKeyEvent(KeyEvent event) {
         if (!DeviceProfile.TV.equals(deviceType) || !tvCapture || webView == null) {
             return super.dispatchKeyEvent(event);
@@ -924,9 +967,13 @@ public final class MainActivity extends Activity {
                 || code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER
                 || code == KeyEvent.KEYCODE_NUMPAD_ENTER;
         if (!navigational) return super.dispatchKeyEvent(event);
-        if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
-            webView.evaluateJavascript("window.veyraTvKey && window.veyraTvKey(" + code + ")", null);
-        }
+        if (event.getAction() != KeyEvent.ACTION_DOWN) return true;
+        boolean center = code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER
+                || code == KeyEvent.KEYCODE_NUMPAD_ENTER;
+        /* 方向键长按要连续走：系统每 ~50ms 发一次 repeat，全部转给页面。
+           确定键不连发，否则按住会连着点开好几层。 */
+        if (center && event.getRepeatCount() > 0) return true;
+        webView.evaluateJavascript("window.veyraTvKey && window.veyraTvKey(" + code + ")", null);
         return true;
     }
 
@@ -973,10 +1020,13 @@ public final class MainActivity extends Activity {
             return status;
         }
         if ("enter-private".equals(action)) {
-            // 管理员/特权组免动态码直接进入；普通用户未解锁需先验证后端动态码（验证一次永久有效，跟账号走）
+            // 电视端每次进入都必须输动态码（forceOtp），家里共用的屏幕不能靠手机的解锁标记；
+            // 手机端保持原样：管理员/特权组免码，普通用户验证一次永久有效（跟账号走）
             account.refreshProfileNow();
             String role = account.role();
-            if (!account.isPrivateUnlocked() && !"admin".equals(role) && !"vip".equals(role)) {
+            if (args.optBoolean("forceOtp", false)) {
+                account.verifyOtp(args.optString("password"));
+            } else if (!account.isPrivateUnlocked() && !"admin".equals(role) && !"vip".equals(role)) {
                 account.verifyOtp(args.optString("password"));
             }
             mode.markPrivateUnlocked();

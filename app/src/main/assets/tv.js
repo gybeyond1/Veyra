@@ -77,6 +77,12 @@ var railAvatar = document.getElementById('rail-avatar');
 var themePanel = document.getElementById('theme');
 var themeGrid = document.getElementById('theme-grid');
 var railVeil = document.getElementById('rail-veil');
+var otpPanel = document.getElementById('otp');
+var otpCells = document.getElementById('otp-cells');
+var otpKeys = document.getElementById('otp-keys');
+var otpError = document.getElementById('otp-error');
+var otpCode = '';
+var otpBusy = false;
 
 function esc(value) {
   return String(value == null ? '' : value)
@@ -1102,6 +1108,7 @@ window.veyraTvKey = function (code) {
 };
 
 window.hgBack = function () {
+  if (otpPanel && !otpPanel.hidden) { closeOtp(); state.focusKey = 'acct:mode'; restoreFocus(); return true; }
   if (themePanel && !themePanel.hidden) { closeTheme(); return true; }
   if (updateLayer && !updateLayer.hidden) { closeUpdatePanel(); return true; }
   if (!loginLayer.hidden) { loginLayer.hidden = true; return true; }
@@ -1307,7 +1314,7 @@ function openAccount() {
   if (modeBtn) {
     modeBtn.hidden = !logged;
     if (state.source === 'huangguo') modeBtn.textContent = '返回公开内容';
-    else modeBtn.textContent = state.unlocked ? '进入私密模式' : '进入私密模式（需手机端解锁）';
+    else modeBtn.textContent = '进入私密模式（需动态码）';
   }
   accountPanel.hidden = false;
   state.focusKey = logged ? 'acct:logout' : 'acct:close';
@@ -1446,19 +1453,88 @@ function applyMode(status, fallback) {
   loadFeed(state.feedId || categoryList()[0][0], true, false);
 }
 
+/* ---------------- 私密模式：电视端每次都要动态码 ----------------
+   手机端验证一次会永久解锁（跟账号走），电视是家里共用的屏幕，
+   所以这里不看「已解锁」标记，每次进入都重新验一次 6 位码。 */
+function renderOtp() {
+  if (otpCells) {
+    var cells = '';
+    for (var i = 0; i < 6; i++) {
+      var digit = otpCode.charAt(i);
+      cells += '<i class="' + (digit ? 'fill' : '') + '">' + (digit || '') + '</i>';
+    }
+    otpCells.innerHTML = cells;
+  }
+  if (otpKeys && !otpKeys.childNodes.length) {
+    var keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'del', '0', 'ok'];
+    var html = '';
+    for (var k = 0; k < keys.length; k++) {
+      var label = keys[k] === 'del' ? '删除' : (keys[k] === 'ok' ? '确定' : keys[k]);
+      html += '<button type="button" data-focusable data-key="otp:' + keys[k] + '">' + label + '</button>';
+    }
+    otpKeys.innerHTML = html;
+    otpKeys.addEventListener('click', function (event) {
+      var btn = event.target && event.target.closest ? event.target.closest('button') : null;
+      if (!btn) return;
+      pressOtp((btn.dataset.key || '').replace('otp:', ''));
+    });
+  }
+}
+
+function openOtp() {
+  otpCode = '';
+  otpBusy = false;
+  if (otpError) otpError.textContent = '';
+  renderOtp();
+  if (accountPanel) accountPanel.hidden = true;
+  if (otpPanel) otpPanel.hidden = false;
+  var first = otpKeys ? otpKeys.querySelector('button') : null;
+  if (first) focusElement(first);
+}
+
+function closeOtp() {
+  if (otpPanel) otpPanel.hidden = true;
+  otpCode = '';
+  if (otpError) otpError.textContent = '';
+}
+
+function pressOtp(key) {
+  if (otpBusy) return;
+  if (key === 'ok') { submitOtp(); return; }
+  if (key === 'del') otpCode = otpCode.slice(0, -1);
+  else if (/^\d$/.test(key) && otpCode.length < 6) otpCode += key;
+  if (otpError) otpError.textContent = '';
+  renderOtp();
+  if (otpCode.length === 6) submitOtp();
+}
+
+function submitOtp() {
+  if (otpBusy || otpCode.length !== 6) return;
+  otpBusy = true;
+  api('enter-private', { password: otpCode, forceOtp: true }).then(function (result) {
+    if (result && result.needsAgeConfirmation) return api('confirm-private-age');
+    return result;
+  }).then(function (status) {
+    otpBusy = false;
+    closeOtp();
+    applyMode(status, 'huangguo');
+  }).catch(function (error) {
+    otpBusy = false;
+    otpCode = '';
+    renderOtp();
+    if (otpError) otpError.textContent = (error && error.message) || '动态码不正确，请重试';
+  });
+}
+
 function switchMode() {
   var leaving = state.source === 'huangguo';
-  var job = leaving
-    ? api('leave-private')
-    : api('enter-private').then(function (result) {
-      if (result && result.needsAgeConfirmation) return api('confirm-private-age');
-      return result;
-    });
+  if (!leaving) { openOtp(); return; }
+  var job = api('leave-private');
   job.then(function (status) {
     applyMode(status, leaving ? 'hongguo' : 'huangguo');
   }).catch(function (error) {
     var message = error && error.message ? error.message : '切换失败';
-    if (/动态码|验证|otp/i.test(message)) message = '私密内容需要先在手机端解锁，再回来试';
+    if (/动态码|验证|otp/i.test(message)) message = '动态码校验失败，请重试';
     toast(message, true);
   });
 }

@@ -44,6 +44,7 @@
         <activity
             android:name=".MainActivity"
             android:enableOnBackInvokedCallback="true"
+            android:theme="@style/LaunchTheme"
             android:configChanges="uiMode|orientation|screenSize|screenLayout|smallestScreenSize|density|keyboardHidden|navigation"
             android:resizeableActivity="true"
             android:exported="true">

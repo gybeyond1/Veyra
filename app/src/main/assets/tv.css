@@ -526,6 +526,40 @@ body.rail-open #rail{
   margin:-1.4rem 0 2.4rem;
 }
 
+/* ---------------- 动态码 ----------------
+   遥控器只有方向键，6 位数字靠屏幕上的九宫格输，焦点走统一的 .is-focused 环。 */
+#otp{
+  position:absolute;left:0;right:0;top:0;bottom:0;z-index:32;
+  background:rgba(6,8,10,.97);
+  display:flex;align-items:center;justify-content:center;
+  color:#F2F3F5;
+}
+.otp-box{width:64rem;text-align:center}
+.otp-box h1{font-size:3.4rem;margin:0 0 1rem}
+.otp-sub{font-size:1.9rem;color:rgba(255,255,255,.66);margin:0 0 2.4rem;line-height:1.5}
+.otp-cells{display:flex;justify-content:center;margin-bottom:1.2rem}
+.otp-cells i{
+  display:block;width:6rem;height:7.6rem;line-height:7.6rem;margin:0 .6rem;
+  border-radius:1rem;background:rgba(255,255,255,.10);
+  font-size:3.2rem;font-style:normal;font-weight:700;color:#FFFFFF;
+}
+.otp-cells i.fill{background:rgba(255,255,255,.22)}
+.otp-error{height:2.8rem;font-size:1.8rem;color:#FF8A80;margin:0 0 1.4rem}
+.otp-keys{
+  display:grid;grid-template-columns:repeat(3,1fr);
+  grid-column-gap:1.2rem;grid-row-gap:1.2rem;
+  width:48rem;margin:0 auto;
+}
+.otp-keys button{
+  height:7rem;line-height:7rem;border-radius:1rem;
+  background:rgba(255,255,255,.10);color:#FFFFFF;
+  font-size:2.6rem;font-weight:700;
+}
+.otp-keys button.is-focused{
+  background:var(--accent);color:var(--accent-ink);
+  box-shadow:0 0 0 .35rem rgba(8,10,13,.92),0 0 0 .75rem #FFFFFF;
+}
+
 /* ---------------- 更新 ----------------
    只在「我的」里手动触发：电视端不自动检查，也不自动下载。 */
 #tv-update{

@@ -7,4 +7,13 @@
         <item name="android:navigationBarColor">#F5F2E9</item>
         <item name="android:windowLightNavigationBar">true</item>
     </style>
+    <!-- 启动页：深色底 + 金色 V，接管系统冷启动时那一帧白屏。
+         页面通过后再由 MainActivity 的 splash 层淡出。 -->
+    <style name="LaunchTheme" parent="@style/AppTheme">
+        <item name="android:windowBackground">@drawable/launch_window</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">#17181A</item>
+        <item name="android:navigationBarColor">#17181A</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
 </resources>
