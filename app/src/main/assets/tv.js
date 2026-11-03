@@ -659,7 +659,8 @@ window.veyraTvKey = function (code) {
 
 window.hgBack = function () {
   if (updateLayer && !updateLayer.hidden) { closeUpdatePanel(); return true; }
-  if (!loginLayer.hidden) { loginLayer.hidden = true; return true; }
+  /* 没登录就停在登录页：返回交给原生弹退出确认，不能靠返回键绕过去 */
+  if (!loginLayer.hidden) return false;
   if (accountPanel && !accountPanel.hidden) { accountPanel.hidden = true; state.focusKey = 'nav:account'; restoreFocus(); return true; }
   var active = document.activeElement;
   if (active && active.tagName === 'INPUT') {
@@ -729,7 +730,6 @@ document.addEventListener('click', function (event) {
   if (target.closest('#tv-update-later')) { closeUpdatePanel(); return; }
 
   if (target.closest('#login-retry')) { showLoginQr(); return; }
-  if (target.closest('#login-guest')) { loginLayer.hidden = true; restoreFocus(); return; }
 
   var card = target.closest('[data-id]');
   if (card && card.dataset.id) { openDetail(card.dataset.id); return; }
@@ -974,7 +974,7 @@ function logout() {
     loadHome();
     loginLayer.hidden = false;
     showLoginQr();
-    state.focusKey = 'login:guest';
+    state.focusKey = 'login:retry';
     restoreFocus();
   }).catch(function (error) { toast(error.message || '退出失败', true); });
 }
@@ -1009,7 +1009,7 @@ function boot() {
     if (!results[1] || !results[1].loggedIn) {
       loginLayer.hidden = false;
       showLoginQr();
-      state.focusKey = 'login:guest';
+      state.focusKey = 'login:retry';
       restoreFocus();
     } else {
       loadLibrary();
