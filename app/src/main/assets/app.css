@@ -926,4 +926,4 @@ html[data-theme=dark] .remote-test-result.fail,html[data-theme=dark] .dl-remote-
   background:var(--panel);color:var(--text);
 }
 .detail-restart svg{width:20px;height:20px}
-.detail-restart[hidden]{display:none}
+.detail-restart[hidden]{display:none}.segmented.cols-3{grid-template-columns:repeat(3,1fr)}.segmented.cols-3 button{font-size:13px;padding:0 2px;white-space:nowrap}.poster-score.is-rank{background:#dce3ec;color:#26313d}html[data-theme=dark] .poster-score.is-rank{background:#3a444f;color:#dfe7f1}.poster-score.is-rank.is-top{background:linear-gradient(180deg,#ffd76a,#eda21a);color:#2b1d04}
