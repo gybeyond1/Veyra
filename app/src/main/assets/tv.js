@@ -638,7 +638,11 @@ function sameColumn(a, b) {
 }
 
 /* 窗口模式下按行跳：一屏 6 列，往下就是 +6 张。
-   返回 true 表示这次按键已经处理掉（包括「已经到头，别再动」）。 */
+   返回 true 表示这次按键已经处理掉（包括「已经到头，别再动」）。
+   lastRowIntent：在最后一行又按了一下「下」—— 说明用户想继续往下看，
+   这一下除了翻页没有别的语义，记下来，新内容插完后把焦点接到新那一行。 */
+var lastRowIntent = null;
+
 function stepToRow(el, direction) {
   if (!el || !el.closest) return false;
   var grid = el.closest('.grid');
@@ -651,7 +655,16 @@ function stepToRow(el, direction) {
   var target = idx + (direction === 'down' ? 6 : -6);
   if (target < 0) return false;              /* 第一排再往上：交回常规逻辑（分类条/页签） */
   if (target >= cards.length) {
-    if (idx >= cards.length - 6) return true;    /* 已经在最后一行，按住也不动 */
+    if (idx >= cards.length - 6) {
+      /* 已经在最后一行：窗口模式把 #stage 锁死了，以前这里直接 return true，
+         于是「滚到底自动续页」永远不会触发 —— 一页就 18 张，翻三排到头。
+         现在按一下就主动要下一页，焦点等新行插进来再跟过去。 */
+      if (direction === 'down' && state.feed && state.feed.nextPage && !state.feed.loading) {
+        lastRowIntent = card;
+        loadFeed(state.feedId, false);
+      }
+      return true;
+    }
     target = cards.length - 1;
   }
   focusElement(cards[target]);
@@ -840,12 +853,21 @@ function layoutFirstScreen() {
 
   /* 窗口贴着屏幕底边放，上面让出来的那块就是背景海报的位置。
      量之前先把上下内边距清零：#stage 的 CSS 里本来就带 4.2rem / 8rem，
-     不清零会把那段算漏，窗口底部就停在离屏幕四十几像素的地方。 */
+     不清零会把那段算漏，窗口底部就停在离屏幕四十几像素的地方。
+     只有「高性能模式 / 详情页」才有整屏海报，纯色主题把这段空白留着只会
+     变成头顶一大块死白（看起来就像窗口布局没生效），所以那种情况保持
+     正常顶部内边距，标题 / 分类条照旧跟在上面。 */
   stage.style.paddingTop = '0px';
   stage.style.paddingBottom = '0px';
   var gridTop = grid.offsetTop;
   var room = stage.clientHeight - winH - gridTop;
-  if (room > 0) stage.style.paddingTop = room + 'px';
+  if (room > 0 && heroBackdropOn()) stage.style.paddingTop = room + 'px';
+  else {
+    /* 纯色主题：恢复 CSS 里的常规内边距（上面量的时候临时清成 0 了），
+       否则标题会直接顶着屏幕上沿 */
+    stage.style.paddingTop = '';
+    stage.style.paddingBottom = '';
+  }
   document.body.classList.add('page-windowed');
   alignGridScroll(document.querySelector('.is-focused'));
 }
@@ -933,7 +955,7 @@ function loadFeed(id, reset, focusChip) {
 
 /* 续页只往末尾插卡片，不整页重绘 —— 整页重绘会把遥控器焦点打回第一张 */
 function appendFeed(items) {
-  if (!items.length || !state.feed) return;
+  if (!items.length || !state.feed) { lastRowIntent = null; return; }
   var grid = view.querySelector('[data-feed] .grid');
   if (!grid) { renderHome(); return; }
   var html = '';
@@ -944,6 +966,15 @@ function appendFeed(items) {
   if (count) count.textContent = state.feed.items.length + ' 部';
   /* 第一页可能刚好 6 张，追加出第二排之后才需要重排顶部留白 */
   layoutFirstScreen();
+  /* 在最后一行按「下」等来的这一页：接到新那一行的第一张，
+     否则新内容插进来了、焦点还停在旧最后一行，用户得再按一下才动。 */
+  if (lastRowIntent) {
+    var anchor = lastRowIntent;
+    lastRowIntent = null;
+    var all = grid.querySelectorAll('.card');
+    var from = Array.prototype.indexOf.call(all, anchor);
+    if (from >= 0 && from + 6 < all.length) focusElement(all[from + 6]);
+  }
 }
 
 /* 滚到底自动续页（电视上不用点“加载更多”） */
