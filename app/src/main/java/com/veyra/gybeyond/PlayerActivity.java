@@ -264,6 +264,9 @@ public final class PlayerActivity extends Activity {
     /* ---- 电视端：没有触摸、没有焦点导航，只有遥控器按键和一个常显的进度条 ---- */
     private boolean tvMode;
     private boolean tvInfoShown;
+    /* 控件条唤出时右上角常驻的「当前 / 总长」，控件条收起就一起消失。
+       以前是用 toast 在顶部弹一下，左右快进每按一次弹一次，很吵。 */
+    private TextView tvClock;
     private android.app.Dialog exitDialog;
     private final Runnable hideTvInfo = () -> {
         if (!tvInfoShown) return;
@@ -280,6 +283,9 @@ public final class PlayerActivity extends Activity {
                 if (!seeking && landscapeSeek != null) landscapeSeek.setProgress((int) Math.min(1000, position * 1000 / duration));
                 updateMiniProgress(position, duration);
                 timeText.setText(clock(position) + " / " + clock(duration));
+                if (tvClock != null && tvClock.getVisibility() == View.VISIBLE) {
+                    tvClock.setText(clock(position) + " / " + clock(duration));
+                }
                 if (System.currentTimeMillis() - lastSaved > 5000) saveProgress(false);
                 maybePrepareNext();
             }
@@ -390,10 +396,10 @@ public final class PlayerActivity extends Activity {
                 playButton.setImageResource(playing ? R.drawable.player_pause : R.drawable.player_play);
                 centerToggle.setImageResource(playing ? R.drawable.player_pause : R.drawable.player_play);
                 if (tvMode) {
-                    /* 电视端不需要按键唤起：暂停就出控件条 + 中心大图标，恢复播放就收掉。
-                       缓冲时 playWhenReady 仍是 true，不会误弹。 */
+                    /* 只在真正开播时收控件条。暂停不在这里弹：自动切下一集时
+                       loadSelection() 内部会 player.pause()，从这儿弹就是每集结束
+                       闪一次控件条；用户按暂停键走 tvTogglePlay，那里已经显式弹了。 */
                     if (playing || player.getPlayWhenReady()) hideTvBar();
-                    else showTvBar();
                 } else {
                     revealControls();
                 }
@@ -591,6 +597,16 @@ public final class PlayerActivity extends Activity {
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, dp(42), 1);
         titleParams.leftMargin = dp(12);
         top.addView(title, titleParams);
+        if (tvMode) {
+            /* 标题靠左占满，时间贴右边。只在控件条唤出期间可见 */
+            tvClock = label("", 14, 0xFFD5D0CD);
+            tvClock.setGravity(Gravity.CENTER_VERTICAL);
+            tvClock.setIncludeFontPadding(false);
+            tvClock.setVisibility(View.GONE);
+            LinearLayout.LayoutParams clockParams = new LinearLayout.LayoutParams(-2, -2);
+            clockParams.leftMargin = dp(16);
+            top.addView(tvClock, clockParams);
+        }
         FrameLayout.LayoutParams topParams = new FrameLayout.LayoutParams(-1, dp(70), Gravity.TOP);
         topParams.topMargin = dp(24);
         root.addView(top, topParams);
@@ -2160,7 +2176,15 @@ public final class PlayerActivity extends Activity {
         if (centerToggle != null && player != null && !player.isPlaying()) {
             centerToggle.setVisibility(View.VISIBLE);
         }
-        showTvInfo();
+        /* 顶部时间常驻：控件条在的时候就一直显示，别用 toast 一下一下地弹 */
+        if (tvClock != null) {
+            tvClock.setText(player != null && player.getDuration() > 0
+                    ? clock(player.getCurrentPosition()) + " / " + clock(player.getDuration()) : "");
+            tvClock.setVisibility(View.VISIBLE);
+        }
+        tvInfoShown = true;
+        handler.removeCallbacks(hideTvInfo);
+        updateTitleVisibility();
     }
 
     private void hideTvBar() {
@@ -2168,6 +2192,10 @@ public final class PlayerActivity extends Activity {
         if (tvBar != null) tvBar.setVisibility(View.GONE);
         if (miniProgress != null) miniProgress.setVisibility(View.GONE);
         if (centerToggle != null) centerToggle.setVisibility(View.GONE);
+        if (tvClock != null) tvClock.setVisibility(View.GONE);
+        tvInfoShown = false;
+        handler.removeCallbacks(hideTvInfo);
+        updateTitleVisibility();
     }
 
     private void tvBarAction(int index) {
@@ -2460,11 +2488,6 @@ public final class PlayerActivity extends Activity {
         showTvInfo();
     }
 
-    private void tvAnnouncePosition() {
-        if (player == null || player.getDuration() <= 0) return;
-        toast(clock(player.getCurrentPosition()) + " / " + clock(player.getDuration()));
-    }
-
     private void confirmExitPlayback() {
         if (exitDialog != null && exitDialog.isShowing()) return;
         exitDialog = VeyraDialog.confirm(this, "退出播放", "确定要退出当前剧集吗？",
@@ -2527,11 +2550,6 @@ public final class PlayerActivity extends Activity {
                     return true;
                 default:
                     break;
-            }
-        } else if (action == android.view.KeyEvent.ACTION_UP) {
-            if (code == android.view.KeyEvent.KEYCODE_DPAD_LEFT || code == android.view.KeyEvent.KEYCODE_DPAD_RIGHT) {
-                tvAnnouncePosition();
-                return true;
             }
         }
         return super.dispatchKeyEvent(event);
