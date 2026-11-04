@@ -273,6 +273,19 @@ body.rail-open #rail{
 }
 #stage::-webkit-scrollbar{display:none}
 
+/* 海报窗口模式（首页 / 我的）：
+   海报区只留「一整行 + 下一行露出 1/5」的高度，遥控器上下移动时窗口内按整行
+   滚动 —— 下面一行顶上来，上面一行退出去。窗口外的 #stage 不再滚动，
+   免得焦点移动时屏幕整体漂移、把刚对齐的那一行又带歪。 */
+body.page-windowed #stage{overflow:hidden}
+.grid.is-window{
+  overflow-y:auto;overflow-x:hidden;
+  scrollbar-width:none;
+  -webkit-overflow-scrolling:touch;
+  overscroll-behavior:contain;
+}
+.grid.is-window::-webkit-scrollbar{display:none}
+
 .page-title{
   font-size:3.2rem;font-weight:700;
   margin:0 0 2.2rem;letter-spacing:.01em;
