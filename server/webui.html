@@ -22,6 +22,9 @@ body{background:var(--bg);color:var(--fg);font:14px/1.6 -apple-system,"PingFang 
 .mode-toggle button.active{background:var(--acc);color:#1a1e26}
 .gear{background:transparent;border:1px solid var(--line);color:var(--mut);width:38px;height:38px;border-radius:10px;cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center}
 .gear:hover{border-color:var(--mut);color:var(--fg)}
+#btn-check-upd-hd{font-size:16px}
+.gear:disabled{opacity:.6;cursor:default}
+@media(max-width:800px){#btn-check-upd-hd{display:none}}
 .cat-bar{display:flex;gap:8px;overflow-x:auto;padding:10px 20px;max-width:1200px;margin:0 auto;scrollbar-width:none}
 .cat-bar::-webkit-scrollbar{display:none}
 .cat-btn{flex-shrink:0;background:#f0f2f6;border:1px solid var(--line);color:var(--mut);border-radius:20px;padding:6px 16px;cursor:pointer;font-size:13px;white-space:nowrap;transition:.2s}
@@ -197,6 +200,7 @@ video{width:100%;border-radius:10px;background:#000}
     <button id="mode-private">私密</button>
   </div>
   <button class="gear" id="btn-downloads" title="NAS 下载管理">⬇</button>
+  <button class="gear" id="btn-check-upd-hd" title="检查更新">⬆</button>
   <button class="gear" id="btn-settings">⚙</button>
 </div>
 <div class="view-head" id="view-head" style="display:none">
@@ -496,6 +500,8 @@ async function loadView(options){
   const head=document.getElementById('view-head'),title=document.getElementById('view-title'),subtitle=document.getElementById('view-subtitle');
   const st=document.getElementById('sub-tabs'),strip=document.getElementById('cat-strip');
   clearHero();catalogObserver.disconnect();sentinel.hidden=true;searching=false;
+  const mineView=document.getElementById('mine-view');
+  if(mineView) mineView.style.display=(view==='mine')?'block':'none';
   if(view==='mine'){
     head.style.display='none';st.style.display='none';strip.style.display='none';grid.style.display='none';renderMine();return;
   }
@@ -1297,7 +1303,17 @@ document.getElementById('dlmgr-overlay').addEventListener('click',e=>{if(e.targe
 /* 立即检查更新：让后端当场查一次版本，有新版就下包。
    以前只能等 10 分钟一轮的后台轮询，发版后干等十几分钟。 */
 let updTimer=0;
-function setUpdBtn(text,disabled){const b=document.getElementById('btn-check-upd');if(!b)return;b.textContent=text;b.disabled=!!disabled}
+function setUpdBtn(text,disabled){
+  const m=document.getElementById('btn-check-upd');
+  if(m){m.textContent=text;m.disabled=!!disabled}
+  const d=document.getElementById('btn-check-upd-hd');
+  if(d){
+    let t='⬆';
+    if(text.indexOf('下载中')===0) t=text.slice(3).trim();
+    else if(text==='检查中…') t='…';
+    d.textContent=t;d.disabled=!!disabled;d.title=text||'检查更新';
+  }
+}
 async function pollUpdateUi(startedAt,beforeVersion){
   clearTimeout(updTimer);
   try{
@@ -1320,9 +1336,9 @@ async function pollUpdateUi(startedAt,beforeVersion){
     toast('检查失败：'+((e&&e.message)||'网络错误'));
   }
 }
-document.getElementById('btn-check-upd').onclick=async()=>{
+async function startCheckUpdate(){
   const b=document.getElementById('btn-check-upd');
-  if(b.disabled) return;
+  if(b&&b.disabled) return;
   setUpdBtn('检查中…',true);
   let before='';
   try{ const s0=await fetch('/api/update/progress',{cache:'no-store'}).then(x=>x.json()); before=s0.version||''; }catch(e){}
@@ -1331,7 +1347,10 @@ document.getElementById('btn-check-upd').onclick=async()=>{
     if(!r.ok) throw new Error(r.error||'检查失败');
     pollUpdateUi(Date.now(),before);
   }catch(e){ setUpdBtn('检查更新',false); toast('检查失败：'+((e&&e.message)||'网络错误')); }
-};
+}
+document.getElementById('btn-check-upd').onclick=startCheckUpdate;
+const _updHd=document.getElementById('btn-check-upd-hd');
+if(_updHd) _updHd.onclick=startCheckUpdate;
 document.getElementById('btn-dl-apk').onclick=()=>{
   // 经 NAS 后端中转拉取最新 APK（手机弱网/直连 GitHub 不稳定时），浏览器直接落盘
   const a=document.createElement('a');
