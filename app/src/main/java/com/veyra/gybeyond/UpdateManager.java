@@ -177,9 +177,19 @@ final class UpdateManager {
         PackageInfo installed = context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
         String localVersion = installed.versionName;
 
+        // 手动点「检查更新」= 顺便让后端当场查一次、把包下下来（优先本渠道）。
+        // 不然后端还是十分钟一轮的节奏，发版后要干等十几分钟才有包。
+        if (manual) triggerServerCheck();
+
         // 先问自己的后端：它已经把 APK 缓存在本地了，从它那里下比让手机直连 GitHub 稳得多。
         // 后端没配置 / 连不上 / 还没拉到包，都安静地回退 GitHub —— 行为跟以前一样。
         JSONObject viaServer = tryServer(localVersion);
+        // 后端已经知道有新版、包还没下完：等几秒再看。立刻退回 GitHub 直连是最慢的一条路。
+        for (int i = 0; manual && i < 5 && viaServer != null
+                && "preparing".equals(viaServer.optString("status")); i++) {
+            try { Thread.sleep(1200); } catch (InterruptedException stop) { break; }
+            viaServer = tryServer(localVersion);
+        }
         if (viaServer != null) {
             String serverState = viaServer.optString("status");
             if ("current".equals(serverState)) {
@@ -382,6 +392,31 @@ final class UpdateManager {
         if (url.startsWith(RELEASE_BASE)) return true;
         String base = ServerConfig.get(context);
         return !base.isEmpty() && url.startsWith(base);
+    }
+
+    /**
+     * 通知后端「现在就去查一次，有新版顺手把包下下来」，优先本渠道（手机包 / 电视包）。
+     * 尽力而为：没配后端、超时、报错都直接忽略，不影响后面照常判断。
+     */
+    private void triggerServerCheck() {
+        String base = ServerConfig.get(context);
+        if (base == null || base.isEmpty()) return;
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(base + "api/update/check?channel=" + channel()).openConnection();
+            connection.setRequestMethod("POST");
+            connection.setDoOutput(true);
+            connection.setFixedLengthStreamingMode(0);
+            connection.setConnectTimeout(3_000);
+            connection.setReadTimeout(3_000);
+            connection.setRequestProperty("User-Agent", "ChengZi-Android-Updater");
+            connection.setRequestProperty("Accept", "application/json");
+            connection.getOutputStream().close();
+            connection.getResponseCode();
+        } catch (Exception ignored) {
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
     }
 
     /**
