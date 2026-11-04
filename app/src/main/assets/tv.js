@@ -811,22 +811,67 @@ function resetFirstScreen() {
    以前是让 #stage 整体加顶部内边距，结果往下翻时整页在滚，屏幕上会同时
    出现「两行完整」或者「上半屏空白」；现在窗口自己滚，每翻一行就把那一行
    顶到窗口顶部，上面那行整行退出，视觉上始终只有一行完整 + 下一行露头。 */
-function layoutFirstScreen() {
+var layoutRetry = 0;
+
+/* 窗口已经设好之后，再按「实际露出的像素」修一次高度。
+   真机上字体 / 封面浮层落下来会把行高改掉，而 setHeight 那一下量到的还是旧值，
+   于是露出来的变成半排 —— 这就是「只有某些主题看着对」的真正来源：
+   有背景海报时整屏尺寸不同，测量基准跟着变。多修一次就没有这个先后问题。 */
+function settleWindow(grid) {
+  if (!grid || !grid.classList.contains('is-window')) return;
+  var cards = grid.querySelectorAll('.card');
+  if (cards.length <= 6) return;
+  var rowH = cards[6].offsetTop - cards[0].offsetTop;
+  if (rowH < 40) return;
+  var h = parseFloat(grid.style.height) || grid.getBoundingClientRect().height;
+  var peek = grid.getBoundingClientRect().bottom - cards[6].getBoundingClientRect().top;
+  var fix = Math.round(rowH * FIRST_ROW_PORTION - peek);
+  if (Math.abs(fix) >= 1) {
+    var next = Math.max(140, h + fix);
+    grid.style.height = next + 'px';
+    /* 高度变了，贴底的位置也要跟着挪，否则窗口底部会离屏幕边一段 */
+    if (heroBackdropOn()) {
+      stage.style.paddingTop = '0px';
+      var room = stage.clientHeight - next - grid.offsetTop;
+      if (room > 0) stage.style.paddingTop = room + 'px';
+    }
+  }
+}
+
+function layoutFirstScreen(retry) {
   if (!stage || !view) return;
-  resetFirstScreen();
   var grid = view.querySelector('.grid');
-  if (!grid) return;
+  if (!grid) { resetFirstScreen(); return; }
   var cards = grid.querySelectorAll('.card');
   /* 不足两排（6 张以内）就没有「露出下一行」这回事，保持原来的顶部间距 */
-  if (cards.length <= 6) return;
+  if (cards.length <= 6) { resetFirstScreen(); return; }
+
+  /* 先探一次「排开没有」再清空旧布局。
+     以前第一步就 resetFirstScreen()，只要这一次没量到（字体未落、视图还在切页），
+     窗口高度就被清掉且不会自己回来 —— 表现是整页又能滚、露出一整排半。 */
+  if (cards[6].offsetTop - cards[0].offsetTop < 40) {
+    if (!retry) {
+      if (window.requestAnimationFrame) {
+        if (!layoutRetry) layoutRetry = requestAnimationFrame(function () { layoutRetry = 0; layoutFirstScreen(true); });
+      } else {
+        setTimeout(function () { layoutFirstScreen(true); }, 60);
+      }
+    }
+    return;                      /* 保持现状，下一帧再试 */
+  }
+
+  resetFirstScreen();
+  cards = grid.querySelectorAll('.card');
   var top0 = cards[0].offsetTop;
   var top1 = cards[6].offsetTop;
   var rowH = top1 - top0;
   if (rowH < 40) return;
-  var cardH = cards[0].getBoundingClientRect().height || (rowH - 24);
   /* 选中时卡片放大 1.08，四边会甩出去约 4%；不留这点余量就会被窗口裁掉描边 */
   var pad = Math.max(10, Math.round(rowH * 0.05));
-  var winH = Math.round(cardH + rowH * FIRST_ROW_PORTION) + pad * 2;
+  /* 高度直接由「行高」推，不再用卡片自身高度：
+     卡片 rect 含剧名、且焦点卡有缩放，和 offsetTop 量出来的行距不是同一个基准，
+     两者一混就会出现「公式算 1/5、实际露半排」。 */
+  var winH = Math.round(rowH * (1 + FIRST_ROW_PORTION)) + pad * 2;
 
   grid.classList.add('is-window');
   grid.style.paddingTop = pad + 'px';
@@ -870,6 +915,14 @@ function layoutFirstScreen() {
   }
   document.body.classList.add('page-windowed');
   alignGridScroll(document.querySelector('.is-focused'));
+  /* 这一帧只保证「结构对了」。字体和封面浮层落下来之后行高还会再变一截，
+     下一帧 + 120ms 各修一次实际露出量，别再出现「算出来 1/5、眼睛看到半排」。 */
+  if (!retry) {
+    if (window.requestAnimationFrame) {
+      requestAnimationFrame(function () { settleWindow(grid); });
+    }
+    setTimeout(function () { settleWindow(grid); }, 120);
+  }
 }
 
 /* 焦点换行时把窗口滚到那一行 —— 下面一行顶上来，上面一行退出去。
