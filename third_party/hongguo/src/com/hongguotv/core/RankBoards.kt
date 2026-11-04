@@ -84,7 +84,7 @@ internal object RankBoards {
                     ?.optJSONArray("routerDataFnArgs")?.opt(0)
                 else -> null
             }
-            val payload: JSONObject? = when (raw) {
+            val payload = when (raw) {
                 is JSONObject -> raw
                 is String -> runCatching { JSONObject(raw) }.getOrNull()
                 else -> null
