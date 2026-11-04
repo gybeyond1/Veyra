@@ -117,10 +117,7 @@ var THEMES = [
   { key: 'yellow', name: '高能黄', color: '#FFC107' },
   { key: 'green',  name: '早苗绿', color: '#8BC34A' },
   { key: 'blue',   name: '宝石蓝', color: '#2196F3' },
-  { key: 'purple', name: '罗兰紫', color: '#9C27B0' },
-  /* 唯一一套"跟随内容"的主题：选中哪部剧，整屏背景就换成它的封面（低模糊）。
-     其余八套都是纯色，零图片零滤镜，遥控器连着按也不掉帧。 */
-  { key: 'cinema', name: '高性能模式', color: '#0E1116' }
+  { key: 'purple', name: '罗兰紫', color: '#9C27B0' }
 ];
 var THEME_STORE = 'veyra.tv.theme';
 
@@ -838,91 +835,10 @@ function settleWindow(grid) {
   }
 }
 
-function layoutFirstScreen(retry) {
-  if (!stage || !view) return;
-  var grid = view.querySelector('.grid');
-  if (!grid) { resetFirstScreen(); return; }
-  var cards = grid.querySelectorAll('.card');
-  /* 不足两排（6 张以内）就没有「露出下一行」这回事，保持原来的顶部间距 */
-  if (cards.length <= 6) { resetFirstScreen(); return; }
-
-  /* 先探一次「排开没有」再清空旧布局。
-     以前第一步就 resetFirstScreen()，只要这一次没量到（字体未落、视图还在切页），
-     窗口高度就被清掉且不会自己回来 —— 表现是整页又能滚、露出一整排半。 */
-  if (cards[6].offsetTop - cards[0].offsetTop < 40) {
-    if (!retry) {
-      if (window.requestAnimationFrame) {
-        if (!layoutRetry) layoutRetry = requestAnimationFrame(function () { layoutRetry = 0; layoutFirstScreen(true); });
-      } else {
-        setTimeout(function () { layoutFirstScreen(true); }, 60);
-      }
-    }
-    return;                      /* 保持现状，下一帧再试 */
-  }
-
+function layoutFirstScreen() {
+  /* 整行窗口那套已经撤掉了：所有主题都恢复成一开始的整页 6×2 滚动布局。
+     函数名保留，调用点不用动；窗口相关的样式类一并清掉（可能是上个版本留下的）。 */
   resetFirstScreen();
-  cards = grid.querySelectorAll('.card');
-  var top0 = cards[0].offsetTop;
-  var top1 = cards[6].offsetTop;
-  var rowH = top1 - top0;
-  if (rowH < 40) return;
-  /* 选中时卡片放大 1.08，四边会甩出去约 4%；不留这点余量就会被窗口裁掉描边 */
-  var pad = Math.max(10, Math.round(rowH * 0.05));
-  /* 高度直接由「行高」推，不再用卡片自身高度：
-     卡片 rect 含剧名、且焦点卡有缩放，和 offsetTop 量出来的行距不是同一个基准，
-     两者一混就会出现「公式算 1/5、实际露半排」。 */
-  var winH = Math.round(rowH * (1 + FIRST_ROW_PORTION)) + pad * 2;
-
-  grid.classList.add('is-window');
-  grid.style.paddingTop = pad + 'px';
-  /* 底部多留「露头那一段」：滚到最后一排时它才能顶到窗口顶部，
-     否则最后一行永远差一截，怎么按都上不来 */
-  grid.style.paddingBottom = (pad + Math.round(rowH * FIRST_ROW_PORTION)) + 'px';
-  /* 左右用「负外边距 + 等量内边距」抵消：列宽一点不变，卡片放大后不被裁 */
-  grid.style.paddingLeft = pad + 'px';
-  grid.style.paddingRight = pad + 'px';
-  grid.style.marginLeft = '-' + pad + 'px';
-  grid.style.marginRight = '-' + pad + 'px';
-  grid.style.width = 'calc(100% + ' + (pad * 2) + 'px)';
-  grid.style.height = winH + 'px';
-
-  /* 量一次真实露出高度再补正：卡片高度取整、行距在不同内核上算出来的值
-     会差十几像素，光按公式设高度，实际露出的可能是 1/4 而不是 1/5 */
-  var gb = grid.getBoundingClientRect();
-  var peek = gb.bottom - cards[6].getBoundingClientRect().top;
-  var fix = Math.round(rowH * FIRST_ROW_PORTION - peek);
-  if (Math.abs(fix) >= 1) {
-    winH = Math.max(140, winH + fix);
-    grid.style.height = winH + 'px';
-  }
-
-  /* 窗口贴着屏幕底边放，上面让出来的那块就是背景海报的位置。
-     量之前先把上下内边距清零：#stage 的 CSS 里本来就带 4.2rem / 8rem，
-     不清零会把那段算漏，窗口底部就停在离屏幕四十几像素的地方。
-     只有「高性能模式 / 详情页」才有整屏海报，纯色主题把这段空白留着只会
-     变成头顶一大块死白（看起来就像窗口布局没生效），所以那种情况保持
-     正常顶部内边距，标题 / 分类条照旧跟在上面。 */
-  stage.style.paddingTop = '0px';
-  stage.style.paddingBottom = '0px';
-  var gridTop = grid.offsetTop;
-  var room = stage.clientHeight - winH - gridTop;
-  if (room > 0 && heroBackdropOn()) stage.style.paddingTop = room + 'px';
-  else {
-    /* 纯色主题：恢复 CSS 里的常规内边距（上面量的时候临时清成 0 了），
-       否则标题会直接顶着屏幕上沿 */
-    stage.style.paddingTop = '';
-    stage.style.paddingBottom = '';
-  }
-  document.body.classList.add('page-windowed');
-  alignGridScroll(document.querySelector('.is-focused'));
-  /* 这一帧只保证「结构对了」。字体和封面浮层落下来之后行高还会再变一截，
-     下一帧 + 120ms 各修一次实际露出量，别再出现「算出来 1/5、眼睛看到半排」。 */
-  if (!retry) {
-    if (window.requestAnimationFrame) {
-      requestAnimationFrame(function () { settleWindow(grid); });
-    }
-    setTimeout(function () { settleWindow(grid); }, 120);
-  }
 }
 
 /* 焦点换行时把窗口滚到那一行 —— 下面一行顶上来，上面一行退出去。
