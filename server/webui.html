@@ -148,6 +148,10 @@ video{width:100%;border-radius:10px;background:#000}
 .mine-sub{font-size:12px;color:var(--mut);margin-top:3px}
 .dl-apk-btn{flex-shrink:0;background:var(--acc);color:#1a1e26;border:none;border-radius:10px;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;margin-left:10px}
 .dl-apk-btn:active{opacity:.8}
+.dl-apk-btn:disabled{opacity:.65;cursor:default}
+.dl-apk-btn.ghost{background:#eef1f6;color:var(--fg);border:1px solid var(--line)}
+.mine-actions{display:flex;flex-direction:column;gap:6px;flex-shrink:0;margin-left:10px}
+.mine-actions .dl-apk-btn{margin-left:0;white-space:nowrap}
 .mine-tabs{display:flex;background:#f0f2f6;border:1px solid var(--line);border-radius:12px;padding:3px;margin-bottom:14px}
 .mine-tabs button{flex:1;background:transparent;border:none;color:var(--mut);padding:9px 0;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer}
 .mine-tabs button.active{background:var(--acc);color:#1a1e26}
@@ -214,7 +218,10 @@ video{width:100%;border-radius:10px;background:#000}
       <div class="mine-name" id="mine-name">Veyra 管理员</div>
       <div class="mine-sub" id="mine-sub">Web 管理台 · 系统管理员</div>
     </div>
-    <button type="button" id="btn-dl-apk" class="dl-apk-btn">下载最新APK</button>
+    <div class="mine-actions">
+      <button type="button" id="btn-check-upd" class="dl-apk-btn ghost">检查更新</button>
+      <button type="button" id="btn-dl-apk" class="dl-apk-btn">下载最新APK</button>
+    </div>
   </div>
   <div class="mine-tabs">
     <button type="button" id="mine-tab-dl" class="active">NAS下载</button>
@@ -1287,6 +1294,44 @@ document.getElementById('btn-close-dlmgr').onclick=closeDlmgr;
 document.getElementById('dlmgr-overlay').addEventListener('click',e=>{if(e.target.id==='dlmgr-overlay')closeDlmgr()});
 
 // ---- 「我的」页（APK 对齐：头像+组别徽章，NAS下载/私密诊断两个入口） ----
+/* 立即检查更新：让后端当场查一次版本，有新版就下包。
+   以前只能等 10 分钟一轮的后台轮询，发版后干等十几分钟。 */
+let updTimer=0;
+function setUpdBtn(text,disabled){const b=document.getElementById('btn-check-upd');if(!b)return;b.textContent=text;b.disabled=!!disabled}
+async function pollUpdateUi(startedAt,beforeVersion){
+  clearTimeout(updTimer);
+  try{
+    const r=await fetch('/api/update/progress',{cache:'no-store'}).then(x=>x.json());
+    if(!r.ok) throw new Error(r.error||'查询失败');
+    if(r.progress) setUpdBtn('下载中 '+r.progress.percent+'%',true);
+    else if(r.polling) setUpdBtn('检查中…',true);
+    else{
+      setUpdBtn('检查更新',false);
+      const v=r.version||'';
+      if(v&&beforeVersion&&v!==beforeVersion) toast('更新包 v'+v+' 已就绪，可直接下载');
+      else if(v) toast('已是最新 v'+v);
+      else toast('还没拿到版本信息，稍后再试');
+      return;
+    }
+    if(Date.now()-startedAt>180000){setUpdBtn('检查更新',false);toast('后台还在下载，稍后点「下载最新APK」');return}
+    updTimer=setTimeout(()=>pollUpdateUi(startedAt,beforeVersion),1500);
+  }catch(e){
+    setUpdBtn('检查更新',false);
+    toast('检查失败：'+((e&&e.message)||'网络错误'));
+  }
+}
+document.getElementById('btn-check-upd').onclick=async()=>{
+  const b=document.getElementById('btn-check-upd');
+  if(b.disabled) return;
+  setUpdBtn('检查中…',true);
+  let before='';
+  try{ const s0=await fetch('/api/update/progress',{cache:'no-store'}).then(x=>x.json()); before=s0.version||''; }catch(e){}
+  try{
+    const r=await fetch('/api/update/check?channel=all',{method:'POST',cache:'no-store'}).then(x=>x.json());
+    if(!r.ok) throw new Error(r.error||'检查失败');
+    pollUpdateUi(Date.now(),before);
+  }catch(e){ setUpdBtn('检查更新',false); toast('检查失败：'+((e&&e.message)||'网络错误')); }
+};
 document.getElementById('btn-dl-apk').onclick=()=>{
   // 经 NAS 后端中转拉取最新 APK（手机弱网/直连 GitHub 不稳定时），浏览器直接落盘
   const a=document.createElement('a');
