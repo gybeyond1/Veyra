@@ -5,6 +5,7 @@ import com.hongguotv.core.CatalogPage;
 import com.hongguotv.core.ContentRepository;
 import com.hongguotv.core.ContentType;
 import com.hongguotv.core.Detail;
+import com.hongguotv.core.RankPosition;
 import com.hongguotv.core.Series;
 import com.hongguotv.core.StreamInfo;
 import okhttp3.OkHttpClient;
@@ -30,12 +31,27 @@ final class HongguoRepository {
                 .put("cover", item.getCover()).put("description", item.getDescription()).put("score", "")
                 .put("episodeLabel", item.getBadge()).put("category", category).put("tags", tags);
     }
+    private static final java.util.List<String> BOARDS =
+            java.util.Arrays.asList("hot-drama", "hot-real-drama", "hot-comic-drama", "hot-ai-drama");
+
     private static JSONObject listing(CatalogPage page, int number, String category) throws Exception {
         JSONArray items = new JSONArray();
-        for (Series item : page.getItems()) items.put(card(item, category));
+        // 只有榜单页带 positions（名次 + 热度）；普通分类这里是 null
+        java.util.Map<String, RankPosition> positions =
+                page.getRanking() == null ? null : page.getRanking().getPositions();
+        for (Series item : page.getItems()) {
+            JSONObject card = card(item, category);
+            RankPosition position = positions == null ? null : positions.get(item.getId());
+            if (position != null) {
+                if (position.getRank() != null) card.put("rank", position.getRank());
+                if (!position.getHeat().isEmpty()) card.put("heat", position.getHeat());
+            }
+            items.put(card);
+        }
         return new JSONObject().put("items", items).put("nextPage", page.getHasMore() ? number + 1 : JSONObject.NULL);
     }
     JSONObject category(String id, int page) throws Exception {
+        if (BOARDS.contains(id)) return listing(upstream.ranking(id, page), page, id);
         if (!"short".equals(id) && !"comic".equals(id)) throw new IllegalArgumentException("无效分类");
         return listing(upstream.home(page, "comic".equals(id) ? ContentType.COMIC : ContentType.SHORT), page, id);
     }
