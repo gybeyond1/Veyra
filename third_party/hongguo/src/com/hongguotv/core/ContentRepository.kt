@@ -66,9 +66,16 @@ class ContentRepository(val http: OkHttpClient = OkHttpClient.Builder().connectT
         return Series(o.str("series_id"),o.str("series_name").ifEmpty { o.str("series_title").ifEmpty { item.str("name") } },cleanUrl(o.str("series_cover")),o.str("series_intro"),o.str("episode_right_text").ifEmpty { if(count>0) "全 ${count} 集" else "" },(0 until minOf(tags.length(),5)).joinToString(" · ") { tags.optJSONObject(it)?.str("name") ?: tags.optString(it) })
     }
     private fun valid(rows: List<Series>) = rows.filter { it.id.matches(Regex("[0-9]{1,30}")) && it.title.isNotBlank() }.distinctBy { it.id }
-    fun comicRanking(page: Int = 1): CatalogPage {
+    fun comicRanking(page: Int = 1): CatalogPage = ranking(RankBoards.COMIC, page)
+    /**
+     * 榜单：见 RankBoards.ALL（总热播 / 真人剧 / 漫剧 / AI剧）。
+     * 第 1 页不带 ?page，跟站点的 canonical 一致，省得被 CDN 当成另一页。
+     */
+    fun ranking(path: String, page: Int = 1): CatalogPage {
+        require(path in RankBoards.ALL) { "无效榜单" }
         require(page in 1..100)
-        return ComicRank.parse(text("$site/rank/hot-comic-drama?page=$page"),page)
+        val address = "$site/rank/$path" + if (page > 1) "?page=$page" else ""
+        return RankBoards.parse(text(address), path, page)
     }
     fun home(page: Int = 1, type: ContentType = ContentType.SHORT): CatalogPage {
         require(page in 1..100)
