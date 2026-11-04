@@ -673,3 +673,65 @@ body.rail-open #rail{
 .theme-swatch.is-active{box-shadow:inset 0 0 0 .15rem var(--accent)}
 .theme-actions{margin-top:2.6rem;text-align:right}
 .theme-actions .btn{margin-right:0;min-width:16rem;text-align:center}
+
+/* 高性能模式：海报背景参数。
+   弹层本身是 .94 的黑底，选这套主题时降到 .52，好让整屏海报透出来当背景 ——
+   翻参数的时候直接看到真实效果，不用退出再进。
+   布局改成左右两栏：左边九宫格 + 关闭，右边参数 + 预览。竖着堆会超一屏，
+   而遥控器焦点移动不会帮你滚弹层，滚出去的按钮就点不到了。 */
+#theme.is-hero-preview{background:rgba(6,8,10,.52)}
+#theme.is-hero-preview .theme-box{width:126rem}
+.theme-box{max-height:92%}
+.theme-cols{display:flex;align-items:flex-start}
+.theme-col-left{flex:1;min-width:0}
+.hero-tune{
+  width:54rem;flex:none;
+  margin-left:3.2rem;padding-left:3.2rem;
+  border-left:1px solid rgba(255,255,255,.12);
+}
+.hero-tune[hidden]{display:none}
+.hero-tune-head{display:flex;align-items:baseline;margin-bottom:1.6rem}
+.hero-tune-head h2{font-size:2.2rem;margin:0;font-weight:700;color:#F2F3F5}
+.hero-tune-head span{font-size:1.5rem;color:rgba(255,255,255,.56);margin-left:1rem}
+.hero-rows{padding-right:.2rem}
+.tune-row{
+  display:flex;align-items:center;
+  padding:.7rem 1.2rem;margin-bottom:.6rem;
+  border-radius:.8rem;background:rgba(255,255,255,.07);
+  transition:background .12s linear;
+}
+.tune-row.is-focused{background:rgba(255,255,255,.19);box-shadow:0 0 0 .3rem #FFFFFF}
+.tune-label{width:9.4rem;flex:none;font-size:1.8rem;color:#E7E9EB}
+.tune-track{
+  flex:1;height:.9rem;margin:0 1.3rem;border-radius:.45rem;
+  background:rgba(255,255,255,.16);position:relative;overflow:hidden;
+}
+.tune-track i{position:absolute;left:0;top:0;bottom:0;background:var(--accent-bright,#ffd277);border-radius:.45rem}
+.tune-value{width:8.6rem;flex:none;text-align:right;font-size:1.7rem;color:rgba(255,255,255,.62)}
+.tune-row.is-focused .tune-value{color:#FFFFFF}
+
+.hero-preview{width:100%;margin-top:1.6rem}
+.hero-preview-bg{
+  position:relative;width:100%;height:15rem;border-radius:1rem;overflow:hidden;
+  background:#0d1013;
+}
+.hero-preview-bg img{
+  position:absolute;left:-4%;top:-4%;width:108%;height:108%;object-fit:cover;
+}
+.hero-preview-bg .hero-preview-veil{
+  position:absolute;left:0;right:0;top:0;bottom:0;
+  background:
+    linear-gradient(90deg,rgba(8,10,13,.62) 0%,rgba(8,10,13,.30) 34%,rgba(8,10,13,.12) 100%),
+    linear-gradient(180deg,rgba(8,10,13,.20) 0%,rgba(8,10,13,0) 34%,rgba(8,10,13,.50) 100%);
+}
+.hero-preview-bg .hero-preview-title{
+  position:absolute;left:1.4rem;bottom:1.2rem;right:1.4rem;
+  font-size:1.8rem;font-weight:700;color:#FFFFFF;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  text-shadow:0 1px 4px rgba(0,0,0,.65);
+}
+.hero-preview .hero-preview-cap{
+  display:block;margin-top:.8rem;font-size:1.5rem;color:rgba(255,255,255,.5);text-align:center;
+}
+.hero-tune-actions{margin-top:1.4rem}
+.hero-tune-actions .btn{min-width:14rem;text-align:center}
