@@ -138,9 +138,15 @@ function parseAtom(xml) {
   const first = entries[0];
   const title = (first.match(/<title[^>]*>([\s\S]*?)<\/title>/) || [])[1] || '';
   const content = (first.match(/<content[^>]*>([\s\S]*?)<\/content>/) || [])[1] || '';
-  const tag = title.trim();
-  if (!/^v\d+\.\d+\.\d+$/.test(tag)) return null;
-  return { tag, version: versionOf(tag), notes: htmlToText(decodeEntities(content)) };
+  // atom 的 entry title 是「Veyra v0.27.8」，不是纯 tag —— 以前直接拿 title 去匹配
+  // ^v\d+\.\d+\.\d+$，永远不成立，每轮都退回 api.github.com 兜底；匿名 API 每 IP
+  // 每小时只有 60 次，被限流后清单就再也不动了（表现为客户端永远「已是最新」）。
+  // 这里从 title / id（.../Repository/123/v0.27.8）里抽出 vX.Y.Z。
+  const id = (first.match(/<id>([\s\S]*?)<\/id>/) || [])[1] || '';
+  const hit = (title + ' ' + id).match(/v(\d+\.\d+\.\d+)/);
+  if (!hit) return null;
+  const tag = 'v' + hit[1];
+  return { tag, version: hit[1], notes: htmlToText(decodeEntities(content)) };
 }
 
 function decodeEntities(text) {
