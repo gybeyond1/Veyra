@@ -112,7 +112,10 @@ var THEMES = [
   { key: 'yellow', name: '高能黄', color: '#FFC107' },
   { key: 'green',  name: '早苗绿', color: '#8BC34A' },
   { key: 'blue',   name: '宝石蓝', color: '#2196F3' },
-  { key: 'purple', name: '罗兰紫', color: '#9C27B0' }
+  { key: 'purple', name: '罗兰紫', color: '#9C27B0' },
+  /* 唯一一套"跟随内容"的主题：选中哪部剧，整屏背景就换成它的封面（低模糊）。
+     其余八套都是纯色，零图片零滤镜，遥控器连着按也不掉帧。 */
+  { key: 'cinema', name: '高性能模式', color: '#0E1116' }
 ];
 var THEME_STORE = 'veyra.tv.theme';
 
@@ -131,6 +134,9 @@ function applyTheme(key) {
   try { localStorage.setItem(THEME_STORE, next); } catch (error) { }
   /* 原生层也存一份：播放器里的退出确认框要按当前主题取强调色 */
   try { if (window.AndroidHost && window.AndroidHost.setTvTheme) window.AndroidHost.setTvTheme(next); } catch (error) { }
+  /* 高性能模式要看海报，切主题时立刻决定背景走哪套 */
+  applyBackdropMode();
+  if (heroBackdropOn()) syncBackdropFromFocus();
   return next;
 }
 function renderThemeGrid() {
@@ -198,28 +204,41 @@ function paintCovers(root) {
 }
 
 /* ---------------- 背景 ----------------
-   只有详情页用海报模糊底；首页/搜索/我的走主题纯色。
-   以前每张卡被选中都换一次背景大图，电视盒子每按一下方向键就全屏重绘一次，
-   选中框的延迟感就是那里来的。 */
+   两种模式，由 body[data-backdrop] 切换：
+     theme  —— 纯色主题底，没有图片、没有模糊；
+     poster —— 当前这部剧的封面放大 + 低模糊。
+   详情页一直用 poster；"高性能模式"主题下首页/搜索/我的也跟着焦点换图。
+   换图做了 150ms 防抖：方向键连按时只加载最后一张，不会每按一下都触发一次
+   全屏重绘 —— 老盒子上那个延迟感就是这么来的。 */
+var HERO_THEME = 'cinema';
 var backdropSrc = '';
+var backdropTimer = 0;
+
+function heroBackdropOn() {
+  return (state && state.route === 'detail') || currentTheme() === HERO_THEME;
+}
 function setBackdrop(src) {
-  var img = document.getElementById('tv-bg-img');
-  if (!img || !src || src === backdropSrc) return;
-  backdropSrc = src;
-  img.src = src;
+  if (!src || src === backdropSrc) return;
+  clearTimeout(backdropTimer);
+  backdropTimer = setTimeout(function () {
+    var img = document.getElementById('tv-bg-img');
+    if (!img) return;
+    backdropSrc = src;
+    img.src = src;
+  }, 150);
 }
 function applyBackdropMode() {
   if (!document.body) return;
-  if (state.route === 'detail') document.body.setAttribute('data-backdrop', 'poster');
+  if (heroBackdropOn()) document.body.setAttribute('data-backdrop', 'poster');
   else document.body.removeAttribute('data-backdrop');
 }
 function syncBackdrop(el) {
-  if (state.route !== 'detail' || !el) return;
+  if (!heroBackdropOn() || !el) return;
   var img = el.classList && el.classList.contains('card') ? el.querySelector('.art img') : null;
   if (img && img.src) setBackdrop(img.src);
 }
 function syncBackdropFromFocus() {
-  if (state.route !== 'detail') return;
+  if (!heroBackdropOn() || !view) return;
   var art = view.querySelector('.detail-art img');
   if (art && art.src) { setBackdrop(art.src); return; }
   var focused = document.querySelector('.card.is-focused');
