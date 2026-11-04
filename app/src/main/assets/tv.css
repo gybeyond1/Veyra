@@ -106,6 +106,19 @@ body[data-tv-theme="purple"]{
   --scrim:rgba(60,14,70,.68);--drawer:rgba(30,6,36,.60);
   --rail-panel:#96249F;
 }
+/* 高性能模式：底色压到近黑，让海报透出来；其余变量跟主题黑一致。
+   背景图由 body[data-backdrop="poster"] 打开，低模糊，看得清海报内容。 */
+body[data-tv-theme="cinema"]{
+  --bg:#0B0D10;--bg-2:#15191E;--panel:rgba(255,255,255,.09);--panel-2:rgba(255,255,255,.16);
+  --text:#FFFFFF;--muted:rgba(255,255,255,.74);
+  --accent:#c89b3c;--accent-ink:#231a06;--accent-bright:#ffd277;
+  --focus:#FFFFFF;--halo:rgba(8,10,13,.92);
+  --glow:rgba(200,155,60,.16);--pill:rgba(255,255,255,.12);
+  --rail-bg:rgba(255,255,255,.07);--rail-ink:#FFFFFF;
+  --chip-bg:rgba(255,255,255,.10);--chip-ink:#FFFFFF;
+  --scrim:rgba(8,10,13,.62);--drawer:rgba(6,8,11,.60);
+  --rail-panel:#12161B;
+}
 /* 简洁白：唯一一套白底深字 */
 body[data-tv-theme="clean"]{
   --bg:#FFFFFF;--bg-2:#F5F7FA;--panel:rgba(20,24,29,.06);--panel-2:rgba(20,24,29,.16);
@@ -178,21 +191,23 @@ img{display:block;border:0}
 #tv-bg img{
   position:absolute;left:-4%;top:-4%;width:108%;height:108%;
   object-fit:cover;opacity:0;
-  -webkit-filter:blur(22px) saturate(1.15);
-  filter:blur(22px) saturate(1.15);
+  /* 低模糊：22px 时候海报只剩一团色块，看不清是哪部剧。9px 够压掉噪点，
+     内容还认得出来。唯一用 filter 的地方，其余一律禁止。 */
+  -webkit-filter:blur(9px) saturate(1.06);
+  filter:blur(9px) saturate(1.06);
   transform:translateZ(0);
   transition:opacity .25s linear;
 }
 #tv-bg img.is-dim{opacity:0}
 body[data-backdrop="poster"] #tv-bg{background:#0d1013}
-body[data-backdrop="poster"] #tv-bg img{opacity:.96}
+body[data-backdrop="poster"] #tv-bg img{opacity:1}
 /* 遮罩只压左边（标题压在那边）和底部，中间露出来 */
 #tv-bg .veil{
   position:absolute;left:0;right:0;top:0;bottom:0;
   opacity:0;transition:opacity .25s linear;
   background:
-    linear-gradient(90deg,rgba(8,10,13,.74) 0%,rgba(8,10,13,.40) 34%,rgba(8,10,13,.20) 100%),
-    linear-gradient(180deg,rgba(8,10,13,.26) 0%,rgba(8,10,13,0) 34%,rgba(8,10,13,.58) 100%);
+    linear-gradient(90deg,rgba(8,10,13,.62) 0%,rgba(8,10,13,.30) 34%,rgba(8,10,13,.12) 100%),
+    linear-gradient(180deg,rgba(8,10,13,.20) 0%,rgba(8,10,13,0) 34%,rgba(8,10,13,.50) 100%);
 }
 body[data-backdrop="poster"] #tv-bg .veil{opacity:1}
 
@@ -631,7 +646,8 @@ body.rail-open #rail{
 .theme-box h1{font-size:3.2rem;margin:0 0 .8rem}
 .theme-box .theme-sub{font-size:1.8rem;color:var(--muted);margin:0 0 2.4rem;line-height:1.5}
 .theme-grid{
-  display:grid;grid-template-columns:repeat(4,1fr);
+  /* 九套主题：3×3 刚好摆满，四列会剩一个孤零零挂在最后一行 */
+  display:grid;grid-template-columns:repeat(3,1fr);
   grid-column-gap:1.4rem;grid-row-gap:1.4rem;
 }
 .theme-swatch{
