@@ -48,6 +48,22 @@ jobs:
           unzip -q /tmp/kotlin.zip -d /opt/kotlin/
           echo "KOTLIN_HOME=/opt/kotlin/kotlinc" >> $GITHUB_ENV
 
+      # 后端镜像：release 里那份 tar.gz 必须和本次 tag 的 server 代码一致。
+      # 以前是直接 pull latest——打 tag 时 docker-build 可能还在排队，打进 release 的就是
+      # 上一版镜像。现在在这里自己构建一次（命中 registry 缓存通常 1~2 分钟），
+      # 顺带把 amd64+arm64 的 manifest list 推到 Hub。
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Restore signing keystore
         run: |
           echo "${{ secrets.VEYRA_KEYSTORE_B64 }}" | base64 -d > $RUNNER_TEMP/veyra-release.keystore
@@ -84,10 +100,32 @@ jobs:
           cp "$(find app/build/outputs/apk -name 'app-tv-release.apk' | head -1)" "$TV_APK"
           echo "PHONE_APK=$PHONE_APK" >> $GITHUB_ENV
           echo "TV_APK=$TV_APK" >> $GITHUB_ENV
-          # 后端最新镜像同步进 release（gzip 压缩，NAS 可 docker load 离线部署）
-          docker pull gybeyond/veyra-backend:latest
-          docker save gybeyond/veyra-backend:latest | gzip -9 > veyra-backend-latest.tar.gz
-          ls -la "$PHONE_APK" "$TV_APK" veyra-backend-latest.tar.gz
+          # 后端镜像：构建 → 推 Hub（amd64 + arm64 合成一个 manifest list）→ 再拉回本地导出两个离线包。
+          # buildx 的产物留在 builder 里，docker save 拿不到，所以必须先 pull 回来。
+          IMG="${{ secrets.DOCKERHUB_USERNAME }}/veyra-backend:latest"
+          VER="${TAG#v}"
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --tag "$IMG" \
+            --push \
+            --provenance=false \
+            --cache-from "type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/veyra-backend:cache" \
+            --cache-to "type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/veyra-backend:cache,mode=max" \
+            ./server
+
+          # 两次 pull 会覆盖同一个本地 tag，所以必须 pull→save 紧挨着写，不能重排。
+          # gzip 用 -6：镜像里大部分是已压缩的 layer，-9 压不出体积还多花几分钟。
+          docker pull --platform linux/amd64 "$IMG"
+          docker image inspect --format 'amd64 离线包: {{.Os}}/{{.Architecture}}' "$IMG"
+          docker save "$IMG" | gzip -6 > "veyra-backend-${VER}-amd64.tar.gz"
+
+          docker pull --platform linux/arm64 "$IMG"
+          docker image inspect --format 'arm64 离线包: {{.Os}}/{{.Architecture}}' "$IMG"
+          docker save "$IMG" | gzip -6 > "veyra-backend-${VER}-arm64.tar.gz"
+
+          echo "AMD64_TGZ=veyra-backend-${VER}-amd64.tar.gz" >> $GITHUB_ENV
+          echo "ARM64_TGZ=veyra-backend-${VER}-arm64.tar.gz" >> $GITHUB_ENV
+          ls -la "$PHONE_APK" "$TV_APK" "veyra-backend-${VER}-amd64.tar.gz" "veyra-backend-${VER}-arm64.tar.gz"
           sha256sum "$PHONE_APK" "$TV_APK"
 
       - name: Create Release
@@ -118,7 +156,8 @@ jobs:
             gh release create "$TAG" \
               "$PHONE_APK" \
               "$TV_APK" \
-              veyra-backend-latest.tar.gz \
+              "$AMD64_TGZ" \
+              "$ARM64_TGZ" \
               --title "Veyra $TAG" \
               --notes "$NOTES" \
               --draft
@@ -126,7 +165,8 @@ jobs:
             gh release create "$TAG" \
               "$PHONE_APK" \
               "$TV_APK" \
-              veyra-backend-latest.tar.gz \
+              "$AMD64_TGZ" \
+              "$ARM64_TGZ" \
               --title "Veyra $TAG" \
               --generate-notes \
               --draft

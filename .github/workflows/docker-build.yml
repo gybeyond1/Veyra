@@ -15,6 +15,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # arm64 镜像要在 amd64 的 runner 上靠 QEMU 跑 RUN 指令（apk add / npm ci）。
+      # 这里是真的编译，不是只下载，所以必须装。
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -24,12 +29,20 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push
+      # 一次构建两个平台，registry 侧合成为一个 manifest list。
+      # 同一个 tag 下 x86 / ARM 机器各取所需，compose 里的镜像名一个字都不用改。
+      #
+      # provenance: false 是必须的：buildx 0.11 之后默认给每个平台追加 attestation
+      # manifest，NAS 上那些 Docker 20.10 的老客户端解析不了 manifest list，
+      # 会报 "unknown manifest" 直接 pull 失败。
+      - name: Build and push (linux/amd64, linux/arm64)
         uses: docker/build-push-action@v6
         with:
           context: ./server
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/veyra-backend:latest
           # 层缓存：base/apk/ffmpeg 等不常变层复用，NAS 增量拉取，避免每次全量 113MB
           cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/veyra-backend:cache
           cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/veyra-backend:cache,mode=max
+          provenance: false

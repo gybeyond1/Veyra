@@ -84,6 +84,12 @@ docker compose up -d
 curl http://<NAS-IP>:8888/api/health     # {"status":"ok"}
 ```
 
+镜像同时提供 `linux/amd64` 与 `linux/arm64`，`docker compose up -d` 会按机器架构自动选，compose 文件不用改。
+
+`/volume1/your/video` 是群晖路径；威联通是 `/share/...`，Unraid 是 `/mnt/user/...`，按自己设备改。
+
+**离线部署**（NAS 不联网）：从 Release 下载对应架构的包 —— x86 NAS 用 `veyra-backend-<版本>-amd64.tar.gz`，ARM NAS 用 `veyra-backend-<版本>-arm64.tar.gz`，`docker load -i` 导入后改 compose 里的 `image` 为本地镜像即可。
+
 APK 首次打开填后端地址（`http://<NAS-IP>:8888`），注册或登录即可。
 
 ## 构建
