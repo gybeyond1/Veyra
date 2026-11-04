@@ -38,6 +38,14 @@ const confirmOverlay = document.getElementById('confirm-overlay');
 const unlockOverlay = document.getElementById('unlock-overlay');
 const downloadOverlay = document.getElementById('download-overlay');
 const categoryIds = { adult: ['ai-duanju', 'ai-manju'], ai: ['ai-huanlian', 'ai-mogai'] };
+/* 分类 id → 显示名。榜单（hot-*）是红果站点自己的热播榜，卡片带名次角标。 */
+const CATEGORY_NAMES = {
+  short: '短剧', comic: '漫剧',
+  'hot-drama': '热播榜', 'hot-real-drama': '真人榜', 'hot-comic-drama': '漫剧榜', 'hot-ai-drama': 'AI榜',
+  'ai-duanju': '成人短剧', 'ai-manju': '成人漫剧', 'ai-huanlian': 'AI换脸', 'ai-mogai': 'AI魔改'
+};
+function isRankId(id) { return /^hot-(drama|real-drama|comic-drama|ai-drama)$/.test(String(id || '')); }
+function tabNames(tab) { return (categoryIds[tab] || []).map(id => CATEGORY_NAMES[id] || id); }
 const popularTags = [
   ['dushi', '都市'], ['xiaoyuan', '校园'], ['gufeng', '古风'], ['haomen', '豪门'],
   ['chuanyue', '穿越'], ['chongsheng', '重生'], ['qihuan', '奇幻'], ['zhichang', '职场']
@@ -66,8 +74,11 @@ contentReady = api('content-status').then(status => {
   try { api('get-proxy-mode').then(v => { state.proxyMode = Number(v) || 3; }).catch(() => {}); } catch (ignore) {}
   document.title = 'Veyra';
   if (!privateMode()) {
-    categoryIds.adult = ['short']; categoryIds.ai = ['comic'];
-    document.querySelector('[data-nav="adult"] > span:last-child').textContent = '短剧';
+    /* 公开源：短剧/漫剧之外再挂上站点的四个热播榜，作为同一页里的二级切换。
+       榜单只有红果站点有，私密源（黄果）保持原样。 */
+    categoryIds.adult = ['short', 'hot-drama', 'hot-real-drama'];
+    categoryIds.ai = ['comic', 'hot-comic-drama', 'hot-ai-drama'];
+    document.querySelector('[data-nav="adult"] > span:last-child').textContent = '剧场';
     document.querySelector('[data-nav="ai"] > span:last-child').textContent = '漫剧';
     searchInput.placeholder = '搜索剧名';
     searchInput.setAttribute('aria-label', '搜索剧名');
@@ -489,9 +500,14 @@ api('theme').then(window.hgTheme).catch(() => {});
 function itemCard(item) {
   const id = esc(item.id);
   const title = esc(item.title || '影片');
-  const info = esc(item.episodeLabel || asArray(item.tags).slice(0, 2).join(' · ') || '打开详情');
+  /* 榜单条目带的是热度（9009万热度），比「打开详情」有用；普通列表还是集数/标签 */
+  const info = esc(item.heat || item.episodeLabel || asArray(item.tags).slice(0, 2).join(' · ') || '打开详情');
+  /* 榜单里用名次（#1~#3 描金），普通列表还是评分 */
+  const rank = Number(item.rank) || 0;
+  const scoreText = rank ? `#${rank}` : (item.score || '');
+  const scoreClass = rank ? `poster-score is-rank${rank <= 3 ? ' is-top' : ''}` : 'poster-score';
   return `<button class="film-card" type="button" data-open-id="${id}" aria-label="查看${title}">
-    <span class="poster loading"><span class="poster-letter">${title.slice(0, 1)}</span><img data-cover="${esc(item.cover || '')}" alt=""><span class="poster-score" ${item.score ? '' : 'hidden'}>${esc(item.score || '')}</span></span>
+    <span class="poster loading"><span class="poster-letter">${title.slice(0, 1)}</span><img data-cover="${esc(item.cover || '')}" alt=""><span class="${scoreClass}" ${scoreText ? '' : 'hidden'}>${esc(scoreText)}</span></span>
     <span class="film-title">${title}</span><span class="film-info">${info}</span></button>`;
 }
 
@@ -897,11 +913,17 @@ function refreshMissingImages(items) {
   });
 }
 
-function categoryId() { return categoryIds[state.tab][state.sub[state.tab]]; }
+function categoryId() {
+  const list = categoryIds[state.tab] || [];
+  /* 恢复上次页面时 sub 可能是旧长度（比如从私密模式切回来），钳一下免得取到 undefined */
+  const index = Math.min(Math.max(0, Number(state.sub[state.tab]) || 0), Math.max(0, list.length - 1));
+  state.sub[state.tab] = index;
+  return list[index];
+}
 function compactMarkup() {
   if (!privateMode()) return '';
   const adult = state.tab === 'adult';
-  const tabs = privateMode() ? (adult ? ['成人短剧', '成人漫剧'] : ['AI换脸', 'AI魔改']) : [adult ? '短剧' : '漫剧'];
+  const tabs = privateMode() ? (adult ? ['成人短剧', '成人漫剧'] : ['AI换脸', 'AI魔改']) : tabNames(state.tab);
   return `<strong>${privateMode() ? (adult ? '成人剧场' : 'AI专区') : (adult ? '短剧' : '漫剧')}</strong><div class="compact-tabs" role="tablist">${tabs.map((name, index) => `<button type="button" role="tab" aria-selected="${index === state.sub[state.tab]}" data-sub="${index}" class="${index === state.sub[state.tab] ? 'selected' : ''}">${name}</button>`).join('')}</div>`;
 }
 function updateCompact() {
@@ -919,18 +941,23 @@ scroll.addEventListener('scroll', updateCompact, { passive: true });
 function renderCategory(keepCompact = false) {
   categoryObserver?.disconnect();
   const adult = state.tab === 'adult';
-  const tabs = privateMode() ? (adult ? ['成人短剧', '成人漫剧'] : ['AI换脸', 'AI魔改']) : [adult ? '短剧' : '漫剧'];
+  const currentId = categoryId();
+  const currentName = tabNames(state.tab)[state.sub[state.tab]] || tabNames(state.tab)[0] || '';
+  const tabs = privateMode() ? (adult ? ['成人短剧', '成人漫剧'] : ['AI换脸', 'AI魔改']) : tabNames(state.tab);
   const items = asArray(state.category?.items);
   const lead = items[0] || null;
   const slides = privateMode() ? [] : items.slice(0, 5);
   const banner = Math.min(state.categoryBanner, Math.max(0, slides.length - 1));
   state.categoryBanner = banner;
   const spotlight = !privateMode() && slides.length ? `<div class="hero category-spotlight category-carousel">${categorySlide(slides[banner], banner, slides.length)}</div><div class="hero-dots">${slides.map((_, index) => `<i class="${index === banner ? 'active' : ''}" data-slide="${index}"></i>`).join('')}</div>` : lead ? `<div class="category-spotlight"><img data-cover="${esc(lead.cover)}" alt=""><div class="category-spotlight-copy"><h2>${esc(lead.title)}</h2><button type="button" data-open-id="${esc(lead.id)}">查看作品 ${icon('arrow')}</button></div></div>` : '';
-  const switcher = privateMode() ? `<div class="segmented" role="tablist">${tabs.map((name, index) => `<button type="button" role="tab" data-sub="${index}" aria-selected="${index === state.sub[state.tab]}" class="${index === state.sub[state.tab] ? 'selected' : ''}">${name}</button>`).join('')}</div>` : '';
-  content.innerHTML = `<div class="category-page"><div class="category-head"><h1>${privateMode() ? (adult ? '成人剧场' : 'AI专区') : (adult ? '短剧' : '漫剧')}</h1><p>${privateMode() ? (adult ? '短剧与漫剧，走进不同的人生。' : '换脸与魔改，探索影像新可能。') : (adult ? '真人演的看了不烧心' : '探索热门漫剧。')}</p></div>
+  /* 二级切换：私密源是两个分类；公开源是「短剧/漫剧 + 热播榜」，两边都要有入口 */
+  const switcher = tabs.length > 1 ? `<div class="segmented cols-${tabs.length}" role="tablist">${tabs.map((name, index) => `<button type="button" role="tab" data-sub="${index}" aria-selected="${index === state.sub[state.tab]}" class="${index === state.sub[state.tab] ? 'selected' : ''}">${name}</button>`).join('')}</div>` : '';
+  const heading = privateMode() ? (adult ? '成人剧场' : 'AI专区') : currentName;
+  const intro = isRankId(currentId) ? '红果官方热播榜，按观看与互动综合热度排序，每日更新。' : privateMode() ? (adult ? '短剧与漫剧，走进不同的人生。' : '换脸与魔改，探索影像新可能。') : (adult ? '真人演的看了不烧心' : '探索热门漫剧。');
+  content.innerHTML = `<div class="category-page"><div class="category-head"><h1>${esc(heading)}</h1><p>${intro}</p></div>
     ${switcher}
     ${spotlight}
-    <section class="category-section"><div class="section-heading"><h2>${tabs[state.sub[state.tab]]}作品</h2><span class="category-count">已显示 ${items.length} 部</span></div>
+    <section class="category-section"><div class="section-heading"><h2>${esc(isRankId(currentId) ? currentName : currentName + '作品')}</h2><span class="category-count">已显示 ${items.length} 部</span></div>
     <div class="search-grid category-grid">${items.map(itemCard).join('')}</div><div class="category-footer">${categoryFooter()}</div></section></div>`;
   compact.innerHTML = compactMarkup();
   scroll.scrollTop = keepCompact ? 150 : 0;
