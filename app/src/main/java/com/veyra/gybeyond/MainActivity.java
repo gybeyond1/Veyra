@@ -303,6 +303,12 @@ public final class MainActivity extends Activity {
         root.addView(webView, new FrameLayout.LayoutParams(-1, -1));
         buildSplash();
         setContentView(root);
+        /* 电视端必须自己接管返回。manifest 里开了 enableOnBackInvokedCallback，
+           targetSdk 36 下系统不再调用 onBackPressed；而 tv.js 从头到尾没调过
+           setBackEnabled，回调也就一直没注册。结果 BACK 落到系统默认行为，
+           直接把 Activity finish 掉——表现就是"除了播放页，哪里按返回都退桌面"。
+           页面加载前就注册上，别等 JS。 */
+        if (liteBuild()) updateBackRegistration(true);
         hotHandler.postDelayed(this::hideSplash, 9000);
         startTextRelay();
         UiRefreshRate.apply(this, webView);
@@ -846,6 +852,8 @@ public final class MainActivity extends Activity {
     }
 
     private void handleBack(boolean predictive) {
+        /* 退出确认框开着的时候，返回键应该是"取消"，不是再弹一次 */
+        if (exitDialog != null && exitDialog.isShowing()) { exitDialog.dismiss(); return; }
         if (webView == null) { finish(); return; }
         String script = predictive
                 ? "window.hgPredictiveBackCommit ? window.hgPredictiveBackCommit() : (window.hgBack ? window.hgBack() : false)"
@@ -1000,6 +1008,12 @@ public final class MainActivity extends Activity {
                 return false;   /* 放行，Shift + 字母 的组合输入不受影响 */
             }
             if (rawAction == KeyEvent.ACTION_DOWN) shiftArmed = false;
+            /* 遥控器返回键也在这里兜一层。部分盒子的 BACK 不走 OnBackInvokedDispatcher，
+               直接以 KeyEvent 下来，漏给 super 就是 finish。消费掉，交给页面判断。 */
+            if (rawCode == KeyEvent.KEYCODE_BACK) {
+                if (rawAction == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) handleBack(false);
+                return true;
+            }
             if (rawCode == KeyEvent.KEYCODE_ESCAPE) {
                 if (rawAction == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) handleBack(false);
                 return true;
