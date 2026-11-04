@@ -747,11 +747,13 @@ function move(direction) {
 /* ---------------- 卡片 ---------------- */
 function cardMarkup(item, index) {
   var key = 'card:' + (item.id || index);
-  /* 观看记录用「第N集」当角标，普通作品用评分 */
-  var badge = item.episode ? ('第' + item.episode + '集') : (item.score || '');
+  var rank = Number(item.rank) || 0;
+  /* 榜单卡片用名次当角标（前 3 名描金），观看记录用「第N集」，其余用评分 */
+  var badge = rank ? ('#' + rank) : (item.episode ? ('第' + item.episode + '集') : (item.score || ''));
+  var badgeClass = rank ? ('badge is-rank' + (rank <= 3 ? ' is-top' : '')) : 'badge';
   return '<button type="button" class="card" data-focusable data-key="' + esc(key) + '" data-id="' + esc(item.id) + '">'
     + '<span class="art"><img data-cover="' + esc(item.cover || '') + '" alt="">'
-    + (badge ? '<i class="badge">' + esc(badge) + '</i>' : '')
+    + (badge ? '<i class="' + badgeClass + '">' + esc(badge) + '</i>' : '')
     + '</span><span class="name">' + esc(item.title || '') + '</span></button>';
 }
 function gridMarkup(items, emptyText) {
@@ -766,7 +768,16 @@ function categoryList() {
   if (state.source === 'huangguo') {
     return [['ai-duanju', '成人短剧'], ['ai-manju', '成人漫剧'], ['ai-huanlian', 'AI换脸'], ['ai-mogai', 'AI魔改']];
   }
-  return [['short', '短剧'], ['comic', '漫剧']];
+  /* 前两个是常规分类，后四个是红果的热播榜（后端按榜单页解析，卡片带名次角标）。
+     排在一起是因为对用户来说「看什么」是一件事，不必再开一级菜单。 */
+  return [['short', '短剧'], ['comic', '漫剧'],
+    ['hot-drama', '热播榜'], ['hot-real-drama', '真人榜'], ['hot-comic-drama', '漫剧榜'], ['hot-ai-drama', 'AI榜']];
+}
+function isRankId(id) { return /^hot-(drama|real-drama|comic-drama|ai-drama)$/.test(String(id || '')); }
+function categoryName(id) {
+  var cats = categoryList();
+  for (var i = 0; i < cats.length; i++) if (cats[i][0] === id) return cats[i][1];
+  return '全部作品';
 }
 function filterList() {
   if (state.source === 'huangguo') {
@@ -878,7 +889,8 @@ function renderHome() {
   else body = gridMarkup(feed.items, '这个分类下暂时没有内容');
 
   var html = '<h1 class="page-title">首页</h1>';
-  html += '<section class="section" data-feed="1"><div class="section-head"><h2>全部作品</h2><span data-feed-count="1">'
+  html += '<section class="section" data-feed="1"><div class="section-head"><h2>'
+    + esc(categoryName(active)) + (isRankId(active) ? ' · 每日更新' : '') + '</h2><span data-feed-count="1">'
     + (feed ? feed.items.length : 0) + ' 部</span></div>' + chips + body + '</section>';
   view.innerHTML = html;
   paintCovers(view);
