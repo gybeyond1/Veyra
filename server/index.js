@@ -972,6 +972,23 @@ app.get('/api/app-update', (req, res) => {
   catch (e) { res.status(500).json({ status: 'none', error: e.message }); }
 });
 
+// ---- 手动触发检查/下载 ----
+// WebUI 那个「立即检查更新」按钮、以及 App/TV 里点「检查更新」都打这里：
+// 立刻查一次最新版本，有新版就下（channel 决定先下哪个渠道的包），没新版什么都不做。
+// 立即返回，进度看 /api/update/progress；不要在这里等下载完（一次 10MB+ 会顶到超时）。
+app.post('/api/update/check', (req, res) => {
+  const raw = String((req.query && req.query.channel) || '').toLowerCase();
+  const channel = raw === 'tv' ? 'tv' : raw === 'mobile' ? 'mobile' : 'all';
+  try { res.json(Object.assign({ ok: true, channel }, appUpdater.checkNow(channel))); }
+  catch (e) { res.status(500).json({ ok: false, channel, error: e && e.message ? e.message : '检查失败' }); }
+});
+
+// 手动检查的进度：version / checkedAt / channels.mobile.ready / progress.percent
+app.get('/api/update/progress', (_req, res) => {
+  try { res.json(Object.assign({ ok: true }, appUpdater.snapshot())); }
+  catch (e) { res.status(500).json({ ok: false, error: e && e.message ? e.message : '查询失败' }); }
+});
+
 // ---- GitHub Release Webhook：发版瞬间开始拉包 ----
 // 定时器是 10 分钟一轮，发版后最长要等十分钟后端才有包。这里让 GitHub 主动敲门：
 // release 一 published 就当场排进下载队列，省掉整段等待。
