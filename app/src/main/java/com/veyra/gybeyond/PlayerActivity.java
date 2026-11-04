@@ -89,6 +89,10 @@ public final class PlayerActivity extends Activity {
     private boolean destroyed;
     private boolean activeFirstFrame;
     private boolean switching;
+    /** 上一集自然播完，这次切集是「连播」——不要加载圈、不要骨架屏 */
+    private boolean seamlessNext;
+    /** 无缝连播后的一小段缓冲期：这期间即使 STATE_BUFFERING 也不弹加载圈 */
+    private long suppressLoadingUntil;
     /**
      * 复用预取播放器的看门狗。
      *
@@ -363,7 +367,10 @@ public final class PlayerActivity extends Activity {
                     message.setVisibility(View.GONE);
                     maybePrepareNext();
                 } else if (state == Player.STATE_BUFFERING) {
-                    loading.setVisibility(View.VISIBLE);
+                    /* 连播那一下会短暂 BUFFERING，此时弹加载圈等于每集闪一次 */
+                    if (SystemClock.elapsedRealtime() > suppressLoadingUntil) {
+                        loading.setVisibility(View.VISIBLE);
+                    }
                     // 这里原来会 cancelPrefetch()：主播放器稍一卡顿，刚预取好的下一集就被丢掉，
                     // 切集时只能从头重新拉，表现就是「切下一集要等很久」。standby 自己有
                     // 5s / 4MB 的上限，不会无限抢带宽，留着它更划算。
@@ -371,7 +378,8 @@ public final class PlayerActivity extends Activity {
                     saveProgress(true);
                     if (!isAiQueue()) {
                         Selection next = adjacent(1);
-                        if (next != null) switchTo(next);
+                        /* 下一集已经预取好了，直接接上：不弹加载、不显示海报 */
+                        if (next != null) { seamlessNext = true; switchTo(next); }
                         else if (isHongguoFinalEpisode()) { seasonEnded = true; showSequelEnd(false); }
                     }
                 }
@@ -1241,7 +1249,24 @@ public final class PlayerActivity extends Activity {
         }
         Log.d("HuangGuoPlayback", "open " + key + " standby=" + key.equals(standbyKey) + " reuse=" + reuse);
         float volume = player.getVolume();
-        player.pause();
+        /* 自动连播：上一集播完直接切下一集，且预取的那份已经 READY ——
+           这种时候一个加载圈、一行海报都不该出现，画面直接接上。
+           做不到无缝（standby 没就绪）就退回原来的加载表现。 */
+        boolean seamless = seamlessNext && reuse;
+        seamlessNext = false;
+        if (!seamless) {
+            player.pause();
+            seekBar.setProgress(0);
+            landscapeSeek.setProgress(0);
+            updateMiniProgress(0, 1);
+            timeText.setText("0:00 / 0:00");
+            skeleton.setVisibility(View.VISIBLE);
+            poster.setVisibility(View.INVISIBLE);
+            poster.setImageDrawable(null);
+            loading.setVisibility(View.VISIBLE);
+            centerToggle.setVisibility(View.GONE);
+            message.setVisibility(View.GONE);
+        }
         currentSource = null;
         activeFirstFrame = false;
         failedStandbyKey = null;
@@ -1249,16 +1274,6 @@ public final class PlayerActivity extends Activity {
         updateBookmarkButton();
         title.setText(currentItem.optString("title") + " · 第 " + episode + " 集");
         episodeText.setText(isAiQueue() ? "AI 作品" : "第 " + episode + " 集");
-        seekBar.setProgress(0);
-        landscapeSeek.setProgress(0);
-        updateMiniProgress(0, 1);
-        timeText.setText("0:00 / 0:00");
-        skeleton.setVisibility(View.VISIBLE);
-        poster.setVisibility(View.INVISIBLE);
-        poster.setImageDrawable(null);
-        loading.setVisibility(View.VISIBLE);
-        centerToggle.setVisibility(View.GONE);
-        message.setVisibility(View.GONE);
         sourceRetryCount = 0;
         if (reuse) {
             ExoPlayer old = player;
@@ -1282,7 +1297,12 @@ public final class PlayerActivity extends Activity {
             player.setVolume(volume);
             applyPlaybackSpeed(speedLocked ? 2f : manualSpeed);
             updateVideoGeometry(player.getVideoSize());
-            if (activeFirstFrame) showActiveFrame();
+            if (seamless) {
+                /* 连播时连海报和骨架都不要：先按「已有画面」处理，
+                   真没出首帧也就是黑一两帧，比闪一张海报自然 */
+                showActiveFrame();
+                suppressLoadingUntil = SystemClock.elapsedRealtime() + 2000;
+            } else if (activeFirstFrame) showActiveFrame();
             else loadPoster(currentItem, poster);
             player.setPlayWhenReady(foreground);
             armReuseGuard(player);
