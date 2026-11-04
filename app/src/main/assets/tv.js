@@ -204,36 +204,37 @@ function heroFilter(p) {
   return 'blur(' + p.blur + 'px) saturate(' + (p.sat / 100).toFixed(2)
     + ') brightness(' + (p.bri / 100).toFixed(2) + ')';
 }
-/* 把参数落到两个地方：整屏背景，和面板里的预览窗 */
-function applyHero() {
-  var p = heroParams();
+/* 把参数落到元素上：过滤器 + 放大（放大是为了让模糊后的边缘不露黑边） */
+function heroStyle(el, p) {
+  if (!el) return;
   var filter = heroFilter(p);
   var zoom = p.zoom;
   var off = -(zoom - 100) / 2;
-  var main = document.getElementById('tv-bg-img');
-  if (main) {
-    main.style.webkitFilter = filter;
-    main.style.filter = filter;
-    main.style.left = off + '%';
-    main.style.top = off + '%';
-    main.style.width = zoom + '%';
-    main.style.height = zoom + '%';
-  }
-  if (heroPreviewImg) {
-    heroPreviewImg.style.webkitFilter = filter;
-    heroPreviewImg.style.filter = filter;
-    heroPreviewImg.style.left = off + '%';
-    heroPreviewImg.style.top = off + '%';
-    heroPreviewImg.style.width = zoom + '%';
-    heroPreviewImg.style.height = zoom + '%';
-  }
-  var strength = p.veil / 100;
+  el.style.webkitFilter = filter;
+  el.style.filter = filter;
+  el.style.left = off + '%';
+  el.style.top = off + '%';
+  el.style.width = zoom + '%';
+  el.style.height = zoom + '%';
+}
+/* 详情页的底图固定用上一版那套参数，不吃面板里的自定义值 ——
+   面板只负责首页/我的/搜索这些「主页面」。 */
+var DETAIL_HERO = { blur: 3, sat: 104, bri: 100, veil: 100, zoom: 108 };
+
+function applyHero() {
+  var p = heroParams();
+  var onDetail = state && state.route === 'detail';
+  heroStyle(document.getElementById('tv-bg-img'), onDetail ? DETAIL_HERO : p);
+  /* 预览窗永远显示「你正在调的那套」，否则在详情页调参看不到变化 */
+  heroStyle(heroPreviewImg, p);
+
   var mainVeil = document.querySelector('#tv-bg .veil');
   if (mainVeil) {
     /* 只有海报模式才显示遮罩，纯色主题下这块是透明的 */
+    var strength = (onDetail ? DETAIL_HERO.veil : p.veil) / 100;
     mainVeil.style.opacity = heroBackdropOn() ? String(strength) : '0';
   }
-  if (heroPreviewVeil) heroPreviewVeil.style.opacity = String(strength);
+  if (heroPreviewVeil) heroPreviewVeil.style.opacity = String(p.veil / 100);
 }
 function tuneRowMarkup(f) {
   var p = heroParams();
@@ -454,6 +455,7 @@ function focusElement(el, remember) {
     if (inRail(el)) state.lastRailKey = state.focusKey;
     else if (state.focusKey) state.lastContentKey = state.focusKey;
   }
+  alignGridScroll(el);
   var box = el.getBoundingClientRect();
   var stageBox = stage.getBoundingClientRect();
   if (box.top < stageBox.top + 8) stage.scrollTop -= (stageBox.top + 8 - box.top);
@@ -602,6 +604,8 @@ function leaveRail() {
    否则往下翻过之后按回来，标题头一直藏在屏幕上边。 */
 function revealSectionHead(el) {
   if (!el || !el.closest) return;
+  /* 窗口模式下 #stage 是不滚的，这一套「把标题带回来」会把已经对齐的行带歪 */
+  if (document.body.classList.contains('page-windowed')) return;
   var grid = el.closest('.grid');
   if (!grid) return;
   var cards = grid.querySelectorAll('.card');
@@ -631,6 +635,27 @@ function sameBand(a, b) {
 function sameColumn(a, b) {
   var overlap = Math.min(a.right, b.right) - Math.max(a.left, b.left);
   return overlap > 0;
+}
+
+/* 窗口模式下按行跳：一屏 6 列，往下就是 +6 张。
+   返回 true 表示这次按键已经处理掉（包括「已经到头，别再动」）。 */
+function stepToRow(el, direction) {
+  if (!el || !el.closest) return false;
+  var grid = el.closest('.grid');
+  if (!grid || !grid.classList.contains('is-window')) return false;
+  var cards = grid.querySelectorAll('.card');
+  if (cards.length <= 6) return false;
+  var card = el.closest('.card') || el;
+  var idx = Array.prototype.indexOf.call(cards, card);
+  if (idx < 0) return false;
+  var target = idx + (direction === 'down' ? 6 : -6);
+  if (target < 0) return false;              /* 第一排再往上：交回常规逻辑（分类条/页签） */
+  if (target >= cards.length) {
+    if (idx >= cards.length - 6) return true;    /* 已经在最后一行，按住也不动 */
+    target = cards.length - 1;
+  }
+  focusElement(cards[target]);
+  return true;
 }
 
 function pickNearest(current, all, direction, banded) {
@@ -679,6 +704,12 @@ function move(direction) {
   }
 
   var from = current.getBoundingClientRect();
+  /* 海报窗口模式：上下按「整行」跳，不用几何最近。
+     被裁到窗口外的那一排，屏幕坐标还留在标题区旁边，按上键会先选中
+     分类条（离得更近）—— 而用户按上就是想回上一排。 */
+  if (direction === 'up' || direction === 'down') {
+    if (stepToRow(current, direction)) return;
+  }
   var best = pickNearest(current, all, direction, true);
   /* 上下允许放宽：不同区块宽度不一致时（分类条、按钮、剧集格），
      严格对齐会把人卡死，所以放宽再找一次。左右不放宽 —— 放宽就会斜着跳。 */
@@ -738,32 +769,101 @@ function filterList() {
    #stage 的顶部内边距上 —— 标题（首页的分类条、我的的三个页签）
    跟着整体下沉，正好落在第一排海报的上沿，上面那片就留给背景海报。
    只对首页 / 我的生效；搜索、详情保持原样。 */
-var FIRST_SCREEN_CAP = 0.33;   /* 顶部最多下移 1/3 屏，防止极端分辨率下空太多 */
+var FIRST_ROW_PORTION = 0.2;   /* 下面一排露出 1/5 行高 */
 
 function resetFirstScreen() {
-  if (stage) stage.style.paddingTop = '';
+  if (stage) {
+    stage.style.paddingTop = '';
+    stage.style.paddingBottom = '';
+    /* 只清 inline 的 overflow —— CSS 里那条 overflow:hidden 是给
+       page-windowed 用的，跟着 body class 一起消失，这里不用管 */
+  }
+  document.body.classList.remove('page-windowed');
+  var grid = view && view.querySelector('.grid');
+  if (grid) {
+    grid.classList.remove('is-window');
+    grid.style.height = '';
+    grid.style.marginLeft = '';
+    grid.style.marginRight = '';
+    grid.style.paddingTop = '';
+    grid.style.paddingBottom = '';
+    grid.style.paddingLeft = '';
+    grid.style.paddingRight = '';
+    grid.style.width = '';
+    grid.scrollTop = 0;
+  }
 }
+
+/* 把海报区做成一个固定高度的窗口：一整行 + 下一行露出 1/5。
+   以前是让 #stage 整体加顶部内边距，结果往下翻时整页在滚，屏幕上会同时
+   出现「两行完整」或者「上半屏空白」；现在窗口自己滚，每翻一行就把那一行
+   顶到窗口顶部，上面那行整行退出，视觉上始终只有一行完整 + 下一行露头。 */
 function layoutFirstScreen() {
   if (!stage || !view) return;
-  stage.style.paddingTop = '';
+  resetFirstScreen();
   var grid = view.querySelector('.grid');
   if (!grid) return;
   var cards = grid.querySelectorAll('.card');
-  /* 不足两排（6 张以内）就没有「露出 1/3」这回事，保持原来的顶部间距 */
+  /* 不足两排（6 张以内）就没有「露出下一行」这回事，保持原来的顶部间距 */
   if (cards.length <= 6) return;
   var top0 = cards[0].offsetTop;
-  var top1 = cards[6].offsetTop;      /* 相对 #stage，不受滚动影响 */
+  var top1 = cards[6].offsetTop;
   var rowH = top1 - top0;
   if (rowH < 40) return;
-  var cs = window.getComputedStyle(stage);
-  var baseTop = parseFloat(cs.paddingTop) || 0;
-  /* 可视底边就是屏幕底边：底部那截 8rem 内边距只在滚到底时才起作用，
-     拿它当边界会让第二排少露一截（实测只剩 1/2 而不是 1/3）。 */
-  var bottomEdge = stage.clientHeight;
-  var delta = bottomEdge - rowH / 3 - top1;
-  if (delta <= 0) return;
-  delta = Math.min(delta, stage.clientHeight * FIRST_SCREEN_CAP);
-  stage.style.paddingTop = (baseTop + delta) + 'px';
+  var cardH = cards[0].getBoundingClientRect().height || (rowH - 24);
+  /* 选中时卡片放大 1.08，四边会甩出去约 4%；不留这点余量就会被窗口裁掉描边 */
+  var pad = Math.max(10, Math.round(rowH * 0.05));
+  var winH = Math.round(cardH + rowH * FIRST_ROW_PORTION) + pad * 2;
+
+  grid.classList.add('is-window');
+  grid.style.paddingTop = pad + 'px';
+  /* 底部多留「露头那一段」：滚到最后一排时它才能顶到窗口顶部，
+     否则最后一行永远差一截，怎么按都上不来 */
+  grid.style.paddingBottom = (pad + Math.round(rowH * FIRST_ROW_PORTION)) + 'px';
+  /* 左右用「负外边距 + 等量内边距」抵消：列宽一点不变，卡片放大后不被裁 */
+  grid.style.paddingLeft = pad + 'px';
+  grid.style.paddingRight = pad + 'px';
+  grid.style.marginLeft = '-' + pad + 'px';
+  grid.style.marginRight = '-' + pad + 'px';
+  grid.style.width = 'calc(100% + ' + (pad * 2) + 'px)';
+  grid.style.height = winH + 'px';
+
+  /* 量一次真实露出高度再补正：卡片高度取整、行距在不同内核上算出来的值
+     会差十几像素，光按公式设高度，实际露出的可能是 1/4 而不是 1/5 */
+  var gb = grid.getBoundingClientRect();
+  var peek = gb.bottom - cards[6].getBoundingClientRect().top;
+  var fix = Math.round(rowH * FIRST_ROW_PORTION - peek);
+  if (Math.abs(fix) >= 1) {
+    winH = Math.max(140, winH + fix);
+    grid.style.height = winH + 'px';
+  }
+
+  /* 窗口贴着屏幕底边放，上面让出来的那块就是背景海报的位置。
+     量之前先把上下内边距清零：#stage 的 CSS 里本来就带 4.2rem / 8rem，
+     不清零会把那段算漏，窗口底部就停在离屏幕四十几像素的地方。 */
+  stage.style.paddingTop = '0px';
+  stage.style.paddingBottom = '0px';
+  var gridTop = grid.offsetTop;
+  var room = stage.clientHeight - winH - gridTop;
+  if (room > 0) stage.style.paddingTop = room + 'px';
+  document.body.classList.add('page-windowed');
+  alignGridScroll(document.querySelector('.is-focused'));
+}
+
+/* 焦点换行时把窗口滚到那一行 —— 下面一行顶上来，上面一行退出去。
+   只按整行滚，不做像素级跟随：遥控器上按一下跳一行才跟得上眼睛。 */
+function alignGridScroll(el) {
+  var grid = view && view.querySelector('.grid');
+  if (!grid || !grid.classList.contains('is-window') || !el) return;
+  var card = el.closest ? el.closest('.card') : null;
+  if (!card || !grid.contains(card)) return;
+  var cards = grid.querySelectorAll('.card');
+  if (cards.length <= 6) return;
+  var rowH = cards[6].offsetTop - cards[0].offsetTop;
+  if (rowH < 40) return;
+  var row = Math.round((card.offsetTop - cards[0].offsetTop) / rowH);
+  var target = row * rowH;
+  if (Math.abs(grid.scrollTop - target) > 2) grid.scrollTop = target;
 }
 
 function renderHome() {
