@@ -416,6 +416,9 @@ function closeRail() {
 
 /* 有浮层盖着时，焦点只在浮层里转，别跑到背后的卡片上 */
 function activeOverlay() {
+  /* 动态码浮窗优先级最高：它开着的时候背后就是整页海报，
+     不锁住的话上下左右会直接选到浮窗后面的剧集封面上。 */
+  if (otpPanel && !otpPanel.hidden) return otpPanel;
   if (themePanel && !themePanel.hidden) return themePanel;
   if (updateLayer && !updateLayer.hidden) return updateLayer;
   if (loginLayer && !loginLayer.hidden) return loginLayer;
@@ -726,6 +729,8 @@ function move(direction) {
   if (!best && (direction === 'up' || direction === 'down')) best = pickNearest(current, all, direction, false);
   if (best) { focusElement(best); return; }
   if (onRail) return;
+  /* 浮层开着时到边就停：再按左会把侧栏呼出来，那也是在浮层背后 */
+  if (activeOverlay()) return;
 
   if (direction === 'left') { enterRail(current); return; }
   if (direction === 'up') {
@@ -1846,6 +1851,10 @@ function applyMode(status, fallback) {
   if (typeof (status && status.unlocked) === 'boolean') state.unlocked = status.unlocked;
   state.home = null;
   state.feed = null;
+  /* 分类 id 是按内容源分的：公开源是 short/comic，私密源是 ai-duanju/ai-manju/…
+     沿用旧 id 过去，后端只会回一句「无效分类」，界面停在空列表上，
+     必须点一下顶部小标题才重新按新 id 拉 —— 就是「进来什么都没有」的原因。 */
+  state.feedId = '';
   state.library = null;
   state.nas = null;
   state.detail = null;
