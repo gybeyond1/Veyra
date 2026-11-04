@@ -315,6 +315,9 @@ function createAppUpdater(options) {
   let wakeRound = 0;
   /** 正在下载的进度，给 /api/health 看，方便判断到底卡在哪一段。 */
   let progressState = null;
+  /** 手动触发时优先下哪个渠道：手机上点就先手机包，电视上点就先电视包。 */
+  let focusChannel = null;
+  let pollPromise = null;
 
   fs.mkdirSync(root, { recursive: true });
   for (const channel of CHANNELS) fs.mkdirSync(path.join(root, channel), { recursive: true });
@@ -545,9 +548,20 @@ function createAppUpdater(options) {
     }
   }
 
-  async function poll() {
-    if (polling) return;
+  /**
+   * 立即跑一轮：查一次最新版本，有新版就把包下下来。
+   * 正在跑就复用同一轮（返回同一个 Promise），不并发抢带宽。
+   */
+  function poll() {
+    if (polling) return pollPromise || Promise.resolve();
     polling = true;
+    pollPromise = runPoll()
+      .catch(() => { })
+      .then(() => { polling = false; pollPromise = null; });
+    return pollPromise;
+  }
+
+  async function runPoll() {
     try {
       const info = await discover(wakeHint);
       const previous = manifest && manifest.version;
@@ -563,7 +577,11 @@ function createAppUpdater(options) {
           manifest.notes = info.notes || manifest.notes || '';
           manifest.tag = info.tag;
         }
-        for (const channel of CHANNELS) {
+        // 手动点「检查更新」的那个渠道排前面，另一个渠道随后补
+        const order = focusChannel && CHANNELS.indexOf(focusChannel) >= 0
+          ? [focusChannel].concat(CHANNELS.filter(c => c !== focusChannel))
+          : CHANNELS;
+        for (const channel of order) {
           // 已经在盘上（含手动投递）就不重复下
           const local = localVersions(channel)[0];
           if (local && compareVersion(local.version, info.version) === 0) {
@@ -593,7 +611,6 @@ function createAppUpdater(options) {
     } catch (error) {
       log(`[update] 检查失败：${error.message}`);
     } finally {
-      polling = false;
       // 有渠道还没落地：短间隔重试。以前全失败要干等 10 分钟，
       // 而 .part 已经下了一大半，早一轮就早一点补完。
       const ready = CHANNELS.every(channel => {
@@ -720,6 +737,51 @@ function createAppUpdater(options) {
     return fs.existsSync(file) ? file : null;
   }
 
+  /**
+   * 手动触发一次「检查 + 下载」。
+   *
+   * channel 传 mobile / tv 就先下这个渠道的包（另一个随后补）；传 all 按常规顺序。
+   * 立即返回、不阻塞请求，前端轮询 snapshot() 看进度就行。
+   * 没新版本时什么都不会下载 —— discover 拿到的还是当前版本，fetchChannel 直接命中磁盘。
+   */
+  function checkNow(channel) {
+    const focus = CHANNELS.indexOf(channel) >= 0 ? channel : null;
+    focusChannel = focus;
+    if (polling) return { started: false, running: true, focus, snapshot: snapshot() };
+    log(`[update] 手动检查${focus ? `（优先 ${focus}）` : ''}`);
+    poll();
+    return { started: true, running: true, focus, snapshot: snapshot() };
+  }
+
+  /** 给 WebUI / 客户端看的整体状态：最新版本、各渠道是否就绪、下载进度。 */
+  function snapshot() {
+    const data = manifest || loadManifest();
+    const channels = {};
+    for (const channel of CHANNELS) {
+      const entry = data && data.channels && data.channels[channel];
+      let ready = false;
+      if (entry && entry.file) {
+        try { ready = fs.statSync(path.join(channelDir(channel), entry.file)).size > 0; } catch { ready = false; }
+      }
+      channels[channel] = {
+        ready,
+        file: entry && entry.file ? entry.file : '',
+        version: ready && data ? data.version : '',
+        size: entry && entry.size ? entry.size : 0,
+      };
+    }
+    return {
+      version: data && data.version ? data.version : null,
+      notes: data && data.notes ? data.notes : '',
+      checkedAt: data && data.fetchedAt ? data.fetchedAt : 0,
+      channels,
+      polling,
+      focus: focusChannel,
+      progress: progress(),
+      wake: wakeHint ? { tag: wakeHint.tag, version: wakeHint.version } : null,
+    };
+  }
+
   function start() {
     if (timer) return;
     setTimeout(() => { poll(); }, FIRST_DELAY_MS).unref();
@@ -733,7 +795,7 @@ function createAppUpdater(options) {
   }
 
   return {
-    start, stop, poll, wake, status, fileOf, progress,
+    start, stop, poll, wake, status, fileOf, progress, checkNow, snapshot,
     get manifest() { return manifest || loadManifest(); },
     /** 快车道状态（webhook 拉起的那一版），给 /api/health 和测试看。 */
     get wakeState() {
