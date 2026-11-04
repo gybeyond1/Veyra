@@ -78,10 +78,34 @@
   <div id="theme" hidden>
     <section class="theme-box">
       <h1>主题颜色</h1>
-      <p class="theme-sub">固定底色，不跟着首页海报换图，遥控器怎么按都不卡</p>
-      <div class="theme-grid" id="theme-grid"></div>
-      <div class="theme-actions">
-        <button id="theme-close" class="btn ghost" type="button" data-focusable data-key="theme:close">关闭</button>
+      <p class="theme-sub" id="theme-sub">固定底色，不跟着首页海报换图，遥控器怎么按都不卡</p>
+      <div class="theme-cols">
+        <div class="theme-col-left">
+          <div class="theme-grid" id="theme-grid"></div>
+          <div class="theme-actions">
+            <button id="theme-close" class="btn ghost" type="button" data-focusable data-key="theme:close">关闭</button>
+          </div>
+        </div>
+
+        <!-- 只在选中「高性能模式」时出现：背景海报的滤镜参数，左右键直接调 -->
+        <div class="hero-tune" id="hero-tune" hidden>
+          <div class="hero-tune-head">
+            <h2>海报背景参数</h2>
+            <span>选中一行后按 ← → 调节，自动保存</span>
+          </div>
+          <div class="hero-rows" id="hero-rows"></div>
+          <div class="hero-preview">
+            <div class="hero-preview-bg">
+              <img id="hero-preview-img" alt="">
+              <i class="hero-preview-veil" id="hero-preview-veil"></i>
+              <span class="hero-preview-title">剧名效果预览</span>
+            </div>
+            <span class="hero-preview-cap">实时预览</span>
+          </div>
+          <div class="hero-tune-actions">
+            <button class="btn ghost" type="button" data-focusable data-key="tune:reset" data-tune-reset="1">恢复默认</button>
+          </div>
+        </div>
       </div>
     </section>
   </div>
