@@ -76,6 +76,11 @@ var railAccount = document.getElementById('rail-account');
 var railAvatar = document.getElementById('rail-avatar');
 var themePanel = document.getElementById('theme');
 var themeGrid = document.getElementById('theme-grid');
+var themeSub = document.getElementById('theme-sub');
+var heroTune = document.getElementById('hero-tune');
+var heroRowsEl = document.getElementById('hero-rows');
+var heroPreviewImg = document.getElementById('hero-preview-img');
+var heroPreviewVeil = document.getElementById('hero-preview-veil');
 var railVeil = document.getElementById('rail-veil');
 var otpPanel = document.getElementById('otp');
 var otpCells = document.getElementById('otp-cells');
@@ -153,7 +158,156 @@ function renderThemeGrid() {
       + '</button>';
   }
   themeGrid.innerHTML = html;
+  syncHeroTune();
 }
+
+/* ---------------- 高性能模式：背景海报参数 ----------------
+   之前这几个值都写死在 CSS 里（blur 3px / saturate 1.04 / 遮罩三段透明度 /
+   图片放大 108%），每换一个口味就得改一次代码发一版包。现在放到面板里，
+   遥控器左右键直接调，结果存 localStorage，下次开电视还在。
+   参数范围都留了余地：模糊 0–20、饱和 60–180%、亮度 60–140%、
+   遮罩 0–100%、放大 100–130%（放大是为了让模糊后的边缘不露黑边）。 */
+var HERO_STORE = 'veyra.tv.hero';
+var HERO_FIELDS = [
+  { key: 'blur', label: '模糊度', unit: 'px', min: 0, max: 20, step: 1, def: 3 },
+  { key: 'sat', label: '饱和度', unit: '%', min: 60, max: 180, step: 4, def: 104 },
+  { key: 'bri', label: '亮度', unit: '%', min: 60, max: 140, step: 4, def: 100 },
+  { key: 'veil', label: '遮罩浓度', unit: '%', min: 0, max: 100, step: 5, def: 100 },
+  { key: 'zoom', label: '画面放大', unit: '%', min: 100, max: 130, step: 2, def: 108 }
+];
+var heroCache = null;
+
+function heroField(key) {
+  for (var i = 0; i < HERO_FIELDS.length; i++) if (HERO_FIELDS[i].key === key) return HERO_FIELDS[i];
+  return null;
+}
+function heroParams() {
+  if (heroCache) return heroCache;
+  var out = {};
+  for (var i = 0; i < HERO_FIELDS.length; i++) out[HERO_FIELDS[i].key] = HERO_FIELDS[i].def;
+  var saved = null;
+  try { saved = JSON.parse(localStorage.getItem(HERO_STORE) || 'null'); } catch (error) { saved = null; }
+  if (saved) {
+    for (var j = 0; j < HERO_FIELDS.length; j++) {
+      var f = HERO_FIELDS[j];
+      var v = Number(saved[f.key]);
+      if (isFinite(v)) out[f.key] = Math.max(f.min, Math.min(f.max, Math.round(v)));
+    }
+  }
+  heroCache = out;
+  return out;
+}
+function saveHero() {
+  try { localStorage.setItem(HERO_STORE, JSON.stringify(heroParams())); } catch (error) { }
+}
+function heroFilter(p) {
+  return 'blur(' + p.blur + 'px) saturate(' + (p.sat / 100).toFixed(2)
+    + ') brightness(' + (p.bri / 100).toFixed(2) + ')';
+}
+/* 把参数落到两个地方：整屏背景，和面板里的预览窗 */
+function applyHero() {
+  var p = heroParams();
+  var filter = heroFilter(p);
+  var zoom = p.zoom;
+  var off = -(zoom - 100) / 2;
+  var main = document.getElementById('tv-bg-img');
+  if (main) {
+    main.style.webkitFilter = filter;
+    main.style.filter = filter;
+    main.style.left = off + '%';
+    main.style.top = off + '%';
+    main.style.width = zoom + '%';
+    main.style.height = zoom + '%';
+  }
+  if (heroPreviewImg) {
+    heroPreviewImg.style.webkitFilter = filter;
+    heroPreviewImg.style.filter = filter;
+    heroPreviewImg.style.left = off + '%';
+    heroPreviewImg.style.top = off + '%';
+    heroPreviewImg.style.width = zoom + '%';
+    heroPreviewImg.style.height = zoom + '%';
+  }
+  var strength = p.veil / 100;
+  var mainVeil = document.querySelector('#tv-bg .veil');
+  if (mainVeil) {
+    /* 只有海报模式才显示遮罩，纯色主题下这块是透明的 */
+    mainVeil.style.opacity = heroBackdropOn() ? String(strength) : '0';
+  }
+  if (heroPreviewVeil) heroPreviewVeil.style.opacity = String(strength);
+}
+function tuneRowMarkup(f) {
+  var p = heroParams();
+  var pct = (p[f.key] - f.min) / (f.max - f.min) * 100;
+  return '<div class="tune-row" data-tune="' + f.key + '" data-focusable data-key="tune:' + f.key + '">'
+    + '<span class="tune-label">' + esc(f.label) + '</span>'
+    + '<span class="tune-track"><i style="width:' + pct.toFixed(1) + '%"></i></span>'
+    + '<span class="tune-value">' + p[f.key] + ' ' + f.unit + '</span>'
+    + '</div>';
+}
+function renderTuneRows() {
+  if (!heroRowsEl) return;
+  var html = '';
+  for (var i = 0; i < HERO_FIELDS.length; i++) html += tuneRowMarkup(HERO_FIELDS[i]);
+  heroRowsEl.innerHTML = html;
+}
+function paintTuneRow(key) {
+  var row = heroRowsEl && heroRowsEl.querySelector('[data-tune="' + key + '"]');
+  if (!row) return;
+  var f = heroField(key);
+  if (!f) return;
+  var p = heroParams();
+  var pct = (p[key] - f.min) / (f.max - f.min) * 100;
+  var fill = row.querySelector('.tune-track i');
+  if (fill) fill.style.width = pct.toFixed(1) + '%';
+  var val = row.querySelector('.tune-value');
+  if (val) val.textContent = p[key] + ' ' + f.unit;
+}
+/* 主题面板里：只有选中高性能模式才展开参数区，并把弹层黑底调淡让海报透出来 */
+function syncHeroTune() {
+  var on = currentTheme() === HERO_THEME;
+  if (heroTune) heroTune.hidden = !on;
+  if (themePanel) {
+    if (on) themePanel.classList.add('is-hero-preview');
+    else themePanel.classList.remove('is-hero-preview');
+  }
+  if (themeSub) {
+    themeSub.textContent = on
+      ? '现在这套会跟着封面换底图，下面的参数改了立刻生效，改完自动保存'
+      : '固定底色，不跟着首页海报换图，遥控器怎么按都不卡';
+  }
+  if (on) {
+    renderTuneRows();
+    applyHero();
+    var preview = document.getElementById('hero-preview-img');
+    /* 用 getAttribute 判断：img 没设 src 时 .src 会返回页面地址，永远不为空 */
+    if (preview && !preview.getAttribute('src') && backdropSrc) preview.src = backdropSrc;
+  }
+}
+function adjustTune(key, dir) {
+  var f = heroField(key);
+  if (!f) return;
+  var p = heroParams();
+  var next = p[key] + dir * f.step;
+  next = Math.max(f.min, Math.min(f.max, next));
+  if (next === p[key]) return;
+  p[key] = next;
+  saveHero();
+  paintTuneRow(key);
+  applyHero();
+}
+function resetHero() {
+  var p = heroParams();
+  for (var i = 0; i < HERO_FIELDS.length; i++) p[HERO_FIELDS[i].key] = HERO_FIELDS[i].def;
+  saveHero();
+  renderTuneRows();
+  applyHero();
+  toast('海报参数已恢复默认');
+}
+function focusTuneRow() {
+  var focused = document.querySelector('.is-focused');
+  return focused && focused.getAttribute ? focused.getAttribute('data-tune') : null;
+}
+
 function openTheme() {
   if (!themePanel) return;
   renderThemeGrid();
@@ -164,6 +318,7 @@ function openTheme() {
 function closeTheme() {
   if (!themePanel) return;
   themePanel.hidden = true;
+  themePanel.classList.remove('is-hero-preview');
   state.focusKey = 'acct:theme';
   restoreFocus();
 }
@@ -222,15 +377,17 @@ function setBackdrop(src) {
   clearTimeout(backdropTimer);
   backdropTimer = setTimeout(function () {
     var img = document.getElementById('tv-bg-img');
-    if (!img) return;
     backdropSrc = src;
-    img.src = src;
+    if (img) img.src = src;
+    /* 参数面板里的预览窗跟着同一张图走，调参时看到的就是屏幕上那张 */
+    if (heroPreviewImg) heroPreviewImg.src = src;
   }, 150);
 }
 function applyBackdropMode() {
   if (!document.body) return;
   if (heroBackdropOn()) document.body.setAttribute('data-backdrop', 'poster');
   else document.body.removeAttribute('data-backdrop');
+  applyHero();
 }
 function syncBackdrop(el) {
   if (!heroBackdropOn() || !el) return;
@@ -575,6 +732,40 @@ function filterList() {
 /* ---------------- 首页 ----------------
    两块：分类条 + 全部作品瀑布流（原「剧场」的内容）。
    「继续观看」已删 —— 「我的」里本来就有观看记录，首页留白给海报墙。 */
+/* ---------------- 首屏排布 ----------------
+   卡片宽度由「一屏 6 列」定死，高度跟着 1.4 比例走，所以缩不了。
+   想让第一排 6 部完整、第二排只露顶部 1/3，多出来的空白只能放在
+   #stage 的顶部内边距上 —— 标题（首页的分类条、我的的三个页签）
+   跟着整体下沉，正好落在第一排海报的上沿，上面那片就留给背景海报。
+   只对首页 / 我的生效；搜索、详情保持原样。 */
+var FIRST_SCREEN_CAP = 0.33;   /* 顶部最多下移 1/3 屏，防止极端分辨率下空太多 */
+
+function resetFirstScreen() {
+  if (stage) stage.style.paddingTop = '';
+}
+function layoutFirstScreen() {
+  if (!stage || !view) return;
+  stage.style.paddingTop = '';
+  var grid = view.querySelector('.grid');
+  if (!grid) return;
+  var cards = grid.querySelectorAll('.card');
+  /* 不足两排（6 张以内）就没有「露出 1/3」这回事，保持原来的顶部间距 */
+  if (cards.length <= 6) return;
+  var top0 = cards[0].offsetTop;
+  var top1 = cards[6].offsetTop;      /* 相对 #stage，不受滚动影响 */
+  var rowH = top1 - top0;
+  if (rowH < 40) return;
+  var cs = window.getComputedStyle(stage);
+  var baseTop = parseFloat(cs.paddingTop) || 0;
+  /* 可视底边就是屏幕底边：底部那截 8rem 内边距只在滚到底时才起作用，
+     拿它当边界会让第二排少露一截（实测只剩 1/2 而不是 1/3）。 */
+  var bottomEdge = stage.clientHeight;
+  var delta = bottomEdge - rowH / 3 - top1;
+  if (delta <= 0) return;
+  delta = Math.min(delta, stage.clientHeight * FIRST_SCREEN_CAP);
+  stage.style.paddingTop = (baseTop + delta) + 'px';
+}
+
 function renderHome() {
   var cats = categoryList();
   var active = state.feedId || cats[0][0];
@@ -595,6 +786,7 @@ function renderHome() {
     + (feed ? feed.items.length : 0) + ' 部</span></div>' + chips + body + '</section>';
   view.innerHTML = html;
   paintCovers(view);
+  layoutFirstScreen();
   restoreFocus();
   applyPendingRestore();
   syncBackdropFromFocus();
@@ -650,6 +842,8 @@ function appendFeed(items) {
   paintCovers(grid);
   var count = view.querySelector('[data-feed-count]');
   if (count) count.textContent = state.feed.items.length + ' 部';
+  /* 第一页可能刚好 6 张，追加出第二排之后才需要重排顶部留白 */
+  layoutFirstScreen();
 }
 
 /* 滚到底自动续页（电视上不用点“加载更多”） */
@@ -729,6 +923,7 @@ function searchQrMarkup() {
 }
 
 function renderSearch() {
+  resetFirstScreen();
   var filters = filterList();
   var query = state.search.query;
   var items = filteredSearchItems();
@@ -904,6 +1099,7 @@ function renderLibrary() {
   }
   view.innerHTML = html;
   paintCovers(view);
+  layoutFirstScreen();
   syncBackdropFromFocus();
   restoreFocus();
   applyPendingRestore();
@@ -947,6 +1143,7 @@ function playNas(id) {
 
 /* ---------------- 详情 ---------------- */
 function renderDetail() {
+  resetFirstScreen();
   if (!state.detail) {
     view.innerHTML = '<p class="empty">正在打开…</p>';
     return;
@@ -1151,6 +1348,7 @@ function setActiveNav(tab) {
 function go(tab, restore) {
   if (tab === 'adult' || tab === 'category') tab = 'home';   /* 剧场已并进首页 */
   closeRail();
+  resetFirstScreen();   /* 首页/我的才需要顶部留白，切页先复位 */
   var mem = (restore && state.memory[tab]) ? state.memory[tab] : null;
   state.pendingRestore = mem ? { scrollTop: mem.scrollTop || 0, focusKey: mem.focusKey || '' } : null;
   if (!mem) stage.scrollTop = 0;
@@ -1184,6 +1382,14 @@ window.veyraTvKey = function (code) {
   var focused = document.querySelector('.is-focused');
   var typing = document.activeElement && document.activeElement.tagName === 'INPUT';
   if (typing) return;   /* 输入中把按键交还给系统 IME */
+
+  /* 参数行上左右 = 调值（不是移焦点）。长按会连发，正好用来快速拖到底。
+     上下仍然走 move()，所以「一行行翻、左右微调」是同一套手感。 */
+  var tuneKey = focused && focused.getAttribute ? focused.getAttribute('data-tune') : null;
+  if (tuneKey && (code === 21 || code === 22)) {
+    adjustTune(tuneKey, code === 22 ? 1 : -1);
+    return;
+  }
 
   if (code === 19) move('up');
   else if (code === 20) move('down');
@@ -1301,6 +1507,7 @@ document.addEventListener('click', function (event) {
   if (target.closest('[data-account]')) { openAccount(); return; }
   if (target.closest('#account-theme')) { openTheme(); return; }
   if (target.closest('#theme-close')) { closeTheme(); return; }
+  if (target.closest('[data-tune-reset]')) { resetHero(); return; }
   var swatch = target.closest('[data-theme-key]');
   if (swatch) {
     var picked = applyTheme(swatch.dataset.themeKey);
@@ -1699,6 +1906,8 @@ function boot() {
   applyBackdropMode();
   try { window.AndroidHost.setTvCapture(true); } catch (error) { }
   if (window.__tvApplyScale) window.__tvApplyScale();
+  /* 字体随视口缩放，卡片尺寸也跟着变：窗口尺寸变了要重算首屏顶部留白 */
+  window.addEventListener('resize', function () { setTimeout(layoutFirstScreen, 120); });
   restoreSearch();
   observeStageEnd();
   /* 版本号：账号面板里显示，检查更新时也拿它兜底显示「当前版本」 */
