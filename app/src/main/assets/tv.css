@@ -191,10 +191,10 @@ img{display:block;border:0}
 #tv-bg img{
   position:absolute;left:-4%;top:-4%;width:108%;height:108%;
   object-fit:cover;opacity:0;
-  /* 低模糊：22px 时候海报只剩一团色块，看不清是哪部剧。9px 够压掉噪点，
-     内容还认得出来。唯一用 filter 的地方，其余一律禁止。 */
-  -webkit-filter:blur(9px) saturate(1.06);
-  filter:blur(9px) saturate(1.06);
+  /* 极低模糊：22px 只剩一团色块，9px 还是糊。3px 基本是"轻微柔化"，
+     海报上的字和脸都看得清。唯一用 filter 的地方，其余一律禁止。 */
+  -webkit-filter:blur(3px) saturate(1.04);
+  filter:blur(3px) saturate(1.04);
   transform:translateZ(0);
   transition:opacity .25s linear;
 }
