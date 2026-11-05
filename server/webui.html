@@ -114,7 +114,9 @@ video{width:100%;border-radius:10px;background:#000}
 .drawer table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
 .drawer td,.drawer th{border:1px solid var(--line);padding:5px 7px;text-align:left}
 .drawer th{color:var(--mut)}
-.otp-big{font-size:28px;letter-spacing:4px;font-weight:700;color:var(--acc)}
+.otp-bound-title{display:inline-block;font-size:14px;font-weight:800;color:#1f7a4d;background:#e6f7ee;border:1px solid #bfe7d2;border-radius:999px;padding:4px 12px;letter-spacing:.3px}
+.otp-bound-title .ok-mark{font-size:15px;margin-right:4px;font-weight:900}
+.otp-unbind-box{margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)}
 .otp-tip{font-size:12px;color:var(--mut);line-height:1.7;margin:6px 0 10px}
 .otp-secret-row{display:flex;gap:8px;margin-bottom:8px;align-items:center}
 .otp-secret-row input{flex:1;min-width:0}
@@ -304,9 +306,9 @@ video{width:100%;border-radius:10px;background:#000}
       <label id="ch-relay" data-ch="relay">后端转发</label>
       <label id="ch-direct" data-ch="direct">直连</label>
     </div>
-    <h2>动态码</h2>
+    <h2>二步验证</h2>
     <div id="otp-unbound">
-      <p class="otp-tip">把下面这串密钥导入 Bitwarden / 1Password / Google Authenticator，再把验证器里实时显示的 6 位码填到下面完成绑定。<b>绑定通过后这串密钥会自动隐藏</b>，这里只显示当前动态码。</p>
+      <p class="otp-tip">把下面这串密钥导入 Bitwarden / 1Password / Google Authenticator，再把验证器里实时显示的 6 位码填到下面完成绑定。<b>绑定后这串密钥会自动隐藏</b>，动态码只在验证器里查看。</p>
       <div class="otp-secret-row">
         <input id="otp-secret" readonly spellcheck="false" placeholder="密钥（Base32）">
         <button class="ghost" id="btn-copy-secret">复制</button>
@@ -318,8 +320,17 @@ video{width:100%;border-radius:10px;background:#000}
       <p class="otp-tip" id="otp-bind-status"></p>
     </div>
     <div id="otp-bound" hidden>
-      <div class="row"><span class="otp-big" id="otp-code">------</span><span class="k" id="otp-remain"></span></div>
-      <p class="otp-tip" id="otp-bound-tip">已绑定验证器。动态码 30 秒一换，直接在 Bitwarden 里看即可，不用再打开这个页面。</p>
+      <p><span class="otp-bound-title"><b class="ok-mark">✓</b>已通过二步验证</span></p>
+      <p class="otp-tip">动态码请到 Bitwarden 里查看，这里不再显示。需要换绑设备时点「解绑」，输入当前 6 位动态码即可重新拿到密钥。</p>
+      <button class="ghost" id="btn-otp-unbind">解绑</button>
+      <div class="otp-unbind-box" id="otp-unbind-box" hidden>
+        <p class="otp-tip">输入验证器里<b>当前</b>的 6 位动态码，验证通过后重新显示密钥。</p>
+        <div class="otp-secret-row">
+          <input id="otp-unbind-code" placeholder="当前 6 位动态码" inputmode="numeric" maxlength="6" autocomplete="one-time-code">
+          <button class="danger" id="btn-otp-unbind-confirm">确认解绑</button>
+        </div>
+        <p class="otp-tip" id="otp-unbind-status"></p>
+      </div>
     </div>
     <h2>用户管理</h2>
     <table><thead><tr><th>用户</th><th>用户组</th><th>操作</th></tr></thead><tbody id="user-rows"></tbody></table>
@@ -1280,9 +1291,15 @@ document.getElementById('btn-dl-confirm').onclick=async()=>{
 // ---- NAS 下载管理页：任务列表 / 进度 / 合并 / 重试 / 删除 ----
 let _dlmgrTimer=null;
 const DL_STATUS={queued:['排队中',''],downloading:['下载中','run'],ready:['待合并','ok'],merging:['合并中','run'],done:['已完成','ok'],failed:['失败','err'],canceled:['已取消','']};
+/* 手机端设置页是整屏抽屉，会把下载弹窗整个盖住：
+   点「NAS 下载管理」先把抽屉收起来，关掉弹窗再自动回到设置页。桌面端不用这套。 */
+function phoneLayout(){ try{ return window.matchMedia('(max-width:800px)').matches; }catch(e){ return false; } }
+let _drawerBackAfterDlmgr=false;
 function openDlmgr(){
   const ov=document.getElementById('dlmgr-overlay');
   if(ov.classList.contains('open')){closeDlmgr();return}
+  if(phoneLayout() && drawer.classList.contains('open')){ _drawerBackAfterDlmgr=true; closeDrawer(); }
+  else _drawerBackAfterDlmgr=false;
   ov.classList.add('open');
   loadDlmgr(document.getElementById('dlmgr-list'));
   _dlmgrTimer=setInterval(()=>loadDlmgr(document.getElementById('dlmgr-list')),10000);
@@ -1290,6 +1307,7 @@ function openDlmgr(){
 function closeDlmgr(){
   document.getElementById('dlmgr-overlay').classList.remove('open');
   if(_dlmgrTimer){clearInterval(_dlmgrTimer);_dlmgrTimer=null}
+  if(_drawerBackAfterDlmgr){ _drawerBackAfterDlmgr=false; openDrawer(); }
 }
 document.getElementById('btn-close-dlmgr').onclick=closeDlmgr;
 document.getElementById('dlmgr-overlay').addEventListener('click',e=>{if(e.target.id==='dlmgr-overlay')closeDlmgr()});
@@ -1438,51 +1456,34 @@ document.getElementById('btn-test-proxy').onclick=async()=>{
   const el=document.getElementById('proxy-status');el.textContent='测试中…';
   try{
     const r=await fetch('/api/admin/proxy-test',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},AUTH()),body:JSON.stringify({proxy:document.getElementById('backend-proxy').value.trim()})}).then(x=>x.json());
-    el.textContent=r.ok?'✅ 通 ('+r.ms+'ms)':'❌ '+(r.error||'失败');
-  }catch(e){el.textContent='❌ '+e.message}
+    el.textContent=r.ok?('通 ('+r.ms+'ms)'):(r.error||'失败');
+  }catch(e){el.textContent=e.message}
 };
 
-/* 动态码面板
- * 未绑定：只显示密钥 + 输入框，服务器不下发算好的码（否则复制粘贴就能「绑定成功」）
- * 已绑定：密钥隐藏，只显示实时码与倒计时
- * 绑定是一次性的：绑定后没有任何入口能改绑/解绑/换密钥，
- * 想彻底重来只能到服务器上删掉 data/otp.json（需要机器权限，不是后台权限）。
+/* 二步验证面板
+ * 未绑定：显示密钥 + 输入框（服务器不下发算好的码，否则复制粘贴就能「绑定成功」）
+ * 已绑定：不显示任何动态码，只显示「已通过二步验证」；动态码去 Bitwarden 里看
+ * 解绑：必须输入当前动态码才能解绑，解绑后密钥重新出现，可再次绑定
  */
-let _otpTick=null,_otpLeft=0;
-
 function renderOtp(d){
   if(!d || d.error) return;
   const bound=!!d.bound;
   document.getElementById('otp-unbound').hidden=bound;
   document.getElementById('otp-bound').hidden=!bound;
-  if(d.secret) document.getElementById('otp-secret').value=d.secret;
+  const secretEl=document.getElementById('otp-secret');
   if(bound){
-    if(d.code) document.getElementById('otp-code').textContent=d.code;
-    startOtpTimer(d.expiresIn);
-  }else{
-    clearInterval(_otpTick); _otpTick=null;
-    document.getElementById('otp-code').textContent='------';
-    document.getElementById('otp-remain').textContent='';
+    // 已绑定：密钥一律不留在页面上
+    secretEl.value='';
+  }else if(d.secret){
+    secretEl.value=d.secret;
   }
-}
-
-function startOtpTimer(left){
-  _otpLeft=Number(left)||30;
-  clearInterval(_otpTick);
-  const el=document.getElementById('otp-remain');
-  if(el) el.textContent=_otpLeft+'秒';
-  _otpTick=setInterval(async()=>{
-    _otpLeft--;
-    const r=document.getElementById('otp-remain');
-    if(r) r.textContent=Math.max(_otpLeft,0)+'秒';
-    if(_otpLeft>0) return;
-    clearInterval(_otpTick); _otpTick=null;
-    try{
-      const d=await fetch('/api/otp',{headers:AUTH()}).then(x=>x.json());
-      // 服务端若已被重置，这里会自动切回「只显示密钥」
-      renderOtp(d);
-    }catch(e){}
-  },1000);
+  // 解绑输入框默认收起，每次重渲染都收回，避免解码后停在半开状态
+  const box=document.getElementById('otp-unbind-box');
+  if(box) box.hidden=true;
+  const uin=document.getElementById('otp-unbind-code');
+  if(uin) uin.value='';
+  const ust=document.getElementById('otp-unbind-status');
+  if(ust) ust.textContent='';
 }
 
 document.getElementById('btn-copy-secret').onclick=async()=>{
@@ -1501,13 +1502,39 @@ document.getElementById('btn-otp-bind').onclick=async()=>{
     if(r.ok){
       inp.value='';
       st.textContent='';
-      renderOtp(r);
-      document.getElementById('otp-secret').value='';
-      toast('绑定成功，密钥已隐藏');
+      // 绑定通过：只显示「已通过二步验证」，密钥与动态码都不留在页面上
+      renderOtp({bound:true});
+      toast('绑定成功，之后请在验证器里查看动态码');
     }else{
-      st.textContent='❌ '+(r.error||'校验失败'); st.style.color='var(--err)';
+      st.textContent=(r.error||'校验失败'); st.style.color='var(--err)';
     }
-  }catch(e){ st.textContent='❌ 网络错误'; st.style.color='var(--err)'; }
+  }catch(e){ st.textContent='网络错误'; st.style.color='var(--err)'; }
+};
+
+/* 解绑：必须输入当前动态码，通过后重新显示密钥，可重新绑定到别的验证器 */
+document.getElementById('btn-otp-unbind').onclick=()=>{
+  const box=document.getElementById('otp-unbind-box');
+  box.hidden=!box.hidden;
+  if(!box.hidden) setTimeout(()=>{try{document.getElementById('otp-unbind-code').focus()}catch(e){}},30);
+};
+document.getElementById('otp-unbind-code').addEventListener('keydown',e=>{
+  if(e.key==='Enter'){e.preventDefault();document.getElementById('btn-otp-unbind-confirm').click();}
+});
+document.getElementById('btn-otp-unbind-confirm').onclick=async()=>{
+  const inp=document.getElementById('otp-unbind-code'), st=document.getElementById('otp-unbind-status');
+  const code=(inp.value||'').replace(/\D/g,'');
+  if(code.length!==6){ st.textContent='请输入 6 位数字'; st.style.color='var(--err)'; return; }
+  st.textContent='校验中…'; st.style.color='var(--mut)';
+  try{
+    const r=await fetch('/api/otp/unbind',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},AUTH()),body:JSON.stringify({code})}).then(x=>x.json());
+    if(r.ok){
+      inp.value=''; st.textContent=''; st.style.color='var(--mut)';
+      renderOtp({bound:false,secret:r.secret});
+      toast('已解绑，请重新导入密钥');
+    }else{
+      st.textContent=(r.error||'解绑失败'); st.style.color='var(--err)';
+    }
+  }catch(e){ st.textContent='网络错误'; st.style.color='var(--err)'; }
 };
 
 document.getElementById('btn-admin-logout').onclick=()=>{adminToken='';localStorage.removeItem('veyraAdmin');location.reload()};

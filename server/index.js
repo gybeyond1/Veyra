@@ -565,10 +565,9 @@ app.post('/api/admin/proxy-test', requireAdmin, (req, res) => {
 });
 
 // 动态码状态（需管理员）
-// 未绑定验证器：只返回密钥，绝不返回算好的码 —— 否则复制粘贴就能「绑定成功」。
-// 已绑定：只返回当前码与剩余秒数，密钥永不再下发。
-// 绑定是一次性的，后台没有任何接口能改绑 / 解绑 / 换密钥；
-// 真要重来只能到服务器上删掉 data/otp.json（需要机器权限，不是后台密码）。
+// 未绑定：只返回密钥，让用户导进验证器。
+// 已绑定：什么都不给 —— 密钥、动态码一律不下发，后台只看「验没验过」。
+// 动态码只在验证器里看；后台要改绑必须先输入当前动态码（POST /api/otp/unbind）。
 app.get('/api/otp', requireAdmin, (_req, res) => {
   const otpData = ensureOtpSecret();
   const bound = Boolean(otpData.boundAt);
@@ -586,7 +585,8 @@ app.get('/api/otp', requireAdmin, (_req, res) => {
       otpauth: otpauthUri(otpData.secret)
     }));
   }
-  res.json(Object.assign({}, base, { code: totpCode(otpData, 0) }));
+  // 已绑定：不再下发 code。后台显示动态码没有任何意义，只会让码离开验证器多一份拷贝。
+  res.json(base);
 });
 
 // 校验绑定：用户把密钥导入验证器后，回填一次验证器生成的 6 位码来确认导入正确。
@@ -598,13 +598,23 @@ app.post('/api/otp/check', requireAdmin, (req, res) => {
   const otpData = ensureOtpSecret();
   otpData.boundAt = Date.now();
   saveOtpData(otpData);
+  res.json({ ok: true, bound: true, verifiedAt: otpData.boundAt });
+});
+
+// 解绑：必须当场输入验证器里的动态码。验过才把 boundAt 清掉，重新下发密钥。
+// 这样光有后台密码解不了绑，还得手上真有那个验证器。
+app.post('/api/otp/unbind', requireAdmin, (req, res) => {
+  const input = String((req.body && req.body.code) || '').replace(/\D/g, '');
+  if (input.length !== OTP_DIGITS) return res.status(400).json({ error: '请输入 6 位数字' });
+  if (!verifyOtp(input)) return res.status(400).json({ error: '动态码不正确，无法解绑' });
+  const otpData = ensureOtpSecret();
+  otpData.boundAt = null;
+  saveOtpData(otpData);
   res.json({
     ok: true,
-    bound: true,
-    verifiedAt: otpData.boundAt,
-    code: totpCode(otpData, 0),
-    window: OTP_WINDOW,
-    expiresIn: OTP_WINDOW - (Math.floor(Date.now() / 1000) % OTP_WINDOW)
+    bound: false,
+    secret: otpData.secret,
+    otpauth: otpauthUri(otpData.secret)
   });
 });
 
