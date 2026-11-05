@@ -5,8 +5,10 @@ interface Props {
   view: View;
   user: AccountUser;
   server: string;
+  source: 'hongguo' | 'huangguo';
   activeDownloads: number;
   onNav: (view: View) => void;
+  onPrivate: () => void;
   onLogout: () => void;
 }
 
@@ -73,7 +75,7 @@ const items: { key: View; label: string; icon: JSX.Element }[] = [
   },
 ];
 
-export default function Sidebar({ view, user, server, activeDownloads, onNav, onLogout }: Props) {
+export default function Sidebar({ view, user, server, source, activeDownloads, onNav, onPrivate, onLogout }: Props) {
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -101,17 +103,28 @@ export default function Sidebar({ view, user, server, activeDownloads, onNav, on
         ))}
       </nav>
 
-      <div className="side-foot">
-        <div className="account">
+      <div className="side-bottom">
+        <button
+          type="button"
+          className={`private-toggle${source === 'huangguo' ? ' on' : ''}`}
+          onClick={onPrivate}
+          title={source === 'huangguo' ? '切回公开内容' : '输入动态码进入私密模式'}
+        >
+          <span className="lock">{source === 'huangguo' ? '🔓' : '🔒'}</span>
+          <span>{source === 'huangguo' ? '私密模式 · 已开启' : '私密模式'}</span>
+        </button>
+        <div className="side-foot">
+          <div className="account">
           <span className="avatar">{(user.username || '?').slice(0, 1).toUpperCase()}</span>
           <div className="account-meta">
             <strong>{user.username}</strong>
             <small title={server}>{server.replace(/^https?:\/\//, '')}</small>
           </div>
         </div>
-        <button type="button" className="ghost tiny" onClick={onLogout}>
-          退出
-        </button>
+          <button type="button" className="ghost tiny" onClick={onLogout}>
+            退出
+          </button>
+        </div>
       </div>
     </aside>
   );

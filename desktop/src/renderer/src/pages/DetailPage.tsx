@@ -12,14 +12,16 @@ export interface DetailFallback {
 
 interface Props {
   id: string;
+  source: 'hongguo' | 'huangguo';
   fallback: DetailFallback | null;
   settings: AppSettings | null;
   onBack: () => void;
   onDownloaded: () => void;
+  onPlay: (episode: number) => void;
   notify: (text: string, tone?: 'info' | 'error') => void;
 }
 
-export default function DetailPage({ id, fallback, settings, onBack, onDownloaded, notify }: Props) {
+export default function DetailPage({ id, source, fallback, settings, onBack, onDownloaded, onPlay, notify }: Props) {
   const [detail, setDetail] = useState<SeriesDetail | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -32,7 +34,7 @@ export default function DetailPage({ id, fallback, settings, onBack, onDownloade
     setLoading(true);
     setError('');
     setSelected(new Set());
-    call<SeriesDetail>('catalog.detail', { id })
+    call<SeriesDetail>('catalog.detail', { id, source })
       .then((data) => {
         if (!alive) return;
         setDetail(data);
@@ -43,7 +45,7 @@ export default function DetailPage({ id, fallback, settings, onBack, onDownloade
     return () => {
       alive = false;
     };
-  }, [id, attempt]);
+  }, [id, source, attempt]);
 
   // 详情接口没给封面时，用列表卡片带过来的那张，别显示空图
   const cover = detail?.cover || fallback?.cover || '';
@@ -76,6 +78,7 @@ export default function DetailPage({ id, fallback, settings, onBack, onDownloade
         id,
         title,
         cover,
+        source,
         episodes: numbers,
       });
       notify(`已加入下载队列：${task.title}（${numbers.length} 集）`);
@@ -143,6 +146,14 @@ export default function DetailPage({ id, fallback, settings, onBack, onDownloade
             <button
               type="button"
               className="primary big"
+              disabled={!episodes.length}
+              onClick={() => onPlay(episodes[0])}
+            >
+              立即播放
+            </button>
+            <button
+              type="button"
+              className="ghost big"
               disabled={busy || !episodes.length}
               onClick={() => download(episodes)}
             >
@@ -177,14 +188,20 @@ export default function DetailPage({ id, fallback, settings, onBack, onDownloade
         </header>
         <div className="ep-grid">
           {episodes.map((number) => (
-            <button
-              key={number}
-              type="button"
-              className={selected.has(number) ? 'ep active' : 'ep'}
-              onClick={() => toggle(number)}
-            >
-              {number}
-            </button>
+            <div key={number} className={selected.has(number) ? 'ep active' : 'ep'}>
+              <button type="button" className="ep-play" title={`播放第 ${number} 集`} onClick={() => onPlay(number)}>
+                <span className="ep-num">{number}</span>
+                <span className="ep-icon">▶</span>
+              </button>
+              <button
+                type="button"
+                className="ep-check"
+                title={selected.has(number) ? '取消下载这一集' : '勾选下载这一集'}
+                onClick={() => toggle(number)}
+              >
+                {selected.has(number) ? '✓' : ''}
+              </button>
+            </div>
           ))}
         </div>
       </section>

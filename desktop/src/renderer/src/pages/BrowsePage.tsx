@@ -6,10 +6,11 @@ import SeriesTile from '../components/SeriesTile';
 interface Props {
   mode?: 'category' | 'search';
   seed?: string;
+  source: 'hongguo' | 'huangguo';
   onOpen: (id: string, fallback: { title: string; cover: string }) => void;
 }
 
-export default function BrowsePage({ mode = 'category', seed = '', onOpen }: Props) {
+export default function BrowsePage({ mode = 'category', seed = '', source, onOpen }: Props) {
   const [type, setType] = useState<'short' | 'comic'>('short');
   const [slug, setSlug] = useState('');
   const [page, setPage] = useState(1);
@@ -23,10 +24,10 @@ export default function BrowsePage({ mode = 'category', seed = '', onOpen }: Pro
 
   useEffect(() => {
     if (mode !== 'category') return;
-    call<{ items: { name: string; slug: string; type: string }[] }>('catalog.tags')
+    call<{ items: { name: string; slug: string; type: string }[] }>('catalog.tags', { source })
       .then((data) => setTags(data.items))
       .catch(() => setTags([]));
-  }, [mode]);
+  }, [mode, source]);
 
   useEffect(() => {
     if (mode === 'search' && seed) {
@@ -42,13 +43,13 @@ export default function BrowsePage({ mode = 'category', seed = '', onOpen }: Pro
     const job =
       mode === 'search'
         ? submitted
-          ? call<{ items: SeriesCard[] }>('catalog.search', { q: submitted }).then((data) => ({
+          ? call<{ items: SeriesCard[] }>('catalog.search', { q: submitted, source }).then((data) => ({
               items: data.items,
               hasMore: false,
               title: `“${submitted}” 的搜索结果`,
             }))
           : Promise.resolve({ items: [], hasMore: false, title: '搜索' })
-        : call<CategoryPayload>('catalog.category', { type, slug, page }).then((data) => ({
+        : call<CategoryPayload>('catalog.category', { type, slug, page, source }).then((data) => ({
             items: data.items,
             hasMore: !!data.hasMore,
             title: data.title || (type === 'comic' ? '漫剧' : '短剧'),
@@ -65,7 +66,7 @@ export default function BrowsePage({ mode = 'category', seed = '', onOpen }: Pro
     return () => {
       alive = false;
     };
-  }, [mode, type, slug, page, submitted]);
+  }, [mode, type, slug, page, submitted, source]);
 
   const visibleTags = useMemo(() => tags.filter((tag) => tag.type === type), [tags, type]);
 

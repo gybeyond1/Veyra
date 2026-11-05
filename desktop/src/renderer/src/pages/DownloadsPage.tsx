@@ -5,6 +5,7 @@ import Cover from '../components/Cover';
 interface Props {
   tasks: DownloadTask[];
   onRefresh: () => void;
+  onPlay: (task: DownloadTask) => void;
   notify: (text: string, tone?: 'info' | 'error') => void;
 }
 
@@ -18,7 +19,7 @@ const STATUS_TEXT: Record<string, string> = {
   canceled: '已取消',
 };
 
-export default function DownloadsPage({ tasks, onRefresh, notify }: Props) {
+export default function DownloadsPage({ tasks, onRefresh, onPlay, notify }: Props) {
   async function act(label: string, job: () => Promise<unknown>) {
     try {
       await job();
@@ -78,6 +79,11 @@ export default function DownloadsPage({ tasks, onRefresh, notify }: Props) {
                 {task.error && <p className="task-error">{task.error}</p>}
               </div>
               <div className="task-actions">
+                {(task.status === 'done' || task.output) && (
+                  <button type="button" className="primary small" onClick={() => onPlay(task)}>
+                    播放本地
+                  </button>
+                )}
                 <button type="button" className="ghost" onClick={() => act('已打开目录', () => call('downloads.openFolder', { id: task.id }))}>
                   目录
                 </button>

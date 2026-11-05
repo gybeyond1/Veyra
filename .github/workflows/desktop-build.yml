@@ -10,7 +10,7 @@ on:
         default: ''
   push:
     tags:
-      - 'desktop-v*'
+      - 'v*'
 
 permissions:
   contents: write
@@ -57,27 +57,25 @@ jobs:
           path: desktop/release/*.exe
           if-no-files-found: error
 
+      # 和手机/电视的 APK 挂在同一个 vX.Y.Z Release 上：
+      # 后端 app-updater 只认 v 开头的 tag，这样电脑端才能从后端检查更新。
       - name: 附到 Release（打 tag 时）
-        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: desktop/release/*.exe
-          name: Veyra 桌面端 ${{ github.ref_name }}
-          body: |
-            Windows 安装包（x64）。首次启动会校验自带的 ffmpeg。
-            下载目录、并发数在「设置」里改；账号与手机端共用同一台服务器。
+          name: Veyra ${{ github.ref_name }}
 
       # 手动触发也发一版，这样用户能从 Release 直接下（Actions 的 artifact 需要登录）
-      - name: 手动触发时发 Release
+      - name: 手动触发时上传到同版本 Release
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.version != ''
         working-directory: desktop
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="desktop-v${{ github.event.inputs.version }}"
-          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
-          gh release create "$TAG" release/*.exe \
-            --title "Veyra 桌面端 ${{ github.event.inputs.version }}" \
-            --notes "Windows x64 安装包，自带 ffmpeg。首次打开如果 SmartScreen 提示，点「更多信息 → 仍要运行」。" \
-            --latest=false
+          TAG="v${{ github.event.inputs.version }}"
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" --title "Veyra ${{ github.event.inputs.version }}" \
+              --notes "Windows x64 安装包，自带 ffmpeg。首次打开如果 SmartScreen 提示，点「更多信息 → 仍要运行」。" --latest=false
+          gh release upload "$TAG" release/*.exe --clobber

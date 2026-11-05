@@ -1,6 +1,6 @@
 {
   "name": "veyra-desktop",
-  "version": "0.1.0",
+  "version": "0.28.0",
   "private": true,
   "description": "Veyra 桌面端：本地解析、下载、合并，账号与片单与手机端同步",
   "main": "dist/main/index.cjs",
@@ -31,5 +31,9 @@
     "react-dom": "^18.3.1",
     "typescript": "^5.7.2",
     "vite": "^5.4.11"
+  },
+  "dependencies": {
+    "cheerio": "^1.2.0",
+    "hls.js": "^1.7.4"
   }
 }

@@ -1,6 +1,9 @@
 import type { CategoryPayload, HomePayload, SeriesDetail, SeriesCard } from '../shared/types';
 import { serverModules } from './server-modules';
 import { fetchText } from './http';
+import * as huangguo from './huangguo';
+import type { ContentSource } from './source';
+import { playUrl } from './media';
 
 const SITE = 'https://hongguoduanju.com';
 
@@ -22,7 +25,8 @@ function toCards(list: any): SeriesCard[] {
   return (Array.isArray(list) ? list : []).map(toCard).filter(Boolean) as SeriesCard[];
 }
 
-export async function home(): Promise<HomePayload> {
+export async function home(source: ContentSource): Promise<HomePayload> {
+  if (source === 'huangguo') return huangguo.home();
   const data = await serverModules().content.home();
   return {
     slides: toCards(data?.slides || data?.items),
@@ -31,24 +35,39 @@ export async function home(): Promise<HomePayload> {
   };
 }
 
-export async function category(params: { type?: string; slug?: string; page?: number }): Promise<CategoryPayload> {
-  const query = {
-    type: params.type === 'comic' ? 'comic' : 'short',
-    slug: params.slug || '',
-    page: Math.min(100, Math.max(1, Number(params.page) || 1)),
-  };
+export async function category(
+  source: ContentSource,
+  params: { type?: string; slug?: string; page?: number },
+): Promise<CategoryPayload> {
+  const page = Math.min(100, Math.max(1, Number(params.page) || 1));
+  if (source === 'huangguo') {
+    const result = await huangguo.category(params.slug || '', page);
+    return { items: result.items, title: result.title, page, hasMore: result.hasMore, total: result.items.length };
+  }
+  const query = { type: params.type === 'comic' ? 'comic' : 'short', slug: params.slug || '', page };
   const data = await serverModules().content.category(query);
   const items = toCards(data?.items);
   return {
     items,
     title: data?.title ? String(data.title) : '',
     total: Number(data?.total) || 0,
-    page: query.page,
+    page,
     hasMore: items.length >= 20,
   };
 }
 
-export async function tags(): Promise<{ items: { name: string; slug: string; type: string }[] }> {
+export async function tags(source: ContentSource): Promise<{ items: { name: string; slug: string; type: string }[] }> {
+  if (source === 'huangguo') {
+    // 私密站没有标签页接口，用固定分类（与 APK 的 four 个分类一致）
+    return {
+      items: [
+        { name: 'AI 短剧', slug: 'ai-duanju', type: 'short' },
+        { name: 'AI 漫剧', slug: 'ai-manju', type: 'short' },
+        { name: 'AI 换脸', slug: 'ai-huanlian', type: 'short' },
+        { name: 'AI 魔改', slug: 'ai-mogai', type: 'short' },
+      ],
+    };
+  }
   const data = await serverModules().content.tags();
   const items = (Array.isArray(data?.items) ? data.items : [])
     .map((item: any) => ({
@@ -60,16 +79,19 @@ export async function tags(): Promise<{ items: { name: string; slug: string; typ
   return { items };
 }
 
-export async function search(q: string): Promise<{ items: SeriesCard[] }> {
+export async function search(source: ContentSource, q: string): Promise<{ items: SeriesCard[] }> {
   const keyword = String(q || '').trim();
   if (!keyword) return { items: [] };
+  if (source === 'huangguo') return { items: await huangguo.search(keyword) };
   const data = await serverModules().content.search(keyword);
   return { items: toCards(data?.items) };
 }
 
-export async function detail(id: string): Promise<SeriesDetail> {
+export async function detail(source: ContentSource, id: string): Promise<SeriesDetail> {
   const seriesId = String(id || '').trim();
   if (!seriesId) throw new Error('缺少剧集 id');
+  if (source === 'huangguo') return huangguo.detail(seriesId);
+
   const { hgApp, contentModule } = serverModules();
   const html = await fetchText(`${SITE}/detail/${encodeURIComponent(seriesId)}`, 12000);
 
@@ -109,4 +131,10 @@ export async function detail(id: string): Promise<SeriesDetail> {
     vids,
     tags: Array.isArray(video.category_list) ? video.category_list.map(String) : [],
   };
+}
+
+/** 播放地址：统一交给本机媒体服务，渲染层只负责把 URL 交给 hls.js / video。 */
+export function play(source: ContentSource, id: string, episode: number): { url: string } {
+  if (!id) throw new Error('缺少剧集 id');
+  return { url: playUrl(source, id, episode) };
 }

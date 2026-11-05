@@ -1316,6 +1316,7 @@ function nextWorkMarkup(item, index) {
   if (item.status === 'done') badge = '已合并';
   else if (!ready) badge = '下载中';
   else badge = item.episodeCount ? ('全 ' + item.episodeCount + ' 集') : '已下载';
+  if (item.kind === 'desktop') badge = item.deviceName ? ('电脑 · ' + item.deviceName) : '电脑';
   return '<button type="button" class="card' + (ready ? '' : ' is-dim') + '" data-focusable data-key="' + esc(key) + '" data-nas="' + esc(item.id) + '" data-nas-ready="' + (ready ? '1' : '') + '">'
     + '<span class="art"><img data-cover="' + esc(item.cover || '') + '" alt="">'
     + '<i class="badge">' + esc(badge) + '</i>'
@@ -1331,13 +1332,13 @@ function renderLibrary() {
     + '<div class="tabs chips">'
     + '<button type="button" class="chip' + (tab === 'history' ? ' is-active' : '') + '" data-focusable data-key="tab:history" data-tab="history">观看记录</button>'
     + '<button type="button" class="chip' + (tab === 'bookmarks' ? ' is-active' : '') + '" data-focusable data-key="tab:bookmarks" data-tab="bookmarks">收藏</button>'
-    + '<button type="button" class="chip' + (tab === 'nas' ? ' is-active' : '') + '" data-focusable data-key="tab:nas" data-tab="nas">NAS</button>'
+    + '<button type="button" class="chip' + (tab === 'nas' ? ' is-active' : '') + '" data-focusable data-key="tab:nas" data-tab="nas">下载</button>'
     + '</div>';
   if (tab === 'nas') {
     html += '<div class="nas-panel">';
     if (state.nasError) html += '<p class="empty">' + esc(state.nasError) + '</p>';
-    else if (!state.nas) html += '<p class="empty">正在读取 NAS 下载…</p>';
-    else if (!state.nas.length) html += '<p class="empty">还没有下载到 NAS 的作品<br><span class="tip">在手机端「我的下载」里把作品传到 NAS 后，这里就能直接播放</span></p>';
+    else if (!state.nas) html += '<p class="empty">正在读取下载…</p>';
+    else if (!state.nas.length) html += '<p class="empty">还没有已下载的作品<br><span class="tip">手机端传到 NAS，或在电脑端下载完成后，这里就能直接播放</span></p>';
     else {
       html += '<div class="grid">';
       for (var i = 0; i < state.nas.length; i++) html += nextWorkMarkup(state.nas[i], i);
@@ -1376,6 +1377,12 @@ function loadNas() {
   state.nasError = '';
   api('nas-download-list').then(function (data) {
     state.nas = list(data && data.tasks);
+    /* 同一账号下在线电脑的下载记录：和 NAS 混在一个列表里，点开直接播电脑上的成品 */
+    return api('desktop-download-list').then(function (pc) {
+      var extra = list(pc && pc.tasks).map(function (t) { t.kind = 'desktop'; return t; });
+      state.nas = state.nas.concat(extra);
+    }).catch(function () { });
+  }).then(function () {
     if (state.route === 'library' && state.libraryTab === 'nas') renderLibrary();
   }).catch(function (error) {
     state.nas = [];
@@ -1388,6 +1395,11 @@ function playNas(id) {
   var task = null;
   for (var i = 0; i < list(state.nas).length; i++) if (String(state.nas[i].id) === String(id)) task = state.nas[i];
   if (task && task.status !== 'done' && task.status !== 'ready') { toast('这部还没下载完，等它下载好再播'); return; }
+  if (task && task.kind === 'desktop') {
+    api('open-desktop-player', { url: task.url, title: task.title })
+      .catch(function (error) { toast((error && error.message) || '电脑视频打不开，确认电脑在同一局域网且在线', true); });
+    return;
+  }
   api('open-nas-player', { id: String(id) }).catch(function (error) { toast((error && error.message) || 'NAS 视频打不开', true); });
 }
 

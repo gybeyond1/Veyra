@@ -1287,6 +1287,62 @@ public final class MainActivity extends Activity {
                 return account.postJson("api/download/tasks", body);
             }
             case "nas-download-list": return account.getJson("api/download/tasks");
+            case "desktop-download-list": {
+                // 电脑端在同一个账号下上报了下载任务摘要和局域网媒体地址：
+                // 这里把「在线电脑」的任务摊平成下载页可直接渲染的行（id 前缀 pc: 避免与手机/NAS 撞号）。
+                if (!account.isLoggedIn()) throw new IllegalStateException("请先登录");
+                JSONArray devices = account.getJson("api/devices").optJSONArray("devices");
+                JSONArray out = new JSONArray();
+                for (int i = 0; devices != null && i < devices.length(); i++) {
+                    JSONObject device = devices.optJSONObject(i);
+                    if (device == null) continue;
+                    if (!"desktop".equals(device.optString("platform"))) continue;
+                    if (!device.optBoolean("online")) continue;
+                    JSONObject lan = device.optJSONObject("lan");
+                    String base = lan == null ? "" : lan.optString("url", "");
+                    String lanToken = lan == null ? "" : lan.optString("token", "");
+                    if (base.isEmpty()) continue;
+                    JSONArray tasks = device.optJSONArray("tasks");
+                    for (int j = 0; tasks != null && j < tasks.length(); j++) {
+                        JSONObject task = tasks.optJSONObject(j);
+                        if (task == null) continue;
+                        String taskId = task.optString("id", "");
+                        if (taskId.isEmpty()) continue;
+                        out.put(new JSONObject()
+                                .put("id", "pc:" + device.optString("id") + ":" + taskId)
+                                .put("taskId", taskId)
+                                .put("deviceId", device.optString("id"))
+                                .put("deviceName", device.optString("name", "电脑"))
+                                .put("title", task.optString("title", "未命名"))
+                                .put("cover", task.optString("cover", ""))
+                                .put("status", task.optString("status", ""))
+                                .put("percent", task.optDouble("percent", 0))
+                                .put("doneCount", task.optInt("doneCount", 0))
+                                .put("totalCount", task.optInt("totalCount", 0))
+                                .put("episodeCount", task.optInt("episodeCount", 0))
+                                .put("merged", task.optBoolean("merged", false))
+                                .put("url", endpoint(base, "/file/" + taskId + "/0?t=" + lanToken))
+                                .put("kind", "desktop"));
+                    }
+                }
+                return new JSONObject().put("tasks", out);
+            }
+            case "open-desktop-player": {
+                // 电脑在线时直接播它本机的成品：局域网直连，不走后端中转。
+                String url = args.optString("url", "");
+                if (url.isEmpty()) throw new IllegalStateException("电脑文件地址无效");
+                Intent intent = new Intent(this, LocalPlayerActivity.class);
+                intent.putExtra("title", args.optString("title", "电脑下载"));
+                intent.putExtra("merged", true);
+                intent.putExtra("nasMode", true);
+                intent.putExtra("auth", "");
+                JSONArray eps = new JSONArray();
+                eps.put(new JSONObject().put("index", 1).put("url", url));
+                intent.putExtra("episodes", eps.toString());
+                intent.putExtra("path", url);
+                runOnUiThread(() -> startActivity(intent));
+                return true;
+            }
             case "open-nas-player": {
                 // NAS 任务点封面直接播 NAS 上的成品：合并产物（files/{id}/0）优先，
                 // 未合并则逐集播（files/{id}/1..N）。服务器 sendFile 支持 Range，拖动进度没问题。

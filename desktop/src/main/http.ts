@@ -130,11 +130,23 @@ const MOBILE_UA = 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120
  * 红果/黄果的边缘节点会按 TLS 指纹拦 Node 客户端，curl 反而正常；
  * Windows 10 1803 起自带 curl.exe，打包时另外附带一份，不依赖用户环境。
  */
-export function fetchText(url: string, timeoutMs = 10000): Promise<string> {
+function curlArgs(url: string, timeoutMs: number, headers?: Record<string, string>): string[] {
+  const args = ['-s', '-L', '-m', String(Math.max(3, Math.round(timeoutMs / 1000)))];
+  const custom = headers || {};
+  if (!Object.keys(custom).some((key) => key.toLowerCase() === 'user-agent')) args.push('-A', MOBILE_UA);
+  for (const [key, value] of Object.entries(custom)) {
+    if (!value) continue;
+    args.push('-H', `${key}: ${value}`);
+  }
+  args.push(url);
+  return args;
+}
+
+export function fetchText(url: string, timeoutMs = 10000, headers?: Record<string, string>): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(
       'curl',
-      ['-s', '-L', '-m', String(Math.max(3, Math.round(timeoutMs / 1000))), '-A', MOBILE_UA, url],
+      curlArgs(url, timeoutMs, headers),
       { maxBuffer: 12 * 1024 * 1024, windowsHide: true },
       (error, stdout) => {
         if (error) {
@@ -142,6 +154,28 @@ export function fetchText(url: string, timeoutMs = 10000): Promise<string> {
           return;
         }
         resolve(String(stdout || ''));
+      },
+    );
+  });
+}
+
+/** 抓二进制（封面、m3u8 分片）：同样走 curl，避开源站对 Node TLS 指纹的风控。 */
+export function fetchBinary(
+  url: string,
+  timeoutMs = 10000,
+  headers?: Record<string, string>,
+): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      'curl',
+      curlArgs(url, timeoutMs, headers),
+      { maxBuffer: 64 * 1024 * 1024, encoding: 'buffer', windowsHide: true },
+      (error, stdout) => {
+        if (error) {
+          reject(new Error(`抓取失败：${error.message}`));
+          return;
+        }
+        resolve(Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout || ''));
       },
     );
   });

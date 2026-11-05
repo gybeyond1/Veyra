@@ -48,7 +48,7 @@ const WAKE_RETRY_MS = parseInt(process.env.APP_UPDATE_WAKE_RETRY_MS || '5000', 1
 const WAKE_ROUNDS = parseInt(process.env.APP_UPDATE_WAKE_ROUNDS || '24', 10);
 /** 被唤醒后这段时间内按 tag 精确查 API（atom 有 CDN 缓存，可能还看不到新版本）。 */
 const WAKE_API_WINDOW_MS = 120_000;
-const MAX_BYTES = 120 * 1024 * 1024;
+const MAX_BYTES = 200 * 1024 * 1024;
 /**
  * 每个渠道在盘上保留几个版本，默认 1：只留最新的。
  * 检查更新拿到的永远是清单里的最新版，旧包没有任何分发路径，留着只占地方。
@@ -71,7 +71,9 @@ const DEFAULT_MIRRORS = [
 ];
 
 /** 只有这两个渠道的包会被缓存和分发。 */
-const CHANNELS = ['mobile', 'tv'];
+const CHANNELS = ['mobile', 'tv', 'desktop'];
+/** 发版必须齐的渠道：桌面端安装包可以后补，不能因此让手机/电视的更新卡住。 */
+const REQUIRED_CHANNELS = ['mobile', 'tv'];
 
 function mirrors() {
   const raw = process.env.APP_UPDATE_MIRRORS;
@@ -97,14 +99,29 @@ function compareVersion(a, b) {
 
 /** 渠道 → 附件名。约定优于配置：发布流水线一直用这两个名字。 */
 function fileName(channel, version) {
-  return channel === 'tv' ? `Veyra-TV-${version}.apk` : `Veyra-${version}.apk`;
+  if (channel === 'tv') return `Veyra-TV-${version}.apk`;
+  if (channel === 'desktop') return `Veyra-Desktop-${version}.exe`;
+  return `Veyra-${version}.apk`;
 }
 
-/** 一组 asset 里两个渠道的包是不是都已经传上去了。 */
+/** 资产名是否属于这个渠道：电视/手机都是 apk，桌面端是 electron-builder 产出的 exe。 */
+function matchesChannel(channel, name) {
+  const value = String(name || '');
+  if (channel === 'desktop') return /\.exe$/i.test(value) && /desktop/i.test(value);
+  if (!value.endsWith('.apk')) return false;
+  return /(^|[-_.])tv([-_.]|$)/i.test(value) === (channel === 'tv');
+}
+
+/** 手机/电视两个包是不是都已经传上去了（桌面端缺包不算残缺）。 */
 function hasApks(assets, version) {
   if (!Array.isArray(assets) || !assets.length || !version) return false;
   const names = new Set(assets.map(a => (a && a.name) || ''));
-  return CHANNELS.every(channel => names.has(fileName(channel, version)));
+  return REQUIRED_CHANNELS.every(channel => names.has(fileName(channel, version)));
+}
+
+/** release 里有没有这个渠道的包；没有就跳过，免得每 10 分钟白重试一次。 */
+function hasAsset(assets, channel) {
+  return Array.isArray(assets) && assets.some(a => a && matchesChannel(channel, a.name));
 }
 
 function curl(args, timeoutMs) {
@@ -344,7 +361,7 @@ function createAppUpdater(options) {
     let names = [];
     try { names = fs.readdirSync(channelDir(channel)); } catch { return found; }
     for (const name of names) {
-      const m = name.match(/^Veyra(?:-TV)?-(\d+\.\d+\.\d+)\.apk$/);
+      const m = name.match(/^Veyra(?:-TV|-Desktop)?-(\d+\.\d+\.\d+)\.(?:apk|exe)$/);
       if (!m) continue;
       if (name !== fileName(channel, m[1])) continue;
       const stat = fs.statSync(path.join(channelDir(channel), name));
@@ -414,8 +431,7 @@ function createAppUpdater(options) {
     let assetName = name;
     let expectSha = '';
     if (Array.isArray(assets) && assets.length) {
-      const hit = assets.find(a => a && typeof a.name === 'string' && a.name.endsWith('.apk')
-        && /(^|[-_.])tv([-_.]|$)/i.test(a.name) === (channel === 'tv'));
+      const hit = assets.find(a => a && typeof a.name === 'string' && matchesChannel(channel, a.name));
       if (hit) {
         assetName = hit.name;
         const digest = String(hit.digest || '');
@@ -591,6 +607,8 @@ function createAppUpdater(options) {
             };
             continue;
           }
+          // 桌面端还没发安装包时直接跳过，不要让它拖慢手机/电视的更新
+          if (channel === 'desktop' && Array.isArray(info.assets) && info.assets.length && !hasAsset(info.assets, 'desktop')) continue;
           try {
             manifest.channels[channel] = await fetchChannel(channel, info.version, info.tag, info.assets,
               // 快车道：只探两个源，每轮换个起点，别让超时把 5 秒的节奏拖没
@@ -613,7 +631,7 @@ function createAppUpdater(options) {
     } finally {
       // 有渠道还没落地：短间隔重试。以前全失败要干等 10 分钟，
       // 而 .part 已经下了一大半，早一轮就早一点补完。
-      const ready = CHANNELS.every(channel => {
+      const ready = REQUIRED_CHANNELS.every(channel => {
         const entry = manifest && manifest.channels && manifest.channels[channel];
         return entry && entry.file && fs.existsSync(path.join(channelDir(channel), entry.file));
       });
@@ -731,7 +749,7 @@ function createAppUpdater(options) {
   /** 下载路由用：只允许清单里登记过的文件，挡住路径穿越。 */
   function fileOf(channel, name) {
     if (CHANNELS.indexOf(channel) < 0) return null;
-    if (!/^Veyra(?:-TV)?-\d+\.\d+\.\d+\.apk$/.test(name)) return null;
+    if (!/^Veyra(?:-TV|-Desktop)?-\d+\.\d+\.\d+\.(?:apk|exe)$/.test(name)) return null;
     const file = path.join(channelDir(channel), name);
     if (!file.startsWith(channelDir(channel) + path.sep)) return null;
     return fs.existsSync(file) ? file : null;

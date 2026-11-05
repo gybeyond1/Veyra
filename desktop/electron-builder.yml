@@ -32,7 +32,7 @@ win:
       arch:
         - x64
   icon: resources/icon.ico
-  artifactName: Veyra-Desktop-${version}-${arch}.${ext}
+  artifactName: Veyra-Desktop-${version}.${ext}
   requestedExecutionLevel: asInvoker
 
 nsis:

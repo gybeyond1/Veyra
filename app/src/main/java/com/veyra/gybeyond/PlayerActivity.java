@@ -1827,7 +1827,9 @@ public final class PlayerActivity extends Activity {
                 for (int i = 0; all != null && i < all.length(); i++) {
                     JSONObject device = all.optJSONObject(i);
                     if (device == null) continue;
-                    if (!"tv".equals(device.optString("platform"))) continue;
+                    // 电视和电脑都是「同一账号下可接投屏的设备」；手机自己不在列表里
+                    String platform = device.optString("platform");
+                    if (!"tv".equals(platform) && !"desktop".equals(platform)) continue;
                     if (!device.optBoolean("online")) continue;
                     devices.put(device);
                 }
@@ -1840,16 +1842,17 @@ public final class PlayerActivity extends Activity {
                 if (isFinishing() || isDestroyed()) return;
                 if (failure != null) { toast("读取设备失败：" + failure); return; }
                 if (found.length() == 0) {
-                    toast("没有在线的电视：确认电视端已打开并登录同一账号");
+                    toast("没有在线的电视/电脑：确认设备已打开并登录同一账号");
                     return;
                 }
                 String[] labels = new String[found.length()];
                 for (int i = 0; i < found.length(); i++) {
                     JSONObject device = found.optJSONObject(i);
-                    labels[i] = device.optString("name", "电视") + " · 在线";
+                    boolean pc = "desktop".equals(device.optString("platform"));
+                    labels[i] = device.optString("name", pc ? "电脑" : "电视") + (pc ? " · 电脑" : " · 电视") + " · 在线";
                 }
                 new AlertDialog.Builder(this)
-                        .setTitle("投到电视")
+                        .setTitle("投屏到设备")
                         .setItems(labels, (dialog, which) -> {
                             JSONObject device = found.optJSONObject(which);
                             if (device != null) castTo(device, cloud);
@@ -1862,7 +1865,8 @@ public final class PlayerActivity extends Activity {
 
     private void castTo(JSONObject device, AccountService cloud) {
         if (device == null) return;
-        final String name = device.optString("name", "电视");
+        final String name = device.optString("name",
+                "desktop".equals(device.optString("platform")) ? "电脑" : "电视");
         final int episode = currentEpisode;
         long position = player == null ? 0 : player.getCurrentPosition();
         long duration = player == null ? 45000 : player.getDuration();

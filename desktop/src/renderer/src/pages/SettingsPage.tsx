@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import type { AppSettings, ServerInfo } from '@shared/types';
+import type { AppSettings, ServerInfo, UpdateInfo } from '@shared/types';
+import { formatBytes } from '../api';
 import { call, errorText } from '../api';
 
 interface Props {
@@ -12,6 +13,8 @@ export default function SettingsPage({ settings, notify, onSaved }: Props) {
   const [info, setInfo] = useState<ServerInfo | null>(null);
   const [draft, setDraft] = useState<AppSettings | null>(settings);
   const [saving, setSaving] = useState(false);
+  const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  const [checking, setChecking] = useState(false);
 
   useEffect(() => {
     call<ServerInfo>('app.info').then(setInfo).catch(() => undefined);
@@ -36,6 +39,20 @@ export default function SettingsPage({ settings, notify, onSaved }: Props) {
       notify(errorText(issue), 'error');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function checkUpdate() {
+    if (checking) return;
+    setChecking(true);
+    try {
+      const result = await call<UpdateInfo>('update.check');
+      setUpdate(result);
+      if (!result.hasUpdate) notify(`已是最新版本 ${result.current}`);
+    } catch (issue) {
+      notify(errorText(issue), 'error');
+    } finally {
+      setChecking(false);
     }
   }
 
@@ -146,7 +163,34 @@ export default function SettingsPage({ settings, notify, onSaved }: Props) {
       </section>
 
       <section className="panel">
-        <h2>关于</h2>
+        <h2>关于与更新</h2>
+        <div className="row">
+          <div>
+            <strong>当前版本 {info?.appVersion || '—'}</strong>
+            <p>
+              {update
+                ? update.hasUpdate
+                  ? `发现新版本 ${update.latest}${update.size ? ` · ${formatBytes(update.size)}` : ''}`
+                  : `已是最新版本 ${update.latest}`
+                : '安装包由后端从 GitHub Release 同步，国内也能直接下载。'}
+            </p>
+            {update?.notes && <p className="hint">{update.notes}</p>}
+          </div>
+          <div className="row-ctrl">
+            <button type="button" className="ghost" onClick={checkUpdate} disabled={checking}>
+              {checking ? '检查中…' : '检查更新'}
+            </button>
+            {update?.hasUpdate && update.url && (
+              <button
+                type="button"
+                className="primary"
+                onClick={() => void call('update.install', { url: update.url }).catch((issue) => notify(errorText(issue), 'error'))}
+              >
+                下载新版
+              </button>
+            )}
+          </div>
+        </div>
         <div className="about">
           <p>
             <span>版本</span>

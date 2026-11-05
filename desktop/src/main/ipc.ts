@@ -1,7 +1,7 @@
 import { BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
-import type { Api, ApiName, ApiResult, AppSettings, DownloadTask, SessionState } from '../shared/types';
+import type { Api, ApiName, ApiResult, AppSettings, DownloadTask, SessionState, UpdateInfo } from '../shared/types';
 import { requestJson } from './http';
 import { readSettings, writeSettings } from './store';
 import { session, normalizeServer } from './session';
@@ -9,7 +9,12 @@ import * as auth from './auth';
 import * as catalog from './catalog';
 import * as downloads from './downloads';
 import * as qrlogin from './qrlogin';
-import { deviceName, ffmpegAvailable, isDev, serverDir, userDataDir } from './paths';
+import * as source from './source';
+import * as update from './update';
+import * as device from './device';
+import { info as mediaInfo, fileUrl } from './media';
+import { setEmitter } from './bus';
+import { deviceName, ffmpegAvailable, isDev, lanAddress, serverDir, userDataDir } from './paths';
 
 let mainWindow: BrowserWindow | null = null;
 let progressTimer: NodeJS.Timeout | null = null;
@@ -24,6 +29,8 @@ function emit(type: string, data: unknown): void {
     mainWindow.webContents.send('ve:event', { type, data });
   }
 }
+
+setEmitter(emit);
 
 function state(): SessionState {
   const current = session();
@@ -44,10 +51,11 @@ const handlers: { [K in ApiName]: (...args: any[]) => any } = {
   'app.info': () => ({
     appVersion: __APP_VERSION__,
     platform: process.platform,
-    downloadDir: downloads.list().length ? readSettings().downloadDir : readSettings().downloadDir,
+    downloadDir: readSettings().downloadDir,
     ffmpeg: ffmpegAvailable(),
     serverDir: serverDir(),
     deviceName: deviceName(),
+    lan: mediaInfo().lan,
   }),
 
   'app.settings': () => settings(),
@@ -100,10 +108,19 @@ const handlers: { [K in ApiName]: (...args: any[]) => any } = {
   },
 
   'auth.session': () => state(),
-  'auth.login': (payload: { server: string; username: string; password: string }) => auth.login(payload),
-  'auth.register': (payload: { server: string; username: string; password: string; code?: string }) => auth.register(payload),
+  'auth.login': async (payload: { server: string; username: string; password: string }) => {
+    const next = await auth.login(payload);
+    device.refresh();
+    return next;
+  },
+  'auth.register': async (payload: { server: string; username: string; password: string; code?: string }) => {
+    const next = await auth.register(payload);
+    device.refresh();
+    return next;
+  },
   'auth.logout': async () => {
     await auth.logout();
+    source.reset();
     emit('auth', { server: '', user: null });
   },
   'auth.qrStart': async () => {
@@ -112,11 +129,26 @@ const handlers: { [K in ApiName]: (...args: any[]) => any } = {
   },
   'auth.qrStop': () => qrlogin.stop(),
 
-  'catalog.home': () => catalog.home(),
-  'catalog.category': (payload: { type?: string; slug?: string; page?: number }) => catalog.category(payload),
-  'catalog.tags': () => catalog.tags(),
-  'catalog.search': (payload: { q: string }) => catalog.search(payload.q),
-  'catalog.detail': (payload: { id: string }) => catalog.detail(payload.id),
+  'catalog.home': (payload?: { source?: string }) => catalog.home(source.requireSource(payload?.source)),
+  'catalog.category': (payload: { source?: string; type?: string; slug?: string; page?: number }) =>
+    catalog.category(source.requireSource(payload?.source), payload),
+  'catalog.tags': (payload?: { source?: string }) => catalog.tags(source.requireSource(payload?.source)),
+  'catalog.search': (payload: { source?: string; q: string }) =>
+    catalog.search(source.requireSource(payload?.source), payload.q),
+  'catalog.detail': (payload: { source?: string; id: string }) =>
+    catalog.detail(source.requireSource(payload?.source), payload.id),
+  'catalog.play': (payload: { source?: string; id: string; episode: number }) =>
+    catalog.play(source.requireSource(payload?.source), payload.id, payload.episode),
+
+  'source.state': () => source.state(),
+  'source.enter': (payload: { code: string }) => source.enterPrivate(payload.code),
+  'source.leave': () => source.leavePrivate(),
+
+  'update.check': () => update.check(),
+  'update.install': async (payload: { url: string }) => {
+    if (!/^https?:\/\//i.test(payload.url)) throw new Error('下载地址无效');
+    await shell.openExternal(payload.url);
+  },
 
   'downloads.list': () => downloads.list(),
   'downloads.create': (payload) => downloads.create(payload),
@@ -128,6 +160,11 @@ const handlers: { [K in ApiName]: (...args: any[]) => any } = {
   'downloads.openFolder': async (payload: { id: string }) => {
     const dir = downloads.taskFolder(payload.id);
     if (fs.existsSync(dir)) await shell.openPath(dir);
+  },
+  'downloads.play': (payload: { id: string; index?: number }) => {
+    const task = downloads.list().find((item) => item.id === payload.id);
+    if (!task) throw new Error('任务不存在');
+    return { url: fileUrl(payload.id, Number(payload.index) || 0) };
   },
 
   'sync.pull': async () => {
@@ -209,6 +246,8 @@ export function startProgressLoop(): void {
     if (signature === lastProgressSignature) return;
     lastProgressSignature = signature;
     emit('downloads', tasks);
+    // 任务状态变了就顺手刷新设备上报，手机上能尽快看到电脑的下载进度
+    device.refresh();
   }, 1200);
 }
 

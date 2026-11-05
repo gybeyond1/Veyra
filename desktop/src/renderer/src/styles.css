@@ -289,8 +289,13 @@ input::placeholder {
   padding: 1px 7px;
 }
 
-.side-foot {
+.side-bottom {
   margin-top: auto;
+  display: flex;
+  flex-direction: column;
+}
+.side-foot {
+  margin-top: 0;
   border-top: 1px solid var(--line);
   padding-top: 14px;
   display: flex;
@@ -1230,4 +1235,202 @@ input::placeholder {
   .login-hero {
     display: none;
   }
+}
+
+/* ---------- 私密模式 ---------- */
+.private-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 11px;
+  margin-bottom: 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.private-toggle:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+.private-toggle.on {
+  color: var(--gold);
+  border-color: rgba(243, 198, 105, 0.4);
+  background: rgba(243, 198, 105, 0.1);
+}
+.private-toggle .lock {
+  font-size: 12px;
+}
+.side-foot .account {
+  min-width: 0;
+}
+
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 6, 9, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+  backdrop-filter: blur(3px);
+}
+.modal {
+  width: 360px;
+  background: var(--panel-2);
+  border: 1px solid var(--line-strong);
+  border-radius: 16px;
+  padding: 22px 24px 20px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+.modal h2 {
+  margin: 0 0 6px;
+  font-size: 17px;
+}
+.modal-desc {
+  margin: 0 0 16px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.private-code {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-deep);
+  color: var(--text);
+  font-size: 24px;
+  letter-spacing: 10px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  outline: none;
+}
+.private-code:focus {
+  border-color: rgba(243, 198, 105, 0.55);
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+/* ---------- 选集：数字播放，右上角勾选 ---------- */
+.ep {
+  position: relative;
+  display: flex;
+  padding: 0;
+  overflow: hidden;
+}
+.ep-play {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.ep-icon {
+  font-size: 9px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.ep:hover .ep-icon {
+  opacity: 0.75;
+}
+.ep-check {
+  width: 22px;
+  border: 0;
+  border-left: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--gold);
+  font-size: 11px;
+  cursor: pointer;
+}
+.ep-check:hover {
+  background: rgba(243, 198, 105, 0.12);
+}
+
+/* ---------- 播放器 ---------- */
+.player-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 1180px;
+}
+.player-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.player-title {
+  flex: 1;
+  min-width: 0;
+}
+.player-title h1 {
+  margin: 0;
+  font-size: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.player-title p {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.player-nav {
+  display: flex;
+  gap: 8px;
+}
+.player-stage {
+  position: relative;
+  background: #000;
+  border-radius: var(--radius);
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--line);
+}
+.player-stage video {
+  width: 100%;
+  height: 100%;
+  background: #000;
+  display: block;
+}
+.player-loading,
+.player-error {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--muted);
+  background: rgba(0, 0, 0, 0.55);
+}
+.player-error h3 {
+  margin: 0;
+  color: var(--text);
+}
+.player-error p {
+  margin: 0;
+  max-width: 520px;
+  text-align: center;
+  line-height: 1.6;
+}
+.player-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
 }

@@ -5,11 +5,12 @@ import Cover from '../components/Cover';
 import SeriesTile from '../components/SeriesTile';
 
 interface Props {
+  source: 'hongguo' | 'huangguo';
   onOpen: (id: string, fallback: { title: string; cover: string }) => void;
   onSearch: (keyword: string) => void;
 }
 
-export default function HomePage({ onOpen, onSearch }: Props) {
+export default function HomePage({ source, onOpen, onSearch }: Props) {
   const [data, setData] = useState<HomePayload | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -19,7 +20,7 @@ export default function HomePage({ onOpen, onSearch }: Props) {
     setLoading(true);
     setError('');
     try {
-      const payload = await call<HomePayload>('catalog.home');
+      const payload = await call<HomePayload>('catalog.home', { source });
       setData(payload);
     } catch (issue) {
       setError(errorText(issue));
@@ -29,8 +30,11 @@ export default function HomePage({ onOpen, onSearch }: Props) {
   }
 
   useEffect(() => {
+    setData(null);
+    setSlide(0);
     void load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [source]);
 
   useEffect(() => {
     if (!data?.slides?.length) return;

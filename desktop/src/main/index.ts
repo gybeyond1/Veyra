@@ -7,6 +7,8 @@ import { readSettings } from './store';
 import { serverModules } from './server-modules';
 import { bindWindow, registerIpc, startProgressLoop, stopProgressLoop } from './ipc';
 import { configureDownloads } from './downloads';
+import { start as startMedia, stop as stopMedia } from './media';
+import { start as startDevice, stop as stopDevice } from './device';
 
 installFileLogger();
 
@@ -148,6 +150,12 @@ app.whenReady().then(async () => {
 
   registerIpc();
   buildMenu();
+  try {
+    await startMedia();
+    startDevice();
+  } catch (error) {
+    console.error('[boot] 媒体服务/设备注册启动失败', error);
+  }
   await createWindow();
   startProgressLoop();
 
@@ -158,5 +166,7 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   stopProgressLoop();
+  stopDevice();
+  stopMedia();
   if (process.platform !== 'darwin') app.quit();
 });

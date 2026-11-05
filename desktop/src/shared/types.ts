@@ -97,6 +97,21 @@ export interface QrLoginState {
   expiresIn: number;
 }
 
+export interface SourceState {
+  active: 'hongguo' | 'huangguo';
+  unlocked: boolean;
+  username: string;
+}
+
+export interface UpdateInfo {
+  current: string;
+  latest: string;
+  url: string;
+  notes: string;
+  size: number;
+  hasUpdate: boolean;
+}
+
 export interface ServerInfo {
   appVersion: string;
   platform: string;
@@ -104,6 +119,7 @@ export interface ServerInfo {
   ffmpeg: string;
   serverDir: string;
   deviceName: string;
+  lan?: string;
 }
 
 /** 渲染层可调用的方法签名。 */
@@ -123,11 +139,19 @@ export interface Api {
   'auth.qrStart': () => Promise<QrLoginState>;
   'auth.qrStop': () => Promise<void>;
 
-  'catalog.home': () => Promise<HomePayload>;
-  'catalog.category': (payload: { type?: string; slug?: string; page?: number }) => Promise<CategoryPayload>;
-  'catalog.tags': () => Promise<{ items: { name: string; slug: string; type: string }[] }>;
-  'catalog.search': (payload: { q: string }) => Promise<{ items: SeriesCard[] }>;
-  'catalog.detail': (payload: { id: string }) => Promise<SeriesDetail>;
+  'catalog.home': (payload?: { source?: string }) => Promise<HomePayload>;
+  'catalog.category': (payload: { source?: string; type?: string; slug?: string; page?: number }) => Promise<CategoryPayload>;
+  'catalog.tags': (payload?: { source?: string }) => Promise<{ items: { name: string; slug: string; type: string }[] }>;
+  'catalog.search': (payload: { source?: string; q: string }) => Promise<{ items: SeriesCard[] }>;
+  'catalog.detail': (payload: { source?: string; id: string }) => Promise<SeriesDetail>;
+  'catalog.play': (payload: { source?: string; id: string; episode: number }) => Promise<{ url: string }>;
+
+  'source.state': () => Promise<SourceState>;
+  'source.enter': (payload: { code: string }) => Promise<SourceState>;
+  'source.leave': () => Promise<SourceState>;
+
+  'update.check': () => Promise<UpdateInfo>;
+  'update.install': (payload: { url: string }) => Promise<void>;
 
   'downloads.list': () => Promise<DownloadTask[]>;
   'downloads.create': (payload: { id: string; title: string; cover?: string; source?: string; episodes?: number[] }) => Promise<DownloadTask>;
@@ -135,6 +159,7 @@ export interface Api {
   'downloads.merge': (payload: { id: string }) => Promise<DownloadTask>;
   'downloads.retry': (payload: { id: string }) => Promise<DownloadTask>;
   'downloads.openFolder': (payload: { id: string }) => Promise<void>;
+  'downloads.play': (payload: { id: string; index?: number }) => Promise<{ url: string }>;
 
   'sync.pull': () => Promise<{ payload: Record<string, unknown> }>;
   'sync.push': (payload: { library: Record<string, unknown> }) => Promise<{ ok: boolean; at: number }>;

@@ -1018,13 +1018,41 @@ app.get('/api/app-update', (req, res) => {
   catch (e) { res.status(500).json({ status: 'none', error: e.message }); }
 });
 
+// 桌面端更新检测：跟 /api/app-update 同一个缓存，只是桌面端要的是 exe 和完整下载地址。
+app.get('/api/app/latest', (req, res) => {
+  const platform = req.query.platform === 'desktop' ? 'desktop' : req.query.platform === 'tv' ? 'tv' : 'mobile';
+  const current = String(req.query.current || '').trim();
+  try {
+    const status = appUpdater.status(platform, current);
+    if (status.status === 'available') {
+      return res.json({
+        version: status.version,
+        url: status.url,
+        size: status.size || 0,
+        notes: status.notes || '',
+        ready: true,
+      });
+    }
+    // 还没拉到包：先告诉客户端当前最新版本号，界面不至于一片空白
+    res.json({
+      version: status.version || current,
+      url: '',
+      size: 0,
+      notes: '',
+      ready: status.status !== 'preparing',
+    });
+  } catch (e) {
+    res.status(500).json({ error: e && e.message ? e.message : '查询失败' });
+  }
+});
+
 // ---- 手动触发检查/下载 ----
 // WebUI 那个「立即检查更新」按钮、以及 App/TV 里点「检查更新」都打这里：
 // 立刻查一次最新版本，有新版就下（channel 决定先下哪个渠道的包），没新版什么都不做。
 // 立即返回，进度看 /api/update/progress；不要在这里等下载完（一次 10MB+ 会顶到超时）。
 app.post('/api/update/check', (req, res) => {
   const raw = String((req.query && req.query.channel) || '').toLowerCase();
-  const channel = raw === 'tv' ? 'tv' : raw === 'mobile' ? 'mobile' : 'all';
+  const channel = raw === 'tv' || raw === 'desktop' ? raw : raw === 'mobile' ? 'mobile' : 'all';
   try { res.json(Object.assign({ ok: true, channel }, appUpdater.checkNow(channel))); }
   catch (e) { res.status(500).json({ ok: false, channel, error: e && e.message ? e.message : '检查失败' }); }
 });
@@ -1045,7 +1073,9 @@ mountReleaseHook(app, { updater: appUpdater, log: (m) => console.log(m) });
 app.get('/api/app-download/:channel/:file', (req, res) => {
   const file = appUpdater.fileOf(req.params.channel, req.params.file);
   if (!file) return res.status(404).json({ error: '更新包不存在或还没准备好' });
-  res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+  res.setHeader('Content-Type', /\.exe$/i.test(file)
+    ? 'application/vnd.microsoft.portable-executable'
+    : 'application/vnd.android.package-archive');
   res.setHeader('Content-Disposition', `attachment; filename="${path.basename(file)}"`);
   res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
   res.sendFile(file);
@@ -1289,7 +1319,9 @@ app.get('/api/update/apk', (req, res) => {
   if (entry && entry.file) {
     const file = appUpdater.fileOf(channel, entry.file);
     if (file) {
-      res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+      res.setHeader('Content-Type', /\.exe$/i.test(file)
+    ? 'application/vnd.microsoft.portable-executable'
+    : 'application/vnd.android.package-archive');
       res.setHeader('Content-Disposition', `attachment; filename="${entry.file}"`);
       return res.sendFile(file);
     }
@@ -1320,7 +1352,9 @@ app.get('/api/update/apk', (req, res) => {
         if (!res.headersSent) return res.status(502).json({ error: '下载 APK 失败: ' + ((err && err.message) || 'HTTP ' + (result && result.status)) });
         return res.end();
       }
-      res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+      res.setHeader('Content-Type', /\.exe$/i.test(file)
+    ? 'application/vnd.microsoft.portable-executable'
+    : 'application/vnd.android.package-archive');
       res.setHeader('Content-Length', String(result.body.length));
       res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
       res.setHeader('X-Apk-Version', tag);

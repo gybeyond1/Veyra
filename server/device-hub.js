@@ -62,6 +62,10 @@ function createDeviceHub(options) {
       platform: device.platform || 'android', appVersion: device.appVersion,
       createdAt: device.createdAt, lastSeen: device.lastSeen,
       online: Date.now() - (device.lastSeen || 0) < ONLINE_MS,
+      // 桌面端：局域网媒体服务地址 + 访问 token，手机/TV 直连播放用
+      lan: device.lan || null,
+      // 桌面端上报的下载任务摘要；手机下载页据此显示「电脑上的下载」
+      tasks: Array.isArray(device.tasks) ? device.tasks : [],
     };
   }
 
@@ -81,6 +85,18 @@ function createDeviceHub(options) {
       appVersion: text(info && info.appVersion, 24),
       createdAt: previous && previous.userId === user.id ? previous.createdAt : now,
       lastSeen: now,
+      // 心跳可能只带 lan 不带 tasks（省流量），缺省时沿用上一次上报的摘要
+      lan: info && info.lan && typeof info.lan === 'object'
+        ? { url: text(info.lan.url, 120), token: text(info.lan.token, 80) }
+        : (previous && previous.lan) || null,
+      tasks: info && Array.isArray(info.tasks)
+        ? info.tasks.slice(0, 40).map(t => ({
+          id: text(t && t.id, 80), title: text(t && t.title, 120), cover: text(t && t.cover, 300),
+          status: text(t && t.status, 24), percent: Number(t && t.percent) || 0,
+          doneCount: Number(t && t.doneCount) || 0, totalCount: Number(t && t.totalCount) || 0,
+          episodeCount: Number(t && t.episodeCount) || 0, merged: Boolean(t && t.merged),
+        }))
+        : (previous && previous.tasks) || [],
     };
     state.devices[id] = device;
     if (previous && previous.userId !== user.id) {
