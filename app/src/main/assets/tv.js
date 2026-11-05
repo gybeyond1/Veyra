@@ -160,8 +160,9 @@ var customSrc = '';       /* data URL，只在内存里留一份 */
 var customLoading = false;
 
 function customThemeOn() { return currentTheme() === CUSTOM_THEME; }
-/* 详情页不套自定义图：那儿要看的是这部剧的海报 */
-function customBgOn() { return customThemeOn() && state.route !== 'detail'; }
+/* 详情页不套自定义图：那儿要看的是这部剧的海报。
+   还没传图时也不切 —— 先让主题底色顶着，别给一块黑屏。 */
+function customBgOn() { return customThemeOn() && state.route !== 'detail' && !!customSrc; }
 
 function customParams() {
   if (customCache) return customCache;
@@ -313,16 +314,17 @@ function heroStyle(el, p) {
 var DETAIL_HERO = { blur: 3, sat: 104, bri: 100, veil: 100, zoom: 108 };
 
 function applyHero() {
-  var custom = customBgOn();
+  var custom = customBgOn();          /* 真的有图、且不在详情页 */
+  var tuning = customThemeOn();       /* 面板现在调的是自定义那套参数 */
   var onDetail = state && state.route === 'detail';
-  var p = custom ? customParams() : heroParams();
+  var p = tuning ? customParams() : heroParams();
   var bgImg = document.getElementById('tv-bg-img');
   if (custom) {
     /* 自定义图整张铺开：换图只在 data URL 变了的时候动一次 img.src */
-    if (bgImg && customSrc && bgImg.getAttribute('src') !== customSrc) bgImg.src = customSrc;
+    if (bgImg && bgImg.getAttribute('src') !== customSrc) bgImg.src = customSrc;
     heroStyle(bgImg, p);
   } else {
-    heroStyle(bgImg, onDetail ? DETAIL_HERO : p);
+    heroStyle(bgImg, onDetail ? DETAIL_HERO : heroParams());
   }
   /* 预览窗永远显示「你正在调的那套」，否则在详情页调参看不到变化 */
   heroStyle(heroPreviewImg, p);
@@ -330,8 +332,10 @@ function applyHero() {
   var mainVeil = document.querySelector('#tv-bg .veil');
   if (mainVeil) {
     /* 只有海报 / 自定义底图才显示遮罩，纯色主题下这块是透明的 */
-    var strength = custom ? (p.veil / 100) : ((onDetail ? DETAIL_HERO.veil : p.veil) / 100);
-    mainVeil.style.opacity = (custom || heroBackdropOn()) ? String(strength) : '0';
+    var strength = 0;
+    if (custom) strength = p.veil / 100;
+    else if (heroBackdropOn()) strength = (onDetail ? DETAIL_HERO.veil : heroParams().veil) / 100;
+    mainVeil.style.opacity = String(strength);
   }
   if (heroPreviewVeil) heroPreviewVeil.style.opacity = String(p.veil / 100);
 }
