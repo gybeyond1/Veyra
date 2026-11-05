@@ -322,8 +322,17 @@ function applyHero() {
   if (custom) {
     /* 自定义图整张铺开：换图只在 data URL 变了的时候动一次 img.src */
     if (bgImg && bgImg.getAttribute('src') !== customSrc) bgImg.src = customSrc;
+    if (bgImg) bgImg.classList.remove('is-dim');
     heroStyle(bgImg, p);
   } else {
+    /* 离开自定义场景（最典型的就是进详情页）时必须把那张图撤掉：
+       data-backdrop 已经切回 poster 了，但 img 的 src 还是用户的图，
+       CSS 会让它照样显示 —— 详情页要的是这部剧自己的封面。
+       撤掉后先留深色底，等海报解密到位由 setBackdrop 换上来。 */
+    if (bgImg && customSrc && bgImg.getAttribute('src') === customSrc) {
+      bgImg.removeAttribute('src');
+      bgImg.classList.add('is-dim');
+    }
     heroStyle(bgImg, onDetail ? DETAIL_HERO : heroParams());
   }
   /* 预览窗永远显示「你正在调的那套」，否则在详情页调参看不到变化 */
@@ -499,7 +508,7 @@ function setBackdrop(src) {
   backdropTimer = setTimeout(function () {
     var img = document.getElementById('tv-bg-img');
     backdropSrc = src;
-    if (img) img.src = src;
+    if (img) { img.classList.remove('is-dim'); img.src = src; }
     /* 参数面板里的预览窗跟着同一张图走，调参时看到的就是屏幕上那张 */
     if (heroPreviewImg) heroPreviewImg.src = src;
   }, 150);
@@ -1498,7 +1507,11 @@ function openDetail(id) {
   state.epGroup = 0;
   state.focusKey = 'play';
   stage.scrollTop = 0;
+  /* 刚点进来的那张卡片，封面早就解密好了 —— 先铺上，别让背景空着等详情接口。
+     详情数据回来后 hydrateCovers 会用正确的封面覆盖一次（通常就是同一张）。 */
+  var seed = document.querySelector('.card.is-focused .art img');
   applyBackdropMode();
+  if (seed && seed.src) setBackdrop(seed.src);
   renderDetail();
   api('detail', { id: String(id) }).then(function (data) {
     if (state.route !== 'detail') return;
