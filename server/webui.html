@@ -177,8 +177,9 @@ video{width:100%;border-radius:10px;background:#000}
 
 /* 手机端「我的」直接复用这个抽屉：底下这条必须放在最后，否则被前面 .drawer 的 max-width:95vw 盖掉 */
 .upd-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}
+.drawer select.role-sel{width:100%;background:#f0f2f6;border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:6px 8px;font-size:12px;cursor:pointer}
+.drawer select.role-sel:focus{outline:none;border-color:var(--acc)}
 .upd-grid button{margin:0;width:100%}
-.upd-grid #btn-nas-dl{grid-column:1/-1}
 @media(max-width:800px){
   .drawer{width:100%;max-width:100vw;right:-100vw;padding:20px 18px 40px}
   .drawer.open{right:0}
@@ -199,7 +200,6 @@ video{width:100%;border-radius:10px;background:#000}
     <button id="mode-public" class="active">公开</button>
     <button id="mode-private">私密</button>
   </div>
-  <button class="gear" id="btn-downloads" title="NAS 下载管理">⬇</button>
   <button class="gear" id="btn-settings">⚙</button>
 </div>
 <div class="view-head" id="view-head" style="display:none">
@@ -290,7 +290,6 @@ video{width:100%;border-radius:10px;background:#000}
     <h2>客户端</h2>
     <div class="upd-grid">
       <button id="btn-check-upd">检查更新</button>
-      <button class="ghost" id="btn-dl-apk">下载最新APK</button>
       <button class="ghost" id="btn-nas-dl">NAS 下载管理</button>
     </div>
     <h2>注册开关</h2>
@@ -323,7 +322,7 @@ video{width:100%;border-radius:10px;background:#000}
       <p class="otp-tip" id="otp-bound-tip">已绑定验证器。动态码 30 秒一换，直接在 Bitwarden 里看即可，不用再打开这个页面。</p>
     </div>
     <h2>用户管理</h2>
-    <table><thead><tr><th>用户</th><th>角色</th><th>操作</th></tr></thead><tbody id="user-rows"></tbody></table>
+    <table><thead><tr><th>用户</th><th>用户组</th><th>操作</th></tr></thead><tbody id="user-rows"></tbody></table>
     <div class="row" style="margin-top:16px">
       <button class="ghost" id="btn-admin-diagnose">私密源诊断</button>
       <button class="ghost" id="btn-admin-logout">退出登录</button>
@@ -1281,14 +1280,13 @@ document.getElementById('btn-dl-confirm').onclick=async()=>{
 // ---- NAS 下载管理页：任务列表 / 进度 / 合并 / 重试 / 删除 ----
 let _dlmgrTimer=null;
 const DL_STATUS={queued:['排队中',''],downloading:['下载中','run'],ready:['待合并','ok'],merging:['合并中','run'],done:['已完成','ok'],failed:['失败','err'],canceled:['已取消','']};
-document.getElementById('btn-downloads').onclick=()=>{
+function openDlmgr(){
   const ov=document.getElementById('dlmgr-overlay');
-  const isOpen=ov.classList.contains('open');
-  if(isOpen){closeDlmgr();return}
+  if(ov.classList.contains('open')){closeDlmgr();return}
   ov.classList.add('open');
   loadDlmgr(document.getElementById('dlmgr-list'));
   _dlmgrTimer=setInterval(()=>loadDlmgr(document.getElementById('dlmgr-list')),10000);
-};
+}
 function closeDlmgr(){
   document.getElementById('dlmgr-overlay').classList.remove('open');
   if(_dlmgrTimer){clearInterval(_dlmgrTimer);_dlmgrTimer=null}
@@ -1338,17 +1336,7 @@ async function startCheckUpdate(){
   }catch(e){ setUpdBtn('检查更新',false); toast('检查失败：'+((e&&e.message)||'网络错误')); }
 }
 document.getElementById('btn-check-upd').onclick=startCheckUpdate;
-// 「NAS 下载管理」入口也放进设置里（手机没有顶栏，以前只能从「我的」页进）
-document.getElementById('btn-nas-dl').onclick=()=>document.getElementById('btn-downloads').click();
-document.getElementById('btn-dl-apk').onclick=()=>{
-  // 经 NAS 后端中转拉取最新 APK（手机弱网/直连 GitHub 不稳定时），浏览器直接落盘
-  const a=document.createElement('a');
-  a.href='/api/update/apk';
-  a.download='Veyra-latest.apk';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-};
+document.getElementById('btn-nas-dl').onclick=openDlmgr;
 async function loadDlmgr(list){
   try{
     const r=await fetch('/api/download/tasks',{headers:AUTH()});
@@ -1600,16 +1588,20 @@ document.getElementById('diag-overlay').addEventListener('click',e=>{if(e.target
 async function loadUsers(){
   try{
     const ROLE_NAMES={user:'普通用户',vip:'特权组',admin:'管理员'};
-    const NEXT_ROLE={user:'vip',vip:'admin',admin:'user'};
     const d=await fetch('/api/admin/users',{headers:AUTH()}).then(r=>r.json());
+    const opts=['user','vip','admin'].map(k=>'<option value="'+k+'">'+ROLE_NAMES[k]+'</option>').join('');
     document.getElementById('user-rows').innerHTML=(d.users||[]).map(u=>{
       const role=(u.role==='admin'||u.role==='vip'||u.role==='user')?u.role:'user';
-      const next=NEXT_ROLE[role];
-      return '<tr><td>'+escapeHtml(u.username)+'</td><td>'+(ROLE_NAMES[role])+'</td>'+
-      '<td><button class="ghost" data-uid="'+u.id+'" data-role="'+next+'">切换为'+ROLE_NAMES[next]+'</button>'+
-      ' <button class="danger" data-del="'+u.id+'">删</button></td></tr>';
+      return '<tr><td>'+escapeHtml(u.username)+'</td>'+
+      '<td><select class="role-sel" data-uid="'+u.id+'">'+opts+'</select></td>'+
+      '<td><button class="danger" data-del="'+u.id+'">删</button></td></tr>';
     }).join('');
-    document.querySelectorAll('[data-uid]').forEach(b=>b.onclick=()=>setRole(b.dataset.uid,b.dataset.role));
+    document.querySelectorAll('.role-sel').forEach(sel=>{
+      const u=(d.users||[]).find(x=>String(x.id)===String(sel.dataset.uid));
+      const cur=(u&&(u.role==='admin'||u.role==='vip'||u.role==='user'))?u.role:'user';
+      sel.value=cur;
+      sel.onchange=()=>setRole(sel.dataset.uid,sel.value);
+    });
     document.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>delUser(b.dataset.del));
   }catch(e){}
 }
