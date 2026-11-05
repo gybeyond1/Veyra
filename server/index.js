@@ -122,6 +122,12 @@ function base32Decode(input) {
   }
   return Buffer.from(out);
 }
+function saveOtpData(data) {
+  const otpFile = path.join(DATA_DIR, 'otp.json');
+  const tmp = otpFile + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+  fs.renameSync(tmp, otpFile);
+}
 function ensureOtpSecret() {
   const otpFile = path.join(DATA_DIR, 'otp.json');
   let data = {};
@@ -132,11 +138,15 @@ function ensureOtpSecret() {
     for (let i = 0; i < 32; i++) secret += chars[Math.floor(Math.random() * chars.length)];
     data.secret = secret;
     data.lastReset = Date.now();
-    const tmp = otpFile + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
-    fs.renameSync(tmp, otpFile);
+    data.boundAt = null; // 密钥未导入验证器前，页面只给密钥、不给算好的码
+    saveOtpData(data);
   }
   return data;
+}
+function otpauthUri(secret) {
+  return 'otpauth://totp/' + encodeURIComponent('Veyra:admin') +
+    '?secret=' + secret + '&issuer=' + encodeURIComponent('Veyra') +
+    '&algorithm=SHA1&digits=' + OTP_DIGITS + '&period=' + OTP_WINDOW;
 }
 function totpCode(otpData, windowOffset) {
   const counter = Math.floor(Date.now() / 1000 / OTP_WINDOW) + windowOffset;
@@ -554,23 +564,28 @@ app.post('/api/admin/proxy-test', requireAdmin, (req, res) => {
   });
 });
 
-// 当前动态码（状态页展示；30 秒轮换一次，需管理员）
-app.get('/api/otp', requireAdmin, (_req, res) => {
+// 动态码状态（需管理员）
+// 未绑定验证器：只返回密钥，绝不返回算好的码 —— 否则复制粘贴就能「绑定成功」。
+// 已绑定：只返回当前码与剩余秒数，密钥不再下发（除非显式 ?reveal=1 重新导入）。
+app.get('/api/otp', requireAdmin, (req, res) => {
   const otpData = ensureOtpSecret();
-  const secret = otpData.secret;
-  // 给验证器（Bitwarden / 1Password / Google Authenticator）用的标准 URI
-  const otpauth = 'otpauth://totp/' + encodeURIComponent('Veyra:admin') +
-    '?secret=' + secret + '&issuer=' + encodeURIComponent('Veyra') +
-    '&algorithm=SHA1&digits=' + OTP_DIGITS + '&period=' + OTP_WINDOW;
-  res.json({
-    code: totpCode(otpData, 0),
+  const bound = Boolean(otpData.boundAt);
+  const reveal = bound && String(req.query.reveal || '') === '1';
+  const base = {
+    bound,
     window: OTP_WINDOW,
     digits: OTP_DIGITS,
-    expiresIn: OTP_WINDOW - (Math.floor(Date.now() / 1000) % OTP_WINDOW),
     lastReset: otpData.lastReset || null,
-    secret,
-    otpauth
-  });
+    boundAt: otpData.boundAt || null,
+    expiresIn: OTP_WINDOW - (Math.floor(Date.now() / 1000) % OTP_WINDOW)
+  };
+  if (!bound || reveal) {
+    return res.json(Object.assign({}, base, {
+      secret: otpData.secret,
+      otpauth: otpauthUri(otpData.secret)
+    }));
+  }
+  res.json(Object.assign({}, base, { code: totpCode(otpData, 0) }));
 });
 
 // 校验绑定：用户把密钥导入验证器后，回填一次验证器生成的 6 位码来确认导入正确。
@@ -579,14 +594,31 @@ app.post('/api/otp/check', requireAdmin, (req, res) => {
   const input = String((req.body && req.body.code) || '').replace(/\D/g, '');
   if (input.length !== OTP_DIGITS) return res.status(400).json({ error: '请输入 6 位数字' });
   if (!verifyOtp(input)) return res.status(400).json({ error: '验证码不正确，检查验证器时间和密钥是否导入完整' });
-  res.json({ ok: true, verifiedAt: Date.now() });
+  const otpData = ensureOtpSecret();
+  otpData.boundAt = Date.now();
+  saveOtpData(otpData);
+  res.json({
+    ok: true,
+    bound: true,
+    verifiedAt: otpData.boundAt,
+    code: totpCode(otpData, 0),
+    window: OTP_WINDOW,
+    expiresIn: OTP_WINDOW - (Math.floor(Date.now() / 1000) % OTP_WINDOW)
+  });
 });
 
 // 重置动态码（重新生成 secret，旧码立即全部失效，需管理员）
 app.post('/api/otp/reset', requireAdmin, (_req, res) => {
   try { fs.unlinkSync(path.join(DATA_DIR, 'otp.json')); } catch { /* 不存在则直接新建 */ }
   const otpData = ensureOtpSecret();
-  res.json({ ok: true, code: totpCode(otpData, 0), window: OTP_WINDOW, secret: otpData.secret });
+  res.json({
+    ok: true,
+    bound: false,
+    window: OTP_WINDOW,
+    digits: OTP_DIGITS,
+    secret: otpData.secret,
+    otpauth: otpauthUri(otpData.secret)
+  });
 });
 
 // 验证动态码（APK 私密模式入口；需登录，验证通过后该账号永久解锁私密模式，跟账号走）
