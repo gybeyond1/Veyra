@@ -66,3 +66,18 @@ jobs:
           body: |
             Windows 安装包（x64）。首次启动会校验自带的 ffmpeg。
             下载目录、并发数在「设置」里改；账号与手机端共用同一台服务器。
+
+      # 手动触发也发一版，这样用户能从 Release 直接下（Actions 的 artifact 需要登录）
+      - name: 手动触发时发 Release
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.version != ''
+        working-directory: desktop
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="desktop-v${{ github.event.inputs.version }}"
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" release/*.exe \
+            --title "Veyra 桌面端 ${{ github.event.inputs.version }}" \
+            --notes "Windows x64 安装包，自带 ffmpeg。首次打开如果 SmartScreen 提示，点「更多信息 → 仍要运行」。" \
+            --latest=false
