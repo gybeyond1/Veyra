@@ -566,11 +566,12 @@ app.post('/api/admin/proxy-test', requireAdmin, (req, res) => {
 
 // 动态码状态（需管理员）
 // 未绑定验证器：只返回密钥，绝不返回算好的码 —— 否则复制粘贴就能「绑定成功」。
-// 已绑定：只返回当前码与剩余秒数，密钥不再下发（除非显式 ?reveal=1 重新导入）。
-app.get('/api/otp', requireAdmin, (req, res) => {
+// 已绑定：只返回当前码与剩余秒数，密钥永不再下发。
+// 绑定是一次性的，后台没有任何接口能改绑 / 解绑 / 换密钥；
+// 真要重来只能到服务器上删掉 data/otp.json（需要机器权限，不是后台密码）。
+app.get('/api/otp', requireAdmin, (_req, res) => {
   const otpData = ensureOtpSecret();
   const bound = Boolean(otpData.boundAt);
-  const reveal = bound && String(req.query.reveal || '') === '1';
   const base = {
     bound,
     window: OTP_WINDOW,
@@ -579,7 +580,7 @@ app.get('/api/otp', requireAdmin, (req, res) => {
     boundAt: otpData.boundAt || null,
     expiresIn: OTP_WINDOW - (Math.floor(Date.now() / 1000) % OTP_WINDOW)
   };
-  if (!bound || reveal) {
+  if (!bound) {
     return res.json(Object.assign({}, base, {
       secret: otpData.secret,
       otpauth: otpauthUri(otpData.secret)
@@ -604,20 +605,6 @@ app.post('/api/otp/check', requireAdmin, (req, res) => {
     code: totpCode(otpData, 0),
     window: OTP_WINDOW,
     expiresIn: OTP_WINDOW - (Math.floor(Date.now() / 1000) % OTP_WINDOW)
-  });
-});
-
-// 重置动态码（重新生成 secret，旧码立即全部失效，需管理员）
-app.post('/api/otp/reset', requireAdmin, (_req, res) => {
-  try { fs.unlinkSync(path.join(DATA_DIR, 'otp.json')); } catch { /* 不存在则直接新建 */ }
-  const otpData = ensureOtpSecret();
-  res.json({
-    ok: true,
-    bound: false,
-    window: OTP_WINDOW,
-    digits: OTP_DIGITS,
-    secret: otpData.secret,
-    otpauth: otpauthUri(otpData.secret)
   });
 });
 

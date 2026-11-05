@@ -22,9 +22,7 @@ body{background:var(--bg);color:var(--fg);font:14px/1.6 -apple-system,"PingFang 
 .mode-toggle button.active{background:var(--acc);color:#1a1e26}
 .gear{background:transparent;border:1px solid var(--line);color:var(--mut);width:38px;height:38px;border-radius:10px;cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center}
 .gear:hover{border-color:var(--mut);color:var(--fg)}
-#btn-check-upd-hd{font-size:16px}
 .gear:disabled{opacity:.6;cursor:default}
-@media(max-width:800px){#btn-check-upd-hd{display:none}}
 .cat-bar{display:flex;gap:8px;overflow-x:auto;padding:10px 20px;max-width:1200px;margin:0 auto;scrollbar-width:none}
 .cat-bar::-webkit-scrollbar{display:none}
 .cat-btn{flex-shrink:0;background:#f0f2f6;border:1px solid var(--line);color:var(--mut);border-radius:20px;padding:6px 16px;cursor:pointer;font-size:13px;white-space:nowrap;transition:.2s}
@@ -104,7 +102,7 @@ video{width:100%;border-radius:10px;background:#000}
 .drawer-mask.open{display:block}
 .drawer{position:fixed;top:0;right:-440px;width:420px;max-width:95vw;height:100vh;background:var(--card);border-left:1px solid var(--line);z-index:300;transition:right .3s;overflow-y:auto;padding:24px}
 .drawer.open{right:0}
-.drawer-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.drawer-head{display:flex;align-items:center;justify-content:flex-end;margin-bottom:4px}
 .drawer h2{font-size:15px;color:var(--acc);margin:20px 0 10px}
 .drawer h2:first-child{margin-top:0}
 .drawer input{width:100%;background:#f0f2f6;border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 10px;font-size:13px;margin-bottom:8px}
@@ -148,22 +146,10 @@ video{width:100%;border-radius:10px;background:#000}
 .cat-strip::-webkit-scrollbar{display:none}
 .cat-strip button{flex-shrink:0;background:#f0f2f6;border:1px solid var(--line);color:var(--mut);border-radius:999px;padding:6px 14px;font-size:13px;cursor:pointer;transition:.2s;white-space:nowrap}
 .cat-strip button.active{background:var(--acc);color:#1a1e26;border-color:var(--acc);font-weight:600}
-.mine-view{max-width:720px;margin:0 auto;padding:20px}
-.mine-head{display:flex;align-items:center;gap:14px;padding:18px;background:var(--card);border:1px solid var(--line);border-radius:16px;margin-bottom:14px}
-.mine-avatar{width:56px;height:56px;border-radius:50%;object-fit:cover;background:var(--acc);display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:800;color:#1a1e26;position:relative;flex-shrink:0}
-.mine-avatar .role-badge{position:absolute;right:-6px;bottom:-6px;background:#e8483d;color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px;border:2px solid var(--card);line-height:1.4;white-space:nowrap}
-.mine-name{font-size:17px;font-weight:700}
-.mine-sub{font-size:12px;color:var(--mut);margin-top:3px}
 .dl-apk-btn{flex-shrink:0;background:var(--acc);color:#1a1e26;border:none;border-radius:10px;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;margin-left:10px}
 .dl-apk-btn:active{opacity:.8}
 .dl-apk-btn:disabled{opacity:.65;cursor:default}
 .dl-apk-btn.ghost{background:#eef1f6;color:var(--fg);border:1px solid var(--line)}
-.mine-actions{display:flex;flex-direction:column;gap:6px;flex-shrink:0;margin-left:10px}
-.mine-actions .dl-apk-btn{margin-left:0;white-space:nowrap}
-.mine-tabs{display:flex;background:#f0f2f6;border:1px solid var(--line);border-radius:12px;padding:3px;margin-bottom:14px}
-.mine-tabs button{flex:1;background:transparent;border:none;color:var(--mut);padding:9px 0;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer}
-.mine-tabs button.active{background:var(--acc);color:#1a1e26}
-.mine-body-pad{padding:0 2px}
 /* ---- 公开内容严格沿用 APP：轮播、九项类型条、双板块、全部类型、三列作品 ---- */
 .hero-copy{color:#fff}.hero-card{box-shadow:0 10px 28px rgba(32,36,44,.12)}
 .hero-dots{display:flex;justify-content:center;gap:5px;margin:9px 0 2px}.hero-dots button{width:5px;height:5px;padding:0;border:0;border-radius:50%;background:#c9ced7}.hero-dots button.active{width:16px;border-radius:5px;background:var(--acc)}
@@ -174,7 +160,6 @@ video{width:100%;border-radius:10px;background:#000}
 .back-link{border:0;background:transparent;color:var(--mut);padding:0;margin-bottom:8px;cursor:pointer}.empty-block{grid-column:1/-1;text-align:center;color:var(--mut);padding:30px}
 @media(max-width:800px){.section-grid,.grid.app-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.section-heading h2{font-size:17px}.poster-title{font-size:12px}.tags-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.tag-choice{font-size:12px;padding:11px 4px}.hero-dots{margin-top:8px}}
 @media (max-width:800px){
-  .mine-view{padding:12px 14px 84px}
   .mine-avatar{width:48px;height:48px;font-size:20px}
 }
 /* ---- 下载目标：NAS / 手机（账号 → 设备） ---- */
@@ -189,6 +174,16 @@ video{width:100%;border-radius:10px;background:#000}
 #btn-refresh{transition:transform .3s}
 #btn-refresh.spin{transform:rotate(360deg);color:var(--acc);border-color:var(--acc)}
 .cache-note{font-size:12px;color:var(--mut);margin-left:8px}
+
+/* 手机端「我的」直接复用这个抽屉：底下这条必须放在最后，否则被前面 .drawer 的 max-width:95vw 盖掉 */
+.upd-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}
+.upd-grid button{margin:0;width:100%}
+.upd-grid #btn-nas-dl{grid-column:1/-1}
+@media(max-width:800px){
+  .drawer{width:100%;max-width:100vw;right:-100vw;padding:20px 18px 40px}
+  .drawer.open{right:0}
+  .drawer-head{margin-bottom:2px}
+}
 </style>
 </head>
 <body>
@@ -205,7 +200,6 @@ video{width:100%;border-radius:10px;background:#000}
     <button id="mode-private">私密</button>
   </div>
   <button class="gear" id="btn-downloads" title="NAS 下载管理">⬇</button>
-  <button class="gear" id="btn-check-upd-hd" title="检查更新">⬆</button>
   <button class="gear" id="btn-settings">⚙</button>
 </div>
 <div class="view-head" id="view-head" style="display:none">
@@ -218,25 +212,6 @@ video{width:100%;border-radius:10px;background:#000}
 <div class="container">
   <div class="grid" id="grid"><div class="loading">加载中…</div></div>
   <div class="catalog-sentinel" id="catalog-sentinel" hidden></div>
-</div>
-
-<div class="mine-view" id="mine-view" style="display:none">
-  <div class="mine-head">
-    <div class="mine-avatar">V<span class="role-badge" id="mine-role">管理员</span></div>
-    <div style="flex:1">
-      <div class="mine-name" id="mine-name">Veyra 管理员</div>
-      <div class="mine-sub" id="mine-sub">Web 管理台 · 系统管理员</div>
-    </div>
-    <div class="mine-actions">
-      <button type="button" id="btn-check-upd" class="dl-apk-btn ghost">检查更新</button>
-      <button type="button" id="btn-dl-apk" class="dl-apk-btn">下载最新APK</button>
-    </div>
-  </div>
-  <div class="mine-tabs">
-    <button type="button" id="mine-tab-dl" class="active">NAS下载</button>
-    <button type="button" id="mine-tab-diag">私密诊断</button>
-  </div>
-  <div id="mine-body" class="mine-body-pad"><div class="loading">加载中…</div></div>
 </div>
 
 <nav class="mobile-dock" id="mobile-dock" aria-label="主导航">
@@ -304,7 +279,6 @@ video{width:100%;border-radius:10px;background:#000}
 <div class="drawer-mask" id="drawer-mask"></div>
 <div class="drawer" id="drawer">
   <div class="drawer-head">
-    <h2 style="margin:0">管理</h2>
     <button class="ghost" id="btn-close-drawer" style="margin:0;width:32px;height:32px;padding:0;font-size:16px;border-radius:8px">✕</button>
   </div>
   <div id="login-area">
@@ -313,7 +287,12 @@ video{width:100%;border-radius:10px;background:#000}
     <span id="login-err" style="color:var(--err);font-size:12px"></span>
   </div>
   <div id="admin-area" style="display:none">
-    <div class="row"><span class="k">用户</span><b id="s-users">-</b><span class="k">注册</span><b id="s-reg">-</b></div>
+    <h2>客户端</h2>
+    <div class="upd-grid">
+      <button id="btn-check-upd">检查更新</button>
+      <button class="ghost" id="btn-dl-apk">下载最新APK</button>
+      <button class="ghost" id="btn-nas-dl">NAS 下载管理</button>
+    </div>
     <h2>注册开关</h2>
     <div class="row"><label style="font-size:13px"><input type="checkbox" id="reg-open" style="width:auto"> 开放注册</label><button id="btn-save-reg">保存</button></div>
     <h2>后端代理</h2>
@@ -342,10 +321,6 @@ video{width:100%;border-radius:10px;background:#000}
     <div id="otp-bound" hidden>
       <div class="row"><span class="otp-big" id="otp-code">------</span><span class="k" id="otp-remain"></span></div>
       <p class="otp-tip" id="otp-bound-tip">已绑定验证器。动态码 30 秒一换，直接在 Bitwarden 里看即可，不用再打开这个页面。</p>
-    </div>
-    <div class="row" style="margin-top:8px">
-      <button class="ghost" id="btn-reveal-secret" hidden>重新导入密钥</button>
-      <button class="ghost" id="btn-reset-otp">重置密钥（旧验证器全部失效）</button>
     </div>
     <h2>用户管理</h2>
     <table><thead><tr><th>用户</th><th>角色</th><th>操作</th></tr></thead><tbody id="user-rows"></tbody></table>
@@ -416,7 +391,6 @@ document.getElementById('btn-refresh').onclick=async()=>{
   btn.classList.add('spin');
   try{
     if(searching){await doSearch();toast('已刷新搜索结果')}
-    else if(view==='mine'){renderMine();toast('已刷新')}
     else{cacheDrop(cacheKey());resetCatalog();await loadView({force:true});toast('已刷新')}
   }catch(e){toast('刷新失败: '+e.message)}
   setTimeout(()=>btn.classList.remove('spin'),500);
@@ -427,9 +401,11 @@ const drawer=document.getElementById('drawer');
 const drawerMask=document.getElementById('drawer-mask');
 function openDrawer(){
   drawer.classList.add('open');drawerMask.classList.add('open');
-  document.getElementById('login-area').style.display='none';
-  document.getElementById('admin-area').style.display='block';
-  loadAdmin();loadChannelUi();
+  // 手机「我的」现在直接进这里，所以未登录时必须先给登录框，不能空着显示一块没数据的面板
+  const logged=!!adminToken;
+  document.getElementById('login-area').style.display=logged?'none':'block';
+  document.getElementById('admin-area').style.display=logged?'block':'none';
+  if(logged){loadAdmin();loadChannelUi();}
 }
 function closeDrawer(){drawer.classList.remove('open');drawerMask.classList.remove('open')}
 document.getElementById('btn-settings').onclick=()=>drawer.classList.contains('open')?closeDrawer():openDrawer();
@@ -511,23 +487,21 @@ function trimCache(){
 function setView(v){
   resetCatalog();view=v;subTab=0;hgCat='';searching=false;
   document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
-  document.getElementById('dock-settings').classList.toggle('active',v==='mine');
   loadView();
 }
 function openPublicListing(slug,name){publicSlug=slug;publicName=name;setView('listing')}
 document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>setView(b.dataset.view));
-document.getElementById('dock-settings').onclick=()=>setView('mine');
+// 手机「我的」= 设置页：直接把抽屉拉出来，不再单做一套页面
+document.getElementById('dock-settings').onclick=()=>{
+  if(document.getElementById('drawer').classList.contains('open'))closeDrawer();
+  else openDrawer();
+};
 
 async function loadView(options){
   const force=!!(options&&options.force);
   const head=document.getElementById('view-head'),title=document.getElementById('view-title'),subtitle=document.getElementById('view-subtitle');
   const st=document.getElementById('sub-tabs'),strip=document.getElementById('cat-strip');
   clearHero();catalogObserver.disconnect();sentinel.hidden=true;searching=false;
-  const mineView=document.getElementById('mine-view');
-  if(mineView) mineView.style.display=(view==='mine')?'block':'none';
-  if(view==='mine'){
-    head.style.display='none';st.style.display='none';strip.style.display='none';grid.style.display='none';renderMine();return;
-  }
   grid.style.display='grid';strip.style.display='none';st.style.display='none';head.style.display='block';
   if(view==='tags'){
     subtitle.textContent='按短剧、漫剧大类，发现相关作品';title.textContent='全部类型';await loadPublicTags();return;
@@ -1322,20 +1296,12 @@ function closeDlmgr(){
 document.getElementById('btn-close-dlmgr').onclick=closeDlmgr;
 document.getElementById('dlmgr-overlay').addEventListener('click',e=>{if(e.target.id==='dlmgr-overlay')closeDlmgr()});
 
-// ---- 「我的」页（APK 对齐：头像+组别徽章，NAS下载/私密诊断两个入口） ----
 /* 立即检查更新：让后端当场查一次版本，有新版就下包。
    以前只能等 10 分钟一轮的后台轮询，发版后干等十几分钟。 */
 let updTimer=0;
 function setUpdBtn(text,disabled){
   const m=document.getElementById('btn-check-upd');
   if(m){m.textContent=text;m.disabled=!!disabled}
-  const d=document.getElementById('btn-check-upd-hd');
-  if(d){
-    let t='⬆';
-    if(text.indexOf('下载中')===0) t=text.slice(3).trim();
-    else if(text==='检查中…') t='…';
-    d.textContent=t;d.disabled=!!disabled;d.title=text||'检查更新';
-  }
 }
 async function pollUpdateUi(startedAt,beforeVersion){
   clearTimeout(updTimer);
@@ -1372,8 +1338,8 @@ async function startCheckUpdate(){
   }catch(e){ setUpdBtn('检查更新',false); toast('检查失败：'+((e&&e.message)||'网络错误')); }
 }
 document.getElementById('btn-check-upd').onclick=startCheckUpdate;
-const _updHd=document.getElementById('btn-check-upd-hd');
-if(_updHd) _updHd.onclick=startCheckUpdate;
+// 「NAS 下载管理」入口也放进设置里（手机没有顶栏，以前只能从「我的」页进）
+document.getElementById('btn-nas-dl').onclick=()=>document.getElementById('btn-downloads').click();
 document.getElementById('btn-dl-apk').onclick=()=>{
   // 经 NAS 后端中转拉取最新 APK（手机弱网/直连 GitHub 不稳定时），浏览器直接落盘
   const a=document.createElement('a');
@@ -1383,22 +1349,6 @@ document.getElementById('btn-dl-apk').onclick=()=>{
   a.click();
   a.remove();
 };
-function renderMine(){
-  const body=document.getElementById('mine-body');
-  body.innerHTML='<div class="loading">加载中…</div>';
-  loadDlmgr(body);
-}
-document.getElementById('mine-tab-dl').onclick=()=>{
-  document.getElementById('mine-tab-dl').classList.add('active');
-  document.getElementById('mine-tab-diag').classList.remove('active');
-  renderMine();
-};
-document.getElementById('mine-tab-diag').onclick=()=>{
-  if(!document.getElementById('drawer').classList.contains('open'))openDrawer();
-  const b=document.getElementById('btn-admin-diagnose');
-  if(b)b.click();
-};
-
 async function loadDlmgr(list){
   try{
     const r=await fetch('/api/download/tasks',{headers:AUTH()});
@@ -1468,7 +1418,7 @@ document.getElementById('btn-admin-login').onclick=async()=>{
     adminToken=d.token;localStorage.setItem('veyraAdmin',adminToken);
     document.getElementById('login-area').style.display='none';
     document.getElementById('admin-area').style.display='block';
-    loadAdmin();
+    loadAdmin();loadChannelUi();
   }catch(e){document.getElementById('login-err').textContent='网络错误'}
 };
 
@@ -1478,8 +1428,6 @@ async function loadAdmin(){
       fetch('/api/stats',{headers:AUTH()}).then(r=>r.json()),
       fetch('/api/otp',{headers:AUTH()}).then(r=>r.json())
     ]);
-    document.getElementById('s-users').textContent=st.users;
-    document.getElementById('s-reg').textContent=st.registerOpen?'开放':'关闭';
     document.getElementById('reg-open').checked=!!st.registerOpen;
     renderOtp(otp);
     const s=await fetch('/api/admin/settings',{headers:AUTH()}).then(r=>r.json());
@@ -1509,7 +1457,8 @@ document.getElementById('btn-test-proxy').onclick=async()=>{
 /* 动态码面板
  * 未绑定：只显示密钥 + 输入框，服务器不下发算好的码（否则复制粘贴就能「绑定成功」）
  * 已绑定：密钥隐藏，只显示实时码与倒计时
- * 「重新导入密钥」只是本地切回密钥视图，不改服务器状态，换设备时用
+ * 绑定是一次性的：绑定后没有任何入口能改绑/解绑/换密钥，
+ * 想彻底重来只能到服务器上删掉 data/otp.json（需要机器权限，不是后台权限）。
  */
 let _otpTick=null,_otpLeft=0;
 
@@ -1518,7 +1467,6 @@ function renderOtp(d){
   const bound=!!d.bound;
   document.getElementById('otp-unbound').hidden=bound;
   document.getElementById('otp-bound').hidden=!bound;
-  document.getElementById('btn-reveal-secret').hidden=!bound;
   if(d.secret) document.getElementById('otp-secret').value=d.secret;
   if(bound){
     if(d.code) document.getElementById('otp-code').textContent=d.code;
@@ -1572,29 +1520,6 @@ document.getElementById('btn-otp-bind').onclick=async()=>{
       st.textContent='❌ '+(r.error||'校验失败'); st.style.color='var(--err)';
     }
   }catch(e){ st.textContent='❌ 网络错误'; st.style.color='var(--err)'; }
-};
-
-document.getElementById('btn-reveal-secret').onclick=async()=>{
-  try{
-    const d=await fetch('/api/otp?reveal=1',{headers:AUTH()}).then(x=>x.json());
-    clearInterval(_otpTick); _otpTick=null;
-    document.getElementById('otp-unbound').hidden=false;
-    document.getElementById('otp-bound').hidden=true;
-    document.getElementById('btn-reveal-secret').hidden=true;
-    if(d.secret) document.getElementById('otp-secret').value=d.secret;
-    const st=document.getElementById('otp-bind-status');
-    st.textContent='已绑定中。把密钥导入新设备后，填一次它生成的 6 位码即可，原有设备不受影响。';
-    st.style.color='var(--mut)';
-  }catch(e){ toast('取密钥失败'); }
-};
-
-document.getElementById('btn-reset-otp').onclick=async()=>{
-  if(!confirm('重置密钥？已经导入的验证器会全部失效，需要用新密钥重新导入。'))return;
-  const d=await fetch('/api/otp/reset',{method:'POST',headers:AUTH()}).then(x=>x.json());
-  renderOtp({bound:false, secret:d.secret});
-  const st=document.getElementById('otp-bind-status');
-  st.textContent='密钥已重置，请用新密钥重新导入验证器'; st.style.color='var(--mut)';
-  document.getElementById('otp-bind-code').value='';
 };
 
 document.getElementById('btn-admin-logout').onclick=()=>{adminToken='';localStorage.removeItem('veyraAdmin');location.reload()};
