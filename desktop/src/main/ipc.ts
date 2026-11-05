@@ -13,7 +13,7 @@ import * as qrlogin from './qrlogin';
 import * as source from './source';
 import * as update from './update';
 import * as device from './device';
-import { info as mediaInfo, fileUrl } from './media';
+import { info as mediaInfo, fileUrl, prepareLocal } from './media';
 import { setEmitter } from './bus';
 import { deviceName, ffmpegAvailable, isDev, lanAddress, serverDir, userDataDir } from './paths';
 
@@ -159,8 +159,8 @@ const handlers: { [K in ApiName]: (...args: any[]) => any } = {
     catalog.search(source.requireSource(payload?.source), payload.q),
   'catalog.detail': (payload: { source?: string; id: string }) =>
     catalog.detail(source.requireSource(payload?.source), payload.id),
-  'catalog.play': (payload: { source?: string; id: string; episode: number }) =>
-    catalog.play(source.requireSource(payload?.source), payload.id, payload.episode),
+  'catalog.play': (payload: { source?: string; id: string; episode: number; hevc?: boolean }) =>
+    catalog.play(source.requireSource(payload?.source), payload.id, payload.episode, payload?.hevc === true),
 
   'source.state': () => source.state(),
   'source.enter': (payload: { code: string }) => source.enterPrivate(payload.code),
@@ -185,10 +185,14 @@ const handlers: { [K in ApiName]: (...args: any[]) => any } = {
   },
   'downloads.remote': () => remote.list(),
 
-  'downloads.play': (payload: { id: string; index?: number }) => {
+  'downloads.play': async (payload: { id: string; index?: number; hevc?: boolean }) => {
     const task = downloads.list().find((item) => item.id === payload.id);
     if (!task) throw new Error('任务不存在');
-    return { url: fileUrl(payload.id, Number(payload.index) || 0) };
+    const index = Number(payload.index) || 0;
+    const needH264 = payload?.hevc !== true;
+    // 和在线播放一样：放不了 H.265 就先转一份 H.264，转完再给地址
+    if (needH264) await prepareLocal(payload.id, index);
+    return { url: fileUrl(payload.id, index, needH264) };
   },
 
   'sync.pull': async () => {

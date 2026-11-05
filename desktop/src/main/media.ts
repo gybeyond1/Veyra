@@ -127,8 +127,120 @@ async function proxySegment(url: string, referer: string): Promise<{ body: Buffe
   return { body, type: head.startsWith('\u0000') || body.subarray(0, 3).toString() === 'ID3' ? 'video/mp2t' : 'application/octet-stream' };
 }
 
-/** 红果单集取流：没加密就代理原流；CENC 加密的先用 ffmpeg 解密封装成 mp4 再发。 */
-async function hongguoStream(seriesId: string, episode: number): Promise<{ hls?: string; file?: string }> {
+/* ---------------- H.265（HEVC）兼容 ----------------
+ * 源站和下载成品基本都是 H.265。Chromium 只在少数装了系统解码器/有硬解的机器上能放，
+ * 其它机器就是「有声音没画面、videoWidth = 0」。检测到放不了时转一遍 H.264 并缓存，
+ * 只影响第一次播放。
+ */
+
+let pickedEncoder: string | null = null;
+
+/** 跑一次 ffmpeg，把 stdout + stderr 都收回来（ffmpeg 的信息一半在 stderr）。 */
+function ffmpegRun(args: string[], timeoutMs: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(ffmpegAvailable(), args, { timeout: timeoutMs, windowsHide: true, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error && (error as { killed?: boolean }).killed) {
+        reject(error);
+        return;
+      }
+      // 只做探测时 ffmpeg 会以 1 退出（没有输出文件），但流信息已经打印出来了
+      resolve(`${stdout || ''}\n${stderr || ''}`);
+    });
+  });
+}
+
+async function probeCodec(file: string): Promise<string> {
+  try {
+    const info = await ffmpegRun(['-hide_banner', '-i', file], 20000);
+    const match = /Stream #\S+.*?Video: (\w+)/.exec(info);
+    return match ? match[1].toLowerCase() : '';
+  } catch {
+    return '';
+  }
+}
+
+/** 候选编码器：软件优先（不挑硬件、参数一致），硬编在后。 */
+const ENCODERS = ['libx264', 'libopenh264', 'h264_nvenc', 'h264_qsv', 'h264_amf'];
+
+let availableEncoders: string[] | null = null;
+
+async function listEncoders(): Promise<string[]> {
+  if (availableEncoders) return availableEncoders;
+  availableEncoders = [];
+  try {
+    const out = await ffmpegRun(['-hide_banner', '-encoders'], 15000);
+    for (const name of ENCODERS) if (out.includes(name)) availableEncoders.push(name);
+  } catch {
+    /* 探测失败就当没有，最后会给出明确报错 */
+  }
+  return availableEncoders;
+}
+
+const transcodeJobs = new Map<string, Promise<string>>();
+
+/**
+ * 不是 H.265 就原样返回；是的话转成 H.264 并缓存。
+ *
+ * 编码器要一个一个试：有的 ffmpeg 编译进了 h264_nvenc/qsv 但机器上没有对应硬件，
+ * 打开编码器就会失败（本项目在 CI 机器上就踩过），软件编码作为兜底必须留着。
+ */
+export async function ensureH264(file: string): Promise<string> {
+  if (!file) return file;
+  const codec = await probeCodec(file);
+  if (codec !== 'hevc' && codec !== 'h265') return file;
+
+  const out = `${file.replace(/\.(mp4|m4v|ts|mkv)$/i, '')}.h264.mp4`;
+  if (fs.existsSync(out) && fs.statSync(out).size > 1024) return out;
+
+  const running = transcodeJobs.get(out);
+  if (running) return running;
+
+  const job = (async () => {
+    const encoders = await listEncoders();
+    if (!encoders.length) throw new Error('这个 ffmpeg 没有 H.264 编码器，放不了 H.265 视频');
+
+    let lastError = '';
+    for (const encoder of encoders) {
+      const startedAt = Date.now();
+      const args = ['-y', '-i', file, '-c:v', encoder];
+      if (encoder === 'libx264') args.push('-preset', 'veryfast', '-crf', '23');
+      args.push(
+        // 竖屏短剧 1080x1920 转 720x1280，速度快一倍多，桌面上看差别不大
+        '-vf', 'scale=-2:min(1280\\,ih)',
+        '-c:a', 'aac', '-b:a', '128k',
+        '-movflags', '+faststart',
+        out,
+      );
+      try {
+        await new Promise<void>((resolve, reject) => {
+          execFile(ffmpegAvailable(), args, { timeout: 30 * 60 * 1000, windowsHide: true, maxBuffer: 16 * 1024 * 1024 }, (error, _stdout, stderr) => {
+            if (!error) return resolve();
+            lastError = String(stderr || error.message).split('\n').filter(Boolean).slice(-2).join(' / ');
+            reject(new Error(lastError));
+          });
+        });
+        if (fs.existsSync(out) && fs.statSync(out).size > 1024) {
+          console.log(`[media] H.265 → H.264（${encoder}，${Date.now() - startedAt}ms）`);
+          return out;
+        }
+        lastError = '输出文件是空的';
+      } catch (error) {
+        console.warn(`[media] 转码用 ${encoder} 失败：${(error as Error).message}`);
+      }
+      try {
+        fs.unlinkSync(out);
+      } catch {
+        /* 本来就没生成 */
+      }
+    }
+    throw new Error(`H.265 转码失败（${lastError || '所有编码器都不可用'}）`);
+  })().finally(() => transcodeJobs.delete(out));
+
+  transcodeJobs.set(out, job);
+  return job;
+}
+
+/** 红果单集取流：没加密就代理原流；CENC 加密的先用 ffmpeg 解密封装成 mp4 再发。 */async function hongguoStream(seriesId: string, episode: number): Promise<{ hls?: string; file?: string }> {
   const key = `rg-${seriesId}-${episode}`;
   const known = cachedResolve(key);
   if (known) return known;
@@ -196,7 +308,12 @@ async function hongguoStream(seriesId: string, episode: number): Promise<{ hls?:
  * 直接报错）。所以这里先等解密完成，再把地址交给渲染层 —— 播放器拿到地址时
  * 文件已经在磁盘上，第一个请求毫秒级返回，不会再出现「点了没反应」。
  */
-export async function prepare(source: 'hongguo' | 'huangguo', seriesId: string, episode: number): Promise<'hls' | 'file'> {
+export async function prepare(
+  source: 'hongguo' | 'huangguo',
+  seriesId: string,
+  episode: number,
+  h264: boolean,
+): Promise<'hls' | 'file'> {
   if (source === 'huangguo') {
     // 私密源要换一次播放地址（带 Referer）/ 可能走后端代理，先热一遍，播放器就不用等
     const found = await playSource(seriesId, episode);
@@ -204,6 +321,8 @@ export async function prepare(source: 'hongguo' | 'huangguo', seriesId: string, 
     return /\.m3u8(\?|$)/i.test(found.url) ? 'hls' : 'file';
   }
   const target = await hongguoStream(seriesId, episode);
+  // 这台机器放不了 H.265：先把转码做完再交地址，别让播放器对着黑屏干等
+  if (target.file && h264) await ensureH264(target.file);
   return target.hls ? 'hls' : 'file';
 }
 
@@ -325,6 +444,14 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (!task) return json(res, 404, { error: '任务不存在' });
     const found = episodeFile(task, Number(index) || 0);
     if (!found) return json(res, 404, { error: '文件还没下载完' });
+    if (url.searchParams.get('h264') === '1') {
+      try {
+        const playable = await ensureH264(found.file);
+        return sendFile(req, res, playable, 'video/mp4');
+      } catch (error) {
+        return json(res, 500, { error: (error as Error).message });
+      }
+    }
     return sendFile(req, res, found.file, found.type);
   }
 
@@ -375,6 +502,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         res.end(playlist);
         return;
       }
+      if (url.searchParams.get('h264') === '1') {
+        return sendFile(req, res, await ensureH264(target.file!), 'video/mp4');
+      }
       return sendFile(req, res, target.file!, 'video/mp4');
     } catch (error) {
       json(res, 502, { error: (error as Error).message });
@@ -414,9 +544,9 @@ export function info(): { port: number; token: string; lan: string } {
   return { port, token, lan: port ? `http://${lanAddress()}:${port}` : '' };
 }
 
-export function playUrl(source: 'hongguo' | 'huangguo', seriesId: string, episode: number): string {
+export function playUrl(source: 'hongguo' | 'huangguo', seriesId: string, episode: number, h264 = false): string {
   const kind = source === 'huangguo' ? 'hg' : 'rg';
-  return mediaUrl(`/${kind}/${encodeURIComponent(seriesId)}/${episode}`);
+  return mediaUrl(`/${kind}/${encodeURIComponent(seriesId)}/${episode}${h264 ? '?h264=1' : ''}`);
 }
 
 /**
@@ -455,9 +585,17 @@ export function nasUrl(taskId: string, index = 0): string {
   return mediaUrl(`/nas/${encodeURIComponent(taskId)}/${index}`);
 }
 
+/** 本地已下载文件：先把 H.265 转好（要时间），再让播放器去请求，避免空等。 */
+export async function prepareLocal(taskId: string, index = 0): Promise<void> {
+  const task = listTasks().find((item) => item.id === taskId);
+  if (!task) return;
+  const found = episodeFile(task, index);
+  if (found) await ensureH264(found.file);
+}
+
 /** 本地已下载文件：index=0 是合并成品，>0 是分集。 */
-export function fileUrl(taskId: string, index = 0): string {
-  return mediaUrl(`/file/${encodeURIComponent(taskId)}/${index}`);
+export function fileUrl(taskId: string, index = 0, h264 = false): string {
+  return mediaUrl(`/file/${encodeURIComponent(taskId)}/${index}${h264 ? '?h264=1' : ''}`);
 }
 
 export function stop(): void {

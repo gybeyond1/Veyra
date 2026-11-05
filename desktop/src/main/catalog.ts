@@ -133,14 +133,20 @@ export async function detail(source: ContentSource, id: string): Promise<SeriesD
   };
 }
 
-/** 播放地址：统一交给本机媒体服务。红果加密的先解密落盘再返回，避免播放器空等。 */
+/**
+ * 播放地址：统一交给本机媒体服务。红果加密的先解密落盘再返回，避免播放器空等。
+ * hevcOk 由渲染层告诉主进程（这台机器的 Chromium 能不能直接解 H.265）；
+ * 放不了就先把这集转成 H.264 再给地址。
+ */
 export async function play(
   source: ContentSource,
   id: string,
   episode: number,
+  hevcOk = false,
 ): Promise<{ url: string; kind: 'hls' | 'file' }> {
   if (!id) throw new Error('缺少剧集 id');
   const number = Math.max(1, Number(episode) || 1);
-  const kind = await prepare(source, id, number);
-  return { url: playUrl(source, id, number), kind };
+  const needH264 = !hevcOk;
+  const kind = await prepare(source, id, number, needH264);
+  return { url: playUrl(source, id, number, needH264 && kind === 'file'), kind };
 }

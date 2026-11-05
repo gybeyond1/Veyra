@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Hls from 'hls.js';
 import { call, errorText } from '../api';
 
@@ -34,6 +34,18 @@ export default function PlayerPage({ source, id, episode, title, position, local
   const [waited, setWaited] = useState(0);
   const [attempt, setAttempt] = useState(0);
   const [list, setList] = useState<number[]>(episodes || []);
+
+  /**
+   * 这台机器的 Chromium 能不能直接解 H.265。
+   * Windows 上要看有没有装 HEVC 解码器，Linux 基本都没有；放不了就让主进程先转码。
+   */
+  const hevcOk = useMemo(() => {
+    try {
+      return document.createElement('video').canPlayType('video/mp4; codecs="hvc1.1.6.L93.B0"') !== '';
+    } catch {
+      return false;
+    }
+  }, []);
 
   // 解密/取流期间给个秒数，别让人以为卡死了
   useEffect(() => {
@@ -75,8 +87,8 @@ export default function PlayerPage({ source, id, episode, title, position, local
     }
 
     const job = localTaskId
-      ? call<{ url: string }>('downloads.play', { id: localTaskId, index: 0 })
-      : call<{ url: string; kind: 'hls' | 'file' }>('catalog.play', { source, id, episode });
+      ? call<{ url: string }>('downloads.play', { id: localTaskId, index: 0, hevc: hevcOk })
+      : call<{ url: string; kind: 'hls' | 'file' }>('catalog.play', { source, id, episode, hevc: hevcOk });
     job
       .then((result) => {
         if (!alive) return;
@@ -93,7 +105,7 @@ export default function PlayerPage({ source, id, episode, title, position, local
     return () => {
       alive = false;
     };
-  }, [source, id, episode, localTaskId, remoteUrl, attempt]);
+  }, [source, id, episode, localTaskId, remoteUrl, attempt, hevcOk]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -198,7 +210,10 @@ export default function PlayerPage({ source, id, episode, title, position, local
             {loading && (
               <div className="player-loading">
                 <p>正在准备播放…{waited > 0 ? `（${waited}s）` : ''}</p>
-                {waited >= 3 && <p className="player-loading-sub">红果加密集需要先解密成 mp4，通常 3–10 秒，稍等一下</p>}
+                {waited >= 3 && waited < 20 && (
+                  <p className="player-loading-sub">首次播放要先解密；这台机器放不了 H.265 时还要转码，通常十几秒，之后秒开</p>
+                )}
+                {waited >= 20 && <p className="player-loading-sub">还在转码，这一集比较长，请再等一下（每集只需要转一次）</p>}
               </div>
             )}
           </>
