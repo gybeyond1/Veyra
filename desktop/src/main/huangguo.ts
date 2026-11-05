@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import * as cheerio from 'cheerio';
 import type { HomePayload, SeriesCard, SeriesDetail } from '../shared/types';
 import { fetchBinary, fetchText } from './http';
+import { session } from './session';
 
 /**
  * 私密源（黄果）网页解析。
@@ -23,15 +24,37 @@ function text(value: unknown): string {
   return String(value == null ? '' : value).replace(/\s+/g, ' ').trim();
 }
 
+function looksLikeChallenge(html: string): boolean {
+  return /Just a moment|challenge-platform|cf-browser-verification|Attention Required/i.test(html);
+}
+
 async function load(pathname: string, referer = '/'): Promise<{ html: string; site: string }> {
   let last: Error | null = null;
   for (const site of SITES) {
     try {
       const html = await fetchText(site + pathname, 15000, { Referer: `${REFERER}${referer}`, 'User-Agent': UA });
-      if (html && html.length > 200) return { html, site };
-      throw new Error('页面内容为空');
+      if (html && html.length > 200 && !looksLikeChallenge(html)) return { html, site };
+      throw new Error(html && looksLikeChallenge(html) ? '源站风控拦截' : '页面内容为空');
     } catch (error) {
       last = error as Error;
+    }
+  }
+  // 直连被风控/掉线时借后端通道（后端可配代理，且已经处理过源站白名单）
+  const current = session();
+  if (current?.server) {
+    for (const site of SITES) {
+      try {
+        const target = `${site}${pathname}`;
+        const html = await fetchText(
+          `${current.server}/api/huangguo-proxy?url=${encodeURIComponent(target)}`,
+          20000,
+          { Referer: `${REFERER}${referer}`, 'User-Agent': UA },
+        );
+        if (html && html.length > 200 && !looksLikeChallenge(html)) return { html, site };
+        throw new Error('后端通道返回的内容不可用');
+      } catch (error) {
+        last = error as Error;
+      }
     }
   }
   throw new Error('私密内容加载失败：' + (last?.message || '网络异常'));
@@ -86,7 +109,19 @@ async function coverData(raw: string): Promise<string> {
   const cached = coverCache.get(url);
   if (cached) return cached;
   try {
-    const buffer = await fetchBinary(url, 12000, { Referer: `${REFERER}/`, 'User-Agent': UA });
+    let buffer: Buffer;
+    try {
+      buffer = await fetchBinary(url, 12000, { Referer: `${REFERER}/`, 'User-Agent': UA });
+    } catch (error) {
+      // 封面 CDN 直连失败时同样借后端通道（后端会把加密封面解成真图）
+      const current = session();
+      if (!current?.server) throw error;
+      buffer = await fetchBinary(
+        `${current.server}/api/huangguo-proxy?url=${encodeURIComponent(url)}`,
+        20000,
+        { Referer: `${REFERER}/`, 'User-Agent': UA },
+      );
+    }
     const image = decodeCover(buffer);
     if (!image) return '';
     const mime = image[0] === 0xff ? 'image/jpeg' : image[0] === 0x89 ? 'image/png' : 'image/gif';

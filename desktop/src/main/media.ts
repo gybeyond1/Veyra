@@ -8,6 +8,7 @@ import { ffmpegAvailable, lanAddress, userDataDir } from './paths';
 import { fetchBinary } from './http';
 import { serverModules } from './server-modules';
 import { playSource } from './huangguo';
+import { session } from './session';
 import { list as listTasks } from './downloads';
 
 /**
@@ -81,8 +82,23 @@ function rewritePlaylist(text: string, base: string, referer: string): string {
     .join('\n');
 }
 
+/** 拉源站媒体：直连被风控时退回后端通道，别让一集视频因为一个分片 403 就整段播不了。 */
+async function fetchMedia(url: string, referer: string): Promise<Buffer> {
+  try {
+    return await fetchBinary(url, HLSTIMEOUT, { Referer: referer, 'User-Agent': 'Mozilla/5.0 (Linux; Android 13) Chrome/130 Mobile Safari/537.36' });
+  } catch (error) {
+    const current = session();
+    if (!current?.server || /^https?:\/\/127\.0\.0\.1/.test(url)) throw error;
+    return fetchBinary(
+      `${current.server}/api/huangguo-proxy?url=${encodeURIComponent(url)}`,
+      30000,
+      { Referer: referer, 'User-Agent': 'Mozilla/5.0 (Linux; Android 13) Chrome/130 Mobile Safari/537.36' },
+    );
+  }
+}
+
 async function proxySegment(url: string, referer: string): Promise<{ body: Buffer; type: string }> {
-  const body = await fetchBinary(url, HLSTIMEOUT, { Referer: referer, 'User-Agent': 'Mozilla/5.0 (Linux; Android 13) Chrome/130 Mobile Safari/537.36' });
+  const body = await fetchMedia(url, referer);
   const head = body.subarray(0, 16).toString('utf8');
   if (head.startsWith('#EXTM3U')) {
     return { body: Buffer.from(rewritePlaylist(body.toString('utf8'), url, referer), 'utf8'), type: 'application/vnd.apple.mpegurl' };
@@ -223,7 +239,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const [, , seriesId, episode] = url.pathname.split('/');
     try {
       const source = await playSource(seriesId, Number(episode) || 1);
-      const body = await fetchBinary(source.url, HLSTIMEOUT, { Referer: source.referer, 'User-Agent': 'Mozilla/5.0 (Linux; Android 13) Chrome/130 Mobile Safari/537.36' });
+      const body = await fetchMedia(source.url, source.referer);
       if (body.subarray(0, 8).toString('utf8').startsWith('#EXTM3U')) {
         const playlist = rewritePlaylist(body.toString('utf8'), source.url, source.referer);
         res.writeHead(200, { 'Content-Type': 'application/vnd.apple.mpegurl', 'Access-Control-Allow-Origin': '*' });
