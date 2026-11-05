@@ -23,3 +23,7 @@ Android Version/
 server/node_modules/
 chengzi-data/
 app/libs/
+
+desktop/node_modules/
+desktop/dist/
+desktop/release/

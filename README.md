@@ -1,6 +1,6 @@
 # Veyra
 
-自建短剧播放系统：**Android 手机 + Android TV 双端客户端 + Node.js 后端**。
+自建短剧播放系统：**Android 手机 + Android TV + Windows 桌面端 + Node.js 后端**。
 
 不是套壳聚合——片源接入、下载合并、账号权限、双端界面、热更新，都在这一个仓库里。
 
@@ -24,6 +24,18 @@
 | 私密模式 | 每次进入都校验动态码（OTP） |
 | 主题 | 浅色 / 深色两套，跟随系统切换 |
 | 更新 | 前端资源热更新（签名校验 + 原子切换），改界面不用重装 APK |
+
+### 桌面端（`desktop/`，Electron + React）
+
+不是把 WebUI 套进窗口：界面用 React 重写，解析、下载、合并全部在本机完成，
+只有账号和片单同步走后端。
+
+- 登录：服务器地址 + 账号密码（token 走系统凭据加密），或手机 App 扫二维码直接授权
+- 浏览：首页 / 分类 / 搜索 / 详情 / 选集，直接复用 `server/` 的解析模块
+- 下载：本机多集并发、失败集自动重试、任务持久化，整剧落到自己选的目录
+- 合并：下载完成自动合并成单文件；编码不一致时先统一转码再合并
+- 同步：「我的」页直接显示手机端的最近在看与收藏
+- 自带 ffmpeg / ffprobe，装完即用
 
 ### 电视端（`tv` flavor，包名 `com.veyra.gybeyond.tv`）
 
@@ -57,6 +69,7 @@ app/                         Android 客户端（17k 行 Java + 8k 行前端）
   src/main/cpp/              自研合并引擎 JNI
   src/main/assets/           app.*（手机前端） / tv.*（电视前端）
 server/                      API + 下载器 + 管理台
+desktop/                     Windows 桌面端（Electron + React，复用 server 的解析与下载）
 third_party/hongguo/         红果内容接入层
 docker-compose.yaml
 ```

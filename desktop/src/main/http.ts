@@ -1,0 +1,148 @@
+import http from 'node:http';
+import https from 'node:https';
+import { execFile } from 'node:child_process';
+import { URL } from 'node:url';
+import zlib from 'node:zlib';
+
+export interface JsonOptions {
+  method?: string;
+  body?: unknown;
+  token?: string;
+  timeoutMs?: number;
+  /** 自建服务器常用自签证书，默认放行（只影响用户自己填的地址） */
+  allowSelfSigned?: boolean;
+}
+
+export class HttpError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+function decode(buffer: Buffer, encoding?: string): string {
+  try {
+    if (encoding === 'gzip') return zlib.gunzipSync(buffer).toString('utf8');
+    if (encoding === 'deflate') return zlib.inflateSync(buffer).toString('utf8');
+    if (encoding === 'br') return zlib.brotliDecompressSync(buffer).toString('utf8');
+  } catch {
+    /* 压缩头不可信时按原文处理 */
+  }
+  return buffer.toString('utf8');
+}
+
+/** 把 Node 的底层错误码翻成人话，别让用户看到 ECONNREFUSED。 */
+function friendlyNetworkError(error: NodeJS.ErrnoException): string {
+  switch (error.code) {
+    case 'ECONNREFUSED':
+      return '连不上服务器：地址或端口不对，或者服务没在运行';
+    case 'ENOTFOUND':
+    case 'EAI_AGAIN':
+      return '找不到这个服务器地址，检查是否填错';
+    case 'ECONNRESET':
+      return '连接被服务器断开，稍后重试';
+    case 'ETIMEDOUT':
+      return '连接超时，检查网络或服务器是否在线';
+    case 'CERT_HAS_EXPIRED':
+    case 'DEPTH_ZERO_SELF_SIGNED_CERT':
+    case 'SELF_SIGNED_CERT_IN_CHAIN':
+      return '服务器证书有问题（自签证书请用 http 地址）';
+    default:
+      return error.message || '网络错误';
+  }
+}
+
+export function requestJson<T = unknown>(base: string, pathname: string, options: JsonOptions = {}): Promise<T> {
+  return new Promise((resolve, reject) => {
+    let url: URL;
+    try {
+      url = new URL(pathname, base.endsWith('/') ? base : `${base}/`);
+    } catch {
+      reject(new HttpError(400, '服务器地址无效'));
+      return;
+    }
+    const isHttps = url.protocol === 'https:';
+    const payload = options.body === undefined ? null : Buffer.from(JSON.stringify(options.body), 'utf8');
+    const headers: Record<string, string> = {
+      Accept: 'application/json',
+      'User-Agent': 'Veyra-Desktop/0.1',
+    };
+    if (payload) {
+      headers['Content-Type'] = 'application/json';
+      headers['Content-Length'] = String(payload.length);
+    }
+    if (options.token) headers.Authorization = `Bearer ${options.token}`;
+
+    const request = (isHttps ? https : http).request(
+      {
+        protocol: url.protocol,
+        hostname: url.hostname,
+        port: url.port || (isHttps ? 443 : 80),
+        path: `${url.pathname}${url.search}`,
+        method: options.method || (payload ? 'POST' : 'GET'),
+        headers,
+        timeout: options.timeoutMs ?? 20000,
+        rejectUnauthorized: options.allowSelfSigned === false,
+      },
+      (response) => {
+        const chunks: Buffer[] = [];
+        response.on('data', (chunk) => chunks.push(chunk as Buffer));
+        response.on('end', () => {
+          const text = decode(Buffer.concat(chunks), String(response.headers['content-encoding'] || ''));
+          const status = response.statusCode || 0;
+          if (status >= 400) {
+            let message = text.slice(0, 300);
+            try {
+              const parsed = JSON.parse(text);
+              message = parsed.error || parsed.message || message;
+            } catch {
+              /* 保持原文 */
+            }
+            reject(new HttpError(status, message || `HTTP ${status}`));
+            return;
+          }
+          if (!text.trim()) {
+            resolve(undefined as T);
+            return;
+          }
+          try {
+            resolve(JSON.parse(text) as T);
+          } catch {
+            reject(new HttpError(502, '服务器返回的不是 JSON，检查地址是否填错'));
+          }
+        });
+      },
+    );
+    request.on('timeout', () => request.destroy(new Error('连接超时，检查服务器地址和网络')));
+    request.on('error', (error: NodeJS.ErrnoException) => {
+      reject(new Error(friendlyNetworkError(error)));
+    });
+    if (payload) request.write(payload);
+    request.end();
+  });
+}
+
+const MOBILE_UA = 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36';
+
+/**
+ * 抓网页文本：先走系统 curl。
+ * 红果/黄果的边缘节点会按 TLS 指纹拦 Node 客户端，curl 反而正常；
+ * Windows 10 1803 起自带 curl.exe，打包时另外附带一份，不依赖用户环境。
+ */
+export function fetchText(url: string, timeoutMs = 10000): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      'curl',
+      ['-s', '-L', '-m', String(Math.max(3, Math.round(timeoutMs / 1000))), '-A', MOBILE_UA, url],
+      { maxBuffer: 12 * 1024 * 1024, windowsHide: true },
+      (error, stdout) => {
+        if (error) {
+          reject(new Error(`抓取失败：${error.message}`));
+          return;
+        }
+        resolve(String(stdout || ''));
+      },
+    );
+  });
+}

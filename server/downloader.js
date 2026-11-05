@@ -33,7 +33,9 @@ function resolveWritableDir(preferred, fallbacks) {
   return null;
 }
 DATA_DIR = resolveWritableDir(DATA_DIR, [path.join(process.cwd(), 'data'), path.join(os.tmpdir(), 'veyra-data')]) || DATA_DIR;
-const CONCURRENCY = Math.max(1, parseInt(process.env.DOWNLOAD_CONCURRENCY || '2', 10) || 2);
+let CONCURRENCY = Math.max(1, parseInt(process.env.DOWNLOAD_CONCURRENCY || '2', 10) || 2);
+/** 合并后是否保留分集文件（桌面端在设置里可关，后端保持原来的「合并即清理」） */
+let KEEP_EPISODES = false;
 const RETRIES = 2;
 const TASKS_FILE = path.join(DATA_DIR, 'downloads.json');
 const REDOWNLOAD_TIMEOUT_MS = 30 * 60 * 1000; // 播放地址默认时效：超时后任务判失败（APK 重新提交）
@@ -857,7 +859,10 @@ async function mergeStage(task, dir, workDir) {
     if (fs.existsSync(dir)) {
       for (const k of fs.readdirSync(dir)) {
         if (k === path.basename(outputPath)) continue;
-        if (k.endsWith('.mp4') || k.endsWith('.enc') || k === '.merge-work' || k.endsWith('.ffconcat')) {
+        const episodeFile = k.endsWith('.mp4') || k.endsWith('.enc');
+        // 保留分集时只留下每集的 mp4/enc，中间文件照样清掉
+        if (episodeFile && KEEP_EPISODES) continue;
+        if (episodeFile || k === '.merge-work' || k.endsWith('.ffconcat')) {
           fs.rmSync(safeJoin(dir, k), { recursive: true, force: true });
         }
       }
@@ -1001,6 +1006,26 @@ function deleteTask(id, owner, isAdmin) {
   flushStore(true);
   return true;
 }
+/**
+ * 桌面端可以改下载目录与并发数（后端不调用这两个函数，行为不变）。
+ * 改目录后立刻校验可写，返回真正生效的目录。
+ */
+function setDownloadDir(dir) {
+  if (!dir) return DOWNLOAD_DIR;
+  DOWNLOAD_DIR = String(dir);
+  ensureDirs();
+  flushStore(true);
+  return DOWNLOAD_DIR;
+}
+function setMergeOptions(options) {
+  if (options && typeof options.keepEpisodes === 'boolean') KEEP_EPISODES = options.keepEpisodes;
+  return { keepEpisodes: KEEP_EPISODES };
+}
+function setConcurrency(value) {
+  const n = parseInt(value, 10);
+  if (Number.isFinite(n) && n >= 1) CONCURRENCY = Math.min(16, n);
+  return CONCURRENCY;
+}
 function ensureDirs() {
   // /video 不可写时回退：DATA_DIR/video → 当前目录/video → 系统临时目录
   const resolved = resolveWritableDir(DOWNLOAD_DIR, [
@@ -1029,4 +1054,4 @@ function status() {
 loadTasks();
 ensureDirs();
 
-module.exports = { createTask, listTasks, getTask, getRawTask, taskDirOf, deleteTask, mergeTask, retryFailedEpisodes, status, DOWNLOAD_DIR, mergeEpisodes, epName, safeJoin };
+module.exports = { createTask, listTasks, getTask, getRawTask, taskDirOf, deleteTask, mergeTask, retryFailedEpisodes, status, setDownloadDir, setConcurrency, setMergeOptions, mergeEpisodes, epName, safeJoin };

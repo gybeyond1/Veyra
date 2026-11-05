@@ -1,0 +1,56 @@
+appId: com.veyra.desktop
+productName: Veyra
+copyright: GPL-3.0 · 仅限自用
+
+directories:
+  output: release
+  buildResources: resources
+
+files:
+  - dist/**/*
+  - package.json
+  - '!**/*.map'
+
+# 解析/下载/合并直接复用仓库 server/ 里的实现，随包放进 resources/server
+extraResources:
+  - from: ../server
+    to: server
+    filter:
+      - '*.js'
+  # 自带 ffmpeg（含 ffprobe），不依赖用户机器上装没装
+  - from: node_modules/ffmpeg-static
+    to: ffmpeg
+    filter:
+      - 'ffmpeg*'
+
+asar: true
+compression: maximum
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: resources/icon.ico
+  artifactName: Veyra-Desktop-${version}-${arch}.${ext}
+  requestedExecutionLevel: asInvoker
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Veyra
+  deleteAppDataOnUninstall: false
+  installerIcon: resources/icon.ico
+  uninstallerIcon: resources/icon.ico
+
+linux:
+  target:
+    - dir
+  category: Video
+  icon: resources/icon.png
+
+publish: null
