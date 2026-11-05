@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { AppSettings, DownloadTask, SeriesDetail } from '@shared/types';
+import type { AppSettings, DownloadDispatchResult, DownloadTarget, SeriesDetail } from '@shared/types';
 import { call, errorText } from '../api';
 import Cover from '../components/Cover';
 
@@ -35,6 +35,9 @@ export default function DetailPage({ id, source, fallback, settings, onBack, onD
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  /** 下载到哪儿：本机 / NAS / 某台设备 / 远程存储 */
+  const [targets, setTargets] = useState<DownloadTarget[]>([]);
+  const [target, setTarget] = useState('local');
 
   useEffect(() => {
     let alive = true;
@@ -79,6 +82,13 @@ export default function DetailPage({ id, source, fallback, settings, onBack, onD
   function beginSelect() {
     setSelecting(true);
     setSelected(new Set());
+    // 每次进选集都刷一次：设备上下线、远端存储增删都能立刻反映
+    call<DownloadTarget[]>('downloads.targets')
+      .then((list) => {
+        setTargets(Array.isArray(list) ? list : []);
+        setTarget((current) => (list.some((item) => item.key === current && item.available) ? current : 'local'));
+      })
+      .catch(() => setTargets([]));
   }
 
   function cancelSelect() {
@@ -90,14 +100,15 @@ export default function DetailPage({ id, source, fallback, settings, onBack, onD
     if (!numbers.length || busy) return;
     setBusy(true);
     try {
-      const task = await call<DownloadTask>('downloads.create', {
+      const result = await call<DownloadDispatchResult>('downloads.create', {
         id,
         title,
         cover,
         source,
         episodes: numbers,
+        target,
       });
-      notify(`已加入下载队列：${task.title}（${numbers.length} 集）`);
+      notify(result?.message || `已提交：${title}（${numbers.length} 集）`);
       onDownloaded();
       cancelSelect();
     } catch (issue) {
@@ -177,7 +188,9 @@ export default function DetailPage({ id, source, fallback, settings, onBack, onD
               {selecting ? '取消下载' : '下载'}
             </button>
           </div>
-          <p className="detail-path">保存到：{settings?.downloadDir || '默认下载目录'}</p>
+          <p className="detail-path">
+            保存到：{targets.find((item) => item.key === target)?.hint || settings?.downloadDir || '默认下载目录'}
+          </p>
         </div>
       </section>
 
@@ -201,7 +214,18 @@ export default function DetailPage({ id, source, fallback, settings, onBack, onD
 
         {selecting && (
           <div className="download-bar">
-            <span>勾选要下载的集数（可全选）</span>
+            <label className="dl-target">
+              <span>下载到</span>
+              <select value={target} onChange={(event) => setTarget(event.target.value)}>
+                {(targets.length ? targets : [{ key: 'local', kind: 'local', name: '本机', hint: '', available: true } as DownloadTarget]).map((item) => (
+                  <option key={item.key} value={item.key} disabled={!item.available}>
+                    {item.name}
+                    {item.hint ? `（${item.hint}）` : ''}
+                    {item.available ? '' : ' · 不可用'}
+                  </option>
+                ))}
+              </select>
+            </label>
             <div className="download-bar-actions">
               <button type="button" className="ghost" onClick={cancelSelect} disabled={busy}>
                 取消

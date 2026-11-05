@@ -3,7 +3,7 @@ import https from 'node:https';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { execFile } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import type { DownloadTask } from '../shared/types';
 import { ffmpegAvailable, lanAddress, userDataDir } from './paths';
 import { fetchBinary } from './http';
@@ -240,7 +240,176 @@ export async function ensureH264(file: string): Promise<string> {
   return job;
 }
 
-/** 红果单集取流：没加密就代理原流；CENC 加密的先用 ffmpeg 解密封装成 mp4 再发。 */async function hongguoStream(seriesId: string, episode: number): Promise<{ hls?: string; file?: string }> {
+/* ---------------- 远程成品（NAS / 别的设备）的 H.265 兼容 ----------------
+ * 手机能放、电脑放不出来，十有八九还是 H.265：手机有硬解，Chromium 没有。
+ * 远端文件可能是一部剧合起来好几个 G，等整段转完再播不现实，所以这里转成 HLS：
+ * ffmpeg 一边转、播放器一边放，几秒就能出画面，转完的切片留在缓存里下次直接秒开。
+ */
+
+interface RemoteJob {
+  dir: string;
+  playlist: string;
+  proc: ChildProcess;
+}
+
+const remoteJobs = new Map<string, RemoteJob>();
+
+function remoteKey(url: string): string {
+  return crypto.createHash('sha1').update(url).digest('hex').slice(0, 16);
+}
+
+function hlsReady(dir: string): boolean {
+  try {
+    const text = fs.readFileSync(path.join(dir, 'index.m3u8'), 'utf8');
+    return /\.ts(\?|$)/m.test(text);
+  } catch {
+    return false;
+  }
+}
+
+async function waitForPlaylist(dir: string, timeoutMs: number): Promise<void> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (hlsReady(dir)) return;
+    const job = [...remoteJobs.values()].find((item) => item.dir === dir);
+    // ffmpeg 已经退出了还没切片：别傻等，明确报错
+    if (!job) break;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+  if (!hlsReady(dir)) throw new Error('转码没有开始产出，可能是远端文件读不到或格式异常');
+}
+
+/**
+ * 把远端视频转成 HLS（H.264），返回 index.m3u8 的本地文件路径。
+ * 同一个地址只起一个 ffmpeg；切片缓存 7 天。
+ */
+async function ensureRemoteHls(url: string, headers: Record<string, string>): Promise<{ key: string; dir: string }> {
+  const key = remoteKey(url);
+  const dir = path.join(cacheDir(), `hls-${key}`);
+  const playlist = path.join(dir, 'index.m3u8');
+  fs.mkdirSync(dir, { recursive: true });
+
+  const running = remoteJobs.get(key);
+  if (running) {
+    await waitForPlaylist(dir, 90000);
+    return { key, dir };
+  }
+  // 上次已经转完（有 ENDLIST）就直接用
+  if (fs.existsSync(playlist) && /#EXT-X-ENDLIST/.test(fs.readFileSync(playlist, 'utf8'))) {
+    return { key, dir };
+  }
+  // 上次半途而废的残留：清掉重来，别让播放器对着半个清单转圈
+  if (fs.existsSync(playlist)) {
+    try {
+      for (const name of fs.readdirSync(dir)) fs.rmSync(path.join(dir, name), { force: true });
+    } catch { /* ignore */ }
+  }
+
+  const encoders = await listEncoders();
+  const encoder = encoders.includes('libx264') ? 'libx264' : encoders[0];
+  if (!encoder) throw new Error('这个 ffmpeg 没有 H.264 编码器，放不了 H.265 视频');
+
+  const args = ['-y'];
+  const headerText = Object.entries(headers).map(([name, value]) => `${name}: ${value}\r\n`).join('');
+  if (headerText) args.push('-headers', headerText);
+  args.push(
+    '-i', url,
+    '-c:v', encoder,
+  );
+  if (encoder === 'libx264') args.push('-preset', 'veryfast', '-crf', '23');
+  args.push(
+    '-vf', 'scale=-2:min(1280\\,ih)',
+    '-c:a', 'aac', '-b:a', '128k',
+    '-max_muxing_queue_size', '1024',
+    '-f', 'hls',
+    '-hls_time', '4',
+    '-hls_playlist_type', 'event',
+    '-hls_flags', 'independent_segments',
+    '-hls_segment_filename', path.join(dir, 'seg%05d.ts'),
+    playlist,
+  );
+  const proc = spawn(ffmpegAvailable(), args, { windowsHide: true });
+  const job: RemoteJob = { dir, playlist, proc };
+  remoteJobs.set(key, job);
+  let stderr = '';
+  proc.stderr?.on('data', (chunk) => {
+    stderr = (stderr + String(chunk)).slice(-4000);
+  });
+  proc.on('error', (error) => {
+    console.warn('[media] 远程转码启动失败：' + error.message);
+    remoteJobs.delete(key);
+  });
+  proc.on('exit', (code) => {
+    remoteJobs.delete(key);
+    if (code === 0) console.log(`[media] 远程转码完成 ${key}`);
+    else console.warn(`[media] 远程转码退出 ${code}：${stderr.split('\n').filter(Boolean).slice(-2).join(' / ')}`);
+  });
+
+  console.log(`[media] 开始远程转码 ${key}（${encoder}）`);
+  await waitForPlaylist(dir, 120000);
+  return { key, dir };
+}
+
+function serveHlsFile(req: http.IncomingMessage, res: http.ServerResponse, key: string, name: string): void {
+  if (!/^(index\.m3u8|seg\d{5}\.ts)$/.test(name)) return json(res, 404, { error: 'not found' });
+  const file = path.join(cacheDir(), `hls-${key}`, name);
+  if (!fs.existsSync(file)) return json(res, 404, { error: '切片还没生成' });
+  if (name.endsWith('.m3u8')) {
+    res.writeHead(200, {
+      'Content-Type': 'application/vnd.apple.mpegurl',
+      'Cache-Control': 'no-store',
+      'Access-Control-Allow-Origin': '*',
+    });
+    fs.createReadStream(file).pipe(res);
+    return;
+  }
+  res.writeHead(200, {
+    'Content-Type': 'video/mp2t',
+    'Content-Length': fs.statSync(file).size,
+    'Access-Control-Allow-Origin': '*',
+  });
+  fs.createReadStream(file).pipe(res);
+}
+
+/** 普通 HTTP 转发（别的设备的局域网媒体服务）：Range 原样透传，不加 Authorization。 */
+async function proxyRemote(req: http.IncomingMessage, res: http.ServerResponse, target: string): Promise<void> {
+  await new Promise<void>((resolve) => {
+    let parsed: URL;
+    try {
+      parsed = new URL(target);
+    } catch {
+      json(res, 400, { error: '地址无效' });
+      resolve();
+      return;
+    }
+    const headers: Record<string, string> = { 'User-Agent': 'Veyra-Desktop/0.1' };
+    if (req.headers.range) headers.Range = String(req.headers.range);
+    const client = parsed.protocol === 'https:' ? https.request : http.request;
+    const upstream = client(parsed, { method: 'GET', headers }, (remote) => {
+      console.log(`[media] 远程转发上游 ${remote.statusCode} ${parsed.pathname}`);
+      const pass: Record<string, string> = {};
+      for (const name of ['content-type', 'content-length', 'content-range', 'accept-ranges', 'last-modified']) {
+        const value = remote.headers[name];
+        if (typeof value === 'string') pass[name] = value;
+      }
+      res.writeHead(remote.statusCode || 502, pass);
+      remote.pipe(res);
+      remote.on('end', () => resolve());
+      remote.on('error', () => resolve());
+    });
+    upstream.on('error', (error) => {
+      if (!res.headersSent) json(res, 502, { error: `远端文件读取失败：${error.message}` });
+      resolve();
+    });
+    // 客户端中途关掉（拖动进度条换 Range）才掐上游；用 req 的 close 会在请求读完时
+    // 就把连接掐掉，导致播放器一个字节都拿不到
+    res.on('close', () => { if (!res.writableEnded) upstream.destroy(); });
+    upstream.end();
+  });
+}
+
+/** 红果单集取流：没加密就代理原流；CENC 加密的先用 ffmpeg 解密封装成 mp4 再发。 */
+async function hongguoStream(seriesId: string, episode: number): Promise<{ hls?: string; file?: string }> {
   const key = `rg-${seriesId}-${episode}`;
   const known = cachedResolve(key);
   if (known) return known;
@@ -386,7 +555,11 @@ async function proxyServerFile(req: http.IncomingMessage, res: http.ServerRespon
       if (!res.headersSent) json(res, 502, { error: `服务器文件读取失败：${error.message}` });
       resolve();
     });
-    req.on('close', () => upstream.destroy());
+    // 客户端中途关掉（拖动进度条换 Range）才掐上游；用 req 的 close 会在请求读完时
+    // 就把连接掐掉，导致播放器一个字节都拿不到
+    res.on('close', () => { if (!res.writableEnded) upstream.destroy(); });
+    // http.request 只是建了请求对象，不 end() 一个字节都不会发出去（表现为一直转圈）
+    upstream.end();
   });
 }
 
@@ -461,13 +634,52 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const current = session();
     if (!current) return json(res, 401, { error: '未登录' });
     const index = Number(indexRaw) || 0;
-    await proxyServerFile(
-      req,
-      res,
-      `${current.server}/api/download/files/${encodeURIComponent(taskId)}/${index}`,
-      current.token,
-    );
+    const target = `${current.server}/api/download/files/${encodeURIComponent(taskId)}/${index}`;
+    if (url.searchParams.get('h264') === '1') {
+      // 服务器上的成品多为 H.265（手机能放、Chromium 放不了）：边转 HLS 边播
+      try {
+        const job = await ensureRemoteHls(target, { Authorization: `Bearer ${current.token}` });
+        res.writeHead(302, { Location: mediaUrl(`/hls/${job.key}/index.m3u8`) });
+        res.end();
+      } catch (error) {
+        json(res, 502, { error: (error as Error).message });
+      }
+      return;
+    }
+    await proxyServerFile(req, res, target, current.token);
     return;
+  }
+
+  if (url.pathname === '/remote') {
+    // 别的设备（手机 / 电视 / 另一台电脑）局域网媒体服务上的成品
+    const target = decode(url.searchParams.get('u') || '');
+    let parsed: URL;
+    try {
+      parsed = new URL(target);
+    } catch {
+      return json(res, 400, { error: '地址无效' });
+    }
+    if (!/^https?:$/.test(parsed.protocol) || !isPrivateHost(parsed.hostname)) {
+      return json(res, 403, { error: '只允许访问局域网地址' });
+    }
+    console.log(`[media] 远程转发 ${parsed.host} ${parsed.pathname}${url.searchParams.get('h264') === '1' ? '（转码）' : ''}`);
+    if (url.searchParams.get('h264') === '1') {
+      try {
+        const job = await ensureRemoteHls(target, {});
+        res.writeHead(302, { Location: mediaUrl(`/hls/${job.key}/index.m3u8`) });
+        res.end();
+      } catch (error) {
+        json(res, 502, { error: (error as Error).message });
+      }
+      return;
+    }
+    await proxyRemote(req, res, target);
+    return;
+  }
+
+  if (url.pathname.startsWith('/hls/')) {
+    const [, , key, name] = url.pathname.split('/');
+    return serveHlsFile(req, res, key || '', name || '');
   }
 
   if (url.pathname.startsWith('/hg/')) {
@@ -580,9 +792,31 @@ export async function resolveKind(source: 'hongguo' | 'huangguo', seriesId: stri
   return kind;
 }
 
+/** 局域网地址判断：只让媒体服务去连内网 / 环回地址，避免变成任意 URL 代理。 */
+function isPrivateHost(host: string): boolean {
+  const value = String(host || '').toLowerCase();
+  if (value === 'localhost' || value.endsWith('.local')) return true;
+  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(value);
+  if (ipv4) {
+    const [a, b] = [Number(ipv4[1]), Number(ipv4[2])];
+    if (a === 10 || a === 127) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 169 && b === 254) return true;
+    return false;
+  }
+  // IPv6 回环 / 链路本地
+  return value === '::1' || value.startsWith('fe80:') || value.startsWith('fd');
+}
+
 /** 服务器上的成品（NAS 任务）：本机媒体服务带 token 转发，渲染层只拿本地地址。 */
-export function nasUrl(taskId: string, index = 0): string {
-  return mediaUrl(`/nas/${encodeURIComponent(taskId)}/${index}`);
+export function nasUrl(taskId: string, index = 0, h264 = false): string {
+  return mediaUrl(`/nas/${encodeURIComponent(taskId)}/${index}${h264 ? '?h264=1' : ''}`);
+}
+
+/** 其它设备局域网媒体服务上的成品：同样经本机媒体服务转发（顺便能兜住 H.265）。 */
+export function remoteUrl(target: string, h264 = false): string {
+  return mediaUrl(`/remote?u=${encode(target)}${h264 ? '&h264=1' : ''}`);
 }
 
 /** 本地已下载文件：先把 H.265 转好（要时间），再让播放器去请求，避免空等。 */
@@ -599,6 +833,10 @@ export function fileUrl(taskId: string, index = 0, h264 = false): string {
 }
 
 export function stop(): void {
+  for (const job of remoteJobs.values()) {
+    try { job.proc.kill('SIGTERM'); } catch { /* 已经退出 */ }
+  }
+  remoteJobs.clear();
   server?.close();
   server = null;
   port = 0;

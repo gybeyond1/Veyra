@@ -1513,6 +1513,24 @@ input::placeholder {
   display: flex;
   gap: 8px;
 }
+/* 「下载到」：左侧目标选择，窄屏自动换行，别把按钮挤出去 */
+.dl-target {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+.dl-target select {
+  flex: 0 1 320px;
+  min-width: 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 12.5px;
+}
 
 /* ---------- 下载页：本机 / 其它设备 ---------- */
 .task-section {

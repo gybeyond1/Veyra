@@ -525,14 +525,17 @@ function createAppUpdater(options) {
       fs.rmSync(apk, { force: true });
       throw new Error(`${channel} 大小不符（${size} != ${total}）`);
     }
-    // APK 本质是 zip，头两个字节一定是 "PK"。反代维护页、404 错误页都过不了这关，
-    // 比 sha 更早挡住「把一坨 HTML 当安装包缓存下来」。
+    // 文件头校验：APK 是 zip（"PK"），Windows 安装包是 PE（"MZ"）。
+    // 以前这里只认 PK，桌面端 exe 每轮都下完 100MB 再被当成坏包删掉 —— 分块也跟着清空，
+    // 表现就是「有分块在下载，过会儿文件夹里啥也没有」。反代维护页 / 404 页两种都过不了。
+    const magic = channel === 'desktop' ? [0x4d, 0x5a] : [0x50, 0x4b];
+    const kindName = channel === 'desktop' ? 'EXE' : 'APK';
     const head = Buffer.alloc(2);
     const fd = fs.openSync(apk, 'r');
     try { fs.readSync(fd, head, 0, 2, 0); } finally { fs.closeSync(fd); }
-    if (head[0] !== 0x50 || head[1] !== 0x4b) {
+    if (head[0] !== magic[0] || head[1] !== magic[1]) {
       fs.rmSync(apk, { force: true });
-      throw new Error(`${channel} 下到的不是 APK（开头不是 PK），已丢弃`);
+      throw new Error(`${channel} 下到的不是 ${kindName}（开头不是 ${String.fromCharCode(...magic)}），已丢弃`);
     }
     if (expectSha && sha !== expectSha) {
       fs.rmSync(apk, { force: true });
@@ -549,8 +552,8 @@ function createAppUpdater(options) {
       const dir = channelDir(channel);
       let names = [];
       try { names = fs.readdirSync(dir); } catch { continue; }
-      const apks = names.filter(n => /\.apk$/.test(n))
-        .map(n => ({ n, v: (n.match(/(\d+\.\d+\.\d+)\.apk$/) || [])[1] || '0.0.0' }))
+      const apks = names.filter(n => /\.(apk|exe)$/.test(n))
+        .map(n => ({ n, v: (n.match(/(\d+\.\d+\.\d+)\.(?:apk|exe)$/) || [])[1] || '0.0.0' }))
         .sort((a, b) => compareVersion(b.v, a.v));
       for (const stale of apks.slice(KEEP_VERSIONS)) {
         try { fs.rmSync(path.join(dir, stale.n), { force: true }); } catch { /* ignore */ }

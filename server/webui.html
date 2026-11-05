@@ -251,10 +251,10 @@ video{width:100%;border-radius:10px;background:#000}
   <div class="modal">
     <button class="modal-close" id="btn-close-dl">✕</button>
     <h3 id="dl-title" style="margin-bottom:4px"></h3>
-    <p id="dl-hint" style="font-size:12px;color:var(--mut);margin-bottom:12px">点集数即可选中/取消，默认全选</p>
+    <p id="dl-hint" style="font-size:12px;color:var(--mut);margin-bottom:12px">点集数即可选中/取消，默认全选；「设备 / 存储」里手机、电视、电脑和 WebDAV / SMB 都能选</p>
     <div class="dl-target" id="dl-target">
       <button type="button" data-dl-target="nas" class="active">下载到 NAS</button>
-      <button type="button" data-dl-target="phone">下载到手机</button>
+      <button type="button" data-dl-target="device">下载到设备 / 存储</button>
     </div>
     <div class="dl-device" id="dl-device" style="display:none">
       <select id="dl-account" aria-label="选择账号"><option value="">加载账号…</option></select>
@@ -1125,7 +1125,7 @@ function closeDetail(){
 
 // ---- 下载：可选下载到 NAS，或推送到手机（账号 → 设备 → 手机本地下载） ----
 let _dlSelected=new Set();
-let dlEps=[], dlTarget='nas', dlAccounts=null, dlDevices=[], dlAccountId='', dlDeviceId='';
+let dlEps=[], dlTarget='nas', dlAccounts=null, dlDevices=[], dlStorages=[], dlAccountId='', dlDeviceId='';
 document.getElementById('btn-download').onclick=()=>{
   const st=document.getElementById('dl-status');
   st.textContent='';
@@ -1169,23 +1169,23 @@ function openDownloadLayer(eps){
 function updateDlCount(eps){
   eps=eps||dlEps;
   document.getElementById('dl-selected').textContent='已选 '+_dlSelected.size+' / '+eps.length+' 集';
-  document.getElementById('btn-dl-confirm').textContent=dlTarget==='phone'
-    ? '推送到手机（'+_dlSelected.size+'集）'
+  document.getElementById('btn-dl-confirm').textContent=dlTarget==='device'
+    ? '推送到设备（'+_dlSelected.size+'集）'
     : '开始下载（'+_dlSelected.size+'集）';
 }
 function setDlTarget(t){
   dlTarget=t;
   document.querySelectorAll('[data-dl-target]').forEach(b=>b.classList.toggle('active',b.dataset.dlTarget===t));
   const box=document.getElementById('dl-device');
-  box.style.display=t==='phone'?'flex':'none';
+  box.style.display=t==='device'?'flex':'none';
   const hint=document.getElementById('dl-device-hint');
-  if(t!=='phone'){hint.textContent='';hint.classList.remove('warn')}
+  if(t!=='device'){hint.textContent='';hint.classList.remove('warn')}
   updateDlCount();
-  if(t==='phone')loadDlAccounts();
+  if(t==='device')loadDlAccounts();
 }
 document.querySelectorAll('[data-dl-target]').forEach(b=>b.onclick=()=>setDlTarget(b.dataset.dlTarget));
 
-// 账号 → 设备（设备由 APK 登录后自动上报，90 秒内有心跳即在线）
+// 账号 → 设备 / 远程存储（设备登录后自动上报，90 秒内有心跳即在线）
 async function loadDlAccounts(){
   const sel=document.getElementById('dl-account');
   const devSel=document.getElementById('dl-device-sel');
@@ -1206,7 +1206,7 @@ async function loadDlAccounts(){
   if(!dlAccounts.length){
     sel.innerHTML='<option value="">暂无账号</option>';
     devSel.innerHTML='<option value="">选择设备…</option>';
-    hint.textContent='还没有账号。让手机在 App 里注册/登录后，这里就会出现。';hint.classList.add('warn');return;
+    hint.textContent='还没有账号。让设备在 Veyra 里注册/登录后，这里就会出现。';hint.classList.add('warn');return;
   }
   const raw=JSON.parse(localStorage.getItem('veyraDlAccount')||'null');
   const keep=dlAccounts.find(u=>u.id===dlAccountId)||dlAccounts.find(u=>u.id===raw)||dlAccounts[0];
@@ -1235,27 +1235,51 @@ async function loadDlDevices(userId){
   const hint=document.getElementById('dl-device-hint');
   sel.innerHTML='<option value="">加载设备…</option>';dlDeviceId='';
   try{
-    const r=await fetch('/api/admin/devices?userId='+encodeURIComponent(userId),{headers:AUTH()});
-    const d=await r.json().catch(()=>({}));
-    if(!r.ok)throw new Error(d.error||('HTTP '+r.status));
+    const [devRes, stRes] = await Promise.all([
+      fetch('/api/admin/devices?userId='+encodeURIComponent(userId),{headers:AUTH()}),
+      fetch('/api/admin/storages?userId='+encodeURIComponent(userId),{headers:AUTH()}).catch(()=>({ok:false,json:()=>({})})),
+    ]);
+    const d=await devRes.json().catch(()=>({}));
+    if(!devRes.ok)throw new Error(d.error||('HTTP '+devRes.status));
     dlDevices=d.devices||[];
-  }catch(e){dlDevices=[];hint.textContent='设备列表加载失败：'+e.message;hint.classList.add('warn');sel.innerHTML='<option value="">选择设备…</option>';return}
-  if(!dlDevices.length){
+    const sd=await stRes.json().catch(()=>({}));
+    dlStorages=sd.storages||[];
+  }catch(e){dlDevices=[];dlStorages=[];hint.textContent='设备列表加载失败：'+e.message;hint.classList.add('warn');sel.innerHTML='<option value="">选择设备…</option>';return}
+  if(!dlDevices.length&&!dlStorages.length){
     sel.innerHTML='<option value="">该账号暂无设备</option>';
-    hint.textContent='让这个账号在手机上登录 App，设备信息会自动上报；之后就能在这里选设备推送下载。';
+    hint.textContent='让这个账号在任意一台设备（手机 / 电视 / 电脑）上登录 Veyra，设备会自动上报；之后就能在这里选目标。';
     hint.classList.add('warn');return;
   }
-  sel.innerHTML=dlDevices.map(v=>'<option value="'+v.id+'">'+escapeHtml(v.name)+(v.online?' · 在线':' · 离线')+'</option>').join('');
-  dlDeviceId=dlDevices[0].id;
-  sel.onchange=()=>{
-    dlDeviceId=sel.value;
-    const hit=dlDevices.find(v=>v.id===dlDeviceId);
-    hint.textContent=hit&&hit.online?'在线，指令会立即下发。':'当前离线，指令会保留，等设备上线后自动下发。';
-    hint.classList.toggle('warn',!!hit&&!hit.online);
-  };
-  const first=dlDevices[0];
-  hint.textContent=first.online?'在线，指令会立即下发。':'当前离线，指令会保留，等设备上线后自动下发。';
-  hint.classList.toggle('warn',!first.online);
+  const plat=d=>d.platform==='desktop'?'电脑':d.platform==='tv'?'电视':'手机';
+  const devHtml=dlDevices.length
+    ? '<optgroup label="设备">'+dlDevices.map(v=>'<option value="device:'+v.id+'">'+escapeHtml(plat(v)+' · '+v.name)+(v.online?' · 在线':' · 离线')+'</option>').join('')+'</optgroup>'
+    : '';
+  const stHtml=dlStorages.length
+    ? '<optgroup label="远程存储">'+dlStorages.map(v=>{
+        const tag=v.type==='webdav'?'直传':(v.deviceName?('由 '+v.deviceName+' 中转'):'缺少中转设备');
+        return '<option value="storage:'+v.id+'"'+(v.direct||v.deviceId?'':' disabled')+'>'+escapeHtml(v.typeName+' · '+v.name+' · '+tag)+'</option>';
+      }).join('')+'</optgroup>'
+    : '';
+  sel.innerHTML=devHtml+stHtml;
+  const first=sel.querySelector('option:not([disabled])');
+  dlDeviceId=first?first.value:'';
+  if(first)sel.value=dlDeviceId;
+  sel.onchange=()=>{dlDeviceId=sel.value;paintDlTargetHint()};
+  paintDlTargetHint();
+}
+function paintDlTargetHint(){
+  const hint=document.getElementById('dl-device-hint');
+  const sel=document.getElementById('dl-device-sel');
+  const value=dlDeviceId||sel.value;
+  if(value.startsWith('storage:')){
+    const item=dlStorages.find(v=>('storage:'+v.id)===value);
+    hint.textContent=item&&item.direct?'WebDAV 直连：下载完成后由服务器直接上传。':(item?'由 '+item.deviceName+' 下载后中转上传。':'');
+    hint.classList.toggle('warn',!!item&&!item.direct&&!item.deviceId);
+    return;
+  }
+  const hit=dlDevices.find(v=>('device:'+v.id)===value);
+  hint.textContent=hit&&hit.online?'在线，指令会立即下发。':'当前离线，指令会保留，等设备上线后自动下发。';
+  hint.classList.toggle('warn',!!hit&&!hit.online);
 }
 function closeDownloadLayer(){document.getElementById('download-overlay').classList.remove('open')}
 document.getElementById('btn-close-dl').onclick=closeDownloadLayer;
@@ -1266,16 +1290,20 @@ document.getElementById('btn-dl-confirm').onclick=async()=>{
   const btn=document.getElementById('btn-dl-confirm');
   const episodes=[..._dlSelected].filter(n=>n>0).sort((a,b)=>a-b);
   if(!episodes.length){toast('请至少选择 1 集');return}
-  if(dlTarget==='phone'&&!dlDeviceId){toast('请先选择账号与设备');return}
+  if(dlTarget==='device'&&!dlDeviceId){toast('请先选择设备或存储');return}
   btn.disabled=true;btn.textContent='提交中…';
   try{
-    if(dlTarget==='phone'){
-      const r=await fetch('/api/admin/device-tasks',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},AUTH()),
-        body:JSON.stringify({deviceId:dlDeviceId,source:'hongguo',title:_detail.title,seriesId:String(_detail.seriesId),episodes,cover:_detail.cover||''})});
+    if(dlTarget==='device'){
+      const value=dlDeviceId;
+      const target=value.startsWith('storage:')
+        ? {kind:'storage',storageId:value.slice(8)}
+        : {kind:'device',deviceId:value.slice(7)};
+      const r=await fetch('/api/admin/download/dispatch',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},AUTH()),
+        body:JSON.stringify({userId:dlAccountId,target,source:'hongguo',title:_detail.title,seriesId:String(_detail.seriesId),episodes,cover:_detail.cover||''})});
       const d=await r.json().catch(()=>({}));
       if(!r.ok)throw new Error(d.error||('HTTP '+r.status));
-      st.textContent='已推送到手机，共 '+episodes.length+' 集（手机本地下载并合并）';
-      toast('已推送到手机，等待设备领取');
+      st.textContent=d.message||('已提交，共 '+episodes.length+' 集');
+      toast(d.message||'已提交，等待设备领取');
       closeDownloadLayer();
     }else{
       const r=await fetch('/api/download/tasks',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},AUTH()),

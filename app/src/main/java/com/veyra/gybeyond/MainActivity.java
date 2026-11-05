@@ -701,8 +701,19 @@ public final class MainActivity extends Activity {
             episodes.put(new JSONObject().put("index", number).put("url", url).put("key", episode.optString("key")));
         }
         if (episodes.length() == 0) throw new IllegalArgumentException("没有可下载的分集");
+        // 电脑 / WebUI 选了「下载到某个远程存储」时会把整条配置一起带过来：
+        // 落到本机 RemoteStore（同 id 覆盖）再交给下载器，下载合并后自动上传。
+        String remoteId = "";
+        JSONObject remote = payload.optJSONObject("remote");
+        if (remote != null && !remote.optString("host", "").isEmpty()) {
+            try {
+                remoteId = RemoteStore.save(this, remote).optString("id", "");
+            } catch (Exception error) {
+                throw new IllegalStateException("远程存储配置无效：" + error.getMessage());
+            }
+        }
         return DownloadManager.get(this).start("hongguo", title.isEmpty() ? seriesId : title,
-                episodes, false, payload.optString("cover"));
+                episodes, false, payload.optString("cover"), remoteId);
     }
 
     private void toast(String message) {
@@ -1155,9 +1166,15 @@ public final class MainActivity extends Activity {
         // 这三个协议的客户端都在手机侧直连局域网，不经后端：后端可能跑在公网 VPS 上，
         // 看不到用户家里的 NAS；而且文件本来就在手机上。
         if ("remote-list".equals(action)) return RemoteStore.list(this);
-        if ("remote-save".equals(action)) return RemoteStore.save(this, args.optJSONObject("server"));
+        if ("remote-save".equals(action)) {
+            JSONObject saved = RemoteStore.save(this, args.optJSONObject("server"));
+            // 下一次心跳重新上报：同账号的电脑 / WebUI 立刻能看到这条存储
+            deviceRegistered = false;
+            return saved;
+        }
         if ("remote-delete".equals(action)) {
             RemoteStore.remove(this, args.optString("id"));
+            deviceRegistered = false;
             return new JSONObject().put("ok", true);
         }
         if ("remote-test".equals(action)) {

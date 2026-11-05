@@ -1,6 +1,6 @@
 {
   "name": "veyra-desktop",
-  "version": "0.28.4",
+  "version": "0.28.5",
   "private": true,
   "description": "Veyra 桌面端：本地解析、下载、合并，账号与片单与手机端同步",
   "main": "dist/main/index.cjs",
@@ -13,8 +13,9 @@
     "build": "npm run build:main && npm run build:renderer",
     "start": "electron .",
     "typecheck": "tsc --noEmit",
-    "dist:win": "npm run build && electron-builder --win --x64 --publish never",
-    "dist:dir": "npm run build && electron-builder --dir --publish never"
+    "dist:win": "node scripts/fetch-mpv.mjs && npm run build && electron-builder --win --x64 --publish never",
+    "dist:dir": "npm run build && electron-builder --dir --publish never",
+    "fetch:mpv": "node scripts/fetch-mpv.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

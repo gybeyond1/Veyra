@@ -32,6 +32,7 @@ const downloader = require('./downloader');
 const hgApp = require('./hongguo-app');
 const { createHongguoContent } = require('./hongguo-content');
 const { createDeviceHub } = require('./device-hub');
+const { createStorages } = require('./storages');
 const { createAppUpdater } = require('./app-updater');
 const { mountReleaseHook } = require('./release-hook');
 
@@ -49,6 +50,8 @@ let DATA_DIR = process.env.DATA_DIR || '/data';
 })();
 // 设备中继（Web「下载到手机」）：账号 → 设备 → 指令，落盘到 DATA_DIR/devices.json
 const deviceHub = createDeviceHub({ dataDir: DATA_DIR });
+// 远程存储（WebDAV / SMB / FTP）：同一账号共享，手机上报、电脑与 WebUI 直接用
+const storages = createStorages({ dataDir: DATA_DIR, log: (message) => console.log(message) });
 // 更新包缓存：后端在后台把本仓库的 APK 拉一份到本地，客户端从本机下载（国内直连 GitHub 不稳）。
 // 定时任务在 app.listen 之后启动，避免启动阶段和迁移/首屏抢带宽。
 const appUpdater = createAppUpdater({
@@ -933,34 +936,57 @@ function isAdminRequest(req) {
   const match = String(req.headers.authorization || '').match(/^Bearer\s+([a-f0-9]{64})$/i);
   return !!match && (adminSessions[match[1]] || 0) > Date.now();
 }
-// NAS 下载任务：管理员鉴权（WebUI 使用管理员 token，勿用用户注册会话 auth）
+// NAS 下载任务：管理员看全部；普通账号只能建/看自己名下的任务
+// （电脑端用账号 token 发起「下载到 NAS」，不能再要求必须是管理员）
 const ADMIN_OWNER = 'admin';
-app.post('/api/download/tasks', requireAdminOrAccountAdmin, (req, res) => {
+
+/** 解析下载相关接口的调用者：管理员会话 → 管理员；账号 token → 该账号。 */
+function downloadActor(req) {
+  const token = extractBearer(req);
+  const expiry = token && adminSessions.get(token);
+  if (expiry && Date.now() <= expiry) {
+    adminSessions.set(token, Date.now() + ADMIN_SESSION_TTL_MS);
+    return { owner: ADMIN_OWNER, isAdmin: true, userId: '', user: null };
+  }
+  const session = token && sessions[token];
+  const user = session && users[session.userId];
+  if (!user) return null;
+  session.lastSeen = Date.now();
+  return { owner: user.id, isAdmin: false, userId: user.id, user };
+}
+
+function requireDownloadAuth(req, res, next) {
+  const actor = downloadActor(req);
+  if (!actor) return res.status(401).json({ error: '登录已失效，请重新登录' });
+  req.actor = actor;
+  next();
+}
+app.post('/api/download/tasks', requireDownloadAuth, (req, res) => {
   try {
     const task = downloader.createTask({
       source: req.body.source, title: req.body.title, seriesId: req.body.seriesId,
-      episodes: req.body.episodes, owner: ADMIN_OWNER, cover: req.body.cover,
+      episodes: req.body.episodes, owner: req.actor.owner, cover: req.body.cover,
     });
     res.json({ task });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
-app.get('/api/download/tasks', requireAdminOrAccountAdmin, (_req, res) => {
-  res.json({ tasks: downloader.listTasks(ADMIN_OWNER, true) });
+app.get('/api/download/tasks', requireDownloadAuth, (req, res) => {
+  res.json({ tasks: downloader.listTasks(req.actor.owner, req.actor.isAdmin) });
 });
-app.get('/api/download/tasks/:id', requireAdminOrAccountAdmin, (req, res) => {
-  const task = downloader.getTask(req.params.id, ADMIN_OWNER, true);
+app.get('/api/download/tasks/:id', requireDownloadAuth, (req, res) => {
+  const task = downloader.getTask(req.params.id, req.actor.owner, req.actor.isAdmin);
   if (!task) return res.status(404).json({ error: '任务不存在' });
   res.json({ task });
 });
-app.delete('/api/download/tasks/:id', requireAdminOrAccountAdmin, (req, res) => {
-  if (!downloader.deleteTask(req.params.id, ADMIN_OWNER, true))
+app.delete('/api/download/tasks/:id', requireDownloadAuth, (req, res) => {
+  if (!downloader.deleteTask(req.params.id, req.actor.owner, req.actor.isAdmin))
     return res.status(404).json({ error: '任务不存在' });
   res.json({ ok: true });
 });
 // 任务分集文件信息（供手机拉取：转发模式 = NAS 下载完 → 手机拉 mp4 → 删 NAS 原文件）
-app.get('/api/download/tasks/:id/episodes', requireAdminOrAccountAdmin, (req, res) => {
+app.get('/api/download/tasks/:id/episodes', requireDownloadAuth, (req, res) => {
   try {
-    const t = downloader.getRawTask(req.params.id, ADMIN_OWNER, true);
+    const t = downloader.getRawTask(req.params.id, req.actor.owner, req.actor.isAdmin);
     if (!t) return res.status(404).json({ error: '任务不存在' });
     const dir = downloader.taskDirOf(t);
     const fs2 = require('fs');
@@ -975,9 +1001,9 @@ app.get('/api/download/tasks/:id/episodes', requireAdminOrAccountAdmin, (req, re
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 // 单集文件流式下载（鉴权 + 路径安全校验）
-app.get('/api/download/files/:id/:index', requireAdminOrAccountAdmin, (req, res) => {
+app.get('/api/download/files/:id/:index', requireDownloadAuth, (req, res) => {
   try {
-    const t = downloader.getRawTask(req.params.id, ADMIN_OWNER, true);
+    const t = downloader.getRawTask(req.params.id, req.actor.owner, req.actor.isAdmin);
     if (!t) return res.status(404).json({ error: '任务不存在' });
     const idx = parseInt(req.params.index, 10);
     if (idx === 0) {
@@ -993,20 +1019,176 @@ app.get('/api/download/files/:id/:index', requireAdminOrAccountAdmin, (req, res)
     res.sendFile(f);
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
-app.post('/api/download/merge', requireAdminOrAccountAdmin, (req, res) => {
+app.post('/api/download/merge', requireDownloadAuth, (req, res) => {
   try {
-    const task = downloader.mergeTask(String(req.body.id || ''), ADMIN_OWNER, true);
+    const task = downloader.mergeTask(String(req.body.id || ''), req.actor.owner, req.actor.isAdmin);
     if (!task) return res.status(404).json({ error: '任务不存在' });
     res.json(task);
   } catch (e) { res.status(400).json({ error: e && e.message ? e.message : '合并失败' }); }
 });
-app.post('/api/download/retry-failed', requireAdminOrAccountAdmin, (req, res) => {
+app.post('/api/download/retry-failed', requireDownloadAuth, (req, res) => {
   try {
-    const task = downloader.retryFailedEpisodes(String(req.body.id || ''), ADMIN_OWNER, true);
+    const task = downloader.retryFailedEpisodes(String(req.body.id || ''), req.actor.owner, req.actor.isAdmin);
     if (!task) return res.status(404).json({ error: '任务不存在' });
     res.json(task);
   } catch (e) { res.status(400).json({ error: e && e.message ? e.message : '重试失败' }); }
 });
+
+/* ---------------- 下载目标：本机 / NAS / 在线设备 / 远程存储 ---------------- */
+
+/** 线上设备里挑一台（同账号）。 */
+function pickDevice(userId, deviceId) {
+  const device = deviceHub.list(userId).find(item => item.id === deviceId);
+  if (!device) throw new Error('设备不在这个账号下，重新登录一下');
+  return device;
+}
+
+/** 把远程存储配置打包给设备（设备端 RemoteStore 认识的字段）。 */
+function remotePayload(storage) {
+  return {
+    id: storage.localId || '',
+    type: storage.type,
+    name: storage.name,
+    host: storage.host,
+    port: storage.port,
+    secure: !!storage.secure,
+    insecure: true,
+    user: storage.user || '',
+    pass: storage.pass || '',
+    share: storage.share || '',
+    path: storage.path || '',
+    cleanup: storage.cleanup !== false,
+  };
+}
+
+/**
+ * 统一入口：电脑 / WebUI 点「下载」时带 target 说清楚要下到哪儿。
+ *  - nas     后端自己下（默认）
+ *  - device  推一条指令给某台在线设备，设备本地下载
+ *  - storage WebDAV 由后端下完直传；SMB / FTP 交给添加它的设备中转
+ */
+function dispatchDownload(actor, body) {
+  const target = body.target && typeof body.target === 'object' ? body.target : { kind: 'nas' };
+  const userId = actor.userId || String(body.userId || '');
+  if (!userId) throw new Error('缺少账号信息');
+  const title = String(body.title || '').slice(0, 120);
+  const seriesId = String(body.seriesId || body.id || '').trim();
+  const cover = String(body.cover || '').slice(0, 500);
+  const source = body.source === 'huangguo' ? 'huangguo' : 'hongguo';
+  const episodes = (Array.isArray(body.episodes) ? body.episodes : [])
+    .map(n => Number(n)).filter(n => Number.isInteger(n) && n > 0 && n <= 999);
+  if (!seriesId) throw new Error('缺少剧集 id');
+  if (!episodes.length) throw new Error('请至少选择 1 集');
+  if (episodes.length > 500) throw new Error('单次最多 500 集');
+
+  const payload = { source, title, seriesId, cover, episodes: [...new Set(episodes)].sort((a, b) => a - b) };
+
+  if (target.kind === 'device') {
+    const deviceId = String(target.deviceId || '');
+    const device = pickDevice(userId, deviceId);
+    const command = deviceHub.createCommand(deviceId, payload, 'download');
+    return {
+      ok: true, mode: 'device', commandId: command.id,
+      device: device.name,
+      message: device.online ? `已推送到 ${device.name}，马上开始下载` : `${device.name} 当前离线，上线后自动开始`,
+    };
+  }
+
+  if (target.kind === 'storage') {
+    const storage = storages.find(String(target.storageId || ''), userId);
+    if (!storage) throw new Error('存储不存在或已被删除');
+    if (storage.type === 'webdav') {
+      const task = downloader.createTask({
+        ...payload, owner: actor.owner,
+        upload: { storageId: storage.id, storageName: storage.name, userId, status: 'pending' },
+      });
+      return { ok: true, mode: 'nas-upload', task, storage: storage.name, message: `下载完成后自动传到 ${storage.name}` };
+    }
+    // SMB / FTP：后端多半够不着，交给添加它的设备（在同一个局域网）中转
+    if (!storage.deviceId) throw new Error(`${storage.type.toUpperCase()} 需要由一台在线设备中转：请在手机或电脑上添加这条存储`);
+    const device = pickDevice(userId, storage.deviceId);
+    const command = deviceHub.createCommand(storage.deviceId, {
+      ...payload,
+      remote: remotePayload(storage),
+      remoteName: storage.name,
+    }, 'download');
+    return {
+      ok: true, mode: 'relay', commandId: command.id,
+      device: device.name,
+      message: `由 ${device.name} 下载并传到 ${storage.name}`,
+    };
+  }
+
+  const task = downloader.createTask({ ...payload, owner: actor.owner });
+  return { ok: true, mode: 'nas', task };
+}
+
+// 电脑端：账号 token
+app.post('/api/download/dispatch', requireDownloadAuth, (req, res) => {
+  try {
+    const result = dispatchDownload(req.actor, req.body || {});
+    res.json(result);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// WebUI：管理员会话 + 选中的账号
+app.post('/api/admin/download/dispatch', requireAdmin, (req, res) => {
+  try {
+    const body = req.body || {};
+    const userId = String(body.userId || '').trim();
+    const actor = { owner: ADMIN_OWNER, isAdmin: true, userId, user: null };
+    res.json(dispatchDownload(actor, body));
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+/* ---------------- 远程存储登记 ---------------- */
+app.get('/api/storages', auth, (req, res) => {
+  res.json({ storages: storages.list(req.user.id) });
+});
+app.post('/api/storages', auth, (req, res) => {
+  try { res.json({ storage: storages.save(req.user.id, req.body || {}) }); }
+  catch (e) { res.status(e.statusCode || 400).json({ error: e.message }); }
+});
+app.delete('/api/storages/:id', auth, (req, res) => {
+  res.json({ ok: storages.remove(String(req.params.id || ''), req.user.id) });
+});
+app.get('/api/admin/storages', requireAdmin, (req, res) => {
+  res.json({ storages: storages.list(String(req.query.userId || '').trim()) });
+});
+
+/* 上传监视器：任务合并完成后，把成品 PUT 到所选 WebDAV，并回报状态。 */
+let uploading = false;
+setInterval(async () => {
+  if (uploading) return;
+  uploading = true;
+  try {
+    const tasks = downloader.listTasks('', true);
+    for (const task of tasks) {
+      const upload = task.upload;
+      if (!upload || upload.status !== 'pending' || task.status !== 'done' || !task.output) continue;
+      downloader.patchTask(task.id, { upload: { ...upload, status: 'uploading', startedAt: Date.now() } });
+      try {
+        const fileName = path.basename(task.output);
+        const result = await storages.upload(upload.storageId, upload.userId, task.output, fileName);
+        const storage = storages.find(upload.storageId, upload.userId);
+        let patch = { upload: { ...upload, status: 'done', url: result.url, finishedAt: Date.now() } };
+        if (storage && storage.cleanup !== false) {
+          try { fs.rmSync(task.output, { force: true }); } catch { /* 删不掉就留着 */ }
+          patch = { ...patch, output: '' };
+        }
+        downloader.patchTask(task.id, patch);
+        console.log(`[upload] ${task.title} → ${upload.storageName}（${(result.size / 1048576).toFixed(1)}MB）`);
+      } catch (error) {
+        console.log(`[upload] ${task.title} 上传失败：${error.message}`);
+        downloader.patchTask(task.id, { upload: { ...upload, status: 'failed', error: error.message } });
+      }
+    }
+  } catch (error) {
+    console.log('[upload] 扫描失败：' + error.message);
+  } finally {
+    uploading = false;
+  }
+}, 5000);
 
 // ---- 客户端更新（后端缓存优先）----
 // 客户端先问这里：有新版直接给本机下载地址，比让它去连 GitHub 稳得多。
@@ -1097,8 +1279,14 @@ app.get('/api/health', (_req, res) => {
 // ---- 设备中继：Web「下载到手机」 ----
 // 设备侧（APK，账号 token 鉴权）
 app.post('/api/devices/register', auth, (req, res) => {
-  try { res.json(deviceHub.register(req.user, req.body || {})); }
-  catch (e) { res.status(e.statusCode || 400).json({ error: e.message }); }
+  try {
+    const result = deviceHub.register(req.user, req.body || {});
+    // 手机把「远程服务器」配置一起带上来：同账号的电脑 / WebUI 立刻就能选
+    if (Array.isArray(req.body && req.body.remotes)) {
+      storages.syncDevice(result.device.id, req.user.id, result.device.name, req.body.remotes);
+    }
+    res.json(result);
+  } catch (e) { res.status(e.statusCode || 400).json({ error: e.message }); }
 });
 app.post('/api/devices/poll', auth, (req, res) => {
   const id = String((req.body && req.body.id) || '').trim();

@@ -34,14 +34,34 @@ export default function PlayerPage({ source, id, episode, title, position, local
   const [waited, setWaited] = useState(0);
   const [attempt, setAttempt] = useState(0);
   const [list, setList] = useState<number[]>(episodes || []);
+  /** 别的设备上的成品直接播只有声音没画面时，切到「转码版」再放一次 */
+  const [remoteFallback, setRemoteFallback] = useState(false);
+  /** 当前这一集是不是正在本机转码（只影响提示文案） */
+  const [transcoding, setTranscoding] = useState(false);
+  /** 未转码的原始地址，给 mpv 用 */
+  const [rawUrl, setRawUrl] = useState('');
+  /** 这台机器有没有带 mpv（有就能原片直放，彻底不转码） */
+  const [nativeOk, setNativeOk] = useState(false);
+
+  useEffect(() => {
+    call<boolean>('player.mpvAvailable')
+      .then((flag) => setNativeOk(flag === true))
+      .catch(() => setNativeOk(false));
+  }, []);
 
   /**
    * 这台机器的 Chromium 能不能直接解 H.265。
-   * Windows 上要看有没有装 HEVC 解码器，Linux 基本都没有；放不了就让主进程先转码。
+   * Electron 内置的 Chromium 不带 HEVC 解码器，Windows 上只有系统装了 HEVC 扩展、
+   * 内核走系统解码器时才能直放；Linux 基本没有。能直放就绝不转码。
    */
   const hevcOk = useMemo(() => {
     try {
-      return document.createElement('video').canPlayType('video/mp4; codecs="hvc1.1.6.L93.B0"') !== '';
+      const probe = document.createElement('video');
+      // hvc1 / hev1 是同一个编码的两种封装标记，都要问一遍
+      return (
+        probe.canPlayType('video/mp4; codecs="hvc1.1.6.L93.B0"') !== '' ||
+        probe.canPlayType('video/mp4; codecs="hev1.1.6.L93.B0"') !== ''
+      );
     } catch {
       return false;
     }
@@ -76,18 +96,22 @@ export default function PlayerPage({ source, id, episode, title, position, local
     setError('');
     setUrl('');
 
-    // 别的设备上的成品是现成 mp4，直接播，不用再解析
+    // 别的设备上的成品：本机能解 H.265 就原样播（零转码、可随意拖进度）；
+    // 本机解不了就直接走转码版，不要先黑屏失败一次再回退
     if (remoteUrl) {
-      setKind('file');
-      setUrl(remoteUrl);
-      setLoading(false);
+      const transcode = !hevcOk || remoteFallback;
+      setTranscoding(transcode);
+      setRawUrl(remoteUrl);
+      setKind(transcode ? 'hls' : 'file');
+      setUrl(transcode ? `${remoteUrl}${remoteUrl.includes('?') ? '&' : '?'}h264=1` : remoteUrl);
+      setLoading(transcode);
       return () => {
         alive = false;
       };
     }
 
     const job = localTaskId
-      ? call<{ url: string }>('downloads.play', { id: localTaskId, index: 0, hevc: hevcOk })
+      ? call<{ url: string; rawUrl?: string }>('downloads.play', { id: localTaskId, index: 0, hevc: hevcOk })
       : call<{ url: string; kind: 'hls' | 'file' }>('catalog.play', { source, id, episode, hevc: hevcOk });
     job
       .then((result) => {
@@ -95,6 +119,7 @@ export default function PlayerPage({ source, id, episode, title, position, local
         const nextKind = (result as { kind?: 'hls' | 'file' }).kind;
         setKind(nextKind === 'hls' ? 'hls' : 'file');
         setUrl(result.url);
+        setRawUrl((result as { rawUrl?: string }).rawUrl || result.url);
       })
       .catch((issue) => {
         if (alive) setError(errorText(issue));
@@ -105,7 +130,7 @@ export default function PlayerPage({ source, id, episode, title, position, local
     return () => {
       alive = false;
     };
-  }, [source, id, episode, localTaskId, remoteUrl, attempt, hevcOk]);
+  }, [source, id, episode, localTaskId, remoteUrl, attempt, hevcOk, remoteFallback]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -139,6 +164,25 @@ export default function PlayerPage({ source, id, episode, title, position, local
     };
     video.addEventListener('loadedmetadata', onLoaded, { once: true });
 
+    // 远端成品如是 H.265：有声音、进度在走，但 videoWidth 永远是 0。
+    // 这里一旦发现「能播但没画面」，就切到媒体服务的转码版重来一次。
+    const checkPicture = () => {
+      if (video.videoWidth > 0) {
+        // 转码场景遮罩要留到第一帧真的出来，别让人对着黑屏猜
+        setLoading(false);
+        return;
+      }
+      if (!remoteUrl || remoteFallback) return;
+      setRemoteFallback(true);
+    };
+    const onPictureError = () => {
+      setLoading(false);
+      if (!remoteUrl || remoteFallback) return;
+      if (video.error && video.error.code === 4) setRemoteFallback(true);
+    };
+    video.addEventListener('loadeddata', checkPicture);
+    video.addEventListener('error', onPictureError);
+
     const save = () => {
       if (video.currentTime > 5) localStorage.setItem(`pos:${source}:${id}:${episode}`, String(video.currentTime));
     };
@@ -153,17 +197,37 @@ export default function PlayerPage({ source, id, episode, title, position, local
     return () => {
       window.clearInterval(timer);
       video.removeEventListener('ended', onEnded);
+      video.removeEventListener('loadeddata', checkPicture);
+      video.removeEventListener('error', onPictureError);
       if (hls) hls.destroy();
       else video.removeAttribute('src');
     };
     // position 只在首次挂载时生效，换集不该再跳回手机的位置
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url, kind, source, id, episode]);
+  }, [url, kind, source, id, episode, remoteUrl, remoteFallback]);
 
   const numbers = list.length ? list : episodes || [];
   const index = numbers.indexOf(episode);
   const next = index >= 0 ? numbers[index + 1] : undefined;
   const prev = index > 0 ? numbers[index - 1] : undefined;
+
+  /** 交给 mpv：不吃 Chromium 的解码能力，H.265 原片硬解，零转码 */
+  const openNative = async () => {
+    const target = rawUrl || url;
+    if (!target) return;
+    try {
+      const saved = Number(localStorage.getItem(`pos:${source}:${id}:${episode}`) || 0);
+      // 交给 mpv 之后把内置播放器停下，不然两路声音一起响
+      videoRef.current?.pause();
+      await call('player.mpvPlay', { url: target, title, start: saved });
+      notify('已用原生内核打开：原片直放，不转码', 'info');
+    } catch (issue) {
+      notify(errorText(issue), 'error');
+    }
+  };
+
+  // 只有本地成品和其它设备上的成品能交给 mpv；在线流是加密的，它解不了
+  const canNative = nativeOk && Boolean(localTaskId || remoteUrl);
 
   return (
     <div className="page player-page">
@@ -177,11 +241,16 @@ export default function PlayerPage({ source, id, episode, title, position, local
             {localTaskId
               ? '本地文件 · 合并成品'
               : remoteUrl
-                ? '其它设备 · 在线播放'
+                ? `其它设备 · 在线播放${transcoding ? ' · 本机转码' : ' · 原片直放'}`
                 : `第 ${episode} 集${source === 'huangguo' ? ' · 私密模式' : ''}`}
           </p>
         </div>
         <div className="player-nav">
+          {canNative && (
+            <button type="button" className={transcoding ? 'primary' : 'ghost'} onClick={openNative}>
+              原片直放
+            </button>
+          )}
           {!localTaskId && !remoteUrl && (
             <>
               <button type="button" className="ghost" disabled={!prev} onClick={() => prev && onEpisode(prev)}>
@@ -209,11 +278,17 @@ export default function PlayerPage({ source, id, episode, title, position, local
             <video ref={videoRef} controls playsInline preload="auto" />
             {loading && (
               <div className="player-loading">
-                <p>正在准备播放…{waited > 0 ? `（${waited}s）` : ''}</p>
-                {waited >= 3 && waited < 20 && (
-                  <p className="player-loading-sub">首次播放要先解密；这台机器放不了 H.265 时还要转码，通常十几秒，之后秒开</p>
+                <p>
+                  {transcoding ? '本机正在转码' : '正在准备播放'}…{waited > 0 ? `（${waited}s）` : ''}
+                </p>
+                {transcoding ? (
+                  <p className="player-loading-sub">
+                    这集是 H.265，内置内核解不了，就在这台电脑上转成 H.264；转过的会缓存，下次快很多。
+                    {canNative ? '不想等的话，点右上角「原片直放」，用原生内核硬解，零转码。' : ''}
+                  </p>
+                ) : (
+                  waited >= 3 && <p className="player-loading-sub">首次播放要先解密，通常几秒</p>
                 )}
-                {waited >= 20 && <p className="player-loading-sub">还在转码，这一集比较长，请再等一下（每集只需要转一次）</p>}
               </div>
             )}
           </>

@@ -2,7 +2,7 @@ import type { RemoteTask } from '../shared/types';
 import { requestJson } from './http';
 import { session } from './session';
 import { deviceId } from './device';
-import { nasUrl } from './media';
+import { nasUrl, remoteUrl } from './media';
 
 /**
  * 汇总「别的设备上」的下载记录。
@@ -114,7 +114,8 @@ function deviceTasks(device: DevicePayload, selfId: string): RemoteTask[] {
         episodeCount: Number(task.episodeCount) || 0,
         merged,
         online,
-        playUrl: playable ? `${lanUrl}/file/${encodeURIComponent(id)}/0?t=${encodeURIComponent(lanToken)}` : '',
+        // 走本机媒体服务转发：既能透传 Range，又能在电脑解不了 H.265 时自动转码
+        playUrl: playable ? remoteUrl(`${lanUrl}/file/${encodeURIComponent(id)}/0?t=${encodeURIComponent(lanToken)}`) : '',
         hint: !online ? '设备离线' : !merged ? '还没合并，先在设备上合并' : !lanUrl ? '该设备没有局域网媒体服务' : '',
       } satisfies RemoteTask;
     });

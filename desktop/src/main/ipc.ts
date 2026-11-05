@@ -13,6 +13,7 @@ import * as qrlogin from './qrlogin';
 import * as source from './source';
 import * as update from './update';
 import * as device from './device';
+import * as mpv from './mpv';
 import { info as mediaInfo, fileUrl, prepareLocal } from './media';
 import { setEmitter } from './bus';
 import { deviceName, ffmpegAvailable, isDev, lanAddress, serverDir, userDataDir } from './paths';
@@ -174,6 +175,7 @@ const handlers: { [K in ApiName]: (...args: any[]) => any } = {
 
   'downloads.list': () => downloads.list(),
   'downloads.create': (payload) => downloads.create(payload),
+  'downloads.targets': () => downloads.targets(),
   'downloads.remove': (payload: { id: string }) => {
     downloads.remove(payload.id);
   },
@@ -192,7 +194,23 @@ const handlers: { [K in ApiName]: (...args: any[]) => any } = {
     const needH264 = payload?.hevc !== true;
     // 和在线播放一样：放不了 H.265 就先转一份 H.264，转完再给地址
     if (needH264) await prepareLocal(payload.id, index);
-    return { url: fileUrl(payload.id, index, needH264) };
+    return { url: fileUrl(payload.id, index, needH264), rawUrl: fileUrl(payload.id, index, false) };
+  },
+
+  'player.mpvAvailable': () => Boolean(mpv.available()),
+
+  'player.mpvPlay': async (payload: { url: string; title?: string; start?: number }) => {
+    if (!payload?.url) throw new Error('播放地址为空');
+    const start = Number(payload.start) || 0;
+    return mpv.play({ url: payload.url, title: payload.title, start, parent: mainWindow });
+  },
+
+  'player.mpvControl': (action: string, value?: number) => mpv.control(action, value),
+
+  'player.mpvStatus': () => mpv.status(),
+
+  'player.mpvClose': () => {
+    mpv.close();
   },
 
   'sync.pull': async () => {
@@ -221,7 +239,7 @@ export function registerIpc(): void {
       return { ok: true, data };
     } catch (error) {
       const message = (error as Error)?.message || String(error);
-      console.warn(`[ipc] ${method} 失败：${message}`);
+      console.warn(`[ipc] ${method} 失败：${message}`, (error as Error)?.stack || '');
       return { ok: false, error: message };
     }
   });

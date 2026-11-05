@@ -9,6 +9,7 @@ import { bindWindow, registerIpc, restoreSession, startProgressLoop, stopProgres
 import { reload as reloadSession } from './session';
 import { configureDownloads } from './downloads';
 import { start as startMedia, stop as stopMedia } from './media';
+import { close as stopMpv } from './mpv';
 import { start as startDevice, stop as stopDevice } from './device';
 
 installFileLogger();
@@ -184,5 +185,11 @@ app.on('window-all-closed', () => {
   stopProgressLoop();
   stopDevice();
   stopMedia();
+  stopMpv();
   if (process.platform !== 'darwin') app.quit();
+});
+
+// 主进程被强杀时也要收掉 mpv 进程，别留一个黑窗口在外面
+app.on('before-quit', () => {
+  stopMpv();
 });

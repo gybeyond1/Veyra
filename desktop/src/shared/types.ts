@@ -119,6 +119,27 @@ export interface RemoteTask {
   hint: string;
 }
 
+/** 详情页「下载到」下拉里的一项：本机 / NAS / 某台在线设备 / 远程存储。 */
+export interface DownloadTarget {
+  /** local | nas | device:<id> | storage:<id> */
+  key: string;
+  kind: 'local' | 'nas' | 'device' | 'storage';
+  name: string;
+  /** 补充说明：平台、在线状态、是否直传 */
+  hint: string;
+  platform?: string;
+  online?: boolean;
+  /** 选了能不能真的用（SMB 没中转设备时就不可用） */
+  available: boolean;
+}
+
+export interface DownloadDispatchResult {
+  mode: 'local' | 'nas' | 'device' | 'relay' | 'nas-upload';
+  title: string;
+  message: string;
+  task?: DownloadTask;
+}
+
 export interface QrLoginState {
   url: string;
   code: string;
@@ -182,13 +203,21 @@ export interface Api {
   'update.install': (payload: { url: string }) => Promise<void>;
 
   'downloads.list': () => Promise<DownloadTask[]>;
-  'downloads.create': (payload: { id: string; title: string; cover?: string; source?: string; episodes?: number[] }) => Promise<DownloadTask>;
+  'downloads.create': (payload: { id: string; title: string; cover?: string; source?: string; episodes?: number[]; target?: string }) => Promise<DownloadDispatchResult>;
+  'downloads.targets': () => Promise<DownloadTarget[]>;
   'downloads.remove': (payload: { id: string; deleteFiles?: boolean }) => Promise<void>;
   'downloads.merge': (payload: { id: string }) => Promise<DownloadTask>;
   'downloads.retry': (payload: { id: string }) => Promise<DownloadTask>;
   'downloads.openFolder': (payload: { id: string }) => Promise<void>;
-  'downloads.play': (payload: { id: string; index?: number }) => Promise<{ url: string }>;
+  'downloads.play': (payload: { id: string; index?: number }) => Promise<{ url: string; rawUrl: string }>;
   'downloads.remote': () => Promise<RemoteTask[]>;
+
+  /** 原生播放内核（mpv）：H.265 原片直放，不转码 */
+  'player.mpvAvailable': () => Promise<boolean>;
+  'player.mpvPlay': (payload: { url: string; title?: string; start?: number }) => Promise<{ ok: boolean; embedded: boolean }>;
+  'player.mpvControl': (action: string, value?: number) => Promise<unknown>;
+  'player.mpvStatus': () => Promise<{ position: number; duration: number; paused: boolean }>;
+  'player.mpvClose': () => Promise<void>;
 
   'sync.pull': () => Promise<{ payload: Record<string, unknown> }>;
   'sync.push': (payload: { library: Record<string, unknown> }) => Promise<{ ok: boolean; at: number }>;

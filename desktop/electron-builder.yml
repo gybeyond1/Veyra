@@ -22,6 +22,14 @@ extraResources:
     to: ffmpeg
     filter:
       - 'ffmpeg*'
+  # 自带 mpv 播放内核：H.265 原片硬解，不转码。
+  # 二进制由 scripts/fetch-mpv.mjs 在打包前拉取，不进 git
+  - from: resources/mpv
+    to: mpv
+    filter:
+      - '*.exe'
+      - '*.dll'
+      - 'mpv'
 
 asar: true
 compression: maximum

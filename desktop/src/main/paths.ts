@@ -27,6 +27,31 @@ export function ffmpegAvailable(): string {
   return 'ffmpeg';
 }
 
+/** 自带 mpv：自带完整 ffmpeg，H.265/AV1/10bit 都能硬解，放原片不用转码。 */
+export function bundledMpv(): string {
+  const name = process.platform === 'win32' ? 'mpv.exe' : 'mpv';
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'mpv', name)
+    : path.join(__dirname, '../../../desktop/resources/mpv', name);
+}
+
+/** 没内置就用系统装的；都没有返回空，调用方退回 Chromium 播放。 */
+export function mpvAvailable(): string {
+  const bundled = bundledMpv();
+  if (fs.existsSync(bundled)) return bundled;
+  const exe = process.platform === 'win32' ? 'mpv.exe' : 'mpv';
+  for (const dir of (process.env.PATH || '').split(path.delimiter)) {
+    if (!dir) continue;
+    const candidate = path.join(dir, exe);
+    try {
+      if (fs.existsSync(candidate)) return candidate;
+    } catch {
+      /* 目录没权限，跳过 */
+    }
+  }
+  return '';
+}
+
 export function ensureDir(dir: string): string {
   try {
     fs.mkdirSync(dir, { recursive: true });

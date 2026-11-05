@@ -107,7 +107,9 @@ final class DeviceLink {
                 .put("appVersion", appVersion())
                 // 局域网媒体服务：电脑/电视/其它手机据此直连这台机器播成品
                 .put("lan", LanMediaServer.ensure(context).info())
-                .put("tasks", taskSummary());
+                .put("tasks", taskSummary())
+                // 远程存储（SMB / WebDAV / FTP）：同账号共享，电脑和 WebUI 的「下载到」里能看到
+                .put("remotes", RemoteStore.load(context));
         return account.postJson("api/devices/register", body);
     }
 

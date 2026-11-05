@@ -922,7 +922,7 @@ function retryFailedEpisodes(id, owner, isAdmin) {
 }
 
 // ---- 对外 API ----
-function createTask({ source, title, seriesId, episodes, owner, cover }) {
+function createTask({ source, title, seriesId, episodes, owner, cover, upload }) {
   if (!Array.isArray(episodes) || episodes.length === 0) throw new Error('没有可下载的分集');
   const norm = [];
   for (let i = 0; i < episodes.length; i++) {
@@ -944,6 +944,8 @@ function createTask({ source, title, seriesId, episodes, owner, cover }) {
     status: 'queued', owner: String(owner || ''), output: '', failedEpisodes: [],
     progress: { phase: 'queued', episode: 0, total: norm.length, percent: 0, detail: '排队中' },
     createdAt: Date.now(), updatedAt: Date.now(), error: '',
+    // 下载完成后要传到哪个远程存储（由服务端上传监视器消费）
+    upload: upload || null,
   };
   tasks[id] = task;
   touch(task);
@@ -964,6 +966,7 @@ function publicTask(t) {
     failedEpisodes: failedEpisodes.map(f => ({ index: f.index, error: f.error || '' })),
     createdAt: t.createdAt, updatedAt: t.updatedAt,
     episodeCount: t.episodes.length, owner: t.owner,
+    upload: t.upload || null,
     percent: p.percent || (t.status === 'done' ? 100 : 0),
     detail: p.detail || (t.status === 'done' ? '完成' : ''),
     doneCount: t.status === 'done' ? t.episodes.length
@@ -990,6 +993,16 @@ function getRawTask(id, owner, isAdmin) {
 }
 /** 任务工作目录（DOWNLOAD_DIR/<sanitize title>） */
 function taskDirOf(t) { return taskDir(t); }
+
+/** 局部更新任务字段（上传状态、清理标记等），只改传进来的键。 */
+function patchTask(id, patch) {
+  const t = tasks[id];
+  if (!t) return null;
+  Object.assign(t, patch || {});
+  touch(t);
+  flushStore(true);
+  return publicTask(t);
+}
 function deleteTask(id, owner, isAdmin) {
   const t = tasks[id];
   if (!t) return false;
@@ -1054,4 +1067,4 @@ function status() {
 loadTasks();
 ensureDirs();
 
-module.exports = { createTask, listTasks, getTask, getRawTask, taskDirOf, deleteTask, mergeTask, retryFailedEpisodes, status, setDownloadDir, setConcurrency, setMergeOptions, mergeEpisodes, epName, safeJoin };
+module.exports = { createTask, listTasks, getTask, getRawTask, taskDirOf, patchTask, deleteTask, mergeTask, retryFailedEpisodes, status, setDownloadDir, setConcurrency, setMergeOptions, mergeEpisodes, epName, safeJoin };
