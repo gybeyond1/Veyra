@@ -7,6 +7,7 @@ import android.provider.Settings;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.File;
 import java.util.UUID;
 
 /**
@@ -60,6 +61,40 @@ final class DeviceLink {
         }
     }
 
+    /**
+     * 本机下载任务摘要：告诉后端「这台机器上有哪些成品」，
+     * 电脑 / 电视的下载页据此显示「手机 · 型号」那一栏。
+     */
+    private JSONArray taskSummary() {
+        JSONArray out = new JSONArray();
+        try {
+            DownloadManager manager = DownloadManager.get(context);
+            JSONArray all = manager.listAll();
+            for (int i = 0; i < all.length() && i < 20; i++) {
+                JSONObject task = all.optJSONObject(i);
+                if (task == null) continue;
+                String id = task.optString("id");
+                if (id.isEmpty()) continue;
+                boolean merged = false;
+                try {
+                    String file = manager.localFilesAny(id).optString("merged", "");
+                    merged = !file.isEmpty() && new File(file).exists();
+                } catch (Exception ignored) { }
+                out.put(new JSONObject()
+                        .put("id", id)
+                        .put("title", task.optString("title"))
+                        .put("cover", task.optString("cover"))
+                        .put("status", task.optString("status"))
+                        .put("percent", task.optInt("percent"))
+                        .put("doneCount", task.optInt("doneCount"))
+                        .put("totalCount", task.optInt("totalCount"))
+                        .put("episodeCount", task.optInt("totalCount"))
+                        .put("merged", merged));
+            }
+        } catch (Exception ignored) { }
+        return out;
+    }
+
     JSONObject register() throws Exception {
         JSONObject body = new JSONObject()
                 .put("id", deviceId(context))
@@ -69,7 +104,10 @@ final class DeviceLink {
                 // 电视端单独标出来：手机投屏时只列 tv，不会把自己也列进去
                 .put("platform", DeviceProfile.isTv(context) ? "tv" : "android")
                 .put("android", Build.VERSION.RELEASE == null ? "" : Build.VERSION.RELEASE)
-                .put("appVersion", appVersion());
+                .put("appVersion", appVersion())
+                // 局域网媒体服务：电脑/电视/其它手机据此直连这台机器播成品
+                .put("lan", LanMediaServer.ensure(context).info())
+                .put("tasks", taskSummary());
         return account.postJson("api/devices/register", body);
     }
 

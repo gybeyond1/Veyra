@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { AppSettings, DownloadTask, SessionState } from '@shared/types';
+import type { AppSettings, DownloadTask, RemoteTask, SessionState } from '@shared/types';
 import { call, errorText } from './api';
 import Sidebar from './components/Sidebar';
 import LoginPage from './pages/LoginPage';
@@ -23,6 +23,8 @@ interface PlayerState {
   position?: number;
   /** 本地已下载任务：直接播合并成品，不再走在线解析 */
   localTaskId?: string;
+  /** 其它设备（服务器 / 手机 / 电视 / 另一台电脑）上的成品，给了就直接播这个地址 */
+  remoteUrl?: string;
 }
 
 export default function App() {
@@ -35,6 +37,7 @@ export default function App() {
   const [detailFallback, setDetailFallback] = useState<DetailFallback | null>(null);
   const [player, setPlayer] = useState<PlayerState | null>(null);
   const [tasks, setTasks] = useState<DownloadTask[]>([]);
+  const [remoteTasks, setRemoteTasks] = useState<RemoteTask[]>([]);
   const [searchSeed, setSearchSeed] = useState('');
   const [privateOpen, setPrivateOpen] = useState(false);
   const [privateCode, setPrivateCode] = useState('');
@@ -53,6 +56,23 @@ export default function App() {
       /* 下载模块未就绪时静默 */
     }
   }, []);
+
+  const refreshRemote = useCallback(async () => {
+    try {
+      setRemoteTasks(await call<RemoteTask[]>('downloads.remote'));
+    } catch {
+      /* 设备列表拉不到就保持原样，不要清空 */
+    }
+  }, []);
+
+  // 下载页打开时刷新本机 + 其它设备，并每 15 秒跟一次进度
+  useEffect(() => {
+    if (view !== 'downloads') return;
+    void refreshTasks();
+    void refreshRemote();
+    const timer = window.setInterval(() => void refreshRemote(), 15000);
+    return () => window.clearInterval(timer);
+  }, [view, refreshTasks, refreshRemote]);
 
   useEffect(() => {
     let alive = true;
@@ -237,6 +257,7 @@ export default function App() {
             title={player.title}
             position={player.position}
             localTaskId={player.localTaskId}
+            remoteUrl={player.remoteUrl}
             onClose={() => setView('detail')}
             onEpisode={(next) => setPlayer({ ...player, episode: next })}
             notify={notify}
@@ -245,9 +266,17 @@ export default function App() {
         {view === 'downloads' && (
           <DownloadsPage
             tasks={tasks}
-            onRefresh={refreshTasks}
+            remote={remoteTasks}
+            onRefresh={() => {
+              void refreshTasks();
+              void refreshRemote();
+            }}
             onPlay={(task) => {
               setPlayer({ source: 'hongguo', id: task.seriesId || task.id, episode: 1, title: task.title, localTaskId: task.id });
+              setView('player');
+            }}
+            onPlayRemote={(task) => {
+              setPlayer({ source: 'hongguo', id: task.remoteId, episode: 1, title: task.title, remoteUrl: task.playUrl });
               setView('player');
             }}
             notify={notify}

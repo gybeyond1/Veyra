@@ -1,4 +1,23 @@
 "use strict";
+var __defProp = Object.defineProperty;
+var __defProps = Object.defineProperties;
+var __getOwnPropDescs = Object.getOwnPropertyDescriptors;
+var __getOwnPropSymbols = Object.getOwnPropertySymbols;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __propIsEnum = Object.prototype.propertyIsEnumerable;
+var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+var __spreadValues = (a, b) => {
+  for (var prop in b || (b = {}))
+    if (__hasOwnProp.call(b, prop))
+      __defNormalProp(a, prop, b[prop]);
+  if (__getOwnPropSymbols)
+    for (var prop of __getOwnPropSymbols(b)) {
+      if (__propIsEnum.call(b, prop))
+        __defNormalProp(a, prop, b[prop]);
+    }
+  return a;
+};
+var __spreadProps = (a, b) => __defProps(a, __getOwnPropDescs(b));
 var _a, _b, _c, _d;
 window.__veyraBooted = true;
 const callbacks = /* @__PURE__ */ new Map();
@@ -24,7 +43,7 @@ function api(action, args = {}) {
     const id = bridgeInstance + ":" + ++requestNumber;
     callbacks.set(id, { resolve, reject });
     try {
-      AndroidHost.request(id, action, JSON.stringify({ ...args, source: contentSource }));
+      AndroidHost.request(id, action, JSON.stringify(__spreadProps(__spreadValues({}, args), { source: contentSource })));
     } catch (error) {
       callbacks.delete(id);
       reject(error);
@@ -48,6 +67,24 @@ const confirmOverlay = document.getElementById("confirm-overlay");
 const unlockOverlay = document.getElementById("unlock-overlay");
 const downloadOverlay = document.getElementById("download-overlay");
 const categoryIds = { adult: ["ai-duanju", "ai-manju"], ai: ["ai-huanlian", "ai-mogai"] };
+const CATEGORY_NAMES = {
+  short: "\u77ED\u5267",
+  comic: "\u6F2B\u5267",
+  "hot-drama": "\u70ED\u64AD\u699C",
+  "hot-real-drama": "\u771F\u4EBA\u699C",
+  "hot-comic-drama": "\u6F2B\u5267\u699C",
+  "hot-ai-drama": "AI\u699C",
+  "ai-duanju": "\u6210\u4EBA\u77ED\u5267",
+  "ai-manju": "\u6210\u4EBA\u6F2B\u5267",
+  "ai-huanlian": "AI\u6362\u8138",
+  "ai-mogai": "AI\u9B54\u6539"
+};
+function isRankId(id) {
+  return /^hot-(drama|real-drama|comic-drama|ai-drama)$/.test(String(id || ""));
+}
+function tabNames(tab) {
+  return (categoryIds[tab] || []).map((id) => CATEGORY_NAMES[id] || id);
+}
 const popularTags = [
   ["dushi", "\u90FD\u5E02"],
   ["xiaoyuan", "\u6821\u56ED"],
@@ -122,9 +159,9 @@ contentReady = api("content-status").then((status) => {
   }
   document.title = "Veyra";
   if (!privateMode()) {
-    categoryIds.adult = ["short"];
-    categoryIds.ai = ["comic"];
-    document.querySelector('[data-nav="adult"] > span:last-child').textContent = "\u77ED\u5267";
+    categoryIds.adult = ["short", "hot-drama", "hot-real-drama"];
+    categoryIds.ai = ["comic", "hot-comic-drama", "hot-ai-drama"];
+    document.querySelector('[data-nav="adult"] > span:last-child').textContent = "\u5267\u573A";
     document.querySelector('[data-nav="ai"] > span:last-child').textContent = "\u6F2B\u5267";
     searchInput.placeholder = "\u641C\u7D22\u5267\u540D";
     searchInput.setAttribute("aria-label", "\u641C\u7D22\u5267\u540D");
@@ -593,9 +630,12 @@ api("theme").then(window.hgTheme).catch(() => {
 function itemCard(item) {
   const id = esc(item.id);
   const title = esc(item.title || "\u5F71\u7247");
-  const info = esc(item.episodeLabel || asArray(item.tags).slice(0, 2).join(" \xB7 ") || "\u6253\u5F00\u8BE6\u60C5");
+  const info = esc(item.heat || item.episodeLabel || asArray(item.tags).slice(0, 2).join(" \xB7 ") || "\u6253\u5F00\u8BE6\u60C5");
+  const rank = Number(item.rank) || 0;
+  const scoreText = rank ? `#${rank}` : item.score || "";
+  const scoreClass = rank ? `poster-score is-rank${rank <= 3 ? " is-top" : ""}` : "poster-score";
   return `<button class="film-card" type="button" data-open-id="${id}" aria-label="\u67E5\u770B${title}">
-    <span class="poster loading"><span class="poster-letter">${title.slice(0, 1)}</span><img data-cover="${esc(item.cover || "")}" alt=""><span class="poster-score" ${item.score ? "" : "hidden"}>${esc(item.score || "")}</span></span>
+    <span class="poster loading"><span class="poster-letter">${title.slice(0, 1)}</span><img data-cover="${esc(item.cover || "")}" alt=""><span class="${scoreClass}" ${scoreText ? "" : "hidden"}>${esc(scoreText)}</span></span>
     <span class="film-title">${title}</span><span class="film-info">${info}</span></button>`;
 }
 function moreCard(kind) {
@@ -823,7 +863,7 @@ function homeSlides() {
   var _a2, _b2, _c2;
   const featured = asArray((_a2 = state.home) == null ? void 0 : _a2.featured);
   const videos = featured.length ? featured : asArray((_c2 = (_b2 = state.home) == null ? void 0 : _b2.recommend) == null ? void 0 : _c2.items).slice(0, 5);
-  return [...activeCampaigns().map((item) => ({ ...item, kind: "campaign", cover: "" })), ...videos];
+  return [...activeCampaigns().map((item) => __spreadProps(__spreadValues({}, item), { kind: "campaign", cover: "" })), ...videos];
 }
 function campaignSlide(item, index, count) {
   return '<div class="hero-slide hero-campaign" data-index="' + index + '"><img class="hero-image campaign-image" src="' + esc(campaignArtwork(item)) + '" alt=""><button class="hero-cover-button" type="button" data-open-campaign="' + esc(item.id) + '" aria-label="\u67E5\u770B\u56FD\u5E86\u5E86\u795D\u9875"></button><div class="hero-copy"><h2>' + esc(item.title) + "</h2><p>" + esc(item.description || "").replaceAll("\n", "<br>") + '</p><button class="hero-action" type="button" data-open-campaign="' + esc(item.id) + '">' + esc(item.button || "\u67E5\u770B\u5E86\u795D\u9875") + '</button></div><span class="campaign-date">' + esc(item.dateLabel || "") + '</span><div class="hero-index"><b>' + String(index + 1).padStart(2, "0") + "</b> / " + String(count).padStart(2, "0") + "</div></div>";
@@ -1044,12 +1084,15 @@ function refreshMissingImages(items) {
   });
 }
 function categoryId() {
-  return categoryIds[state.tab][state.sub[state.tab]];
+  const list = categoryIds[state.tab] || [];
+  const index = Math.min(Math.max(0, Number(state.sub[state.tab]) || 0), Math.max(0, list.length - 1));
+  state.sub[state.tab] = index;
+  return list[index];
 }
 function compactMarkup() {
   if (!privateMode()) return "";
   const adult = state.tab === "adult";
-  const tabs = privateMode() ? adult ? ["\u6210\u4EBA\u77ED\u5267", "\u6210\u4EBA\u6F2B\u5267"] : ["AI\u6362\u8138", "AI\u9B54\u6539"] : [adult ? "\u77ED\u5267" : "\u6F2B\u5267"];
+  const tabs = privateMode() ? adult ? ["\u6210\u4EBA\u77ED\u5267", "\u6210\u4EBA\u6F2B\u5267"] : ["AI\u6362\u8138", "AI\u9B54\u6539"] : tabNames(state.tab);
   return `<strong>${privateMode() ? adult ? "\u6210\u4EBA\u5267\u573A" : "AI\u4E13\u533A" : adult ? "\u77ED\u5267" : "\u6F2B\u5267"}</strong><div class="compact-tabs" role="tablist">${tabs.map((name, index) => `<button type="button" role="tab" aria-selected="${index === state.sub[state.tab]}" data-sub="${index}" class="${index === state.sub[state.tab] ? "selected" : ""}">${name}</button>`).join("")}</div>`;
 }
 function updateCompact() {
@@ -1068,18 +1111,22 @@ function renderCategory(keepCompact = false) {
   var _a2;
   categoryObserver == null ? void 0 : categoryObserver.disconnect();
   const adult = state.tab === "adult";
-  const tabs = privateMode() ? adult ? ["\u6210\u4EBA\u77ED\u5267", "\u6210\u4EBA\u6F2B\u5267"] : ["AI\u6362\u8138", "AI\u9B54\u6539"] : [adult ? "\u77ED\u5267" : "\u6F2B\u5267"];
+  const currentId = categoryId();
+  const currentName = tabNames(state.tab)[state.sub[state.tab]] || tabNames(state.tab)[0] || "";
+  const tabs = privateMode() ? adult ? ["\u6210\u4EBA\u77ED\u5267", "\u6210\u4EBA\u6F2B\u5267"] : ["AI\u6362\u8138", "AI\u9B54\u6539"] : tabNames(state.tab);
   const items = asArray((_a2 = state.category) == null ? void 0 : _a2.items);
   const lead = items[0] || null;
   const slides = privateMode() ? [] : items.slice(0, 5);
   const banner = Math.min(state.categoryBanner, Math.max(0, slides.length - 1));
   state.categoryBanner = banner;
   const spotlight = !privateMode() && slides.length ? `<div class="hero category-spotlight category-carousel">${categorySlide(slides[banner], banner, slides.length)}</div><div class="hero-dots">${slides.map((_, index) => `<i class="${index === banner ? "active" : ""}" data-slide="${index}"></i>`).join("")}</div>` : lead ? `<div class="category-spotlight"><img data-cover="${esc(lead.cover)}" alt=""><div class="category-spotlight-copy"><h2>${esc(lead.title)}</h2><button type="button" data-open-id="${esc(lead.id)}">\u67E5\u770B\u4F5C\u54C1 ${icon("arrow")}</button></div></div>` : "";
-  const switcher = privateMode() ? `<div class="segmented" role="tablist">${tabs.map((name, index) => `<button type="button" role="tab" data-sub="${index}" aria-selected="${index === state.sub[state.tab]}" class="${index === state.sub[state.tab] ? "selected" : ""}">${name}</button>`).join("")}</div>` : "";
-  content.innerHTML = `<div class="category-page"><div class="category-head"><h1>${privateMode() ? adult ? "\u6210\u4EBA\u5267\u573A" : "AI\u4E13\u533A" : adult ? "\u77ED\u5267" : "\u6F2B\u5267"}</h1><p>${privateMode() ? adult ? "\u77ED\u5267\u4E0E\u6F2B\u5267\uFF0C\u8D70\u8FDB\u4E0D\u540C\u7684\u4EBA\u751F\u3002" : "\u6362\u8138\u4E0E\u9B54\u6539\uFF0C\u63A2\u7D22\u5F71\u50CF\u65B0\u53EF\u80FD\u3002" : adult ? "\u771F\u4EBA\u6F14\u7684\u770B\u4E86\u4E0D\u70E7\u5FC3" : "\u63A2\u7D22\u70ED\u95E8\u6F2B\u5267\u3002"}</p></div>
+  const switcher = tabs.length > 1 ? `<div class="segmented cols-${tabs.length}" role="tablist">${tabs.map((name, index) => `<button type="button" role="tab" data-sub="${index}" aria-selected="${index === state.sub[state.tab]}" class="${index === state.sub[state.tab] ? "selected" : ""}">${name}</button>`).join("")}</div>` : "";
+  const heading = privateMode() ? adult ? "\u6210\u4EBA\u5267\u573A" : "AI\u4E13\u533A" : currentName;
+  const intro = isRankId(currentId) ? "\u7EA2\u679C\u5B98\u65B9\u70ED\u64AD\u699C\uFF0C\u6309\u89C2\u770B\u4E0E\u4E92\u52A8\u7EFC\u5408\u70ED\u5EA6\u6392\u5E8F\uFF0C\u6BCF\u65E5\u66F4\u65B0\u3002" : privateMode() ? adult ? "\u77ED\u5267\u4E0E\u6F2B\u5267\uFF0C\u8D70\u8FDB\u4E0D\u540C\u7684\u4EBA\u751F\u3002" : "\u6362\u8138\u4E0E\u9B54\u6539\uFF0C\u63A2\u7D22\u5F71\u50CF\u65B0\u53EF\u80FD\u3002" : adult ? "\u771F\u4EBA\u6F14\u7684\u770B\u4E86\u4E0D\u70E7\u5FC3" : "\u63A2\u7D22\u70ED\u95E8\u6F2B\u5267\u3002";
+  content.innerHTML = `<div class="category-page"><div class="category-head"><h1>${esc(heading)}</h1><p>${intro}</p></div>
     ${switcher}
     ${spotlight}
-    <section class="category-section"><div class="section-heading"><h2>${tabs[state.sub[state.tab]]}\u4F5C\u54C1</h2><span class="category-count">\u5DF2\u663E\u793A ${items.length} \u90E8</span></div>
+    <section class="category-section"><div class="section-heading"><h2>${esc(isRankId(currentId) ? currentName : currentName + "\u4F5C\u54C1")}</h2><span class="category-count">\u5DF2\u663E\u793A ${items.length} \u90E8</span></div>
     <div class="search-grid category-grid">${items.map(itemCard).join("")}</div><div class="category-footer">${categoryFooter()}</div></section></div>`;
   compact.innerHTML = compactMarkup();
   scroll.scrollTop = keepCompact ? 150 : 0;
@@ -1174,6 +1221,11 @@ async function renderLibraryDownloads(prefetched) {
       } catch (error) {
         nas = [];
       }
+      try {
+        const pc = await withTimeout(api("desktop-download-list"), 4e3);
+        nas = nas.concat(asArray(pc.tasks));
+      } catch (error) {
+      }
     }
   }
   await loadRemoteJobs();
@@ -1193,7 +1245,8 @@ function commitDownloadList(list, phone, nas, opts = {}) {
   if (!opts.noTimer) processForwardTasks(phone, nas);
   const phoneTasks = phone.map((t) => Object.assign({}, t, { kind: "phone" }));
   const forwardNas = new Set(phone.filter((t) => t.nasTaskId).map((t) => String(t.nasTaskId)));
-  const nasTasks = nas.filter((t) => !forwardNas.has(String(t.id)) && (!t.source || t.source === contentSource)).map((t) => Object.assign({}, t, { kind: "nas" }));
+  const nasTasks = nas.filter((t) => !forwardNas.has(String(t.id)) && (!t.source || t.source === contentSource)).map((t) => Object.assign({}, t, { kind: t.kind === "desktop" || t.kind === "tv" || t.kind === "android" ? t.kind : "nas" }));
+  state.deviceTasks = nasTasks.filter((t) => t.kind === "desktop" || t.kind === "tv" || t.kind === "android");
   list.innerHTML = renderDownloadList([...phoneTasks, ...nasTasks]);
   hydrateImages();
   backfillNasCovers(nasTasks);
@@ -1315,6 +1368,11 @@ async function refreshDownloads(token, keepTimer) {
     } catch (error) {
       nas = [];
     }
+    try {
+      const pc = await api("desktop-download-list");
+      nas = nas.concat(asArray(pc.tasks));
+    } catch (error) {
+    }
   }
   await loadRemoteJobs();
   if (state.route !== "downloads" || routeToken !== token) return;
@@ -1324,7 +1382,8 @@ async function refreshDownloads(token, keepTimer) {
   processForwardTasks(phone, nas);
   const phoneTasks = phone.map((t) => Object.assign({}, t, { kind: "phone" }));
   const forwardNas = new Set(phone.filter((t) => t.nasTaskId).map((t) => String(t.nasTaskId)));
-  const nasTasks = nas.filter((t) => !forwardNas.has(String(t.id)) && (!t.source || t.source === contentSource)).map((t) => Object.assign({}, t, { kind: "nas" }));
+  const nasTasks = nas.filter((t) => !forwardNas.has(String(t.id)) && (!t.source || t.source === contentSource)).map((t) => Object.assign({}, t, { kind: t.kind === "desktop" || t.kind === "tv" || t.kind === "android" ? t.kind : "nas" }));
+  state.deviceTasks = nasTasks.filter((t) => t.kind === "desktop" || t.kind === "tv" || t.kind === "android");
   list.innerHTML = renderDownloadList([...phoneTasks, ...nasTasks]);
 }
 function renderDownloadSection(label, tasks, kind) {
@@ -1392,7 +1451,9 @@ function coverForTask(task) {
 function downloadTaskRow(task, kind) {
   const running = task.status === "running";
   const statusText = downloadStatusText(task, kind);
-  const sourceBadge = kind === "nas" ? '<span class="dl-source-badge nas">NAS</span>' : '<span class="dl-source-badge phone">\u624B\u673A</span>';
+  const remoteKind = kind === "desktop" || kind === "tv" || kind === "android";
+  const deviceLabel = kind === "desktop" ? "\u7535\u8111" : kind === "tv" ? "\u7535\u89C6" : "\u624B\u673A";
+  const sourceBadge = kind === "nas" ? '<span class="dl-source-badge nas">NAS</span>' : remoteKind ? `<span class="dl-source-badge ${kind}">${deviceLabel} \xB7 ${esc(task.deviceName || "\u5728\u7EBF")}</span>` : '<span class="dl-source-badge phone">\u624B\u673A</span>';
   const remoteJob = kind === "phone" ? remoteJobs.get(String(task.id)) : null;
   const remoteText = remoteJobText(remoteJob);
   const remoteBusy = !!(remoteJob && (remoteJob.status === "running" || remoteJob.status === "queued"));
@@ -1406,14 +1467,14 @@ function downloadTaskRow(task, kind) {
   const srcNote = task.detail && task.detail.includes("\uFF08") ? (task.detail.match(/（([^）]*)）/) || [])[1] || "" : "";
   const canRetryFailed = task.status === "ready" || task.status === "failed" && !(task.error || "").includes("\u5408\u5E76\u5931\u8D25");
   const retryFailedBtn = !running && kind === "nas" && canRetryFailed && failedList.length > 0 ? `<button type="button" class="dl-cancel dl-retry" data-dl-retry-failed="nas" data-dl-id="${esc(task.id)}">\u91CD\u8BD5\u5931\u8D25${failedList.length}\u96C6</button>` : "";
-  const mergeBtn = !running && (task.status === "ready" || (task.status === "failed" || task.status === "done") && (task.error || "").includes("\u5408\u5E76\u5931\u8D25")) ? `<button type="button" class="dl-cancel dl-retry" data-dl-merge="${kind}" data-dl-id="${esc(task.id)}">\u5408\u5E76</button>` : "";
-  const deleteBtn = !running ? `<button type="button" class="dl-cancel" data-dl-delete="${kind}" data-dl-id="${esc(task.id)}"${task.children && task.children.length > 1 ? ` data-dl-siblings="${esc(task.children.map((c) => c.id).join(","))}"` : ""}>\u5220\u9664</button>` : "";
+  const mergeBtn = !running && !remoteKind && (task.status === "ready" || (task.status === "failed" || task.status === "done") && (task.error || "").includes("\u5408\u5E76\u5931\u8D25")) ? `<button type="button" class="dl-cancel dl-retry" data-dl-merge="${kind}" data-dl-id="${esc(task.id)}">\u5408\u5E76</button>` : "";
+  const deleteBtn = !running && !remoteKind ? `<button type="button" class="dl-cancel" data-dl-delete="${kind}" data-dl-id="${esc(task.id)}"${task.children && task.children.length > 1 ? ` data-dl-siblings="${esc(task.children.map((c) => c.id).join(","))}"` : ""}>\u5220\u9664</button>` : "";
   const failedInfo = failedList.length > 0 ? `<span class="dl-error" data-dl-copy="${esc(task.id)}" data-dl-log="${esc("\u5931\u8D25\u96C6: " + failedList.map((f) => "\u7B2C" + f.index + "\u96C6(" + (f.error || "") + ")").join("\uFF1B"))}" title="\u70B9\u51FB\u590D\u5236\u5931\u8D25\u660E\u7EC6">\u5931\u8D25 ${failedList.length} \u96C6\uFF1A${esc(failedList.slice(0, 3).map((f) => "\u7B2C" + f.index + "\u96C6").join("\u3001"))}${failedList.length > 3 ? " \u7B49" : ""}</span>` : "";
   const errLog = task.error || task.debug || "";
   const errBlock = errLog ? `<span class="dl-error" data-dl-copy="${esc(task.id)}" data-dl-log="${esc(errLog.replace(/\n/g, "\\n"))}" title="\u70B9\u51FB\u590D\u5236\u5168\u90E8\u65E5\u5FD7">${task.error ? task.error.split("\n").slice(0, 4).map(esc).join("<br>") : '<span class="dl-log-link">\u590D\u5236\u5408\u5E76\u65E5\u5FD7</span>'}</span>` : "";
   const detailHint = task.detail && (/片/.test(task.detail) || task.detail.includes("\u5408\u5E76\u4E2D")) ? ` \xB7 <span class="dl-detail-hint">${esc(task.detail)}</span>` : "";
-  const playAttr = kind === "nas" ? "data-dl-play-nas" : "data-dl-play";
-  const playHint = kind === "nas" ? "\u64AD\u653E NAS \u6210\u54C1" : "\u672C\u5730\u64AD\u653E";
+  const playAttr = kind === "nas" ? "data-dl-play-nas" : remoteKind ? "data-dl-play-device" : "data-dl-play";
+  const playHint = kind === "nas" ? "\u64AD\u653E NAS \u6210\u54C1" : remoteKind ? `\u64AD\u653E${deviceLabel}\u4E0A\u7684\u6210\u54C1` : "\u672C\u5730\u64AD\u653E";
   const playTile = `<button type="button" class="download-cover" ${playAttr}="${esc(task.id)}" aria-label="${playHint}\u300A${esc(task.title || "\u672A\u77E5\u5267\u96C6")}\u300B">
     <span class="poster loading"><span class="poster-letter">${esc(String(task.title || "\u5F71").slice(0, 1))}</span><img data-cover="${esc(coverForTask(task))}" alt=""></span>
     <span class="download-cover-hint">${playHint}</span></button>`;
@@ -2745,14 +2806,14 @@ async function goTag(slug, label) {
   const cached = await api("cached", { key: `tag:${slug}:1` }).catch(() => null);
   if (token !== routeToken) return;
   const firstLoad = !(cached == null ? void 0 : cached.data);
-  state.listing = (cached == null ? void 0 : cached.data) ? { ...cached.data, kind: "tag-list", slug, label, refreshing: true, loading: false, error: false } : { items: [], nextPage: null, kind: "tag-list", slug, label, refreshing: true, loading: false, error: false };
+  state.listing = (cached == null ? void 0 : cached.data) ? __spreadProps(__spreadValues({}, cached.data), { kind: "tag-list", slug, label, refreshing: true, loading: false, error: false }) : { items: [], nextPage: null, kind: "tag-list", slug, label, refreshing: true, loading: false, error: false };
   renderListing();
   try {
     const fresh = await refreshing;
     if (token !== routeToken) return;
     const changed = listSignature(state.listing) !== listSignature(fresh) || state.listing.nextPage !== fresh.nextPage;
     const previousScroll = scroll.scrollTop;
-    state.listing = { ...fresh, kind: "tag-list", slug, label, refreshing: false, loading: false, error: false };
+    state.listing = __spreadProps(__spreadValues({}, fresh), { kind: "tag-list", slug, label, refreshing: false, loading: false, error: false });
     if (firstLoad || changed) {
       renderListing();
       scroll.scrollTop = previousScroll;
@@ -2892,7 +2953,7 @@ async function goCategory(tab, sub = state.sub[tab], keepCompact = false) {
   const refreshing = api("category", { id, page: 1 });
   const cached = await api("cached", { key: `category:${id}:1` }).catch(() => null);
   if (token !== routeToken) return;
-  state.category = (cached == null ? void 0 : cached.data) ? { ...cached.data, refreshing: true, loading: false, error: false } : null;
+  state.category = (cached == null ? void 0 : cached.data) ? __spreadProps(__spreadValues({}, cached.data), { refreshing: true, loading: false, error: false }) : null;
   if (adopted) {
     try {
       hydrateImages();
@@ -2905,7 +2966,7 @@ async function goCategory(tab, sub = state.sub[tab], keepCompact = false) {
     const fresh = await refreshing;
     if (token !== routeToken) return;
     const previousCategory = state.category;
-    state.category = { ...fresh, refreshing: false, loading: false, error: false };
+    state.category = __spreadProps(__spreadValues({}, fresh), { refreshing: false, loading: false, error: false });
     state.categoryItems = asArray(fresh.items);
     if (adopted) {
       try {
@@ -3079,7 +3140,7 @@ async function goDetail(id, trigger) {
   const candidates = state.route === "category" ? asArray((_b2 = state.category) == null ? void 0 : _b2.items) : state.route === "search" ? asArray((_c2 = state.search) == null ? void 0 : _c2.items) : state.route === "listing" ? asArray((_d2 = state.listing) == null ? void 0 : _d2.items) : [...asArray((_f = (_e = state.home) == null ? void 0 : _e.recommend) == null ? void 0 : _f.items), ...asArray((_h = (_g = state.home) == null ? void 0 : _g.newest) == null ? void 0 : _h.items)];
   state.sourceQueue = aiGroup ? candidates.filter((item) => item.category === state.sourceGroup) : [];
   setRoute("detail");
-  state.detail = { ...state.sourceItem };
+  state.detail = __spreadValues({}, state.sourceItem);
   state.detailLoading = true;
   state.bookmarked = false;
   if (state.detail && state.detail.title) rememberTitleCover(state.detail.title, state.detail.cover || "");
@@ -3252,10 +3313,24 @@ window.hgResume = () => {
   retryFailedImages(true);
   if (state.route === "library") goLibrary(state.libraryTab);
   if (state.route === "home") refreshHomeHistory();
-  if (state.route === "detail" && state.detail) api("bookmark-state", { id: state.detail.id }).then((value) => {
-    state.bookmarked = value;
-    renderDetail();
-  });
+  if (state.route === "detail" && state.detail) {
+    const id = String(state.detail.id);
+    const token = routeToken;
+    api("latest-progress", { id }).then((progress) => {
+      if (token !== routeToken || state.route !== "detail" || !state.detail || String(state.detail.id) !== id) return;
+      const before = JSON.stringify(state.detailProgress || null);
+      state.detailProgress = progress || null;
+      if (JSON.stringify(state.detailProgress) !== before) renderDetail();
+    }).catch(() => {
+    });
+    api("bookmark-state", { id }).then((value) => {
+      if (token !== routeToken || state.route !== "detail" || !state.detail) return;
+      if (state.bookmarked === value) return;
+      state.bookmarked = value;
+      renderDetail();
+    }).catch(() => {
+    });
+  }
   window.__bingeSync && window.__bingeSync();
 };
 function resumePlan() {
@@ -3288,7 +3363,7 @@ function resumeLabel() {
 async function openPlayer(episode = 1, restart = false) {
   const detail = state.detail;
   if (!detail) return;
-  const item = { ...state.sourceItem, ...detail };
+  const item = __spreadValues(__spreadValues({}, state.sourceItem), detail);
   const queue = state.sourceQueue.length ? [...state.sourceQueue] : [item];
   if (!queue.some((candidate) => candidate.id === item.id)) queue.unshift(item);
   const index = queue.findIndex((candidate) => candidate.id === item.id);
@@ -3514,7 +3589,7 @@ async function swipePrefetch(keyOrFn, prepare, render) {
     const saved = {
       route: state.route,
       tab: state.tab,
-      sub: { ...state.sub },
+      sub: __spreadValues({}, state.sub),
       libraryTab: state.libraryTab,
       library: state.library,
       libraryQuery: state.libraryQuery,
@@ -3605,7 +3680,7 @@ async function swipePrefetchAll() {
           state.tab = data.tab;
           state.sub[data.tab] = data.sub;
           state.categoryBanner = 0;
-          state.category = { ...data.fresh, refreshing: false, loading: false, error: false };
+          state.category = __spreadProps(__spreadValues({}, data.fresh), { refreshing: false, loading: false, error: false });
           state.categoryItems = asArray(data.fresh.items);
           renderCategory();
         }
@@ -3629,6 +3704,10 @@ async function swipePrefetchAll() {
           nas = asArray((await withTimeout(api("nas-download-list"), 4e3)).tasks);
         } catch (ignore) {
           nas = [];
+        }
+        try {
+          nas = nas.concat(asArray((await withTimeout(api("desktop-download-list"), 4e3)).tasks));
+        } catch (ignore) {
         }
       }
       return { library: state.library, downloads: { phone, nas } };
@@ -4395,6 +4474,17 @@ document.addEventListener("click", async (event) => {
   if (event.target.closest("[data-dl-play]")) {
     const id = event.target.closest("[data-dl-play]").dataset.dlPlay;
     api("open-local-player", { id }).then(() => toast("\u6B63\u5728\u64AD\u653E\u672C\u5730\u6210\u54C1")).catch((error) => toast(error.message || "\u672C\u5730\u6587\u4EF6\u4E0D\u53EF\u64AD\u653E", true));
+    return;
+  }
+  if (event.target.closest("[data-dl-play-device]")) {
+    const id = event.target.closest("[data-dl-play-device]").dataset.dlPlayDevice;
+    const task = (state.deviceTasks || []).find((t) => String(t.id) === String(id));
+    if (!task) return;
+    if (!task.url) {
+      toast(task.merged ? "\u8FD9\u53F0\u8BBE\u5907\u6CA1\u6709\u53EF\u7528\u7684\u5C40\u57DF\u7F51\u5730\u5740\uFF0C\u786E\u8BA4\u5728\u540C\u4E00 Wi-Fi" : "\u5BF9\u9762\u8FD8\u6CA1\u5408\u5E76\u6210\u54C1\uFF0C\u7B49\u5B83\u5408\u5E76\u597D\u518D\u64AD");
+      return;
+    }
+    api("open-desktop-player", { url: task.url, title: task.title }).catch((error) => toast(error.message || "\u6253\u5F00\u5931\u8D25"));
     return;
   }
   if (event.target.closest("[data-dl-play-nas]")) {

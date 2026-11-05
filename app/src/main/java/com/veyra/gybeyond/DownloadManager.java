@@ -405,14 +405,32 @@ final class DownloadManager {
         return out;
     }
 
-    /** 该任务在本机的可播放产物：合并整剧文件优先，其次逐集文件（第NN集.mp4）。 */
+    /** 全部任务，不分内容模式：局域网媒体服务要把本机所有成品开放出去。 */
+    JSONArray listAll() {
+        JSONArray out = new JSONArray();
+        synchronized (tasks) {
+            for (Task t : tasks) out.put(t.snapshot());
+        }
+        return out;
+    }
+
     JSONObject localFiles(String id) {
+        return localFiles(id, true);
+    }
+
+    /** 不带内容模式校验的版本：跨设备播放时手机可能停在另一个模式上。 */
+    JSONObject localFilesAny(String id) {
+        return localFiles(id, false);
+    }
+
+    /** 该任务在本机的可播放产物：合并整剧文件优先，其次逐集文件（第NN集.mp4）。 */
+    JSONObject localFiles(String id, boolean checkMode) {
         Task found = null;
         synchronized (tasks) {
             for (Task t : tasks) if (t.id.equals(id)) { found = t; break; }
         }
         if (found == null) throw new IllegalStateException("任务不存在");
-        if (!ContentMode.get(context).active().equals(found.source))
+        if (checkMode && !ContentMode.get(context).active().equals(found.source))
             throw new IllegalStateException("内容已切换，请重新打开");
         String safe = found.title == null || found.title.isEmpty() ? "download"
                 : found.title.replaceAll("[\\\\/:*?\"<>|]", "_");

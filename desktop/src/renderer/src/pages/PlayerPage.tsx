@@ -9,6 +9,8 @@ interface Props {
   title: string;
   /** 本地已下载任务 id：有值时播本机文件 */
   localTaskId?: string;
+  /** 其它设备上的成品地址（局域网直连或本机媒体服务转发），给了就直接播它 */
+  remoteUrl?: string;
   /** 手机投屏带过来的起播位置（毫秒），只在第一集用一次 */
   position?: number;
   episodes?: number[];
@@ -23,9 +25,10 @@ interface Props {
  * 在线内容不直接连源站：交给主进程的媒体服务转一手（hls.js 带不了 Referer，
  * 红果的 CENC 流浏览器也解不了）。本地已下载的 mp4 走同一个服务的 /file。
  */
-export default function PlayerPage({ source, id, episode, title, position, localTaskId, episodes, onClose, onEpisode, notify }: Props) {
+export default function PlayerPage({ source, id, episode, title, position, localTaskId, remoteUrl, episodes, onClose, onEpisode, notify }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [url, setUrl] = useState('');
+  const [kind, setKind] = useState<'hls' | 'file'>('file');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [attempt, setAttempt] = useState(0);
@@ -33,7 +36,7 @@ export default function PlayerPage({ source, id, episode, title, position, local
 
   // 没从详情页带集数过来（例如手机投屏）时，自己拉一次，保证「下一集」可用
   useEffect(() => {
-    if (localTaskId || (episodes && episodes.length)) return;
+    if (localTaskId || remoteUrl || (episodes && episodes.length)) return;
     let alive = true;
     call<{ episodes: number[] }>('catalog.detail', { id, source })
       .then((data) => {
@@ -51,12 +54,26 @@ export default function PlayerPage({ source, id, episode, title, position, local
     setLoading(true);
     setError('');
     setUrl('');
+
+    // 别的设备上的成品是现成 mp4，直接播，不用再解析
+    if (remoteUrl) {
+      setKind('file');
+      setUrl(remoteUrl);
+      setLoading(false);
+      return () => {
+        alive = false;
+      };
+    }
+
     const job = localTaskId
       ? call<{ url: string }>('downloads.play', { id: localTaskId, index: 0 })
-      : call<{ url: string }>('catalog.play', { source, id, episode });
+      : call<{ url: string; kind: 'hls' | 'file' }>('catalog.play', { source, id, episode });
     job
       .then((result) => {
-        if (alive) setUrl(result.url);
+        if (!alive) return;
+        const nextKind = (result as { kind?: 'hls' | 'file' }).kind;
+        setKind(nextKind === 'hls' ? 'hls' : 'file');
+        setUrl(result.url);
       })
       .catch((issue) => {
         if (alive) setError(errorText(issue));
@@ -67,15 +84,23 @@ export default function PlayerPage({ source, id, episode, title, position, local
     return () => {
       alive = false;
     };
-  }, [source, id, episode, localTaskId, attempt]);
+  }, [source, id, episode, localTaskId, remoteUrl, attempt]);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !url) return;
     let hls: Hls | null = null;
 
-    if (source === 'huangguo' && Hls.isSupported()) {
+    // 服务端已经告诉我们这是 m3u8 还是 mp4：m3u8 必须走 hls.js，直接塞给 video 只会一直转圈
+    if (kind === 'hls' && Hls.isSupported()) {
       hls = new Hls({ enableWorker: true, lowLatencyMode: false });
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (!data.fatal) return;
+        // 兜底：hls.js 起不来就退回原生播放，宁可少一层也别整段黑屏
+        hls?.destroy();
+        hls = null;
+        video.src = url;
+      });
       hls.loadSource(url);
       hls.attachMedia(video);
     } else {
@@ -111,7 +136,7 @@ export default function PlayerPage({ source, id, episode, title, position, local
     };
     // position 只在首次挂载时生效，换集不该再跳回手机的位置
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url, source, id, episode]);
+  }, [url, kind, source, id, episode]);
 
   const numbers = list.length ? list : episodes || [];
   const index = numbers.indexOf(episode);
@@ -127,11 +152,15 @@ export default function PlayerPage({ source, id, episode, title, position, local
         <div className="player-title">
           <h1>{title || '正在播放'}</h1>
           <p>
-            {localTaskId ? '本地文件 · 合并成品' : `第 ${episode} 集${source === 'huangguo' ? ' · 私密模式' : ''}`}
+            {localTaskId
+              ? '本地文件 · 合并成品'
+              : remoteUrl
+                ? '其它设备 · 在线播放'
+                : `第 ${episode} 集${source === 'huangguo' ? ' · 私密模式' : ''}`}
           </p>
         </div>
         <div className="player-nav">
-          {!localTaskId && (
+          {!localTaskId && !remoteUrl && (
             <>
               <button type="button" className="ghost" disabled={!prev} onClick={() => prev && onEpisode(prev)}>
                 上一集

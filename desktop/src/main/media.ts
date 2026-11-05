@@ -1,4 +1,5 @@
 import http from 'node:http';
+import https from 'node:https';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -178,6 +179,39 @@ function sendFile(req: http.IncomingMessage, res: http.ServerResponse, file: str
   fs.createReadStream(file).pipe(res);
 }
 
+/** 服务器上的成品（NAS 下载）：带 token 转发，Range 原样透传，拖动进度条才能用。 */
+async function proxyServerFile(req: http.IncomingMessage, res: http.ServerResponse, target: string, authToken: string): Promise<void> {
+  await new Promise<void>((resolve) => {
+    let parsed: URL;
+    try {
+      parsed = new URL(target);
+    } catch {
+      json(res, 400, { error: '地址无效' });
+      resolve();
+      return;
+    }
+    const headers: Record<string, string> = { Authorization: `Bearer ${authToken}`, 'User-Agent': 'Veyra-Desktop/0.1' };
+    if (req.headers.range) headers.Range = String(req.headers.range);
+    const client = parsed.protocol === 'https:' ? https.request : http.request;
+    const upstream = client(parsed, { method: 'GET', headers }, (remote) => {
+      const pass: Record<string, string> = {};
+      for (const key of ['content-type', 'content-length', 'content-range', 'accept-ranges', 'last-modified']) {
+        const value = remote.headers[key];
+        if (typeof value === 'string') pass[key] = value;
+      }
+      res.writeHead(remote.statusCode || 502, pass);
+      remote.pipe(res);
+      remote.on('end', () => resolve());
+      remote.on('error', () => resolve());
+    });
+    upstream.on('error', (error) => {
+      if (!res.headersSent) json(res, 502, { error: `服务器文件读取失败：${error.message}` });
+      resolve();
+    });
+    req.on('close', () => upstream.destroy());
+  });
+}
+
 /** 任务目录里找某一集的明文 mp4（分集或合并成品）。 */
 function episodeFile(task: DownloadTask, index: number): { file: string; type: string } | null {
   if (index === 0 && task.output && fs.existsSync(task.output)) return { file: task.output, type: 'video/mp4' };
@@ -233,6 +267,21 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const found = episodeFile(task, Number(index) || 0);
     if (!found) return json(res, 404, { error: '文件还没下载完' });
     return sendFile(req, res, found.file, found.type);
+  }
+
+  if (url.pathname.startsWith('/nas/')) {
+    // 服务器上的成品：桌面端和手机/电视一样，统一从本机媒体服务出，避免渲染层带不了 Authorization
+    const [, , taskId, indexRaw] = url.pathname.split('/');
+    const current = session();
+    if (!current) return json(res, 401, { error: '未登录' });
+    const index = Number(indexRaw) || 0;
+    await proxyServerFile(
+      req,
+      res,
+      `${current.server}/api/download/files/${encodeURIComponent(taskId)}/${index}`,
+      current.token,
+    );
+    return;
   }
 
   if (url.pathname.startsWith('/hg/')) {
@@ -301,6 +350,42 @@ export function info(): { port: number; token: string; lan: string } {
 export function playUrl(source: 'hongguo' | 'huangguo', seriesId: string, episode: number): string {
   const kind = source === 'huangguo' ? 'hg' : 'rg';
   return mediaUrl(`/${kind}/${encodeURIComponent(seriesId)}/${episode}`);
+}
+
+/**
+ * 播放前先判流类型：红果/黄果都可能给 mp4 也可能给 m3u8，
+ * 渲染层拿错的播放器就会一直转圈（video 元素放不了 m3u8）。
+ */
+const kindCache = new Map<string, { kind: 'hls' | 'file'; at: number }>();
+
+export async function resolveKind(source: 'hongguo' | 'huangguo', seriesId: string, episode: number): Promise<'hls' | 'file'> {
+  const cacheKey = `${source}:${seriesId}:${episode}`;
+  const hit = kindCache.get(cacheKey);
+  if (hit && Date.now() - hit.at < 120000) return hit.kind;
+
+  let kind: 'hls' | 'file' = source === 'huangguo' ? 'hls' : 'file';
+  try {
+    if (source === 'huangguo') {
+      const found = await playSource(seriesId, episode);
+      kind = /\.m3u8(\?|$)/i.test(found.url) ? 'hls' : 'file';
+    } else {
+      const { hgApp } = serverModules();
+      const info = await hgApp.videoDetail(seriesId);
+      const vid = Array.isArray(info?.vids) ? info.vids[episode - 1] : '';
+      const model = vid ? await hgApp.videoModel(vid) : null;
+      // 有 key 说明是 CENC 加密，服务端会先解成 mp4；否则看源地址后缀
+      kind = model?.key ? 'file' : /\.m3u8(\?|$)/i.test(String(model?.url || '')) ? 'hls' : 'file';
+    }
+  } catch {
+    /* 探测失败按默认走，播放器自己还有兜底 */
+  }
+  kindCache.set(cacheKey, { kind, at: Date.now() });
+  return kind;
+}
+
+/** 服务器上的成品（NAS 任务）：本机媒体服务带 token 转发，渲染层只拿本地地址。 */
+export function nasUrl(taskId: string, index = 0): string {
+  return mediaUrl(`/nas/${encodeURIComponent(taskId)}/${index}`);
 }
 
 /** 本地已下载文件：index=0 是合并成品，>0 是分集。 */

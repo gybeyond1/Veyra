@@ -1434,3 +1434,132 @@ input::placeholder {
   color: var(--muted);
   font-size: 12px;
 }
+
+/* ---------- 选集：默认点集播放，点「下载」才进入勾选 ---------- */
+.ep {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  font: inherit;
+  cursor: pointer;
+}
+.ep-icon {
+  font-size: 9px;
+  opacity: 0;
+}
+.ep:hover .ep-icon {
+  opacity: 0.75;
+}
+.ep.selectable {
+  justify-content: flex-start;
+  gap: 8px;
+}
+.ep-box {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  border: 1px solid var(--line-strong);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 10px;
+  color: var(--gold);
+}
+.ep.active .ep-box {
+  border-color: var(--gold);
+  background: var(--gold);
+  color: #14181f;
+}
+.ep-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.ep-all input {
+  accent-color: var(--gold);
+}
+.ep-summary {
+  color: var(--muted);
+}
+.download-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(243, 198, 105, 0.28);
+  background: rgba(243, 198, 105, 0.08);
+  font-size: 12.5px;
+}
+.download-bar-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* ---------- 下载页：本机 / 其它设备 ---------- */
+.task-section {
+  margin-bottom: 26px;
+}
+.task-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.task-section-head h2 {
+  margin: 0;
+  font-size: 15px;
+}
+.task-section-head span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.task-cover {
+  position: relative;
+}
+.source-badge {
+  flex: none;
+  max-width: 40%;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: rgba(255, 255, 255, 0.06);
+  color: #cfd7e3;
+}
+.source-badge.desktop {
+  color: #6fe0a8;
+}
+.source-badge.android {
+  color: #9ec5ff;
+}
+.source-badge.tv {
+  color: #f3c669;
+}
+.source-badge.nas {
+  color: #ffab6b;
+}
+.task.remote {
+  background: rgba(255, 255, 255, 0.02);
+}
+.remote-hint {
+  color: var(--muted);
+  font-size: 11.5px;
+  text-align: right;
+  max-width: 130px;
+}
+.empty-block.small {
+  padding: 22px;
+}

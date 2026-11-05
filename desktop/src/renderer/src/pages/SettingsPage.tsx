@@ -189,6 +189,7 @@ export default function SettingsPage({ settings, notify, onSaved }: Props) {
                 下载新版
               </button>
             )}
+            {update?.hasUpdate && !update.url && <span className="hint">安装包还在准备，稍后再点一次</span>}
           </div>
         </div>
         <div className="about">

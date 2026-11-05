@@ -183,9 +183,13 @@ input,textarea{user-select:text;-webkit-user-select:text;-webkit-touch-callout:d
 .dl-source-badge.phone{background:#e8f2ff;color:#0b5fd6}
 .dl-source-badge.nas{background:#fff3e0;color:#c77700}
 .dl-source-badge.desktop{background:#e8f7ef;color:#0f7a4a}
+.dl-source-badge.android{background:#e8f0ff;color:#1f5fbf}
+.dl-source-badge.tv{background:#fff6e0;color:#a3730a}
 html[data-theme=dark] .dl-source-badge.phone{background:#12325f;color:#8ec7ff}
 html[data-theme=dark] .dl-source-badge.nas{background:#4a3208;color:#ffc25e}
 html[data-theme=dark] .dl-source-badge.desktop{background:#0d3a2a;color:#6fe0a8}
+html[data-theme=dark] .dl-source-badge.android{background:#12233d;color:#8fbcff}
+html[data-theme=dark] .dl-source-badge.tv{background:#3a2c07;color:#ffd27a}
 .download-task-head{display:flex;align-items:center;gap:4px}
 .download-task-head strong{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .search-form{position:relative}

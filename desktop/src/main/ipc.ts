@@ -8,6 +8,7 @@ import { session, normalizeServer } from './session';
 import * as auth from './auth';
 import * as catalog from './catalog';
 import * as downloads from './downloads';
+import * as remote from './remote';
 import * as qrlogin from './qrlogin';
 import * as source from './source';
 import * as update from './update';
@@ -161,6 +162,8 @@ const handlers: { [K in ApiName]: (...args: any[]) => any } = {
     const dir = downloads.taskFolder(payload.id);
     if (fs.existsSync(dir)) await shell.openPath(dir);
   },
+  'downloads.remote': () => remote.list(),
+
   'downloads.play': (payload: { id: string; index?: number }) => {
     const task = downloads.list().find((item) => item.id === payload.id);
     if (!task) throw new Error('任务不存在');

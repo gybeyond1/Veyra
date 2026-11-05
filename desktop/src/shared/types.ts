@@ -91,6 +91,34 @@ export interface DownloadTask {
   totalCount: number;
 }
 
+/**
+ * 其它设备（服务器/NAS、手机、电视、另一台电脑）上的下载任务。
+ * 桌面端「下载」页把它们和本机任务并排显示，在线且已有成品时可以直接播。
+ */
+export interface RemoteTask {
+  /** 唯一键：nas:<id> 或 <deviceId>:<taskId> */
+  key: string;
+  kind: 'nas' | 'android' | 'tv' | 'desktop';
+  /** 设备名，NAS 任务为空 */
+  deviceName: string;
+  deviceId: string;
+  /** 任务在它自己那一侧的 id（播 NAS 用的是这个） */
+  remoteId: string;
+  title: string;
+  cover: string;
+  status: string;
+  percent: number;
+  doneCount: number;
+  totalCount: number;
+  episodeCount: number;
+  merged: boolean;
+  online: boolean;
+  /** 可播时的播放地址（局域网直连或本机媒体服务转发），不可播为空 */
+  playUrl: string;
+  /** 不可播的原因 */
+  hint: string;
+}
+
 export interface QrLoginState {
   url: string;
   code: string;
@@ -144,7 +172,7 @@ export interface Api {
   'catalog.tags': (payload?: { source?: string }) => Promise<{ items: { name: string; slug: string; type: string }[] }>;
   'catalog.search': (payload: { source?: string; q: string }) => Promise<{ items: SeriesCard[] }>;
   'catalog.detail': (payload: { source?: string; id: string }) => Promise<SeriesDetail>;
-  'catalog.play': (payload: { source?: string; id: string; episode: number }) => Promise<{ url: string }>;
+  'catalog.play': (payload: { source?: string; id: string; episode: number }) => Promise<{ url: string; kind: 'hls' | 'file' }>;
 
   'source.state': () => Promise<SourceState>;
   'source.enter': (payload: { code: string }) => Promise<SourceState>;
@@ -160,6 +188,7 @@ export interface Api {
   'downloads.retry': (payload: { id: string }) => Promise<DownloadTask>;
   'downloads.openFolder': (payload: { id: string }) => Promise<void>;
   'downloads.play': (payload: { id: string; index?: number }) => Promise<{ url: string }>;
+  'downloads.remote': () => Promise<RemoteTask[]>;
 
   'sync.pull': () => Promise<{ payload: Record<string, unknown> }>;
   'sync.push': (payload: { library: Record<string, unknown> }) => Promise<{ ok: boolean; at: number }>;

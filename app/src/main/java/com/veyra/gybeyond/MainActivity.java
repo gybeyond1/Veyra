@@ -1287,32 +1287,40 @@ public final class MainActivity extends Activity {
                 return account.postJson("api/download/tasks", body);
             }
             case "nas-download-list": return account.getJson("api/download/tasks");
+            case "device-download-list":
             case "desktop-download-list": {
-                // 电脑端在同一个账号下上报了下载任务摘要和局域网媒体地址：
-                // 这里把「在线电脑」的任务摊平成下载页可直接渲染的行（id 前缀 pc: 避免与手机/NAS 撞号）。
+                // 同一账号下在线设备的下载记录：电脑、电视、其它手机都列出来。
+                // 每台设备上报了自己的局域网媒体服务地址，有地址且已合并就能直接连过去播。
                 if (!account.isLoggedIn()) throw new IllegalStateException("请先登录");
                 JSONArray devices = account.getJson("api/devices").optJSONArray("devices");
+                String selfId = DeviceLink.deviceId(this);
                 JSONArray out = new JSONArray();
                 for (int i = 0; devices != null && i < devices.length(); i++) {
                     JSONObject device = devices.optJSONObject(i);
                     if (device == null) continue;
-                    if (!"desktop".equals(device.optString("platform"))) continue;
+                    String deviceId = device.optString("id", "");
+                    if (deviceId.isEmpty() || deviceId.equals(selfId)) continue;  // 本机的任务手机自己有一份
                     if (!device.optBoolean("online")) continue;
+                    String platform = device.optString("platform", "android");
+                    String kind = "desktop".equals(platform) ? "desktop" : "tv".equals(platform) ? "tv" : "android";
                     JSONObject lan = device.optJSONObject("lan");
                     String base = lan == null ? "" : lan.optString("url", "");
                     String lanToken = lan == null ? "" : lan.optString("token", "");
-                    if (base.isEmpty()) continue;
                     JSONArray tasks = device.optJSONArray("tasks");
                     for (int j = 0; tasks != null && j < tasks.length(); j++) {
                         JSONObject task = tasks.optJSONObject(j);
                         if (task == null) continue;
                         String taskId = task.optString("id", "");
                         if (taskId.isEmpty()) continue;
+                        boolean merged = task.optBoolean("merged", false);
+                        boolean playable = merged && !base.isEmpty();
+                        String label = "desktop".equals(kind) ? "电脑" : "tv".equals(kind) ? "电视" : "手机";
                         out.put(new JSONObject()
-                                .put("id", "pc:" + device.optString("id") + ":" + taskId)
+                                .put("id", (("desktop".equals(kind)) ? "pc:" : "dev:") + deviceId + ":" + taskId)
                                 .put("taskId", taskId)
-                                .put("deviceId", device.optString("id"))
-                                .put("deviceName", device.optString("name", "电脑"))
+                                .put("deviceId", deviceId)
+                                .put("deviceName", device.optString("name", label))
+                                .put("platform", platform)
                                 .put("title", task.optString("title", "未命名"))
                                 .put("cover", task.optString("cover", ""))
                                 .put("status", task.optString("status", ""))
@@ -1320,9 +1328,9 @@ public final class MainActivity extends Activity {
                                 .put("doneCount", task.optInt("doneCount", 0))
                                 .put("totalCount", task.optInt("totalCount", 0))
                                 .put("episodeCount", task.optInt("episodeCount", 0))
-                                .put("merged", task.optBoolean("merged", false))
-                                .put("url", endpoint(base, "/file/" + taskId + "/0?t=" + lanToken))
-                                .put("kind", "desktop"));
+                                .put("merged", merged)
+                                .put("url", playable ? endpoint(base, "/file/" + taskId + "/0?t=" + lanToken) : "")
+                                .put("kind", kind));
                     }
                 }
                 return new JSONObject().put("tasks", out);

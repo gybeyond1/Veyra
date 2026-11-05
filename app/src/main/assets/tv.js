@@ -1316,7 +1316,10 @@ function nextWorkMarkup(item, index) {
   if (item.status === 'done') badge = '已合并';
   else if (!ready) badge = '下载中';
   else badge = item.episodeCount ? ('全 ' + item.episodeCount + ' 集') : '已下载';
-  if (item.kind === 'desktop') badge = item.deviceName ? ('电脑 · ' + item.deviceName) : '电脑';
+  if (item.kind === 'desktop' || item.kind === 'tv' || item.kind === 'android') {
+    var label = item.kind === 'desktop' ? '电脑' : item.kind === 'tv' ? '电视' : '手机';
+    badge = item.deviceName ? (label + ' · ' + item.deviceName) : label;
+  }
   return '<button type="button" class="card' + (ready ? '' : ' is-dim') + '" data-focusable data-key="' + esc(key) + '" data-nas="' + esc(item.id) + '" data-nas-ready="' + (ready ? '1' : '') + '">'
     + '<span class="art"><img data-cover="' + esc(item.cover || '') + '" alt="">'
     + '<i class="badge">' + esc(badge) + '</i>'
@@ -1379,7 +1382,11 @@ function loadNas() {
     state.nas = list(data && data.tasks);
     /* 同一账号下在线电脑的下载记录：和 NAS 混在一个列表里，点开直接播电脑上的成品 */
     return api('desktop-download-list').then(function (pc) {
-      var extra = list(pc && pc.tasks).map(function (t) { t.kind = 'desktop'; return t; });
+      /* 同一账号下在线的电脑 / 手机 / 另一台电视：和 NAS 混在一个列表里，点开直接播那台机器上的成品 */
+      var extra = list(pc && pc.tasks).map(function (t) {
+        t.kind = (t.kind === 'desktop' || t.kind === 'tv' || t.kind === 'android') ? t.kind : 'desktop';
+        return t;
+      });
       state.nas = state.nas.concat(extra);
     }).catch(function () { });
   }).then(function () {
@@ -1395,9 +1402,10 @@ function playNas(id) {
   var task = null;
   for (var i = 0; i < list(state.nas).length; i++) if (String(state.nas[i].id) === String(id)) task = state.nas[i];
   if (task && task.status !== 'done' && task.status !== 'ready') { toast('这部还没下载完，等它下载好再播'); return; }
-  if (task && task.kind === 'desktop') {
+  if (task && (task.kind === 'desktop' || task.kind === 'tv' || task.kind === 'android')) {
+    if (!task.url) { toast(task.merged ? '这台设备没有可用的局域网地址，确认在同一 Wi-Fi' : '对面还没合并成品，等它合并好再播', true); return; }
     api('open-desktop-player', { url: task.url, title: task.title })
-      .catch(function (error) { toast((error && error.message) || '电脑视频打不开，确认电脑在同一局域网且在线', true); });
+      .catch(function (error) { toast((error && error.message) || '视频打不开，确认设备在同一局域网且在线', true); });
     return;
   }
   api('open-nas-player', { id: String(id) }).catch(function (error) { toast((error && error.message) || 'NAS 视频打不开', true); });

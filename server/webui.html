@@ -133,6 +133,8 @@ video{width:100%;border-radius:10px;background:#000}
 .dlmgr-top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
 .dlmgr-title{font-size:14px;font-weight:600;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dlmgr-badge{font-size:11px;padding:2px 8px;border-radius:20px;background:#1a1e26;border:1px solid var(--line);color:var(--mut);white-space:nowrap}
+.dlmgr-sub{margin:14px 0 8px;font-size:12px;color:var(--mut);letter-spacing:.04em}
+.dlmgr-dev{margin-left:8px;font-size:11px;color:var(--mut);font-weight:400}
 .dlmgr-badge.ok{color:#3ddc97;border-color:#3ddc9755}
 .dlmgr-badge.err{color:#ff6b6b;border-color:#ff6b6b55}
 .dlmgr-badge.run{color:#f6c343;border-color:#f6c34355}
@@ -1361,8 +1363,7 @@ async function loadDlmgr(list){
     if(!r.ok)throw new Error('HTTP '+r.status);
     const d=await r.json().catch(()=>({}));
     const tasks=d.tasks||[];
-    if(!tasks.length){list.innerHTML='<div class="dlmgr-empty">暂无下载任务<br><span style="font-size:12px">在剧集详情里点"下载到NAS"创建任务</span></div>';return}
-    list.innerHTML=tasks.map(t=>{
+    const nasHtml = tasks.map(t=>{
       const st=DL_STATUS[t.status]||[t.status,''];
       const pct=Math.max(0,Math.min(100,Math.round(t.percent||0)));
       const failed=(t.failedEpisodes||[]).map(f=>f.index).join('、');
@@ -1384,6 +1385,31 @@ async function loadDlmgr(list){
         '<button class="ghost" data-op="del" data-id="'+t.id+'">删除</button></div>'+
         '</div>';
     }).join('');
+
+    // 同一账号下在线的手机 / 电视 / 电脑：它们各自上报了下载摘要和局域网媒体地址，
+    // 有成品就能直接连过去播（浏览器与设备在同一局域网时可用）。
+    const devData = await fetch('/api/admin/devices',{headers:AUTH()}).then(r=>r.json()).catch(()=>({devices:[]}));
+    const devHtml = (devData.devices||[]).filter(d=>d.online && (d.tasks||[]).length).map(d=>{
+      const label = d.platform==='desktop' ? '电脑' : d.platform==='tv' ? '电视' : '手机';
+      const base = String((d.lan&&d.lan.url)||'').replace(/\/+$/,'');
+      const tk = String((d.lan&&d.lan.token)||'');
+      return (d.tasks||[]).map(t=>{
+        const pct=Math.max(0,Math.min(100,Math.round(t.percent||0)));
+        const playable=!!base && !!t.merged;
+        const url=playable ? base+'/file/'+encodeURIComponent(t.id)+'/0?t='+encodeURIComponent(tk) : '';
+        const hint=!t.merged ? '还没合并' : (!base ? '没有局域网地址' : '');
+        return '<div class="dlmgr-item"><div class="dlmgr-top"><span class="dlmgr-title">'+escapeHtml(t.title||'未命名')+
+          '<span class="dlmgr-dev">'+escapeHtml(label)+(d.name?' · '+escapeHtml(d.name):'')+'</span></span>'+
+          '<span class="dlmgr-badge">'+(t.status==='done'?'已完成':t.status==='ready'?'待合并':escapeHtml(t.status||''))+'</span></div>'+
+          '<div class="dlmgr-bar"><i style="width:'+pct+'%"></i></div>'+
+          '<div class="dlmgr-detail">'+t.doneCount+'/'+t.totalCount+' 集'+(hint?' · '+hint:'')+'</div>'+
+          '<div class="dlmgr-ops">'+(playable?'<a class="ghost" href="'+url+'" target="_blank" rel="noreferrer">播放</a>':'')+'</div></div>';
+      }).join('');
+    }).join('');
+
+    list.innerHTML = (nasHtml || devHtml)
+      ? nasHtml + (devHtml ? '<div class="dlmgr-sub">同一账号下在线设备</div>' + devHtml : '')
+      : '<div class="dlmgr-empty">暂无下载任务<br><span style="font-size:12px">在剧集详情里点"下载到NAS"创建任务</span></div>';
     list.querySelectorAll('[data-op]').forEach(btn=>{
       btn.onclick=async()=>{
         const op=btn.dataset.op,id=btn.dataset.id;

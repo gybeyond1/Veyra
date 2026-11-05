@@ -21,8 +21,15 @@ interface Props {
   notify: (text: string, tone?: 'info' | 'error') => void;
 }
 
+/**
+ * 详情页：
+ *  - 平时点集数就是「播这一集」，不做任何勾选；
+ *  - 只有点了「下载」才进入选集模式，这时才有勾选框和全选；
+ *  - 下载按钮只有一个，不会一进来就把全部集数默认选上。
+ */
 export default function DetailPage({ id, source, fallback, settings, onBack, onDownloaded, onPlay, notify }: Props) {
   const [detail, setDetail] = useState<SeriesDetail | null>(null);
+  const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -33,12 +40,12 @@ export default function DetailPage({ id, source, fallback, settings, onBack, onD
     let alive = true;
     setLoading(true);
     setError('');
+    setSelecting(false);
     setSelected(new Set());
     call<SeriesDetail>('catalog.detail', { id, source })
       .then((data) => {
         if (!alive) return;
         setDetail(data);
-        setSelected(new Set(data.episodes));
       })
       .catch((issue) => alive && setError(errorText(issue)))
       .finally(() => alive && setLoading(false));
@@ -51,15 +58,14 @@ export default function DetailPage({ id, source, fallback, settings, onBack, onD
   const cover = detail?.cover || fallback?.cover || '';
   const title = detail?.title || fallback?.title || '加载中…';
   const episodes = detail?.episodes || [];
-
   const allSelected = episodes.length > 0 && selected.size === episodes.length;
-  const selectedCount = selected.size;
 
   const summary = useMemo(() => {
     if (!episodes.length) return '';
-    if (allSelected) return `全 ${episodes.length} 集`;
-    return `已选 ${selectedCount} / ${episodes.length} 集`;
-  }, [episodes.length, allSelected, selectedCount]);
+    if (!selecting) return `全 ${episodes.length} 集 · 点集数直接播放`;
+    if (allSelected) return `全选 ${episodes.length} 集`;
+    return `已选 ${selected.size} 集`;
+  }, [allSelected, episodes.length, selecting, selected.size]);
 
   function toggle(number: number) {
     setSelected((current) => {
@@ -68,6 +74,16 @@ export default function DetailPage({ id, source, fallback, settings, onBack, onD
       else next.add(number);
       return next;
     });
+  }
+
+  function beginSelect() {
+    setSelecting(true);
+    setSelected(new Set());
+  }
+
+  function cancelSelect() {
+    setSelecting(false);
+    setSelected(new Set());
   }
 
   async function download(numbers: number[]) {
@@ -83,6 +99,7 @@ export default function DetailPage({ id, source, fallback, settings, onBack, onD
       });
       notify(`已加入下载队列：${task.title}（${numbers.length} 集）`);
       onDownloaded();
+      cancelSelect();
     } catch (issue) {
       notify(errorText(issue), 'error');
     } finally {
@@ -154,18 +171,10 @@ export default function DetailPage({ id, source, fallback, settings, onBack, onD
             <button
               type="button"
               className="ghost big"
-              disabled={busy || !episodes.length}
-              onClick={() => download(episodes)}
+              disabled={!episodes.length}
+              onClick={() => (selecting ? cancelSelect() : beginSelect())}
             >
-              {busy ? '正在加入…' : `下载全剧（${episodes.length} 集）`}
-            </button>
-            <button
-              type="button"
-              className="ghost big"
-              disabled={busy || !selectedCount || allSelected}
-              onClick={() => download([...selected].sort((a, b) => a - b))}
-            >
-              下载已选 {allSelected ? '' : `（${selectedCount}）`}
+              {selecting ? '退出下载选择' : '下载'}
             </button>
           </div>
           <p className="detail-path">保存到：{settings?.downloadDir || '默认下载目录'}</p>
@@ -176,32 +185,52 @@ export default function DetailPage({ id, source, fallback, settings, onBack, onD
         <header className="section-head">
           <h2>选集</h2>
           <div className="ep-tools">
-            <span>{summary}</span>
-            <button
-              type="button"
-              className="link"
-              onClick={() => setSelected(allSelected ? new Set() : new Set(episodes))}
-            >
-              {allSelected ? '取消全选' : '全选'}
-            </button>
+            {selecting && (
+              <label className="ep-all">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={() => setSelected(allSelected ? new Set() : new Set(episodes))}
+                />
+                <span>全选</span>
+              </label>
+            )}
+            <span className="ep-summary">{summary}</span>
           </div>
         </header>
-        <div className="ep-grid">
-          {episodes.map((number) => (
-            <div key={number} className={selected.has(number) ? 'ep active' : 'ep'}>
-              <button type="button" className="ep-play" title={`播放第 ${number} 集`} onClick={() => onPlay(number)}>
-                <span className="ep-num">{number}</span>
-                <span className="ep-icon">▶</span>
+
+        {selecting && (
+          <div className="download-bar">
+            <span>勾选要下载的集数（可全选）</span>
+            <div className="download-bar-actions">
+              <button type="button" className="ghost" onClick={cancelSelect} disabled={busy}>
+                取消
               </button>
               <button
                 type="button"
-                className="ep-check"
-                title={selected.has(number) ? '取消下载这一集' : '勾选下载这一集'}
-                onClick={() => toggle(number)}
+                className="primary"
+                disabled={busy || !selected.size}
+                onClick={() => download([...selected].sort((a, b) => a - b))}
               >
-                {selected.has(number) ? '✓' : ''}
+                {busy ? '正在加入…' : `开始下载（${selected.size} 集）`}
               </button>
             </div>
+          </div>
+        )}
+
+        <div className="ep-grid">
+          {episodes.map((number) => (
+            <button
+              key={number}
+              type="button"
+              className={`ep${selecting ? ' selectable' : ''}${selected.has(number) ? ' active' : ''}`}
+              title={selecting ? (selected.has(number) ? '取消选中这一集' : '选中这一集') : `播放第 ${number} 集`}
+              onClick={() => (selecting ? toggle(number) : onPlay(number))}
+            >
+              {selecting && <span className="ep-box">{selected.has(number) ? '✓' : ''}</span>}
+              <span className="ep-num">{number}</span>
+              {!selecting && <span className="ep-icon">▶</span>}
+            </button>
           ))}
         </div>
       </section>

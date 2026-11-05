@@ -1065,8 +1065,8 @@ function commitDownloadList(list, phone, nas, opts = {}) {
   const phoneTasks = phone.map(t => Object.assign({}, t, { kind: 'phone' }));
   // 手机转发任务关联的 NAS 任务不在下载页单独显示（由"下载到手机"触发，属内部步骤；主动下载到 NAS 的任务正常显示）
   const forwardNas = new Set(phone.filter(t => t.nasTaskId).map(t => String(t.nasTaskId)));
-  const nasTasks = nas.filter(t => !forwardNas.has(String(t.id)) && (!t.source || t.source === contentSource)).map(t => Object.assign({}, t, { kind: t.kind === 'desktop' ? 'desktop' : 'nas' }));
-  state.desktopTasks = nasTasks.filter(t => t.kind === 'desktop');
+  const nasTasks = nas.filter(t => !forwardNas.has(String(t.id)) && (!t.source || t.source === contentSource)).map(t => Object.assign({}, t, { kind: (t.kind === 'desktop' || t.kind === 'tv' || t.kind === 'android') ? t.kind : 'nas' }));
+  state.deviceTasks = nasTasks.filter(t => t.kind === 'desktop' || t.kind === 'tv' || t.kind === 'android');
   list.innerHTML = renderDownloadList([...phoneTasks, ...nasTasks]);
   hydrateImages();   // 下载封面是 data-cover，必须补 src 才出图（之前缺这步 → 灰块）
   backfillNasCovers(nasTasks);   // 老 NAS 任务后端没存封面：用 seriesId 现拉详情页封面兜底（尽力而为）
@@ -1197,8 +1197,8 @@ async function refreshDownloads(token, keepTimer) {
   const phoneTasks = phone.map(t => Object.assign({}, t, { kind: 'phone' }));
   // 手机转发任务关联的 NAS 任务不在下载页单独显示（由"下载到手机"触发，属内部步骤；主动下载到 NAS 的任务正常显示）
   const forwardNas = new Set(phone.filter(t => t.nasTaskId).map(t => String(t.nasTaskId)));
-  const nasTasks = nas.filter(t => !forwardNas.has(String(t.id)) && (!t.source || t.source === contentSource)).map(t => Object.assign({}, t, { kind: t.kind === 'desktop' ? 'desktop' : 'nas' }));
-  state.desktopTasks = nasTasks.filter(t => t.kind === 'desktop');
+  const nasTasks = nas.filter(t => !forwardNas.has(String(t.id)) && (!t.source || t.source === contentSource)).map(t => Object.assign({}, t, { kind: (t.kind === 'desktop' || t.kind === 'tv' || t.kind === 'android') ? t.kind : 'nas' }));
+  state.deviceTasks = nasTasks.filter(t => t.kind === 'desktop' || t.kind === 'tv' || t.kind === 'android');
   list.innerHTML = renderDownloadList([...phoneTasks, ...nasTasks]);
 }
 
@@ -1267,10 +1267,13 @@ function coverForTask(task) {
 function downloadTaskRow(task, kind) {
   const running = task.status === 'running';
   const statusText = downloadStatusText(task, kind);
+  // 下载行来源：本机 / NAS / 同一账号下在线设备（电脑、电视、另一台手机）
+  const remoteKind = kind === 'desktop' || kind === 'tv' || kind === 'android';
+  const deviceLabel = kind === 'desktop' ? '电脑' : kind === 'tv' ? '电视' : '手机';
   const sourceBadge = kind === 'nas'
     ? '<span class="dl-source-badge nas">NAS</span>'
-    : kind === 'desktop'
-      ? `<span class="dl-source-badge desktop">电脑 · ${esc(task.deviceName || '在线')}</span>`
+    : remoteKind
+      ? `<span class="dl-source-badge ${kind}">${deviceLabel} · ${esc(task.deviceName || '在线')}</span>`
       : '<span class="dl-source-badge phone">手机</span>';
   // 远程传输（手机下载 → SMB/WebDAV/FTP）：一部剧只有一条最新记录，直接挂在下载行上显示
   const remoteJob = kind === 'phone' ? remoteJobs.get(String(task.id)) : null;
@@ -1295,17 +1298,17 @@ function downloadTaskRow(task, kind) {
   const retryFailedBtn = !running && kind === 'nas' && canRetryFailed && failedList.length > 0
     ? `<button type="button" class="dl-cancel dl-retry" data-dl-retry-failed="nas" data-dl-id="${esc(task.id)}">重试失败${failedList.length}集</button>` : '';
   // 手动合并：下载完成（ready，含部分失败）或合并失败（分集保留）时显示合并按钮，等用户点合并才合并
-  const mergeBtn = !running && kind !== 'desktop' && (task.status === 'ready' || ((task.status === 'failed' || task.status === 'done') && (task.error || '').includes('合并失败')))
+  const mergeBtn = !running && !remoteKind && (task.status === 'ready' || ((task.status === 'failed' || task.status === 'done') && (task.error || '').includes('合并失败')))
     ? `<button type="button" class="dl-cancel dl-retry" data-dl-merge="${kind}" data-dl-id="${esc(task.id)}">合并</button>` : '';
-  const deleteBtn = !running ? `<button type="button" class="dl-cancel" data-dl-delete="${kind}" data-dl-id="${esc(task.id)}"${task.children && task.children.length > 1 ? ` data-dl-siblings="${esc(task.children.map(c => c.id).join(','))}"` : ''}>删除</button>` : '';
+  const deleteBtn = !running && !remoteKind ? `<button type="button" class="dl-cancel" data-dl-delete="${kind}" data-dl-id="${esc(task.id)}"${task.children && task.children.length > 1 ? ` data-dl-siblings="${esc(task.children.map(c => c.id).join(','))}"` : ''}>删除</button>` : '';
   const failedInfo = failedList.length > 0
     ? `<span class="dl-error" data-dl-copy="${esc(task.id)}" data-dl-log="${esc('失败集: ' + failedList.map(f => '第' + f.index + '集(' + (f.error || '') + ')').join('；'))}" title="点击复制失败明细">失败 ${failedList.length} 集：${esc(failedList.slice(0, 3).map(f => '第' + f.index + '集').join('、'))}${failedList.length > 3 ? ' 等' : ''}</span>` : '';
   const errLog = task.error || task.debug || '';
   const errBlock = errLog
     ? `<span class="dl-error" data-dl-copy="${esc(task.id)}" data-dl-log="${esc(errLog.replace(/\n/g, '\\n'))}" title="点击复制全部日志">${task.error ? task.error.split('\n').slice(0, 4).map(esc).join('<br>') : '<span class="dl-log-link">复制合并日志</span>'}</span>` : '';
   const detailHint = task.detail && (/片/.test(task.detail) || task.detail.includes('合并中')) ? ` · <span class="dl-detail-hint">${esc(task.detail)}</span>` : '';
-  const playAttr = kind === 'nas' ? 'data-dl-play-nas' : kind === 'desktop' ? 'data-dl-play-desktop' : 'data-dl-play';
-  const playHint = kind === 'nas' ? '播放 NAS 成品' : kind === 'desktop' ? '播放电脑成品' : '本地播放';
+  const playAttr = kind === 'nas' ? 'data-dl-play-nas' : remoteKind ? 'data-dl-play-device' : 'data-dl-play';
+  const playHint = kind === 'nas' ? '播放 NAS 成品' : remoteKind ? `播放${deviceLabel}上的成品` : '本地播放';
   const playTile = `<button type="button" class="download-cover" ${playAttr}="${esc(task.id)}" aria-label="${playHint}《${esc(task.title || '未知剧集')}》">
     <span class="poster loading"><span class="poster-letter">${esc(String(task.title || '影').slice(0, 1))}</span><img data-cover="${esc(coverForTask(task))}" alt=""></span>
     <span class="download-cover-hint">${playHint}</span></button>`;
@@ -3951,11 +3954,12 @@ document.addEventListener('click', async event => {
     api('open-local-player', { id }).then(() => toast('正在播放本地成品')).catch(error => toast(error.message || '本地文件不可播放', true));
     return;
   }
-  if (event.target.closest('[data-dl-play-desktop]')) {
-    const id = event.target.closest('[data-dl-play-desktop]').dataset.dlPlayDesktop;
-    const task = (state.desktopTasks || []).find(t => String(t.id) === String(id));
+  if (event.target.closest('[data-dl-play-device]')) {
+    // 同一账号下在线设备（电脑/电视/另一台手机）：直连它的局域网媒体服务播成品
+    const id = event.target.closest('[data-dl-play-device]').dataset.dlPlayDevice;
+    const task = (state.deviceTasks || []).find(t => String(t.id) === String(id));
     if (!task) return;
-    if (task.status !== 'done' && !task.merged && task.status !== 'ready') { toast('电脑上这集还没下载完'); return; }
+    if (!task.url) { toast(task.merged ? '这台设备没有可用的局域网地址，确认在同一 Wi-Fi' : '对面还没合并成品，等它合并好再播'); return; }
     api('open-desktop-player', { url: task.url, title: task.title }).catch(error => toast(error.message || '打开失败'));
     return;
   }

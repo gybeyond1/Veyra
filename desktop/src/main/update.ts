@@ -35,6 +35,7 @@ export async function check(): Promise<UpdateInfo> {
     url,
     notes: String(data?.notes || ''),
     size: Number(data?.size) || 0,
-    hasUpdate: Boolean(url) && compare(latest, currentVersion) > 0,
+    // 后端知道有新版但安装包还在路上时 url 为空，这时也算「有更新」，界面提示稍后再点
+    hasUpdate: compare(latest, currentVersion) > 0,
   };
 }
