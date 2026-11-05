@@ -4,6 +4,8 @@ import android.os.Build;
 
 import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -37,6 +39,11 @@ final class LanTextRelay {
         void onLogin(String server, String token, org.json.JSONObject user);
     }
 
+    /** 自定义背景：手机把原图整张传上来，落成临时文件后回调（任意线程）。 */
+    interface BgListener {
+        void onImage(File file);
+    }
+
     private static final int FIRST_PORT = 8765;
     private static final int LAST_PORT = 8784;
     private static final int MAX_TEXT = 4000;
@@ -58,6 +65,9 @@ final class LanTextRelay {
     /** 二维码里的一次性登录码：过了有效期或已用掉就作废。 */
     private volatile String loginCode = "";
     private volatile long loginCodeExpiresAt;
+    /** 背景上传：目标目录由调用方给（App 的 cache 目录），没设置就不提供这条路径。 */
+    private volatile BgListener bgListener;
+    private volatile File bgDir;
 
     LanTextRelay(Listener listener) {
         this(listener, null);
@@ -67,6 +77,17 @@ final class LanTextRelay {
         this.listener = listener;
         this.loginListener = loginListener;
         this.token = String.format("%06x", (int) (Math.random() * 0xFFFFFF));
+    }
+
+    /** 打开「扫码换背景」：给一个能落盘的目录和一个收图回调。 */
+    void setBackgroundSink(File dir, BgListener listener) {
+        this.bgDir = dir;
+        this.bgListener = listener;
+    }
+
+    /** 换背景页面的地址（二维码就画这个）；服务没起来时为空串。 */
+    String backgroundUrl() {
+        return address.isEmpty() || port == 0 ? "" : "http://" + address + ":" + port + "/bg?t=" + token;
     }
 
     void start() {
@@ -228,6 +249,64 @@ final class LanTextRelay {
                 loginListener.onLogin(payload.optString("server", ""), accountToken, user);
                 return;
             }
+            // 自定义背景：手机扫电视上的二维码打开这个页面，选图后 POST 原图上来。
+            // 只在这条通道里放宽超时（大图在 2.4G Wi-Fi 上要传一阵），其余路径保持 8 秒。
+            if ("GET".equals(method) && "/bg".equals(path)) {
+                if (!tokenMatches(query)) {
+                    respond(socket, 403, "text/html; charset=utf-8", page("链接已失效", "<p class=\"hint\">请回到电视上重新打开二维码。</p>"));
+                    return;
+                }
+                if (bgListener == null) {
+                    respond(socket, 404, "text/html; charset=utf-8", page("暂不支持", "<p class=\"hint\">当前版本没有开启自定义背景。</p>"));
+                    return;
+                }
+                respond(socket, 200, "text/html; charset=utf-8", backgroundPage(token));
+                return;
+            }
+            if ("POST".equals(method) && "/bg".equals(path)) {
+                if (!tokenMatches(query)) {
+                    respond(socket, 403, "application/json; charset=utf-8", "{\"ok\":false,\"error\":\"token\"}");
+                    return;
+                }
+                BgListener receiver = bgListener;
+                File dir = bgDir;
+                if (receiver == null || dir == null) {
+                    respond(socket, 500, "application/json; charset=utf-8", "{\"ok\":false,\"error\":\"off\"}");
+                    return;
+                }
+                if (contentLength <= 0) {
+                    respond(socket, 400, "application/json; charset=utf-8", "{\"ok\":false,\"error\":\"empty\"}");
+                    return;
+                }
+                if (!dir.isDirectory() && !dir.mkdirs() && !dir.isDirectory()) {
+                    respond(socket, 500, "application/json; charset=utf-8", "{\"ok\":false,\"error\":\"dir\"}");
+                    return;
+                }
+                socket.setSoTimeout(180000);
+                File upload = new File(dir, "bg-" + System.currentTimeMillis() + ".upload");
+                long left = contentLength;
+                FileOutputStream output = new FileOutputStream(upload);
+                try {
+                    byte[] chunk = new byte[64 * 1024];
+                    while (left > 0) {
+                        int read = input.read(chunk, 0, (int) Math.min(chunk.length, left));
+                        if (read < 0) break;
+                        output.write(chunk, 0, read);
+                        left -= read;
+                    }
+                } finally {
+                    try { output.close(); } catch (IOException ignored) { }
+                }
+                if (left > 0) {
+                    // 中途断线：文件是残的，别拿去解码
+                    try { upload.delete(); } catch (Exception ignored) { }
+                    respond(socket, 400, "application/json; charset=utf-8", "{\"ok\":false,\"error\":\"truncated\"}");
+                    return;
+                }
+                respond(socket, 200, "application/json; charset=utf-8", "{\"ok\":true}");
+                receiver.onImage(upload);
+                return;
+            }
             if ("GET".equals(method) && "/favicon.ico".equals(path)) {
                 respond(socket, 204, "text/plain", "");
                 return;
@@ -363,6 +442,62 @@ final class LanTextRelay {
                 + "ta.addEventListener('keydown',function(e){if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){e.preventDefault();send()}});"
                 + "})();</script>";
         return page("Veyra 输入", body);
+    }
+
+    /**
+     * 「换电视背景」手机页：选图 → 预览 → 上传。
+     * 不小图压缩、不限制大小 —— 收下来之后由 TvBackground 统一缩到长边 1920 再压 JPEG，
+     * 所以用户拿原始照片（哪怕几十兆）直接传就行。
+     */
+    private String backgroundPage(String token) {
+        String body = """
+<h1>换电视背景</h1>
+<p class="sub">选一张图传到电视，电视首页马上换上。尺寸不限，大图会自动压缩。</p>
+<label class="pick" id="pick">
+  <span id="pickText">点这里选图片</span>
+  <input type="file" id="f" accept="image/*">
+</label>
+<img id="pv" alt="">
+<button id="up" disabled>上传到电视</button>
+<div class="status" id="s"></div>
+<style>
+.pick{display:block;text-align:center;padding:34px 12px;border:1px dashed #3b4250;border-radius:14px;color:#9aa2b1;cursor:pointer}
+.pick input{display:none}
+#pv{display:none;width:100%;margin:14px 0 0;border-radius:14px}
+</style>
+<script>(function(){
+var tk=__TOKEN__,f=document.getElementById('f'),pv=document.getElementById('pv'),
+btn=document.getElementById('up'),st=document.getElementById('s'),pt=document.getElementById('pickText'),
+pick=document.getElementById('pick'),file=null;
+function say(msg,cls){st.textContent=msg;st.className='status '+(cls||'')}
+pick.addEventListener('click',function(e){if(e.target!==f){f.click();e.preventDefault();}});
+f.addEventListener('change',function(){
+  file=f.files&&f.files[0];
+  if(!file){return}
+  pt.textContent='已选择：'+(file.name||'图片')+'（'+(file.size/1048576).toFixed(1)+' MB）';
+  btn.disabled=false;
+  try{pv.src=URL.createObjectURL(file);pv.style.display='block';}catch(e){}
+  say('点下面的按钮开始上传');
+});
+btn.addEventListener('click',function(){
+  if(!file){return}
+  btn.disabled=true;say('上传中… 0%');
+  var xhr=new XMLHttpRequest();
+  xhr.open('POST','/bg?t='+encodeURIComponent(tk));
+  xhr.setRequestHeader('Content-Type',file.type||'application/octet-stream');
+  xhr.upload.onprogress=function(e){if(e.lengthComputable){say('上传中… '+Math.round(e.loaded/e.total*100)+'%')}};
+  xhr.onload=function(){
+    var d=null;try{d=JSON.parse(xhr.responseText)}catch(e){}
+    if(xhr.status===200&&d&&d.ok){say('上传完成，看一眼电视就换好了','ok');btn.disabled=false}
+    else{say('上传失败：'+((d&&d.error)||('HTTP '+xhr.status)),'err');btn.disabled=false}
+  };
+  xhr.onerror=function(){say('连不上电视，确认手机和电视在同一个 Wi-Fi','err');btn.disabled=false};
+  xhr.send(file);
+});
+})();</script>
+""";
+        body = body.replace("__TOKEN__", jsString(token));
+        return page("Veyra 换背景", body);
     }
 
     private static String escapeHtml(String value) {

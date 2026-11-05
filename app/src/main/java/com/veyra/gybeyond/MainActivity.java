@@ -900,11 +900,37 @@ public final class MainActivity extends Activity {
                     }),
                     // 扫码登录：手机把会话推过来，这边落盘后通知页面。
                     (server, tokenValue, user) -> runOnUiThread(() -> adoptScannedSession(server, tokenValue, user)));
+            // 扫码换背景：手机把原图整张传上来，这里解码压缩成 data URL 再交给页面
+            textRelay.setBackgroundSink(new java.io.File(getCacheDir(), "tv-bg-upload"), this::adoptBackgroundImage);
             textRelay.start();
         } catch (Exception error) {
             Log.w(TAG, "扫码输入服务启动失败", error);
             textRelay = null;
         }
+    }
+
+    /**
+     * 手机扫码上传的自定义背景：原图可能几十兆，解码压缩一律放后台线程，
+     * 处理完只把压缩后的 data URL 交给页面；原图立刻删掉，不在缓存里留。
+     */
+    private void adoptBackgroundImage(java.io.File source) {
+        if (source == null) return;
+        requests.execute(() -> {
+            String dataUrl = "";
+            try {
+                dataUrl = TvBackground.save(this, source);
+            } catch (Exception error) {
+                Log.w(TAG, "自定义背景处理失败", error);
+            } finally {
+                try { if (!source.delete()) source.deleteOnExit(); } catch (Exception ignored) { }
+            }
+            final String result = dataUrl;
+            runOnUiThread(() -> {
+                if (isDestroyed() || webView == null) return;
+                webView.evaluateJavascript("window.veyraTvBgUpdated && window.veyraTvBgUpdated("
+                        + org.json.JSONObject.quote(result) + ")", null);
+            });
+        });
     }
 
     /** 把手机扫码授权过来的账号写进本机，并通知页面刷新登录态。 */
@@ -1070,6 +1096,9 @@ public final class MainActivity extends Activity {
     private Object dispatch(String action, JSONObject args) throws Exception {
         ContentMode mode = ContentMode.get(this);
         if ("server-base".equals(action)) return ServerConfig.get(this);   // 当前后端地址（登录页预填用）
+        // 自定义背景：页面启动时取一次 data URL；清空只删本地文件
+        if ("tv-bg-load".equals(action)) return TvBackground.dataUrl(this);
+        if ("tv-bg-clear".equals(action)) { TvBackground.clear(this); return true; }
         if ("content-status".equals(action)) {
             // 解锁状态跟账号走：先强制拉服务端最新（角色/解锁标记），避免本地缓存陈旧导致误判
             account.refreshProfileNow();
@@ -1521,6 +1550,8 @@ public final class MainActivity extends Activity {
                 info.put("url", relay == null ? "" : relay.url());
                 info.put("address", relay == null ? "" : relay.address());
                 info.put("port", relay == null ? 0 : relay.port());
+                // 自定义背景的扫码地址：同一个局域网服务，换一条路径
+                info.put("bgUrl", relay == null ? "" : relay.backgroundUrl());
             } catch (Exception ignored) { }
             return info.toString();
         }

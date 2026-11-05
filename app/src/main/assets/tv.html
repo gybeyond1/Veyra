@@ -90,15 +90,17 @@
         <!-- 只在选中「高性能模式」时出现：背景海报的滤镜参数，左右键直接调 -->
         <div class="hero-tune" id="hero-tune" hidden>
           <div class="hero-tune-head">
-            <h2>海报背景参数</h2>
-            <span>选中一行后按 ← → 调节，自动保存</span>
+            <h2 id="tune-title">海报背景参数</h2>
+            <span id="tune-hint">选中一行后按 ← → 调节，自动保存</span>
           </div>
+          <!-- 只在选中「自定义」时出现：手机扫码上传自己的图 -->
+          <div class="bg-qr" id="bg-qr" hidden></div>
           <div class="hero-rows" id="hero-rows"></div>
           <div class="hero-preview">
             <div class="hero-preview-bg">
               <img id="hero-preview-img" alt="">
               <i class="hero-preview-veil" id="hero-preview-veil"></i>
-              <span class="hero-preview-title">剧名效果预览</span>
+              <span class="hero-preview-title" id="preview-title">剧名效果预览</span>
             </div>
             <span class="hero-preview-cap">实时预览</span>
           </div>

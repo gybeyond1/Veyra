@@ -117,7 +117,8 @@ var THEMES = [
   { key: 'yellow', name: '高能黄', color: '#FFC107' },
   { key: 'green',  name: '早苗绿', color: '#8BC34A' },
   { key: 'blue',   name: '宝石蓝', color: '#2196F3' },
-  { key: 'purple', name: '罗兰紫', color: '#9C27B0' }
+  { key: 'purple', name: '罗兰紫', color: '#9C27B0' },
+  { key: 'custom', name: '自定义', color: 'linear-gradient(135deg,#6C8CFF,#F5D782)' }
 ];
 var THEME_STORE = 'veyra.tv.theme';
 
@@ -136,11 +137,103 @@ function applyTheme(key) {
   try { localStorage.setItem(THEME_STORE, next); } catch (error) { }
   /* 原生层也存一份：播放器里的退出确认框要按当前主题取强调色 */
   try { if (window.AndroidHost && window.AndroidHost.setTvTheme) window.AndroidHost.setTvTheme(next); } catch (error) { }
-  /* 高性能模式要看海报，切主题时立刻决定背景走哪套 */
+  /* 高性能模式要看海报、自定义模式要看自己的图，切主题时立刻决定背景走哪套 */
   applyBackdropMode();
+  if (next === CUSTOM_THEME) loadCustomBg();
   if (heroBackdropOn()) syncBackdropFromFocus();
   return next;
 }
+/* ---------------- 自定义背景 ----------------
+   一张自己的图当首页底图：手机扫码 → 局域网直传上来 → 原生缩到长边 1920 压成 JPEG
+   → data URL 交回页面。图不经过后端，也不落云端，换一张就覆盖上一张。
+   只在首页/搜索/我的出现，详情页仍然用当前剧的海报。 */
+var CUSTOM_THEME = 'custom';
+var CUSTOM_STORE = 'veyra.tv.custombg';
+var CUSTOM_FIELDS = [
+  { key: 'blur', label: '模糊度', unit: 'px', min: 0, max: 30, step: 1, def: 0 },
+  { key: 'bri', label: '亮度', unit: '%', min: 60, max: 140, step: 2, def: 100 },
+  { key: 'sat', label: '饱和度', unit: '%', min: 0, max: 200, step: 4, def: 100 },
+  { key: 'veil', label: '遮罩浓度', unit: '%', min: 0, max: 100, step: 5, def: 40 }
+];
+var customCache = null;
+var customSrc = '';       /* data URL，只在内存里留一份 */
+var customLoading = false;
+
+function customThemeOn() { return currentTheme() === CUSTOM_THEME; }
+/* 详情页不套自定义图：那儿要看的是这部剧的海报 */
+function customBgOn() { return customThemeOn() && state.route !== 'detail'; }
+
+function customParams() {
+  if (customCache) return customCache;
+  var out = { zoom: 104 };
+  for (var i = 0; i < CUSTOM_FIELDS.length; i++) out[CUSTOM_FIELDS[i].key] = CUSTOM_FIELDS[i].def;
+  var saved = null;
+  try { saved = JSON.parse(localStorage.getItem(CUSTOM_STORE) || 'null'); } catch (error) { saved = null; }
+  if (saved) {
+    for (var j = 0; j < CUSTOM_FIELDS.length; j++) {
+      var f = CUSTOM_FIELDS[j];
+      var v = Number(saved[f.key]);
+      if (isFinite(v)) out[f.key] = Math.max(f.min, Math.min(f.max, Math.round(v)));
+    }
+  }
+  customCache = out;
+  return out;
+}
+function saveCustom() {
+  try { localStorage.setItem(CUSTOM_STORE, JSON.stringify(customParams())); } catch (error) { }
+}
+
+/* 取一次图：native 存着压缩后的 JPEG，页面每次启动只需要这一份 data URL */
+function loadCustomBg() {
+  if (customSrc || customLoading) return;
+  customLoading = true;
+  api('tv-bg-load').then(function (value) {
+    customLoading = false;
+    customSrc = typeof value === 'string' ? value : '';
+    if (customBgOn()) applyBackdropMode();
+    syncTunePreview();
+  }).catch(function () { customLoading = false; });
+}
+
+/* 手机扫码换图的二维码：直接用局域网那条通道，不依赖后端 */
+var bgQrCache = { url: '', html: '' };
+function renderBgQr() {
+  var box = document.getElementById('bg-qr');
+  if (!box) return;
+  var url = '';
+  try { url = JSON.parse(window.AndroidHost.relayInfo()).bgUrl || ''; } catch (error) { url = ''; }
+  if (!url) {
+    box.className = 'bg-qr-empty';
+    box.innerHTML = '电视没连上局域网<br>先用网线或 Wi-Fi 连上，再回来扫码';
+    return;
+  }
+  if (bgQrCache.url !== url) {
+    try {
+      var qr = window.qrcode(0, 'M');
+      qr.addData(url);
+      qr.make();
+      bgQrCache = { url: url, html: qr.createSvgTag({ cellSize: 3, margin: 1, scalable: true }) };
+    } catch (error) {
+      bgQrCache = { url: url, html: '' };
+    }
+  }
+  if (!bgQrCache.html) {
+    box.className = 'bg-qr-empty';
+    box.innerHTML = '二维码生成失败，重新打开这个面板再试';
+    return;
+  }
+  box.className = 'bg-qr';
+  box.innerHTML = '<div class="code">' + bgQrCache.html + '</div>'
+    + '<p class="cap"><b>手机扫码换背景</b>选一张图上传<br>换好这张图立刻生效</p>';
+}
+
+function syncTunePreview() {
+  if (!heroPreviewImg) return;
+  if (customThemeOn() && customSrc) { heroPreviewImg.src = customSrc; return; }
+  if (customThemeOn()) { heroPreviewImg.removeAttribute('src'); return; }
+  if (!heroPreviewImg.getAttribute('src') && backdropSrc) heroPreviewImg.src = backdropSrc;
+}
+
 function renderThemeGrid() {
   if (!themeGrid) return;
   var active = currentTheme();
@@ -175,7 +268,8 @@ var HERO_FIELDS = [
 var heroCache = null;
 
 function heroField(key) {
-  for (var i = 0; i < HERO_FIELDS.length; i++) if (HERO_FIELDS[i].key === key) return HERO_FIELDS[i];
+  var fields = customThemeOn() ? CUSTOM_FIELDS : HERO_FIELDS;
+  for (var i = 0; i < fields.length; i++) if (fields[i].key === key) return fields[i];
   return null;
 }
 function heroParams() {
@@ -219,22 +313,32 @@ function heroStyle(el, p) {
 var DETAIL_HERO = { blur: 3, sat: 104, bri: 100, veil: 100, zoom: 108 };
 
 function applyHero() {
-  var p = heroParams();
+  var custom = customBgOn();
   var onDetail = state && state.route === 'detail';
-  heroStyle(document.getElementById('tv-bg-img'), onDetail ? DETAIL_HERO : p);
+  var p = custom ? customParams() : heroParams();
+  var bgImg = document.getElementById('tv-bg-img');
+  if (custom) {
+    /* 自定义图整张铺开：换图只在 data URL 变了的时候动一次 img.src */
+    if (bgImg && customSrc && bgImg.getAttribute('src') !== customSrc) bgImg.src = customSrc;
+    heroStyle(bgImg, p);
+  } else {
+    heroStyle(bgImg, onDetail ? DETAIL_HERO : p);
+  }
   /* 预览窗永远显示「你正在调的那套」，否则在详情页调参看不到变化 */
   heroStyle(heroPreviewImg, p);
 
   var mainVeil = document.querySelector('#tv-bg .veil');
   if (mainVeil) {
-    /* 只有海报模式才显示遮罩，纯色主题下这块是透明的 */
-    var strength = (onDetail ? DETAIL_HERO.veil : p.veil) / 100;
-    mainVeil.style.opacity = heroBackdropOn() ? String(strength) : '0';
+    /* 只有海报 / 自定义底图才显示遮罩，纯色主题下这块是透明的 */
+    var strength = custom ? (p.veil / 100) : ((onDetail ? DETAIL_HERO.veil : p.veil) / 100);
+    mainVeil.style.opacity = (custom || heroBackdropOn()) ? String(strength) : '0';
   }
   if (heroPreviewVeil) heroPreviewVeil.style.opacity = String(p.veil / 100);
 }
+function tuneFields() { return customThemeOn() ? CUSTOM_FIELDS : HERO_FIELDS; }
+function tuneParams() { return customThemeOn() ? customParams() : heroParams(); }
 function tuneRowMarkup(f) {
-  var p = heroParams();
+  var p = tuneParams();
   var pct = (p[f.key] - f.min) / (f.max - f.min) * 100;
   return '<div class="tune-row" data-tune="' + f.key + '" data-focusable data-key="tune:' + f.key + '">'
     + '<span class="tune-label">' + esc(f.label) + '</span>'
@@ -245,7 +349,8 @@ function tuneRowMarkup(f) {
 function renderTuneRows() {
   if (!heroRowsEl) return;
   var html = '';
-  for (var i = 0; i < HERO_FIELDS.length; i++) html += tuneRowMarkup(HERO_FIELDS[i]);
+  var fields = tuneFields();
+  for (var i = 0; i < fields.length; i++) html += tuneRowMarkup(fields[i]);
   heroRowsEl.innerHTML = html;
 }
 function paintTuneRow(key) {
@@ -253,7 +358,7 @@ function paintTuneRow(key) {
   if (!row) return;
   var f = heroField(key);
   if (!f) return;
-  var p = heroParams();
+  var p = tuneParams();
   var pct = (p[key] - f.min) / (f.max - f.min) * 100;
   var fill = row.querySelector('.tune-track i');
   if (fill) fill.style.width = pct.toFixed(1) + '%';
@@ -262,44 +367,56 @@ function paintTuneRow(key) {
 }
 /* 主题面板里：只有选中高性能模式才展开参数区，并把弹层黑底调淡让海报透出来 */
 function syncHeroTune() {
-  var on = currentTheme() === HERO_THEME;
+  var custom = customThemeOn();
+  var hero = currentTheme() === HERO_THEME;
+  var on = hero || custom;
   if (heroTune) heroTune.hidden = !on;
   if (themePanel) {
     if (on) themePanel.classList.add('is-hero-preview');
     else themePanel.classList.remove('is-hero-preview');
   }
+  var title = document.getElementById('tune-title');
+  if (title) title.textContent = custom ? '自定义背景' : '海报背景参数';
+  var hint = document.getElementById('tune-hint');
+  if (hint) hint.textContent = custom ? '扫码换图，← → 调参数，自动保存' : '选中一行后按 ← → 调节，自动保存';
+  var qr = document.getElementById('bg-qr');
+  if (qr) qr.hidden = !custom;
+  var pvTitle = document.getElementById('preview-title');
+  if (pvTitle) pvTitle.textContent = custom ? '背景效果预览' : '剧名效果预览';
   if (themeSub) {
-    themeSub.textContent = on
-      ? '现在这套会跟着封面换底图，下面的参数改了立刻生效，改完自动保存'
-      : '固定底色，不跟着首页海报换图，遥控器怎么按都不卡';
+    themeSub.textContent = custom
+      ? '手机扫码上传一张自己的图，只用在首页 / 搜索 / 我的，详情页仍是剧集海报'
+      : (hero
+        ? '现在这套会跟着封面换底图，下面的参数改了立刻生效，改完自动保存'
+        : '固定底色，不跟着首页海报换图，遥控器怎么按都不卡');
   }
   if (on) {
     renderTuneRows();
     applyHero();
-    var preview = document.getElementById('hero-preview-img');
-    /* 用 getAttribute 判断：img 没设 src 时 .src 会返回页面地址，永远不为空 */
-    if (preview && !preview.getAttribute('src') && backdropSrc) preview.src = backdropSrc;
   }
+  if (custom) { loadCustomBg(); renderBgQr(); }
+  syncTunePreview();
 }
 function adjustTune(key, dir) {
   var f = heroField(key);
   if (!f) return;
-  var p = heroParams();
+  var p = tuneParams();
   var next = p[key] + dir * f.step;
   next = Math.max(f.min, Math.min(f.max, next));
   if (next === p[key]) return;
   p[key] = next;
-  saveHero();
+  if (customThemeOn()) saveCustom(); else saveHero();
   paintTuneRow(key);
   applyHero();
 }
 function resetHero() {
-  var p = heroParams();
-  for (var i = 0; i < HERO_FIELDS.length; i++) p[HERO_FIELDS[i].key] = HERO_FIELDS[i].def;
-  saveHero();
+  var p = tuneParams();
+  var fields = tuneFields();
+  for (var i = 0; i < fields.length; i++) p[fields[i].key] = fields[i].def;
+  if (customThemeOn()) saveCustom(); else saveHero();
   renderTuneRows();
   applyHero();
-  toast('海报参数已恢复默认');
+  toast(customThemeOn() ? '背景参数已恢复默认' : '海报参数已恢复默认');
 }
 function focusTuneRow() {
   var focused = document.querySelector('.is-focused');
@@ -371,6 +488,8 @@ function heroBackdropOn() {
   return (state && state.route === 'detail') || currentTheme() === HERO_THEME;
 }
 function setBackdrop(src) {
+  /* 自定义底图下，焦点换卡不再改背景 —— 用户选的那张图才是背景 */
+  if (customBgOn()) return;
   if (!src || src === backdropSrc) return;
   clearTimeout(backdropTimer);
   backdropTimer = setTimeout(function () {
@@ -383,7 +502,8 @@ function setBackdrop(src) {
 }
 function applyBackdropMode() {
   if (!document.body) return;
-  if (heroBackdropOn()) document.body.setAttribute('data-backdrop', 'poster');
+  if (customBgOn()) document.body.setAttribute('data-backdrop', 'custom');
+  else if (heroBackdropOn()) document.body.setAttribute('data-backdrop', 'poster');
   else document.body.removeAttribute('data-backdrop');
   applyHero();
 }
@@ -2028,6 +2148,15 @@ window.hgResume = function () {
     }).catch(function () { });
   }
   if (state.route === 'home' || state.route === 'library') loadLibrary();
+};
+
+/* 手机扫码上传完成：原生把压缩后的 data URL 推过来，直接换背景 */
+window.veyraTvBgUpdated = function (dataUrl) {
+  if (!dataUrl) { toast('这张图没读出来，换一张试试', true); return; }
+  customSrc = dataUrl;
+  if (customBgOn()) applyBackdropMode();
+  syncTunePreview();
+  toast('背景已更新');
 };
 
 /* ---------------- 启动 ---------------- */
