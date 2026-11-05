@@ -989,7 +989,7 @@ async function resumeFromHome(id) {
   const token = routeToken + 1;
   await goDetail(id);
   if (routeToken !== token || contentSource !== source || state.route !== "detail" || state.detailLoading || String((_a2 = state.detail) == null ? void 0 : _a2.id) !== id) return;
-  if (episode <= asArray(state.detail.episodes).length) await openPlayer(episode);
+  if (episode <= asArray(state.detail.episodes).length) await openPlayer(episode, Boolean(item.completed));
 }
 function renderHome() {
   var _a2, _b2;
@@ -3258,20 +3258,32 @@ window.hgResume = () => {
   });
   window.__bingeSync && window.__bingeSync();
 };
-function resumeReady() {
+function resumePlan() {
   const progress = state.detailProgress;
-  if (!progress || progress.completed) return false;
-  const episode = Number(progress.episode);
-  const position = Number(progress.position);
-  const duration = Number(progress.duration);
-  if (!(episode >= 1) || !(position > 5e3)) return false;
-  return !(duration > 0 && position >= duration - 5e3);
+  if (!progress) return null;
+  const episode = Number(progress.episode) || 0;
+  if (episode < 1) return null;
+  if (progress.completed) {
+    const total = Number(progress.episodeCount) || 0;
+    if (total > 0 && episode >= total) return null;
+    return { episode: episode + 1, restart: true };
+  }
+  return { episode, restart: false };
+}
+function resumeReady() {
+  return Boolean(resumePlan());
 }
 function resumeEpisode() {
-  return resumeReady() ? Number(state.detailProgress.episode) : 1;
+  const plan = resumePlan();
+  return plan ? plan.episode : 1;
+}
+function resumeRestart() {
+  const plan = resumePlan();
+  return plan ? plan.restart : false;
 }
 function resumeLabel() {
-  return resumeReady() ? `\u7EE7\u7EED\u64AD\u653E \u7B2C${state.detailProgress.episode}\u96C6` : "\u7ACB\u5373\u64AD\u653E";
+  const plan = resumePlan();
+  return plan ? `\u7EE7\u7EED\u64AD\u653E \u7B2C${plan.episode}\u96C6` : "\u7ACB\u5373\u64AD\u653E";
 }
 async function openPlayer(episode = 1, restart = false) {
   const detail = state.detail;
@@ -4586,7 +4598,7 @@ document.addEventListener("click", async (event) => {
     return;
   }
   if (event.target.closest("[data-play]")) {
-    openPlayer(resumeEpisode());
+    openPlayer(resumeEpisode(), resumeRestart());
     return;
   }
   if (event.target.closest("[data-restart]")) {

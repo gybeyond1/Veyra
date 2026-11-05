@@ -1259,6 +1259,20 @@ function playNas(id) {
 }
 
 /* ---------------- 详情 ---------------- */
+/* 续播只认「最后看到哪一集哪一秒」，不设 5 秒/近结尾门槛；看完这集就顺延下一集 */
+function resumePlan() {
+  var p = state.detailProgress;
+  if (!p) return null;
+  var ep = Number(p.episode) || 0;
+  if (ep < 1) return null;
+  if (p.completed) {
+    var total = Number(p.episodeCount) || 0;
+    if (total > 0 && ep >= total) return null;
+    return { episode: ep + 1, restart: true };
+  }
+  return { episode: ep, restart: false };
+}
+
 function renderDetail() {
   resetFirstScreen();
   if (!state.detail) {
@@ -1298,22 +1312,20 @@ function renderDetail() {
     eps += '</div>';
   }
 
-  var resume = state.detailProgress;
-  /* 有真实进度才叫「继续播放」：判定条件是看了至少 5 秒、没看完 */
-  var resumeValid = !!(resume && resume.episode >= 1 && resume.position > 5000
-    && !resume.completed && (!resume.duration || resume.position < resume.duration - 5000));
-  var playText = state.detailLoading ? '正在加载…' : (resumeValid ? ('继续播放 · 第' + resume.episode + '集') : '立即播放');
+  var resume = resumePlan();
+  var playText = state.detailLoading ? '正在加载…' : (resume ? ('继续播放 · 第' + resume.episode + '集') : '立即播放');
 
   view.innerHTML = '<div class="detail">'
     + '<div class="detail-art"><img data-cover="' + esc(data.cover || '') + '" alt=""></div>'
     + '<div class="detail-info">'
     + '<h1>' + esc(data.title || '') + '</h1>'
     + '<p class="meta">' + esc(data.score || '') + '　' + esc(data.episodeLabel || '') + '</p>'
-    + (resumeValid ? '<p class="resume-line">上次看到第 ' + resume.episode + ' 集 · ' + clock(resume.position) + '</p>' : '')
+    + (resume && !resume.restart ? '<p class="resume-line">上次看到第 ' + resume.episode + ' 集 · ' + clock(state.detailProgress.position) + '</p>' : '')
+    + (resume && resume.restart ? '<p class="resume-line">第 ' + state.detailProgress.episode + ' 集已看完，接着看第 ' + resume.episode + ' 集</p>' : '')
     + '<p class="desc">' + esc(data.description || '') + '</p>'
     + '<div class="actions detail-actions">'
     + '<button type="button" class="btn primary" data-focusable data-key="play" data-play="1"' + (state.detailLoading ? ' disabled' : '') + '>' + playText + '</button>'
-    + (resumeValid ? '<button type="button" class="btn icon-only" data-focusable data-key="restart" data-restart="1" aria-label="从头播放" title="从头播放">'
+    + (resume ? '<button type="button" class="btn icon-only" data-focusable data-key="restart" data-restart="1" aria-label="从头播放" title="从头播放">'
       + '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V1L7 6l5 5V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z"/></svg></button>' : '')
     + '<button type="button" class="btn" data-focusable data-key="bookmark" data-bookmark="1">' + (data.bookmarked ? '已收藏' : '收藏') + '</button>'
     + '</div>' + eps + '</div></div>';
@@ -1595,10 +1607,8 @@ document.addEventListener('click', function (event) {
 
   var playButton = target.closest('[data-play]');
   if (playButton) {
-    var saved = state.detailProgress;
-    var canResume = !!(saved && saved.episode >= 1 && saved.position > 5000
-      && !saved.completed && (!saved.duration || saved.position < saved.duration - 5000));
-    play(state.detail, canResume ? saved.episode : 1, false);
+    var plan = resumePlan();
+    play(state.detail, plan ? plan.episode : 1, plan ? plan.restart : false);
     return;
   }
 

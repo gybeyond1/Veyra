@@ -864,7 +864,7 @@ async function resumeFromHome(id) {
   const token = routeToken + 1;
   await goDetail(id);
   if (routeToken !== token || contentSource !== source || state.route !== 'detail' || state.detailLoading || String(state.detail?.id) !== id) return;
-  if (episode <= asArray(state.detail.episodes).length) await openPlayer(episode);
+  if (episode <= asArray(state.detail.episodes).length) await openPlayer(episode, Boolean(item.completed));
 }
 
 function renderHome() {
@@ -2916,21 +2916,30 @@ window.hgResume = () => {
   window.__bingeSync && window.__bingeSync();
 };
 
-/** 上次看到一半（超过 5 秒、没看完）才算「继续播放」 */
-function resumeReady() {
+/**
+ * 续播只认一件事：这部剧最后一次看的是哪一集、哪一秒。
+ * 不再用「不足 5 秒不算」「离结尾不足 5 秒不算」这类门槛 —— 看 2 秒也是看，
+ * 这些门槛只会造成「历史里明明有进度，详情页却写立即播放」。
+ * 唯一的例外：这一集已经看完，就顺延到下一集从头开始。
+ */
+function resumePlan() {
   const progress = state.detailProgress;
-  if (!progress || progress.completed) return false;
-  const episode = Number(progress.episode);
-  const position = Number(progress.position);
-  const duration = Number(progress.duration);
-  if (!(episode >= 1) || !(position > 5000)) return false;
-  return !(duration > 0 && position >= duration - 5000);
+  if (!progress) return null;
+  const episode = Number(progress.episode) || 0;
+  if (episode < 1) return null;
+  if (progress.completed) {
+    const total = Number(progress.episodeCount) || 0;
+    if (total > 0 && episode >= total) return null; // 全剧看完，回详情自己选集
+    return { episode: episode + 1, restart: true };
+  }
+  return { episode, restart: false };
 }
-function resumeEpisode() {
-  return resumeReady() ? Number(state.detailProgress.episode) : 1;
-}
+function resumeReady() { return Boolean(resumePlan()); }
+function resumeEpisode() { const plan = resumePlan(); return plan ? plan.episode : 1; }
+function resumeRestart() { const plan = resumePlan(); return plan ? plan.restart : false; }
 function resumeLabel() {
-  return resumeReady() ? `继续播放 第${state.detailProgress.episode}集` : '立即播放';
+  const plan = resumePlan();
+  return plan ? `继续播放 第${plan.episode}集` : '立即播放';
 }
 
 async function openPlayer(episode = 1, restart = false) {
@@ -4074,7 +4083,7 @@ function refreshCurrentDownloads() {
   if (event.target.closest('[data-back]')) { window.hgBack(); return; }
   const episode = event.target.closest('[data-episode]');
   if (episode) { openPlayer(Number(episode.dataset.episode)); return; }
-  if (event.target.closest('[data-play]')) { openPlayer(resumeEpisode()); return; }
+  if (event.target.closest('[data-play]')) { openPlayer(resumeEpisode(), resumeRestart()); return; }
   if (event.target.closest('[data-restart]')) { openPlayer(1, true); return; }
   if (event.target.closest('[data-bookmark]')) {
     if (!state.detail) return;
