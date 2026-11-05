@@ -35,7 +35,7 @@ jobs:
         if: github.event.inputs.version != ''
         working-directory: desktop
         shell: bash
-        run: npm version "${{ github.event.inputs.version }}" --no-git-tag-version
+        run: npm version "${{ github.event.inputs.version }}" --no-git-tag-version --allow-same-version
 
       - name: 类型检查
         working-directory: desktop

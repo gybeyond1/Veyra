@@ -3,9 +3,16 @@ import type { AppSettings, DownloadTask, SeriesDetail } from '@shared/types';
 import { call, errorText } from '../api';
 import Cover from '../components/Cover';
 
+export interface DetailFallback {
+  title: string;
+  cover: string;
+  description?: string;
+  episodeLabel?: string;
+}
+
 interface Props {
   id: string;
-  fallback: { title: string; cover: string } | null;
+  fallback: DetailFallback | null;
   settings: AppSettings | null;
   onBack: () => void;
   onDownloaded: () => void;
@@ -118,8 +125,9 @@ export default function DetailPage({ id, fallback, settings, onBack, onDownloade
         <div className="detail-meta">
           <h1>{title}</h1>
           <p className="detail-sub">
-            {detail?.score ? `评分 ${detail.score}` : ''}
-            {detail?.episodeLabel ? ` · ${detail.episodeLabel}` : ''}
+            {[detail?.score ? `评分 ${detail.score}` : '', detail?.episodeLabel || fallback?.episodeLabel || '']
+              .filter(Boolean)
+              .join(' · ')}
           </p>
           {detail?.tags && detail.tags.length > 0 && (
             <div className="chips">
@@ -130,7 +138,7 @@ export default function DetailPage({ id, fallback, settings, onBack, onDownloade
               ))}
             </div>
           )}
-          <p className="detail-desc">{detail?.description || '暂无简介'}</p>
+          <p className="detail-desc">{detail?.description || fallback?.description || '暂无简介'}</p>
           <div className="detail-actions">
             <button
               type="button"

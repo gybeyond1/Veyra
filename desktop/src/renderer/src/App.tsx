@@ -9,6 +9,7 @@ import DetailPage from './pages/DetailPage';
 import DownloadsPage from './pages/DownloadsPage';
 import LibraryPage from './pages/LibraryPage';
 import SettingsPage from './pages/SettingsPage';
+import type { DetailFallback } from './pages/DetailPage';
 
 export type View = 'home' | 'category' | 'search' | 'library' | 'detail' | 'downloads' | 'settings';
 
@@ -18,7 +19,7 @@ export default function App() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [view, setView] = useState<View>('home');
   const [detailId, setDetailId] = useState('');
-  const [detailFallback, setDetailFallback] = useState<{ title: string; cover: string } | null>(null);
+  const [detailFallback, setDetailFallback] = useState<DetailFallback | null>(null);
   const [tasks, setTasks] = useState<DownloadTask[]>([]);
   const [searchSeed, setSearchSeed] = useState('');
   const [toast, setToast] = useState<{ text: string; tone: 'info' | 'error' } | null>(null);
@@ -72,7 +73,7 @@ export default function App() {
     };
   }, [notify, refreshTasks]);
 
-  const openDetail = useCallback((id: string, fallback?: { title: string; cover: string }) => {
+  const openDetail = useCallback((id: string, fallback?: DetailFallback) => {
     setDetailId(id);
     setDetailFallback(fallback || null);
     setView('detail');

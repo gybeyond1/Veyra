@@ -3,7 +3,7 @@ import Cover from './Cover';
 
 interface Props {
   item: SeriesCard;
-  onOpen: (id: string, fallback: { title: string; cover: string }) => void;
+  onOpen: (id: string, fallback: { title: string; cover: string; description?: string; episodeLabel?: string }) => void;
 }
 
 export default function SeriesTile({ item, onOpen }: Props) {
@@ -11,7 +11,14 @@ export default function SeriesTile({ item, onOpen }: Props) {
     <button
       type="button"
       className="tile"
-      onClick={() => onOpen(item.id, { title: item.title, cover: item.cover })}
+      onClick={() =>
+        onOpen(item.id, {
+          title: item.title,
+          cover: item.cover,
+          description: item.description,
+          episodeLabel: item.episodeCount ? `全 ${item.episodeCount} 集` : '',
+        })
+      }
       title={item.title}
     >
       <div className="tile-art">
