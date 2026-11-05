@@ -31,6 +31,26 @@ const token = crypto.randomBytes(16).toString('hex');
 const streamJobs = new Map<string, Promise<{ hls?: string; file?: string }>>();
 const HLSTIMEOUT = 15000;
 
+/**
+ * 解析结果缓存（10 分钟）。一集播放期间播放器会发好几次请求（探测 + Range），
+ * 每次都重新拉 videoDetail + videoModel 不但慢，还容易被源站风控。
+ */
+const resolvedCache = new Map<string, { value: { hls?: string; file?: string }; at: number }>();
+const RESOLVE_TTL = 10 * 60 * 1000;
+
+/** 私密源播放地址缓存：prepare 预热过一次，/hg/ 首请求就不用再等源站 */
+const hgCache = new Map<string, { url: string; referer: string; at: number }>();
+
+function cachedResolve(key: string): { hls?: string; file?: string } | null {
+  const hit = resolvedCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.at > RESOLVE_TTL) {
+    resolvedCache.delete(key);
+    return null;
+  }
+  return hit.value;
+}
+
 function cacheDir(): string {
   const dir = path.join(userDataDir, 'media-cache');
   fs.mkdirSync(dir, { recursive: true });
@@ -110,10 +130,13 @@ async function proxySegment(url: string, referer: string): Promise<{ body: Buffe
 /** 红果单集取流：没加密就代理原流；CENC 加密的先用 ffmpeg 解密封装成 mp4 再发。 */
 async function hongguoStream(seriesId: string, episode: number): Promise<{ hls?: string; file?: string }> {
   const key = `rg-${seriesId}-${episode}`;
+  const known = cachedResolve(key);
+  if (known) return known;
   const existing = streamJobs.get(key) as Promise<{ hls?: string; file?: string }> | undefined;
   if (existing) return existing;
 
   const job = (async () => {
+    const startedAt = Date.now();
     const { hgApp } = serverModules();
     const info = await hgApp.videoDetail(seriesId);
     const vid = Array.isArray(info?.vids) ? info.vids[episode - 1] : '';
@@ -121,31 +144,67 @@ async function hongguoStream(seriesId: string, episode: number): Promise<{ hls?:
     const model = await hgApp.videoModel(vid);
     if (!model?.url) throw new Error('这一集没有取到播放地址');
 
+    let result: { hls?: string; file?: string };
     if (!model.key) {
       // 明文流：m3u8 交给 hls.js，mp4 直接落盘（支持 Range 拖动）
-      if (/\.m3u8(\?|$)/i.test(model.url)) return { hls: model.url };
+      if (/\.m3u8(\?|$)/i.test(model.url)) {
+        result = { hls: model.url };
+      } else {
+        const file = path.join(cacheDir(), `${key}.mp4`);
+        if (!(fs.existsSync(file) && fs.statSync(file).size > 1024)) {
+          const buffer = await fetchBinary(model.url, 60000, { Referer: 'https://www.hongguoduanju.com/', 'User-Agent': 'Mozilla/5.0' });
+          fs.writeFileSync(file, buffer);
+        }
+        result = { file };
+      }
+    } else {
+      // CENC 加密：整集先解密转封装成普通 mp4，之后每次播放都是本地文件（秒开、可拖）
       const file = path.join(cacheDir(), `${key}.mp4`);
-      if (fs.existsSync(file) && fs.statSync(file).size > 1024) return { file };
-      const buffer = await fetchBinary(model.url, 60000, { Referer: 'https://www.hongguoduanju.com/', 'User-Agent': 'Mozilla/5.0' });
-      fs.writeFileSync(file, buffer);
-      return { file };
+      if (!(fs.existsSync(file) && fs.statSync(file).size > 1024)) {
+        await new Promise<void>((resolve, reject) => {
+          execFile(
+            ffmpegAvailable(),
+            ['-y', '-decryption_key', model.key, '-i', model.url, '-c', 'copy', '-movflags', '+faststart', file],
+            { timeout: 10 * 60 * 1000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 },
+            (error) => {
+              if (!error) return resolve();
+              const text = (error as NodeJS.ErrnoException).code === 'ENOENT'
+                ? `找不到 ffmpeg（${ffmpegAvailable()}），安装包不完整，请重新下载安装`
+                : '解密转封装失败：' + error.message;
+              reject(new Error(text));
+            },
+          );
+        });
+      }
+      result = { file };
     }
 
-    const file = path.join(cacheDir(), `${key}.mp4`);
-    if (fs.existsSync(file) && fs.statSync(file).size > 1024) return { file };
-    await new Promise<void>((resolve, reject) => {
-      execFile(
-        ffmpegAvailable(),
-        ['-y', '-decryption_key', model.key, '-i', model.url, '-c', 'copy', '-movflags', '+faststart', file],
-        { timeout: 10 * 60 * 1000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 },
-        (error) => (error ? reject(new Error('解密转封装失败：' + error.message)) : resolve()),
-      );
-    });
-    return { file };
+    resolvedCache.set(key, { value: result, at: Date.now() });
+    console.log(`[media] 解析完成 ${key}（${result.file ? '本地 mp4' : 'm3u8'}，${Date.now() - startedAt}ms）`);
+    return result;
   })().finally(() => streamJobs.delete(key));
 
   streamJobs.set(key, job);
   return job;
+}
+
+/**
+ * 播放前先把「要播的东西」准备好。
+ *
+ * 关键点：红果加密集是先用 ffmpeg 整集解密成 mp4 的，这一步没做完之前
+ * 媒体服务不会回任何响应头，浏览器里的 <video> 就会一直空白转圈（等太久还会
+ * 直接报错）。所以这里先等解密完成，再把地址交给渲染层 —— 播放器拿到地址时
+ * 文件已经在磁盘上，第一个请求毫秒级返回，不会再出现「点了没反应」。
+ */
+export async function prepare(source: 'hongguo' | 'huangguo', seriesId: string, episode: number): Promise<'hls' | 'file'> {
+  if (source === 'huangguo') {
+    // 私密源要换一次播放地址（带 Referer）/ 可能走后端代理，先热一遍，播放器就不用等
+    const found = await playSource(seriesId, episode);
+    hgCache.set(`hg-${seriesId}-${episode}`, { ...found, at: Date.now() });
+    return /\.m3u8(\?|$)/i.test(found.url) ? 'hls' : 'file';
+  }
+  const target = await hongguoStream(seriesId, episode);
+  return target.hls ? 'hls' : 'file';
 }
 
 function sendFile(req: http.IncomingMessage, res: http.ServerResponse, file: string, type: string): void {
@@ -287,7 +346,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   if (url.pathname.startsWith('/hg/')) {
     const [, , seriesId, episode] = url.pathname.split('/');
     try {
-      const source = await playSource(seriesId, Number(episode) || 1);
+      const warm = hgCache.get(`hg-${seriesId}-${Number(episode) || 1}`);
+      const source = warm && Date.now() - warm.at < RESOLVE_TTL ? warm : await playSource(seriesId, Number(episode) || 1);
       const body = await fetchMedia(source.url, source.referer);
       if (body.subarray(0, 8).toString('utf8').startsWith('#EXTM3U')) {
         const playlist = rewritePlaylist(body.toString('utf8'), source.url, source.referer);
@@ -329,6 +389,13 @@ export function start(): Promise<{ port: number; token: string; base: string }> 
   if (server && port) return Promise.resolve({ port, token, base: `http://127.0.0.1:${port}` });
   return new Promise((resolve, reject) => {
     const instance = http.createServer((req, res) => {
+      const startedAt = Date.now();
+      const pathname = (req.url || '').split('?')[0];
+      res.on('finish', () => {
+        const cost = Date.now() - startedAt;
+        // 只有慢请求才值得记一笔：排查「点播放一直转圈」时全靠它
+        if (cost > 3000) console.warn(`[media] ${req.method} ${pathname} 耗时 ${cost}ms -> ${res.statusCode}`);
+      });
       handle(req, res).catch((error) => json(res, 500, { error: (error as Error).message }));
     });
     instance.once('error', reject);

@@ -335,18 +335,7 @@ function requestTvLoginQr() {
   } catch (error) {
   }
   if (!info || !info.ready) {
-    if (code) {
-      code.hidden = true;
-      code.innerHTML = "";
-    }
-    if (start) {
-      start.hidden = false;
-      start.textContent = "\u91CD\u8BD5";
-    }
-    if (note) {
-      note.textContent = "\u5C40\u57DF\u7F51\u6CA1\u8D77\u6765\uFF0C\u786E\u8BA4\u7535\u89C6\u548C\u624B\u673A\u8FDE\u540C\u4E00\u4E2A Wi-Fi \u540E\u518D\u8BD5";
-      note.hidden = false;
-    }
+    showQrUnavailable();
     return;
   }
   if (!window.qrcode) {
@@ -364,7 +353,7 @@ function requestTvLoginQr() {
     code.hidden = false;
     if (start) start.hidden = true;
     if (note) {
-      note.textContent = "\u624B\u673A Veyra \u2192 \u8BBE\u7F6E \u2192 \u626B\u7801\u767B\u5F55\u7535\u89C6\uFF08" + info.host + ":" + info.port + "\uFF09";
+      note.textContent = "\u7528\u53E6\u4E00\u53F0\u5DF2\u767B\u5F55\u7684 Veyra \u626B\u8FD9\u4E2A\u7801\uFF1A\u7535\u89C6 / \u7535\u8111 / \u5E73\u677F / \u624B\u673A\u90FD\u884C\uFF08" + info.host + ":" + info.port + "\uFF09";
       note.hidden = false;
     }
   } catch (error) {
@@ -373,6 +362,54 @@ function requestTvLoginQr() {
       note.hidden = false;
     }
   }
+}
+function showQrUnavailable() {
+  const code = document.getElementById("tv-login-code");
+  const note = document.getElementById("tv-login-note");
+  const start = document.getElementById("tv-login-start");
+  if (code) {
+    code.hidden = true;
+    code.innerHTML = "";
+  }
+  if (start) {
+    start.hidden = false;
+    start.textContent = "\u91CD\u8BD5";
+  }
+  if (note) {
+    note.textContent = "\u5C40\u57DF\u7F51\u6CA1\u8D77\u6765\uFF0C\u786E\u8BA4\u8FD9\u53F0\u8BBE\u5907\u548C\u626B\u7801\u7684\u8BBE\u5907\u8FDE\u5728\u540C\u4E00\u4E2A Wi-Fi \u540E\u518D\u8BD5";
+    note.hidden = false;
+  }
+}
+function startLoginHostAndRender() {
+  var _a2, _b2;
+  let info = null;
+  try {
+    info = JSON.parse(((_b2 = (_a2 = window.AndroidHost) == null ? void 0 : _a2.startLoginHost) == null ? void 0 : _b2.call(_a2)) || "null");
+  } catch (error) {
+  }
+  if (info && info.ready) {
+    requestTvLoginQr();
+    return;
+  }
+  let tries = 0;
+  const tick = () => {
+    var _a3, _b3;
+    let next = null;
+    try {
+      next = JSON.parse(((_b3 = (_a3 = window.AndroidHost) == null ? void 0 : _a3.tvLoginInfo) == null ? void 0 : _b3.call(_a3)) || "null");
+    } catch (error) {
+    }
+    if (next && next.ready) {
+      requestTvLoginQr();
+      return;
+    }
+    if (++tries < 12) {
+      setTimeout(tick, 400);
+      return;
+    }
+    showQrUnavailable();
+  };
+  setTimeout(tick, 300);
 }
 window.hgTvLogin = (ok) => {
   if (!ok) {
@@ -398,7 +435,17 @@ function showAuth(mode = "login") {
     showTvLoginPanel();
     return;
   }
-  document.getElementById("auth-title").textContent = mode === "login" ? "\u767B\u5F55\u5E94\u7528\u8D26\u53F7" : "\u6CE8\u518C\u5E94\u7528\u8D26\u53F7";
+  const scan = mode === "scan";
+  const form = document.getElementById("auth-form");
+  const panel = authOverlay.querySelector(".auth-panel");
+  const footnote = panel == null ? void 0 : panel.querySelector(".auth-footnote");
+  const scanBox = document.getElementById("tv-login");
+  if (form) form.hidden = scan;
+  if (footnote) footnote.hidden = scan;
+  if (scanBox) scanBox.hidden = !scan;
+  document.getElementById("auth-title").textContent = scan ? "\u626B\u7801\u767B\u5F55" : mode === "login" ? "\u767B\u5F55\u5E94\u7528\u8D26\u53F7" : "\u6CE8\u518C\u5E94\u7528\u8D26\u53F7";
+  const subtitle = document.getElementById("auth-subtitle");
+  if (subtitle) subtitle.textContent = scan ? "\u7528\u53E6\u4E00\u53F0\u5DF2\u767B\u5F55\u7684 Veyra \u626B\u4E0B\u9762\u7684\u7801\uFF0C\u8D26\u53F7\u76F4\u63A5\u540C\u6B65\u8FC7\u6765" : "\u767B\u5F55\u540E\u540C\u6B65\u6536\u85CF\u548C\u89C2\u770B\u5386\u53F2";
   setAuthPending(authPending, mode);
   document.getElementById("auth-password").autocomplete = mode === "login" ? "current-password" : "new-password";
   const codeField = document.getElementById("auth-code");
@@ -411,11 +458,21 @@ function showAuth(mode = "login") {
   if (codeLabel) codeLabel.hidden = mode !== "register";
   document.querySelectorAll("[data-auth-mode]").forEach((button) => button.classList.toggle("selected", button.dataset.authMode === mode));
   document.getElementById("auth-error").hidden = true;
+  if (scan) startLoginHostAndRender();
 }
 function hideAuth() {
   authOverlay.hidden = true;
   updateBackEnabled();
-  document.getElementById("auth-form").reset();
+  const form = document.getElementById("auth-form");
+  if (form) {
+    form.reset();
+    form.hidden = false;
+  }
+  const panel = authOverlay.querySelector(".auth-panel");
+  const footnote = panel == null ? void 0 : panel.querySelector(".auth-footnote");
+  if (footnote) footnote.hidden = false;
+  const scanBox = document.getElementById("tv-login");
+  if (scanBox) scanBox.hidden = true;
 }
 avatarButton.addEventListener("click", () => {
   if (state.account.loggedIn) goAccountManagement();
@@ -423,7 +480,10 @@ avatarButton.addEventListener("click", () => {
 });
 headerSettings.addEventListener("click", goSettings);
 document.querySelectorAll("[data-auth-mode]").forEach((button) => button.addEventListener("click", () => showAuth(button.dataset.authMode)));
-(_a = document.getElementById("tv-login-start")) == null ? void 0 : _a.addEventListener("click", requestTvLoginQr);
+(_a = document.getElementById("tv-login-start")) == null ? void 0 : _a.addEventListener("click", () => {
+  if (tvDevice()) requestTvLoginQr();
+  else startLoginHostAndRender();
+});
 function startQrScan() {
   var _a2;
   if (!((_a2 = window.AndroidHost) == null ? void 0 : _a2.startQrScan)) {
@@ -437,7 +497,7 @@ function startQrScan() {
   }
 }
 window.hgQrScan = (ok, message) => {
-  toast(message || (ok ? "\u5DF2\u767B\u5F55\u7535\u89C6" : "\u626B\u7801\u5931\u8D25"), !ok);
+  toast(message || (ok ? "\u5DF2\u767B\u5F55" : "\u626B\u7801\u5931\u8D25"), !ok);
 };
 document.getElementById("auth-form").addEventListener("submit", async (event) => {
   var _a2, _b2;
@@ -1806,8 +1866,8 @@ function renderAccountManagement() {
           <p id="password-error" class="auth-error" role="alert" hidden></p><button type="submit">\u786E\u8BA4\u4FEE\u6539</button>
         </form></section>
       <section class="settings-account"><h2>\u540C\u6B65\u4E0E\u767B\u5F55</h2><button type="button" data-sync-now="1">\u7ACB\u5373\u540C\u6B65\u7247\u5355</button><button type="button" data-logout="1" aria-live="polite">\u9000\u51FA\u767B\u5F55</button></section>
-      <section class="settings-account"><h2>\u7535\u89C6\u7AEF</h2><p>\u7535\u89C6\u4E0A\u7528\u624B\u673A\u626B\u7801\u767B\u5F55\uFF1A\u626B\u7535\u89C6\u5C4F\u5E55\u4E0A\u7684\u4E8C\u7EF4\u7801\uFF0C\u8D26\u53F7\u76F4\u63A5\u540C\u6B65\u8FC7\u53BB\u3002</p><button type="button" data-qr-login="1">\u626B\u7801\u767B\u5F55\u7535\u89C6</button></section>` : `<section class="settings-account"><p>\u767B\u5F55\u540E\u53EF\u540C\u6B65\u6536\u85CF\u548C\u89C2\u770B\u5386\u53F2\uFF0C\u5E76\u7BA1\u7406\u5934\u50CF\u4E0E\u5BC6\u7801\u3002</p><button type="button" data-account-action="1">\u767B\u5F55\u6216\u6CE8\u518C</button></section>
-      <section class="settings-account"><h2>\u7535\u89C6\u7AEF</h2><p>\u7535\u89C6\u4E0A\u7528\u624B\u673A\u626B\u7801\u767B\u5F55\uFF1A\u626B\u7535\u89C6\u5C4F\u5E55\u4E0A\u7684\u4E8C\u7EF4\u7801\uFF0C\u8D26\u53F7\u76F4\u63A5\u540C\u6B65\u8FC7\u53BB\u3002</p><button type="button" data-qr-login="1">\u626B\u7801\u767B\u5F55\u7535\u89C6</button></section>`}</div>`;
+      <section class="settings-account"><h2>\u626B\u7801\u767B\u5F55\u5176\u5B83\u8BBE\u5907</h2><p>\u7535\u89C6\u3001\u7535\u8111\u3001\u5E73\u677F\u767B\u5F55\u9875\u4E0A\u7684\u4E8C\u7EF4\u7801\u90FD\u80FD\u626B\uFF1A\u626B\u5B8C\u8FD9\u53F0\u624B\u673A\u7684\u8D26\u53F7\u4F1A\u76F4\u63A5\u540C\u6B65\u8FC7\u53BB\uFF0C\u4E0D\u7528\u6572\u5BC6\u7801\u3002</p><button type="button" data-qr-login="1">\u53BB\u626B\u7801\u767B\u5F55</button></section>` : `<section class="settings-account"><p>\u767B\u5F55\u540E\u53EF\u540C\u6B65\u6536\u85CF\u548C\u89C2\u770B\u5386\u53F2\uFF0C\u5E76\u7BA1\u7406\u5934\u50CF\u4E0E\u5BC6\u7801\u3002</p><button type="button" data-account-action="1">\u767B\u5F55\u6216\u6CE8\u518C</button></section>
+      <section class="settings-account"><h2>\u626B\u7801\u767B\u5F55\u5176\u5B83\u8BBE\u5907</h2><p>\u7535\u89C6\u3001\u7535\u8111\u3001\u5E73\u677F\u767B\u5F55\u9875\u4E0A\u7684\u4E8C\u7EF4\u7801\u90FD\u80FD\u626B\uFF1A\u626B\u5B8C\u8FD9\u53F0\u624B\u673A\u7684\u8D26\u53F7\u4F1A\u76F4\u63A5\u540C\u6B65\u8FC7\u53BB\uFF0C\u4E0D\u7528\u6572\u5BC6\u7801\u3002</p><button type="button" data-qr-login="1">\u53BB\u626B\u7801\u767B\u5F55</button></section>`}</div>`;
 }
 var accountPop = null;
 function buildAccountPopHtml() {
@@ -1820,8 +1880,8 @@ function buildAccountPopHtml() {
           <p id="password-error" class="auth-error" role="alert" hidden></p><button type="submit">\u786E\u8BA4\u4FEE\u6539</button>
         </form></section>
       <section class="settings-account"><h2>\u540C\u6B65\u4E0E\u767B\u5F55</h2><button type="button" data-sync-now="1">\u7ACB\u5373\u540C\u6B65\u7247\u5355</button><button type="button" data-logout="1" aria-live="polite">\u9000\u51FA\u767B\u5F55</button></section>
-      <section class="settings-account"><h2>\u7535\u89C6\u7AEF</h2><p>\u7535\u89C6\u4E0A\u7528\u624B\u673A\u626B\u7801\u767B\u5F55\uFF1A\u626B\u7535\u89C6\u5C4F\u5E55\u4E0A\u7684\u4E8C\u7EF4\u7801\uFF0C\u8D26\u53F7\u76F4\u63A5\u540C\u6B65\u8FC7\u53BB\u3002</p><button type="button" data-qr-login="1">\u626B\u7801\u767B\u5F55\u7535\u89C6</button></section>` : `<section class="settings-account"><p>\u767B\u5F55\u540E\u53EF\u540C\u6B65\u6536\u85CF\u548C\u89C2\u770B\u5386\u53F2\uFF0C\u5E76\u7BA1\u7406\u5934\u50CF\u4E0E\u5BC6\u7801\u3002</p><button type="button" data-account-action="1">\u767B\u5F55\u6216\u6CE8\u518C</button></section>
-      <section class="settings-account"><h2>\u7535\u89C6\u7AEF</h2><p>\u7535\u89C6\u4E0A\u7528\u624B\u673A\u626B\u7801\u767B\u5F55\uFF1A\u626B\u7535\u89C6\u5C4F\u5E55\u4E0A\u7684\u4E8C\u7EF4\u7801\uFF0C\u8D26\u53F7\u76F4\u63A5\u540C\u6B65\u8FC7\u53BB\u3002</p><button type="button" data-qr-login="1">\u626B\u7801\u767B\u5F55\u7535\u89C6</button></section>`;
+      <section class="settings-account"><h2>\u626B\u7801\u767B\u5F55\u5176\u5B83\u8BBE\u5907</h2><p>\u7535\u89C6\u3001\u7535\u8111\u3001\u5E73\u677F\u767B\u5F55\u9875\u4E0A\u7684\u4E8C\u7EF4\u7801\u90FD\u80FD\u626B\uFF1A\u626B\u5B8C\u8FD9\u53F0\u624B\u673A\u7684\u8D26\u53F7\u4F1A\u76F4\u63A5\u540C\u6B65\u8FC7\u53BB\uFF0C\u4E0D\u7528\u6572\u5BC6\u7801\u3002</p><button type="button" data-qr-login="1">\u53BB\u626B\u7801\u767B\u5F55</button></section>` : `<section class="settings-account"><p>\u767B\u5F55\u540E\u53EF\u540C\u6B65\u6536\u85CF\u548C\u89C2\u770B\u5386\u53F2\uFF0C\u5E76\u7BA1\u7406\u5934\u50CF\u4E0E\u5BC6\u7801\u3002</p><button type="button" data-account-action="1">\u767B\u5F55\u6216\u6CE8\u518C</button></section>
+      <section class="settings-account"><h2>\u626B\u7801\u767B\u5F55\u5176\u5B83\u8BBE\u5907</h2><p>\u7535\u89C6\u3001\u7535\u8111\u3001\u5E73\u677F\u767B\u5F55\u9875\u4E0A\u7684\u4E8C\u7EF4\u7801\u90FD\u80FD\u626B\uFF1A\u626B\u5B8C\u8FD9\u53F0\u624B\u673A\u7684\u8D26\u53F7\u4F1A\u76F4\u63A5\u540C\u6B65\u8FC7\u53BB\uFF0C\u4E0D\u7528\u6572\u5BC6\u7801\u3002</p><button type="button" data-qr-login="1">\u53BB\u626B\u7801\u767B\u5F55</button></section>`;
   return `<div class="appearance-pop account-pop" role="dialog" aria-modal="true" aria-labelledby="account-title">
     <div class="appearance-head"><h2 id="account-title">\u8D26\u53F7\u7BA1\u7406</h2><button type="button" class="appearance-close" data-account-close aria-label="\u5173\u95ED">\u2715</button></div>
     ${body}</div>`;

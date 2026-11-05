@@ -1856,7 +1856,7 @@ function showLoginQr() {
     box.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 1, scalable: true });
     box.hidden = false;
     retry.hidden = true;
-    tip.textContent = '手机 Veyra → 我的 → 账号管理 → 扫码登录电视（' + info.host + ':' + info.port + '）';
+    tip.textContent = '用手机 Veyra → 我的 → 账号管理 → 去扫码登录（' + info.host + ':' + info.port + '）';
   } catch (error) {
     box.hidden = true;
     retry.hidden = false;

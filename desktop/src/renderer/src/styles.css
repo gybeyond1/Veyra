@@ -1423,6 +1423,15 @@ input::placeholder {
   margin: 0;
   color: var(--text);
 }
+.player-loading p {
+  margin: 0;
+  font-size: 13px;
+}
+.player-loading-sub {
+  color: var(--muted);
+  opacity: 0.75;
+  font-size: 12px !important;
+}
 .player-error p {
   margin: 0;
   max-width: 520px;

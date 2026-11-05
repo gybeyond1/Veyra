@@ -244,9 +244,7 @@ function requestTvLoginQr() {
   let info = null;
   try { info = JSON.parse(window.AndroidHost?.tvLoginInfo?.() || 'null'); } catch (error) { }
   if (!info || !info.ready) {
-    if (code) { code.hidden = true; code.innerHTML = ''; }
-    if (start) { start.hidden = false; start.textContent = '重试'; }
-    if (note) { note.textContent = '局域网没起来，确认电视和手机连同一个 Wi-Fi 后再试'; note.hidden = false; }
+    showQrUnavailable();
     return;
   }
   if (!window.qrcode) {
@@ -261,12 +259,43 @@ function requestTvLoginQr() {
     code.hidden = false;
     if (start) start.hidden = true;
     if (note) {
-      note.textContent = '手机 Veyra → 设置 → 扫码登录电视（' + info.host + ':' + info.port + '）';
+      // 这台设备可以是被电视扫、被另一台手机/平板扫，也可以被电脑扫 —— 文案别再写死「电视」
+      note.textContent = '用另一台已登录的 Veyra 扫这个码：电视 / 电脑 / 平板 / 手机都行（' + info.host + ':' + info.port + '）';
       note.hidden = false;
     }
   } catch (error) {
     if (note) { note.textContent = '二维码生成失败，请重试'; note.hidden = false; }
   }
+}
+
+/** 二维码还没准备好（局域网服务刚起来 / 没连 Wi-Fi）时的提示。 */
+function showQrUnavailable() {
+  const code = document.getElementById('tv-login-code');
+  const note = document.getElementById('tv-login-note');
+  const start = document.getElementById('tv-login-start');
+  if (code) { code.hidden = true; code.innerHTML = ''; }
+  if (start) { start.hidden = false; start.textContent = '重试'; }
+  if (note) { note.textContent = '局域网没起来，确认这台设备和扫码的设备连在同一个 Wi-Fi 后再试'; note.hidden = false; }
+}
+
+/**
+ * 手机 / 平板登录页的扫码登录：
+ * 让原生起一个局域网服务（和电视端同一套协议），把二维码画出来。
+ * 服务是异步 bind 的，端口可能还没好，所以这里轮询几次再显示。
+ */
+function startLoginHostAndRender() {
+  let info = null;
+  try { info = JSON.parse(window.AndroidHost?.startLoginHost?.() || 'null'); } catch (error) { }
+  if (info && info.ready) { requestTvLoginQr(); return; }
+  let tries = 0;
+  const tick = () => {
+    let next = null;
+    try { next = JSON.parse(window.AndroidHost?.tvLoginInfo?.() || 'null'); } catch (error) { }
+    if (next && next.ready) { requestTvLoginQr(); return; }
+    if (++tries < 12) { setTimeout(tick, 400); return; }
+    showQrUnavailable();
+  };
+  setTimeout(tick, 300);
 }
 
 // 手机扫码授权完成后，电视这边收尾
@@ -284,7 +313,17 @@ function showAuth(mode = 'login') {
   authOverlay.hidden = false;
   updateBackEnabled();
   if (tvDevice()) { showTvLoginPanel(); return; }
-  document.getElementById('auth-title').textContent = mode === 'login' ? '登录应用账号' : '注册应用账号';
+  const scan = mode === 'scan';
+  const form = document.getElementById('auth-form');
+  const panel = authOverlay.querySelector('.auth-panel');
+  const footnote = panel?.querySelector('.auth-footnote');
+  const scanBox = document.getElementById('tv-login');
+  if (form) form.hidden = scan;
+  if (footnote) footnote.hidden = scan;
+  if (scanBox) scanBox.hidden = !scan;
+  document.getElementById('auth-title').textContent = scan ? '扫码登录' : mode === 'login' ? '登录应用账号' : '注册应用账号';
+  const subtitle = document.getElementById('auth-subtitle');
+  if (subtitle) subtitle.textContent = scan ? '用另一台已登录的 Veyra 扫下面的码，账号直接同步过来' : '登录后同步收藏和观看历史';
   setAuthPending(authPending, mode);
   document.getElementById('auth-password').autocomplete = mode === 'login' ? 'current-password' : 'new-password';
   const codeField = document.getElementById('auth-code');
@@ -293,11 +332,18 @@ function showAuth(mode = 'login') {
   if (codeLabel) codeLabel.hidden = mode !== 'register';
   document.querySelectorAll('[data-auth-mode]').forEach(button => button.classList.toggle('selected', button.dataset.authMode === mode));
   document.getElementById('auth-error').hidden = true;
+  if (scan) startLoginHostAndRender();
 }
 function hideAuth() {
   authOverlay.hidden = true;
   updateBackEnabled();
-  document.getElementById('auth-form').reset();
+  const form = document.getElementById('auth-form');
+  if (form) { form.reset(); form.hidden = false; }
+  const panel = authOverlay.querySelector('.auth-panel');
+  const footnote = panel?.querySelector('.auth-footnote');
+  if (footnote) footnote.hidden = false;
+  const scanBox = document.getElementById('tv-login');
+  if (scanBox) scanBox.hidden = true;
 }
 avatarButton.addEventListener('click', () => {
   if (state.account.loggedIn) goAccountManagement();
@@ -305,16 +351,19 @@ avatarButton.addEventListener('click', () => {
 });
 headerSettings.addEventListener('click', goSettings);
 document.querySelectorAll('[data-auth-mode]').forEach(button => button.addEventListener('click', () => showAuth(button.dataset.authMode)));
-document.getElementById('tv-login-start')?.addEventListener('click', requestTvLoginQr);
+document.getElementById('tv-login-start')?.addEventListener('click', () => {
+  if (tvDevice()) requestTvLoginQr();
+  else startLoginHostAndRender();
+});
 
-/** 手机端：打开扫码页去扫电视上的登录码，结果异步回到这里。 */
+/** 手机端：打开扫码页去扫另一台设备的登录码，结果异步回到这里。 */
 function startQrScan() {
   if (!window.AndroidHost?.startQrScan) { toast('当前版本不支持扫码，请更新应用', true); return; }
   try { window.AndroidHost.startQrScan(); }
   catch (error) { toast(error.message || '打不开扫码页', true); }
 }
 window.hgQrScan = (ok, message) => {
-  toast(message || (ok ? '已登录电视' : '扫码失败'), !ok);
+  toast(message || (ok ? '已登录' : '扫码失败'), !ok);
 };
 document.getElementById('auth-form').addEventListener('submit', async event => {
   event.preventDefault();
@@ -1630,8 +1679,8 @@ function renderAccountManagement() {
           <p id="password-error" class="auth-error" role="alert" hidden></p><button type="submit">确认修改</button>
         </form></section>
       <section class="settings-account"><h2>同步与登录</h2><button type="button" data-sync-now="1">立即同步片单</button><button type="button" data-logout="1" aria-live="polite">退出登录</button></section>
-      <section class="settings-account"><h2>电视端</h2><p>电视上用手机扫码登录：扫电视屏幕上的二维码，账号直接同步过去。</p><button type="button" data-qr-login="1">扫码登录电视</button></section>` : `<section class="settings-account"><p>登录后可同步收藏和观看历史，并管理头像与密码。</p><button type="button" data-account-action="1">登录或注册</button></section>
-      <section class="settings-account"><h2>电视端</h2><p>电视上用手机扫码登录：扫电视屏幕上的二维码，账号直接同步过去。</p><button type="button" data-qr-login="1">扫码登录电视</button></section>`}</div>`;
+      <section class="settings-account"><h2>扫码登录其它设备</h2><p>电视、电脑、平板登录页上的二维码都能扫：扫完这台手机的账号会直接同步过去，不用敲密码。</p><button type="button" data-qr-login="1">去扫码登录</button></section>` : `<section class="settings-account"><p>登录后可同步收藏和观看历史，并管理头像与密码。</p><button type="button" data-account-action="1">登录或注册</button></section>
+      <section class="settings-account"><h2>扫码登录其它设备</h2><p>电视、电脑、平板登录页上的二维码都能扫：扫完这台手机的账号会直接同步过去，不用敲密码。</p><button type="button" data-qr-login="1">去扫码登录</button></section>`}</div>`;
 }
 
 // v0.18.108：账号管理弹窗（复用外观弹窗 scrim/pop 结构，body 锁滚动共用 .appearance-open）
@@ -1647,9 +1696,9 @@ function buildAccountPopHtml() {
           <p id="password-error" class="auth-error" role="alert" hidden></p><button type="submit">确认修改</button>
         </form></section>
       <section class="settings-account"><h2>同步与登录</h2><button type="button" data-sync-now="1">立即同步片单</button><button type="button" data-logout="1" aria-live="polite">退出登录</button></section>
-      <section class="settings-account"><h2>电视端</h2><p>电视上用手机扫码登录：扫电视屏幕上的二维码，账号直接同步过去。</p><button type="button" data-qr-login="1">扫码登录电视</button></section>`
+      <section class="settings-account"><h2>扫码登录其它设备</h2><p>电视、电脑、平板登录页上的二维码都能扫：扫完这台手机的账号会直接同步过去，不用敲密码。</p><button type="button" data-qr-login="1">去扫码登录</button></section>`
     : `<section class="settings-account"><p>登录后可同步收藏和观看历史，并管理头像与密码。</p><button type="button" data-account-action="1">登录或注册</button></section>
-      <section class="settings-account"><h2>电视端</h2><p>电视上用手机扫码登录：扫电视屏幕上的二维码，账号直接同步过去。</p><button type="button" data-qr-login="1">扫码登录电视</button></section>`;
+      <section class="settings-account"><h2>扫码登录其它设备</h2><p>电视、电脑、平板登录页上的二维码都能扫：扫完这台手机的账号会直接同步过去，不用敲密码。</p><button type="button" data-qr-login="1">去扫码登录</button></section>`;
   return `<div class="appearance-pop account-pop" role="dialog" aria-modal="true" aria-labelledby="account-title">
     <div class="appearance-head"><h2 id="account-title">账号管理</h2><button type="button" class="appearance-close" data-account-close aria-label="关闭">✕</button></div>
     ${body}</div>`;

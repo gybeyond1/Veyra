@@ -174,7 +174,7 @@ export default function DetailPage({ id, source, fallback, settings, onBack, onD
               disabled={!episodes.length}
               onClick={() => (selecting ? cancelSelect() : beginSelect())}
             >
-              {selecting ? '退出下载选择' : '下载'}
+              {selecting ? '取消下载' : '下载'}
             </button>
           </div>
           <p className="detail-path">保存到：{settings?.downloadDir || '默认下载目录'}</p>

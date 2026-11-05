@@ -95,12 +95,14 @@ export default function App() {
     const off = window.veyra.onEvent((event) => {
       if (event.type === 'downloads') setTasks(event.data as DownloadTask[]);
       if (event.type === 'auth') {
-        const next = event.data as SessionState;
+        const next = event.data as SessionState & { expired?: boolean };
         setSession(next);
         if (next.user) {
           setView('home');
           notify(`已登录：${next.user.username}`);
           void refreshTasks();
+        } else if (next.expired) {
+          notify('登录已失效，请重新登录', 'error');
         }
       }
       if (event.type === 'cast') {

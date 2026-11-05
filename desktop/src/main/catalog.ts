@@ -3,7 +3,7 @@ import { serverModules } from './server-modules';
 import { fetchText } from './http';
 import * as huangguo from './huangguo';
 import type { ContentSource } from './source';
-import { playUrl, resolveKind } from './media';
+import { playUrl, prepare } from './media';
 
 const SITE = 'https://hongguoduanju.com';
 
@@ -133,13 +133,14 @@ export async function detail(source: ContentSource, id: string): Promise<SeriesD
   };
 }
 
-/** 播放地址：统一交给本机媒体服务，渲染层按 kind 决定用 hls.js 还是原生 video。 */
+/** 播放地址：统一交给本机媒体服务。红果加密的先解密落盘再返回，避免播放器空等。 */
 export async function play(
   source: ContentSource,
   id: string,
   episode: number,
 ): Promise<{ url: string; kind: 'hls' | 'file' }> {
   if (!id) throw new Error('缺少剧集 id');
-  const kind = await resolveKind(source, id, Math.max(1, Number(episode) || 1));
-  return { url: playUrl(source, id, episode), kind };
+  const number = Math.max(1, Number(episode) || 1);
+  const kind = await prepare(source, id, number);
+  return { url: playUrl(source, id, number), kind };
 }

@@ -65,8 +65,10 @@ function encrypt(value: string): { data: string; plain: boolean } {
 function decrypt(data: string, plain: boolean): string {
   try {
     if (!plain) return safeStorage.decryptString(Buffer.from(data, 'base64'));
-  } catch {
-    /* 换机器/换用户后系统密钥失效，当作未登录 */
+  } catch (error) {
+    // 换机器/换用户后系统密钥失效，当作未登录；但要留痕，否则「每次启动都要登录」很难查
+    console.warn('[session] 解密本地凭据失败，按未登录处理', (error as Error).message);
+    return '';
   }
   return plain ? Buffer.from(data, 'base64').toString('utf8') : '';
 }
@@ -75,10 +77,19 @@ export function readSession(): StoredSession | null {
   try {
     const raw = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
     if (!raw || !raw.token || !raw.user) return null;
-    const token = decrypt(raw.token, !!raw.plain);
+    let token = decrypt(raw.token, !!raw.plain);
+    // 兜底：某些环境（换过 Windows 用户/以管理员身份运行/系统密钥重置）DPAPI 解不开，
+    // 这时用同一份文件里的明文备份，避免「明明登录过，每次打开都要重登」。
+    if (!token && raw.tokenPlain) {
+      token = Buffer.from(String(raw.tokenPlain), 'base64').toString('utf8');
+      if (token) console.warn('[session] 系统凭据解不开，改用明文备份恢复登录');
+    }
     if (!token) return null;
     return { server: String(raw.server || ''), token, user: raw.user, savedAt: Number(raw.savedAt) || 0 };
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      console.warn('[session] 读取 session.json 失败，按未登录处理', (error as Error).message);
+    }
     return null;
   }
 }
@@ -86,11 +97,25 @@ export function readSession(): StoredSession | null {
 export function saveSession(session: StoredSession): void {
   const packed = encrypt(session.token);
   ensureDir(userDataDir);
-  fs.writeFileSync(
-    sessionFile,
-    JSON.stringify({ server: session.server, token: packed.data, plain: packed.plain, user: session.user, savedAt: session.savedAt }),
-    { mode: 0o600 },
-  );
+  const payload = JSON.stringify({
+    server: session.server,
+    token: packed.data,
+    plain: packed.plain,
+    // 文件权限是 0600（仅当前用户可读），和手机端 AccountService 的存法一致；
+    // 系统加密只是锦上添花，能用就用，解不开时还有这条备胎。
+    tokenPlain: Buffer.from(session.token, 'utf8').toString('base64'),
+    user: session.user,
+    savedAt: session.savedAt,
+  });
+  // 先写临时文件再改名：直接覆盖时进程被杀会留下半截 JSON，下次启动就只能重新登录
+  const tmp = `${sessionFile}.tmp`;
+  fs.writeFileSync(tmp, payload, { mode: 0o600 });
+  fs.renameSync(tmp, sessionFile);
+  try {
+    fs.chmodSync(sessionFile, 0o600);
+  } catch {
+    /* Windows 上不支持也无所谓 */
+  }
 }
 
 export function clearSession(): void {

@@ -31,8 +31,17 @@ export default function PlayerPage({ source, id, episode, title, position, local
   const [kind, setKind] = useState<'hls' | 'file'>('file');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [waited, setWaited] = useState(0);
   const [attempt, setAttempt] = useState(0);
   const [list, setList] = useState<number[]>(episodes || []);
+
+  // 解密/取流期间给个秒数，别让人以为卡死了
+  useEffect(() => {
+    if (!loading) return;
+    setWaited(0);
+    const timer = window.setInterval(() => setWaited((value) => value + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [loading, episode, attempt]);
 
   // 没从详情页带集数过来（例如手机投屏）时，自己拉一次，保证「下一集」可用
   useEffect(() => {
@@ -93,13 +102,14 @@ export default function PlayerPage({ source, id, episode, title, position, local
 
     // 服务端已经告诉我们这是 m3u8 还是 mp4：m3u8 必须走 hls.js，直接塞给 video 只会一直转圈
     if (kind === 'hls' && Hls.isSupported()) {
-      hls = new Hls({ enableWorker: true, lowLatencyMode: false });
+      // 关掉 worker：打包后的页面是 file:// 源，CSP/Blob worker 在个别机器上会被拦，
+      // 拦了以后 hls.js 没有任何提示地停住。多线程解码这点收益不值得冒这个风险。
+      hls = new Hls({ enableWorker: false, lowLatencyMode: false, maxBufferLength: 30 });
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (!data.fatal) return;
-        // 兜底：hls.js 起不来就退回原生播放，宁可少一层也别整段黑屏
         hls?.destroy();
         hls = null;
-        video.src = url;
+        setError(`流解析失败（${data.details || data.type}）`);
       });
       hls.loadSource(url);
       hls.attachMedia(video);
@@ -184,8 +194,13 @@ export default function PlayerPage({ source, id, episode, title, position, local
           </div>
         ) : (
           <>
-            <video ref={videoRef} controls playsInline />
-            {loading && <div className="player-loading">正在准备播放…</div>}
+            <video ref={videoRef} controls playsInline preload="auto" />
+            {loading && (
+              <div className="player-loading">
+                <p>正在准备播放…{waited > 0 ? `（${waited}s）` : ''}</p>
+                {waited >= 3 && <p className="player-loading-sub">红果加密集需要先解密成 mp4，通常 3–10 秒，稍等一下</p>}
+              </div>
+            )}
           </>
         )}
       </div>

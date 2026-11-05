@@ -5,7 +5,8 @@ import { installFileLogger } from './log';
 import { devServerUrl, isDev, primeRuntimeEnv, userDataDir } from './paths';
 import { readSettings } from './store';
 import { serverModules } from './server-modules';
-import { bindWindow, registerIpc, startProgressLoop, stopProgressLoop } from './ipc';
+import { bindWindow, registerIpc, restoreSession, startProgressLoop, stopProgressLoop } from './ipc';
+import { reload as reloadSession } from './session';
 import { configureDownloads } from './downloads';
 import { start as startMedia, stop as stopMedia } from './media';
 import { start as startDevice, stop as stopDevice } from './device';
@@ -40,6 +41,8 @@ function saveWindowState(win: BrowserWindow): void {
   }
 }
 
+const PROJECT_URL = 'https://github.com/gybeyond1/Veyra';
+
 function buildMenu(): void {
   const template: Electron.MenuItemConstructorOptions[] = [
     {
@@ -57,7 +60,6 @@ function buildMenu(): void {
         { role: 'quit', label: '退出' },
       ],
     },
-    { label: '编辑', submenu: [{ role: 'copy', label: '复制' }, { role: 'paste', label: '粘贴' }, { role: 'selectAll', label: '全选' }] },
     {
       label: '视图',
       submenu: [
@@ -70,9 +72,17 @@ function buildMenu(): void {
       label: '帮助',
       submenu: [
         {
+          // 之前是给渲染层发 about 事件，但界面根本没监听，点了像没反应。
+          // 直接打开项目主页，也顺便让用户能看到更新日志。
           label: '关于 Veyra',
           click: () => {
-            mainWindow?.webContents.send('ve:event', { type: 'about', data: { version: app.getVersion() } });
+            void shell.openExternal(PROJECT_URL);
+          },
+        },
+        {
+          label: '项目主页',
+          click: () => {
+            void shell.openExternal(PROJECT_URL);
           },
         },
       ],
@@ -134,6 +144,8 @@ app.on('second-instance', () => {
 });
 
 app.whenReady().then(async () => {
+  // 必须在 ready 之后再读会话：safeStorage 在 ready 之前不可用（见 session.ts）
+  const restored = reloadSession();
   const settings = readSettings();
   primeRuntimeEnv({
     dataDir: path.join(userDataDir, 'data'),
@@ -158,6 +170,10 @@ app.whenReady().then(async () => {
   }
   await createWindow();
   startProgressLoop();
+  if (restored) {
+    // 有本地凭据就跟服务器核一次：凭据还有效就把用户信息刷新，失效才真的退出登录
+    void restoreSession();
+  }
 
   app.on('activate', async () => {
     if (BrowserWindow.getAllWindows().length === 0) await createWindow();

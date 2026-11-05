@@ -106,13 +106,13 @@
       <section class="auth-panel" role="dialog" aria-modal="true" aria-labelledby="auth-title">
         <h2 id="auth-title">登录应用账号</h2>
         <p id="auth-subtitle">登录后同步收藏和观看历史</p>
-        <!-- 电视专用：不注册、不输密码，只留手机扫码这一条路 -->
+        <!-- 扫码登录面板：电视端只走这一条路；手机/平板是「扫码登录」标签页（用另一台已登录设备授权） -->
         <div id="tv-login" hidden>
           <div id="tv-login-code" class="tv-login-code" hidden></div>
           <button id="tv-login-start" class="auth-submit" type="button">显示登录二维码</button>
           <p id="tv-login-note" class="tv-login-note" hidden></p>
         </div>
-        <div class="auth-tabs" role="tablist"><button type="button" data-auth-mode="login" class="selected">登录</button><button type="button" data-auth-mode="register">注册</button></div>
+        <div class="auth-tabs" role="tablist"><button type="button" data-auth-mode="login" class="selected">登录</button><button type="button" data-auth-mode="register">注册</button><button type="button" data-auth-mode="scan">扫码登录</button></div>
         <form id="auth-form">
           <label for="auth-server">服务器地址</label><input id="auth-server" name="server" autocomplete="off" autocapitalize="none" spellcheck="false" required placeholder="https://你的后端地址:端口">
           <label for="auth-username">账号</label><input id="auth-username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" minlength="3" maxlength="24" required placeholder="字母、数字或下划线">

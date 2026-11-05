@@ -50,7 +50,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 手机端扫码：扫电视上的登录二维码，把本机账号授权过去。
+ * 手机端扫码：扫另一台设备（电视 / 电脑 / 手机 / 平板）的登录二维码，把本机账号授权过去。
  *
  * 为什么用 CameraX 而不是手搓 Camera2 + TextureView：
  * 预览的「旋转 + 等比缩放」看着简单，实际每一步都踩坑 —— TextureView 默认把 buffer
@@ -59,13 +59,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 屏幕方向、镜像和裁剪，是 CameraX 团队在大量机型上校准过的逻辑，比自己推公式靠谱。
  *
  * 二维码内容由 MainActivity.tvLoginInfo() 生成：
- *   veyra://tv-login?h=192.168.1.5&p=8765&t=<relay token>&c=<一次性码>&n=<电视名>
- * 扫到之后先弹确认框，用户点「允许登录」才 POST 到电视的 http://h:p/login?t=…。
+ *   veyra://tv-login?h=192.168.1.5&p=8765&t=<relay token>&c=<一次性码>&n=<设备名>
+ * 扫到之后先弹确认框，用户点「允许登录」才 POST 到那台设备的 http://h:p/login?t=…。
  */
 public class QrScanActivity extends Activity implements LifecycleOwner {
     private static final String TAG = "VeyraQrScan";
     private static final int REQUEST_CAMERA = 0x61;
-    private static final String HINT_IDLE = "对准电视上的二维码，让码落在方框内";
+    private static final String HINT_IDLE = "对准另一台设备上的登录二维码（电视 / 电脑 / 平板 / 手机）";
 
     private final LifecycleRegistry lifecycleRegistry = new LifecycleRegistry(this);
     private final AtomicBoolean handled = new AtomicBoolean(false);
@@ -222,7 +222,7 @@ public class QrScanActivity extends Activity implements LifecycleOwner {
         card.setClickable(true);
 
         TextView title = new TextView(this);
-        title.setText("允许登录电视？");
+        title.setText("允许登录这台设备？");
         title.setTextColor(0xFFF3EFE4);
         title.setTextSize(19f);
         card.addView(title, new LinearLayout.LayoutParams(-1, -2));
@@ -286,8 +286,8 @@ public class QrScanActivity extends Activity implements LifecycleOwner {
         hint.setVisibility(View.INVISIBLE);
         confirmLayer.setVisibility(View.VISIBLE);
         cardBody.setTextColor(0xFFB9B2A4);
-        cardBody.setText(login.label() + "\n\n允许后这台电视会用你手机上的账号登录，"
-                + "你随时可以在电视上退出。");
+        cardBody.setText(login.label() + "\n\n允许后这台设备会用你手机上的账号登录，"
+                + "你随时可以在那台设备上退出。");
         cardPrimary.setText("允许登录");
         cardPrimary.setEnabled(true);
         cardPrimary.setAlpha(1f);
@@ -321,12 +321,12 @@ public class QrScanActivity extends Activity implements LifecycleOwner {
         cardSecondary.setEnabled(false);
         cardSecondary.setAlpha(0.4f);
         cardBody.setTextColor(0xFFB9B2A4);
-        cardBody.setText("正在把这台手机的账号授权给电视，请稍候…");
+        cardBody.setText("正在把这台手机的账号授权给 " + login.name + "，请稍候…");
 
         new Thread(() -> {
             try {
                 push(login.host, login.port, login.token, login.code);
-                finishWith(true, "已登录电视");
+                finishWith(true, "已登录 " + login.name);
             } catch (Exception error) {
                 final String message = error.getMessage() == null ? "登录失败" : error.getMessage();
                 runOnUiThread(() -> {
@@ -557,10 +557,10 @@ public class QrScanActivity extends Activity implements LifecycleOwner {
             int status = connection.getResponseCode();
             InputStream input = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
             String response = read(input);
-            if (status == 403) throw new IllegalStateException("二维码已失效，请在电视上重新打开");
-            if (status == 410) throw new IllegalStateException("登录码已过期，请刷新电视上的二维码");
-            if (status != 200) throw new IllegalStateException("电视没有接受登录（" + status + "）");
-            if (!response.contains("\"ok\":true")) throw new IllegalStateException("电视返回异常");
+            if (status == 403) throw new IllegalStateException("二维码已失效，请在另一台设备上重新打开");
+            if (status == 410) throw new IllegalStateException("登录码已过期，请刷新另一台设备上的二维码");
+            if (status != 200) throw new IllegalStateException("那台设备没有接受登录（" + status + "）");
+            if (!response.contains("\"ok\":true")) throw new IllegalStateException("那台设备返回异常");
         } finally {
             connection.disconnect();
         }
@@ -576,7 +576,7 @@ public class QrScanActivity extends Activity implements LifecycleOwner {
         }
     }
 
-    /** 二维码里承载的登录信息。n 是电视名，老版本码没有就退回 IP。 */
+    /** 二维码里承载的登录信息。n 是设备名，老版本码没有就退回 IP。 */
     private static final class TvLogin {
         final String host;
         final int port;
@@ -595,18 +595,18 @@ public class QrScanActivity extends Activity implements LifecycleOwner {
         static TvLogin parse(String text) {
             Uri uri = Uri.parse(text.trim());
             if (!"veyra".equals(uri.getScheme()) || !"tv-login".equals(uri.getHost()))
-                throw new IllegalArgumentException("这不是电视登录码");
+                throw new IllegalArgumentException("这不是 Veyra 登录码");
             String host = uri.getQueryParameter("h");
             String port = uri.getQueryParameter("p");
             String token = uri.getQueryParameter("t");
             String code = uri.getQueryParameter("c");
             if (host == null || port == null || token == null || code == null)
-                throw new IllegalArgumentException("登录码不完整，请刷新电视上的二维码");
+                throw new IllegalArgumentException("登录码不完整，请刷新二维码");
             int portNumber;
             try {
                 portNumber = Integer.parseInt(port);
             } catch (NumberFormatException error) {
-                throw new IllegalArgumentException("登录码里的端口不对，请刷新电视上的二维码");
+                throw new IllegalArgumentException("登录码里的端口不对，请刷新二维码");
             }
             String name = uri.getQueryParameter("n");
             if (name == null || name.trim().isEmpty()) name = host;

@@ -25,6 +25,27 @@ export function bindWindow(win: BrowserWindow): void {
   mainWindow = win;
 }
 
+/**
+ * 启动后跟服务器核一次会话。
+ * 网络不通时 auth.restore 会保留本地会话（离线也能看已下载内容），
+ * 只有服务器明确回 401/403 才真的踢人。
+ */
+export async function restoreSession(): Promise<void> {
+  const before = session();
+  if (!before) return;
+  try {
+    const result = await auth.restore();
+    const changed = (before.user?.id || '') !== (result.state.user?.id || '');
+    if (changed) {
+      // user 变空说明服务器判定凭据失效，带上标记让界面提示一句，别让人莫名其妙回到登录页
+      emit('auth', { ...result.state, expired: !result.state.user });
+    }
+    if (result.error) console.warn('[auth] 会话校验：' + result.error);
+  } catch (error) {
+    console.warn('[auth] 会话校验失败', (error as Error).message);
+  }
+}
+
 function emit(type: string, data: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('ve:event', { type, data });

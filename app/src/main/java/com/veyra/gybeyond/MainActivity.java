@@ -885,11 +885,17 @@ public final class MainActivity extends Activity {
     }
 
     /**
-     * 扫码输入：起一个只读本机的局域网 HTTP 服务，收到文字就填进页面当前输入框。
-     * 只有电视才需要（遥控器打字不现实）；手机和平板能直接打字，不开端口、不占线程。
+     * 局域网中继服务：
+     *  - 电视开机就起（遥控器打字不现实，搜索/换背景都靠手机扫码）；
+     *  - 手机/平板只在「扫码登录」时按需起（用完就留着，端口只监听局域网，且所有
+     *    请求都要校验一次性码 + token）。
      */
     private void startTextRelay() {
         if (!DeviceProfile.TV.equals(deviceType)) return;
+        ensureTextRelay();
+    }
+
+    private synchronized void ensureTextRelay() {
         if (textRelay != null) return;
         try {
             textRelay = new LanTextRelay(
@@ -898,7 +904,7 @@ public final class MainActivity extends Activity {
                         webView.evaluateJavascript("window.veyraRelayFill && window.veyraRelayFill("
                                 + JSONObject.quote(text) + ")", null);
                     }),
-                    // 扫码登录：手机把会话推过来，这边落盘后通知页面。
+                    // 扫码登录：另一台设备把会话推过来，这边落盘后通知页面。
                     (server, tokenValue, user) -> runOnUiThread(() -> adoptScannedSession(server, tokenValue, user)));
             // 扫码换背景：手机把原图整张传上来，这里解码压缩成 data URL 再交给页面
             textRelay.setBackgroundSink(new java.io.File(getCacheDir(), "tv-bg-upload"), this::adoptBackgroundImage);
@@ -1653,7 +1659,17 @@ public final class MainActivity extends Activity {
             return info.toString();
         }
 
-        /** 手机端：打开扫码页，扫电视上的登录二维码，把本机账号授权过去。 */
+        /**
+         * 手机 / 平板登录页的「扫码登录」：按需起局域网服务并返回二维码信息。
+         * 协议与电视端完全一致（veyra://tv-login?...），所以任何一台已登录的设备
+         * （手机、平板、电脑）都能扫这个码，把账号授权给这台设备。
+         */
+        @JavascriptInterface public String startLoginHost() {
+            ensureTextRelay();
+            return tvLoginInfo();
+        }
+
+        /** 手机端：打开扫码页，扫另一台设备（电视 / 电脑 / 手机 / 平板）上的登录二维码，把本机账号授权过去。 */
         @JavascriptInterface public void startQrScan() {
             runOnUiThread(() -> {
                 if (isDestroyed() || webView == null) return;
