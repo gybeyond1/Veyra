@@ -1892,10 +1892,10 @@ function renderOtp() {
     otpCells.innerHTML = cells;
   }
   if (otpKeys && !otpKeys.childNodes.length) {
-    var keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'del', '0', 'ok'];
+    var keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'del', '0', 'clear'];
     var html = '';
     for (var k = 0; k < keys.length; k++) {
-      var label = keys[k] === 'del' ? '删除' : (keys[k] === 'ok' ? '确定' : keys[k]);
+      var label = keys[k] === 'del' ? '删除' : (keys[k] === 'clear' ? '清空' : keys[k]);
       html += '<button type="button" data-focusable data-key="otp:' + keys[k] + '">' + label + '</button>';
     }
     otpKeys.innerHTML = html;
@@ -1926,7 +1926,8 @@ function closeOtp() {
 
 function pressOtp(key) {
   if (otpBusy) return;
-  if (key === 'ok') { submitOtp(); return; }
+  // 6 位输满会自动提交，所以这里不需要「确定」；空出来的位置给「清空」
+  if (key === 'clear') { otpCode = ''; renderOtp(); if (otpError) otpError.textContent = ''; return; }
   if (key === 'del') otpCode = otpCode.slice(0, -1);
   else if (/^\d$/.test(key) && otpCode.length < 6) otpCode += key;
   if (otpError) otpError.textContent = '';

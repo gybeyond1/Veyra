@@ -557,19 +557,36 @@ app.post('/api/admin/proxy-test', requireAdmin, (req, res) => {
 // 当前动态码（状态页展示；30 秒轮换一次，需管理员）
 app.get('/api/otp', requireAdmin, (_req, res) => {
   const otpData = ensureOtpSecret();
+  const secret = otpData.secret;
+  // 给验证器（Bitwarden / 1Password / Google Authenticator）用的标准 URI
+  const otpauth = 'otpauth://totp/' + encodeURIComponent('Veyra:admin') +
+    '?secret=' + secret + '&issuer=' + encodeURIComponent('Veyra') +
+    '&algorithm=SHA1&digits=' + OTP_DIGITS + '&period=' + OTP_WINDOW;
   res.json({
     code: totpCode(otpData, 0),
     window: OTP_WINDOW,
+    digits: OTP_DIGITS,
     expiresIn: OTP_WINDOW - (Math.floor(Date.now() / 1000) % OTP_WINDOW),
-    lastReset: otpData.lastReset || null
+    lastReset: otpData.lastReset || null,
+    secret,
+    otpauth
   });
+});
+
+// 校验绑定：用户把密钥导入验证器后，回填一次验证器生成的 6 位码来确认导入正确。
+// 注意不能用 /api/otp/verify：管理员在该接口里直接免码放行，等于永远校验通过。
+app.post('/api/otp/check', requireAdmin, (req, res) => {
+  const input = String((req.body && req.body.code) || '').replace(/\D/g, '');
+  if (input.length !== OTP_DIGITS) return res.status(400).json({ error: '请输入 6 位数字' });
+  if (!verifyOtp(input)) return res.status(400).json({ error: '验证码不正确，检查验证器时间和密钥是否导入完整' });
+  res.json({ ok: true, verifiedAt: Date.now() });
 });
 
 // 重置动态码（重新生成 secret，旧码立即全部失效，需管理员）
 app.post('/api/otp/reset', requireAdmin, (_req, res) => {
   try { fs.unlinkSync(path.join(DATA_DIR, 'otp.json')); } catch { /* 不存在则直接新建 */ }
   const otpData = ensureOtpSecret();
-  res.json({ ok: true, code: totpCode(otpData, 0), window: OTP_WINDOW });
+  res.json({ ok: true, code: totpCode(otpData, 0), window: OTP_WINDOW, secret: otpData.secret });
 });
 
 // 验证动态码（APK 私密模式入口；需登录，验证通过后该账号永久解锁私密模式，跟账号走）

@@ -117,6 +117,11 @@ video{width:100%;border-radius:10px;background:#000}
 .drawer td,.drawer th{border:1px solid var(--line);padding:5px 7px;text-align:left}
 .drawer th{color:var(--mut)}
 .otp-big{font-size:28px;letter-spacing:4px;font-weight:700;color:var(--acc)}
+.otp-tip{font-size:12px;color:var(--mut);line-height:1.7;margin:6px 0 10px}
+.otp-secret-row{display:flex;gap:8px;margin-bottom:8px;align-items:center}
+.otp-secret-row input{flex:1;min-width:0}
+.otp-secret-row button{margin:0;white-space:nowrap}
+#otp-secret{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;letter-spacing:.6px}
 .radio-group{display:flex;gap:8px;margin:6px 0 12px}
 .radio-group label{background:#f0f2f6;border:1px solid var(--line);border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px;color:var(--mut)}
 .radio-group label.active{background:var(--acc);color:#1a1e26;font-weight:700;border-color:var(--acc)}
@@ -323,7 +328,17 @@ video{width:100%;border-radius:10px;background:#000}
     </div>
     <h2>动态码</h2>
     <div class="row"><span class="otp-big" id="otp-code">------</span><span class="k" id="otp-remain"></span></div>
-    <button class="ghost" id="btn-reset-otp">重置动态码</button>
+    <p class="otp-tip">服务器按 TOTP 标准算码，30 秒一换。把下面的密钥导入 Bitwarden / 1Password / Google Authenticator，之后直接用验证器里的 6 位码，不用再回这里看。</p>
+    <div class="otp-secret-row">
+      <input id="otp-secret" readonly spellcheck="false" placeholder="密钥（Base32）">
+      <button class="ghost" id="btn-copy-secret">复制</button>
+    </div>
+    <div class="otp-secret-row">
+      <input id="otp-bind-code" placeholder="输入验证器里的 6 位码" inputmode="numeric" maxlength="6" autocomplete="one-time-code">
+      <button id="btn-otp-bind">校验绑定</button>
+    </div>
+    <p class="otp-tip" id="otp-bind-status"></p>
+    <button class="ghost" id="btn-reset-otp">重置密钥（旧验证器全部失效）</button>
     <h2>用户管理</h2>
     <table><thead><tr><th>用户</th><th>角色</th><th>操作</th></tr></thead><tbody id="user-rows"></tbody></table>
     <div class="row" style="margin-top:16px">
@@ -1460,6 +1475,8 @@ async function loadAdmin(){
     document.getElementById('reg-open').checked=!!st.registerOpen;
     document.getElementById('otp-code').textContent=otp.code;
     document.getElementById('otp-remain').textContent=otp.expiresIn+'秒';
+    document.getElementById('otp-secret').value=otp.secret||'';
+    startOtpTimer(otp.expiresIn);
     const s=await fetch('/api/admin/settings',{headers:AUTH()}).then(r=>r.json());
     document.getElementById('backend-proxy').value=s.backendProxy||'';
     loadUsers();
@@ -1484,10 +1501,52 @@ document.getElementById('btn-test-proxy').onclick=async()=>{
   }catch(e){el.textContent='❌ '+e.message}
 };
 
+/* 动态码面板：密钥给验证器，6 位码只是「导入对不对」的确认 */
+let _otpTick=null,_otpLeft=0;
+function startOtpTimer(left){
+  _otpLeft=Number(left)||30;
+  clearInterval(_otpTick);
+  const el=document.getElementById('otp-remain');
+  if(el) el.textContent=_otpLeft+'秒';
+  _otpTick=setInterval(async()=>{
+    _otpLeft--;
+    const r=document.getElementById('otp-remain');
+    if(r) r.textContent=Math.max(_otpLeft,0)+'秒';
+    if(_otpLeft>0) return;
+    clearInterval(_otpTick);
+    try{
+      const d=await fetch('/api/otp',{headers:AUTH()}).then(x=>x.json());
+      document.getElementById('otp-code').textContent=d.code;
+      if(d.secret) document.getElementById('otp-secret').value=d.secret;
+      startOtpTimer(d.expiresIn);
+    }catch(e){}
+  },1000);
+}
+document.getElementById('btn-copy-secret').onclick=async()=>{
+  const el=document.getElementById('otp-secret');
+  try{ await navigator.clipboard.writeText(el.value); toast('密钥已复制，去验证器里粘贴'); }
+  catch(e){ el.removeAttribute('readonly'); el.select(); try{document.execCommand('copy')}catch(_){} el.setAttribute('readonly',''); toast('密钥已复制'); }
+};
+document.getElementById('btn-otp-bind').onclick=async()=>{
+  const inp=document.getElementById('otp-bind-code'), st=document.getElementById('otp-bind-status');
+  const code=(inp.value||'').replace(/\D/g,'');
+  if(code.length!==6){ st.textContent='请输入 6 位数字'; st.style.color='var(--err)'; return; }
+  st.textContent='校验中…'; st.style.color='var(--mut)';
+  try{
+    const r=await fetch('/api/otp/check',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},AUTH()),body:JSON.stringify({code})}).then(x=>x.json());
+    if(r.ok){ st.textContent='✅ 绑定成功，以后验证器里的码就能直接进私密模式'; st.style.color='var(--ok)'; inp.value=''; }
+    else{ st.textContent='❌ '+(r.error||'校验失败'); st.style.color='var(--err)'; }
+  }catch(e){ st.textContent='❌ 网络错误'; st.style.color='var(--err)'; }
+};
 document.getElementById('btn-reset-otp').onclick=async()=>{
-  if(!confirm('重置动态码？'))return;
+  if(!confirm('重置密钥？已经导入的验证器会全部失效，需要用新密钥重新导入。'))return;
   const d=await fetch('/api/otp/reset',{method:'POST',headers:AUTH()}).then(x=>x.json());
   document.getElementById('otp-code').textContent=d.code;
+  if(d.secret) document.getElementById('otp-secret').value=d.secret;
+  startOtpTimer(d.window||30);
+  const st=document.getElementById('otp-bind-status');
+  st.textContent='密钥已重置，请用新密钥重新导入验证器'; st.style.color='var(--mut)';
+  document.getElementById('otp-bind-code').value='';
 };
 
 document.getElementById('btn-admin-logout').onclick=()=>{adminToken='';localStorage.removeItem('veyraAdmin');location.reload()};
