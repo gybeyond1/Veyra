@@ -41,6 +41,11 @@ jobs:
         working-directory: desktop
         run: npm run typecheck
 
+      # mpv 播放内核几十 MB，不进 git，打包前现拉（H.265 原片直放靠它）
+      - name: 拉取 mpv
+        working-directory: desktop
+        run: npm run fetch:mpv
+
       - name: 构建
         working-directory: desktop
         run: npm run build

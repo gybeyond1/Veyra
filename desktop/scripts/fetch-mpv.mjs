@@ -60,14 +60,6 @@ function request(url, redirects = 0) {
   });
 }
 
-async function fetchText(url) {
-  const res = await request(url);
-  let text = '';
-  res.setEncoding('utf8');
-  for await (const chunk of res) text += chunk;
-  return text;
-}
-
 async function download(url, dest) {
   const res = await request(url);
   const total = Number(res.headers['content-length']) || 0;
@@ -93,15 +85,16 @@ async function download(url, dest) {
   process.stdout.write('\n');
 }
 
+/**
+ * 固定版本的下载地址。不去查 GitHub API：CI 上未登录的 API 每小时只有 60 次，
+ * 而且我们要的是可复现的版本，不是「今天最新」。
+ * 需要换版本时改这一行，或用 MPV_URL / MPV_ARCHIVE 覆盖。
+ */
+const DEFAULT_URL =
+  'https://sourceforge.net/projects/mpv-player-windows/files/64bit/mpv-x86_64-20261101-git-48fca90e8c.7z/download';
+
 async function latestAsset() {
-  const meta = JSON.parse(
-    await fetchText('https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest'),
-  );
-  const assets = (meta.assets || []).filter((item) => /^mpv-x86_64-.*\.7z$/.test(item.name));
-  // 优先 v3（要求 CPU 支持 AVX2，2020 年后的机器基本都行），没有再退普通版
-  const pick = assets.find((item) => /x86_64-v3-/.test(item.name)) || assets[0];
-  if (!pick) throw new Error('这个 release 里没找到 7z 包');
-  return pick.browser_download_url;
+  return process.env.MPV_URL || DEFAULT_URL;
 }
 
 async function unzip(archive, dest) {
