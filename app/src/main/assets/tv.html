@@ -67,10 +67,44 @@
       <p class="account-version" id="account-version">版本 —</p>
       <div class="account-actions">
         <button id="account-mode" class="btn" type="button" data-focusable data-key="acct:mode">进入私密模式</button>
+        <button id="account-proxy" class="btn" type="button" data-focusable data-key="acct:proxy">黄果网络通道</button>
         <button id="account-theme" class="btn" type="button" data-focusable data-key="acct:theme">主题设置</button>
         <button id="account-logout" class="btn" type="button" data-focusable data-key="acct:logout">退出登录</button>
         <button id="account-update" class="btn ghost" type="button" data-focusable data-key="acct:update">检查更新</button>
         <button id="account-close" class="btn ghost" type="button" data-focusable data-key="acct:close">关闭</button>
+      </div>
+    </section>
+  </div>
+
+  <!-- 私密内容的网络通道：直连 / 代理 / 后端转发三选一，逻辑跟手机端完全一致 -->
+  <div id="proxy" hidden>
+    <section class="proxy-box">
+      <h1>黄果网络通道</h1>
+      <p class="proxy-sub">只对私密内容生效，公开内容永远直连；选完立即生效，不用重启。</p>
+      <div class="proxy-modes" id="proxy-modes">
+        <button class="proxy-mode" type="button" data-proxy-mode="1" data-focusable data-key="proxy:1">
+          <strong>仅直连</strong><small>用电视自己的网络，走系统 VPN / 全局代理</small>
+        </button>
+        <button class="proxy-mode" type="button" data-proxy-mode="2" data-focusable data-key="proxy:2">
+          <strong>仅代理</strong><small>只走下面填的代理地址，连不上就报错</small>
+        </button>
+        <button class="proxy-mode" type="button" data-proxy-mode="3" data-focusable data-key="proxy:3">
+          <strong>走后端转发</strong><small>全部经后端中转（仅管理员与特权组）</small>
+        </button>
+      </div>
+      <div class="proxy-addr">
+        <label for="proxy-address">代理地址</label>
+        <div class="proxy-input" data-focusable data-key="proxy:addr" tabindex="0">
+          <input id="proxy-address" type="text" placeholder="host:port，比如 192.168.31.108:7893" autocomplete="off">
+        </div>
+        <div class="proxy-qr-row">
+          <div class="proxy-qr" id="proxy-qr"></div>
+          <p class="proxy-cap">遥控器不好打字<br>手机扫码 → 粘贴代理地址<br>自动填进来并保存</p>
+        </div>
+      </div>
+      <div class="proxy-actions">
+        <button id="proxy-save" class="btn" type="button" data-focusable data-key="proxy:save">保存地址</button>
+        <button id="proxy-close" class="btn ghost" type="button" data-focusable data-key="proxy:close">关闭</button>
       </div>
     </section>
   </div>

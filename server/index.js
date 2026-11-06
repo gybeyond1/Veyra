@@ -1164,6 +1164,10 @@ app.post('/api/storages', auth, (req, res) => {
 app.delete('/api/storages/:id', auth, (req, res) => {
   res.json({ ok: storages.remove(String(req.params.id || ''), req.user.id) });
 });
+// 手机端恢复：重装/换机后把账号下的远程服务器配置（含口令）拉回本地
+app.get('/api/storages/restore', auth, (req, res) => {
+  res.json({ storages: storages.restore(req.user.id) });
+});
 app.get('/api/admin/storages', requireAdmin, (req, res) => {
   res.json({ storages: storages.list(String(req.query.userId || '').trim()) });
 });

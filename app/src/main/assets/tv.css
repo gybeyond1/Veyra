@@ -561,6 +561,63 @@ body.page-windowed #stage{overflow:hidden}
   margin:-1.4rem 0 2.4rem;
 }
 
+/* ---------------- 黄果网络通道 ----------------
+   三个模式横排（老内核不认 flex gap，间距一律用 margin），
+   代理地址靠手机扫码填，遥控器只用方向键选模式。 */
+#proxy{
+  position:absolute;left:0;right:0;top:0;bottom:0;z-index:29;
+  background:rgba(6,8,10,.97);
+  display:flex;align-items:center;justify-content:center;
+  color:#F2F3F5;
+}
+.proxy-box{
+  width:108rem;padding:4.2rem;
+  background:var(--panel);border-radius:1.4rem;
+}
+.proxy-box h1{font-size:3.4rem;margin:0 0 1rem}
+.proxy-sub{font-size:1.8rem;color:var(--muted);margin:0 0 2.8rem;line-height:1.5}
+.proxy-modes{display:flex;margin:0 0 2.8rem}
+.proxy-mode{
+  flex:1;display:block;text-align:left;
+  margin:0 1.2rem 0 0;padding:2rem 1.8rem;
+  border:1px solid var(--panel-2);border-radius:1.2rem;
+  background:rgba(255,255,255,.04);color:#F2F3F5;
+}
+.proxy-mode:last-child{margin-right:0}
+.proxy-mode strong{display:block;font-size:2.4rem;margin:0 0 1rem;font-weight:700}
+.proxy-mode small{display:block;font-size:1.7rem;color:var(--muted);line-height:1.45}
+.proxy-mode.is-active{
+  border-color:var(--accent);background:rgba(200,155,60,.16);
+}
+.proxy-mode.is-active strong{color:var(--accent)}
+.proxy-mode.is-focused{box-shadow:0 0 0 .4rem var(--halo),0 0 0 .8rem var(--focus)}
+.proxy-addr{margin:0 0 2.6rem}
+.proxy-addr label{display:block;font-size:1.7rem;color:var(--muted);margin:0 0 1rem}
+.proxy-input{
+  display:block;padding:0 1.6rem;border-radius:1rem;
+  border:1px solid var(--panel-2);background:rgba(255,255,255,.06);
+  margin:0 0 2rem;
+}
+.proxy-input input{
+  width:100%;height:6.4rem;border:0;outline:none;background:transparent;
+  color:#F2F3F5;font-size:2rem;
+}
+.proxy-input.is-focused{box-shadow:0 0 0 .4rem var(--halo),0 0 0 .8rem var(--focus)}
+.proxy-input input::placeholder{color:#6f7883}
+.proxy-qr-row{display:flex;align-items:center;margin:0 0 2.6rem}
+.proxy-qr{
+  width:24rem;height:24rem;padding:1rem;flex:0 0 auto;
+  background:#fff;border-radius:1rem;margin:0 2.8rem 0 0;
+}
+.proxy-qr svg{display:block;width:100%;height:100%}
+.proxy-qr.proxy-qr-empty{
+  background:rgba(255,255,255,.06);color:var(--muted);
+  display:flex;align-items:center;justify-content:center;
+  font-size:1.5rem;line-height:1.5;text-align:center;padding:1.4rem;
+}
+.proxy-cap{font-size:2rem;color:#cfd4da;margin:0;line-height:1.8;max-width:52rem}
+.proxy-actions .btn{margin:0 1.2rem 0 0;min-width:18rem}
+
 /* ---------------- 动态码 ----------------
    遥控器只有方向键，6 位数字靠屏幕上的九宫格输，焦点走统一的 .is-focused 环。 */
 #otp{

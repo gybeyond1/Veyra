@@ -552,6 +552,7 @@ function activeOverlay() {
   /* 动态码浮窗优先级最高：它开着的时候背后就是整页海报，
      不锁住的话上下左右会直接选到浮窗后面的剧集封面上。 */
   if (otpPanel && !otpPanel.hidden) return otpPanel;
+  if (proxyPanel && !proxyPanel.hidden) return proxyPanel;
   if (themePanel && !themePanel.hidden) return themePanel;
   if (updateLayer && !updateLayer.hidden) return updateLayer;
   if (loginLayer && !loginLayer.hidden) return loginLayer;
@@ -1699,6 +1700,7 @@ window.veyraTvKey = function (code) {
 
 window.hgBack = function () {
   if (otpPanel && !otpPanel.hidden) { closeOtp(); state.focusKey = 'acct:mode'; restoreFocus(); return true; }
+  if (proxyPanel && !proxyPanel.hidden) { closeProxy(); return true; }
   if (themePanel && !themePanel.hidden) { closeTheme(); return true; }
   if (updateLayer && !updateLayer.hidden) { closeUpdatePanel(); return true; }
   /* 没登录就停在登录页：返回直接交给原生弹退出确认，不能靠返回键绕过去 */
@@ -1805,6 +1807,20 @@ document.addEventListener('click', function (event) {
   }
   if (target.closest('#account-close')) { closeAccount(); return; }
   if (target.closest('#account-mode')) { switchMode(); return; }
+  if (target.closest('#account-proxy')) { openProxy(); return; }
+  var proxyModeBtn = target.closest('[data-proxy-mode]');
+  if (proxyModeBtn) { selectProxyMode(Number(proxyModeBtn.getAttribute('data-proxy-mode')) || 3); return; }
+  if (target.closest('#proxy-save')) { saveProxyAddress(false); return; }
+  if (target.closest('#proxy-close')) { closeProxy(); return; }
+  /* 地址框：把按键交还系统 IME，跟搜索框同一套（电视遥控器打字难，能扫码就扫码） */
+  if (target.closest('.proxy-input')) {
+    var proxyField = document.getElementById('proxy-address');
+    if (proxyField) {
+      try { window.AndroidHost.setTvCapture(false); } catch (error) { }
+      try { proxyField.focus(); } catch (error) { }
+    }
+    return;
+  }
   if (target.closest('#account-logout')) { logout(); return; }
   if (target.closest('#account-update')) { checkTvUpdate(); return; }
   if (target.closest('#tv-update-install')) { startTvUpdate(); return; }
@@ -1882,6 +1898,129 @@ window.hgTvLogin = function (ok) {
     }
   }).catch(function () { });
 };
+
+/* ---------------- 黄果网络通道：直连 / 代理 / 后端转发 ----------------
+   跟手机端同一套原生设置（ProxySettings），电视上选完就是同一份配置，
+   私密内容下次请求立刻按新模式走，不用重启。 */
+var proxyPanel = document.getElementById('proxy');
+var proxyModesEl = document.getElementById('proxy-modes');
+var proxyAddressInput = document.getElementById('proxy-address');
+var proxyQrBox = document.getElementById('proxy-qr');
+var proxyMode = 3;
+var proxyAddress = '';
+var proxyQrCache = { url: '', html: '' };
+var PROXY_MODE_NAMES = { 1: '仅直连', 2: '仅代理', 3: '走后端转发' };
+
+/* 走后端转发只有管理员/特权组能用；普通用户点上去给一句人话，而不是静默失败 */
+function roleCanUseBackend() {
+  var role = String((state.account && state.account.role) || 'user');
+  return role === 'admin' || role === 'vip';
+}
+
+function renderProxyModes() {
+  if (!proxyModesEl) return;
+  var nodes = proxyModesEl.querySelectorAll('[data-proxy-mode]');
+  for (var i = 0; i < nodes.length; i++) {
+    var value = Number(nodes[i].getAttribute('data-proxy-mode'));
+    if (value === proxyMode) nodes[i].classList.add('is-active');
+    else nodes[i].classList.remove('is-active');
+    /* 不能选的模式不禁用（禁用后焦点直接跳过去，用户看不到原因），
+       只在文字上标一句，点的时候再提示。 */
+    var small = nodes[i].querySelector('small');
+    if (small && value === 3) {
+      small.textContent = roleCanUseBackend()
+        ? '全部经后端中转（仅管理员与特权组）'
+        : '全部经后端中转 · 当前账号不可用';
+    }
+  }
+}
+
+function relayUrl() {
+  var info = null;
+  try { info = JSON.parse(window.AndroidHost.relayInfo()); } catch (error) { }
+  return info && info.url ? info.url : '';
+}
+
+function renderProxyQr() {
+  if (!proxyQrBox) return;
+  var url = relayUrl();
+  if (!url) {
+    proxyQrBox.className = 'proxy-qr proxy-qr-empty';
+    proxyQrBox.innerHTML = '电视没连上局域网<br>可以先点地址框用键盘输';
+    return;
+  }
+  if (proxyQrCache.url !== url) {
+    try {
+      var qr = window.qrcode(0, 'M');
+      qr.addData(url);
+      qr.make();
+      proxyQrCache = { url: url, html: qr.createSvgTag({ cellSize: 4, margin: 1, scalable: true }) };
+    } catch (error) {
+      proxyQrBox.className = 'proxy-qr proxy-qr-empty';
+      proxyQrBox.innerHTML = '二维码生成失败';
+      return;
+    }
+  }
+  proxyQrBox.className = 'proxy-qr';
+  proxyQrBox.innerHTML = proxyQrCache.html;
+}
+
+function paintProxyAddress() {
+  if (proxyAddressInput && proxyAddressInput.value !== proxyAddress) proxyAddressInput.value = proxyAddress;
+}
+
+function saveProxyAddress(silent) {
+  var value = proxyAddressInput ? String(proxyAddressInput.value || '').trim() : proxyAddress;
+  proxyAddress = value;
+  return api('set-proxy', { value: value }).then(function () {
+    if (!silent) toast(value ? '代理地址已保存' : '代理地址已清空');
+  }).catch(function (error) {
+    toast((error && error.message) || '代理地址保存失败', true);
+  });
+}
+
+function selectProxyMode(value) {
+  if (value === 3 && !roleCanUseBackend()) {
+    toast('走后端转发仅管理员与特权组可用，请联系管理员', true);
+    return;
+  }
+  api('set-proxy-mode', { value: value }).then(function () {
+    proxyMode = value;
+    renderProxyModes();
+    toast('已切换：' + (PROXY_MODE_NAMES[value] || ''));
+    state.focusKey = 'proxy:' + value;
+    restoreFocus();
+  }).catch(function (error) {
+    toast((error && error.message) || '切换失败', true);
+  });
+}
+
+function openProxy() {
+  if (accountPanel) accountPanel.hidden = true;
+  if (proxyPanel) proxyPanel.hidden = false;
+  paintProxyAddress();
+  renderProxyModes();
+  renderProxyQr();
+  state.focusKey = 'proxy:' + proxyMode;
+  restoreFocus();
+  api('get-proxy-mode').then(function (value) {
+    var mode = Number(value) || 3;
+    if (mode === proxyMode) return;
+    proxyMode = mode;
+    renderProxyModes();
+  }).catch(function () { });
+  api('get-proxy').then(function (value) {
+    proxyAddress = String(value || '');
+    paintProxyAddress();
+  }).catch(function () { });
+}
+
+function closeProxy() {
+  if (proxyPanel) proxyPanel.hidden = true;
+  if (accountPanel) accountPanel.hidden = false;
+  state.focusKey = 'acct:proxy';
+  restoreFocus();
+}
 
 /* ---------------- 账号面板：退出登录 / 切换私密模式 ---------------- */
 function openAccount() {
@@ -2161,6 +2300,18 @@ function logout() {
 
 /* 手机「扫码输入」传过来的文字：直接填进搜索框并搜 */
 window.veyraRelayFill = function (text) {
+  /* 黄果通道面板开着：手机推过来的就是代理地址，填进地址框并直接保存
+     （电视遥控器输 host:port 太痛苦，扫码是主要输入方式）。 */
+  if (proxyPanel && !proxyPanel.hidden) {
+    proxyAddress = String(text == null ? '' : text).trim();
+    paintProxyAddress();
+    saveProxyAddress(true).then(function () {
+      toast(proxyAddress ? '代理地址已填入并保存' : '代理地址已清空');
+    });
+    state.focusKey = 'proxy:addr';
+    restoreFocus();
+    return;
+  }
   if (state.route !== 'search') go('search');
   var input = document.getElementById('search-input');
   if (input) input.value = text || '';

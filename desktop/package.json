@@ -1,6 +1,6 @@
 {
   "name": "veyra-desktop",
-  "version": "0.28.6",
+  "version": "0.28.7",
   "private": true,
   "description": "Veyra 桌面端：本地解析、下载、合并，账号与片单与手机端同步",
   "main": "dist/main/index.cjs",

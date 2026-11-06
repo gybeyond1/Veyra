@@ -127,6 +127,8 @@ public final class MainActivity extends Activity {
     private final Handler deviceHandler = new Handler(Looper.getMainLooper());
     private boolean deviceLoopRunning;
     private volatile boolean deviceRegistered;
+    /** 远程服务器配置是否已从账号里恢复过（每次登录/冷启动各一次） */
+    private volatile boolean remotesRestored;
     // 大屏适配：phone/tablet/tv 由 DeviceProfile 判定，页面据此加载对应布局与遥控焦点。
     // tvCapture 为 true 时方向键/确认键由页面接管（遥控导航），输入框聚焦时页面会临时关掉。
     private String deviceType = DeviceProfile.PHONE;
@@ -583,6 +585,7 @@ public final class MainActivity extends Activity {
                 runOnUiThread(() -> webView.evaluateJavascript("window.hgCloudSynced && window.hgCloudSynced()", null));
             } catch (Exception error) { Log.w(TAG, "云端同步稍后重试", error); }
         });
+        if (!remotesRestored) restoreAccountRemotes();
         startDeviceLoop();
         if (pendingUpdateApk != null) {
             File apk = pendingUpdateApk;
@@ -967,6 +970,11 @@ public final class MainActivity extends Activity {
                 if (isDestroyed() || webView == null) return;
                 webView.evaluateJavascript("window.hgTvLogin && window.hgTvLogin(" + result + ")", null);
             });
+            if (result) {
+                deviceRegistered = false;
+                remotesRestored = false;
+                restoreAccountRemotes();
+            }
         });
     }
 
@@ -1811,10 +1819,32 @@ public final class MainActivity extends Activity {
         }
     }
 
+    /**
+     * 远程服务器配置跟账号走：登录后/每次冷启动把账号下那份（含口令）合并回本机，
+     * 重装、换机、清数据之后不用重新填。本地已经有的条目按 id 更新，不会重复堆积。
+     */
+    private void restoreAccountRemotes() {
+        if (account == null || !account.isLoggedIn()) return;
+        requests.execute(() -> {
+            try {
+                boolean changed = RemoteStore.restoreFromAccount(this, account.restoreRemotes());
+                remotesRestored = true;
+                if (changed) runOnUiThread(() -> {
+                    if (isDestroyed() || webView == null) return;
+                    webView.evaluateJavascript("window.hgRemotesRestored && window.hgRemotesRestored()", null);
+                });
+            } catch (Exception error) {
+                Log.w(TAG, "远程服务器配置稍后恢复", error);
+            }
+        });
+    }
+
     private void refreshAccountAfterAuth(String userId) {
         // 登录/注册成功后立刻上报设备，Web 管理台才能看到这台手机
         deviceRegistered = false;
+        remotesRestored = false;
         runOnUiThread(this::startDeviceLoop);
+        restoreAccountRemotes();
         requests.execute(() -> {
             try {
                 account.sync();

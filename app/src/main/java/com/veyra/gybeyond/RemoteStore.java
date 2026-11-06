@@ -119,6 +119,83 @@ final class RemoteStore {
         return publicView(server);
     }
 
+    /**
+     * 账号里的配置回填到本机：登录后、App 启动时调用。
+     *
+     * 「配置跟账号走」的实现：心跳已经把本地配置上报到后端（storages.syncDevice），
+     * 这里把后端那一份（含口令）合并回来 —— 重装、换机、清数据之后不用重新填。
+     * 以 localId 认条目：后端同一 localId 只留一条，所以合并不会堆出重复项。
+     *
+     * @return 本地是否发生变化（变了页面才需要重画列表）
+     */
+    static boolean restoreFromAccount(Context context, JSONArray remote) throws Exception {
+        if (remote == null || remote.length() == 0) return false;
+        JSONArray servers = load(context);
+        boolean changed = false;
+        for (int i = 0; i < remote.length() && servers.length() < MAX_SERVERS; i++) {
+            JSONObject item = remote.optJSONObject(i);
+            if (item == null) continue;
+            String type = item.optString("type", "").trim().toLowerCase();
+            if (!TYPE_SMB.equals(type) && !TYPE_WEBDAV.equals(type) && !TYPE_FTP.equals(type)) continue;
+            String host = cleanHost(item.optString("host", ""));
+            if (host.isEmpty()) continue;
+            String localId = item.optString("localId", "").trim();
+            int hit = -1;
+            for (int j = 0; j < servers.length(); j++) {
+                JSONObject saved = servers.optJSONObject(j);
+                if (saved == null) continue;
+                String id = saved.optString("id", "");
+                boolean same = !localId.isEmpty() ? localId.equals(id)
+                        : (host.equals(saved.optString("host", "")) && type.equals(saved.optString("type", ""))
+                        && item.optString("name", "").equals(saved.optString("name", "")));
+                if (same) { hit = j; break; }
+            }
+            JSONObject merged = new JSONObject();
+            merged.put("id", hit >= 0 ? servers.optJSONObject(hit).optString("id", "")
+                    : (localId.isEmpty() ? newId() : localId));
+            merged.put("type", type);
+            merged.put("host", host);
+            merged.put("secure", item.optBoolean("secure", false));
+            // insecure 是本地证书选项（后端不存）：本地已有就沿用，别被回填覆盖
+            merged.put("insecure", hit >= 0 ? servers.optJSONObject(hit).optBoolean("insecure", true) : true);
+            merged.put("cleanup", item.optBoolean("cleanup", true));
+            merged.put("user", item.optString("user", "").trim());
+            merged.put("path", cleanPath(item.optString("path", "")));
+            merged.put("share", TYPE_SMB.equals(type) ? cleanShare(item.optString("share", "")) : "");
+            int port = item.optInt("port", 0);
+            if (port <= 0 || port > 65535) port = defaultPort(type, merged.optBoolean("secure", false));
+            merged.put("port", port);
+            merged.put("pass", item.optString("pass", ""));
+            String name = item.optString("name", "").trim();
+            merged.put("name", name.isEmpty() ? defaultName(merged) : (name.length() > 40 ? name.substring(0, 40) : name));
+
+            if (hit >= 0) {
+                JSONObject old = servers.optJSONObject(hit);
+                if (old != null && sameConfig(old, merged)) continue;
+                servers.put(hit, merged);
+            } else {
+                servers.put(merged);
+            }
+            changed = true;
+        }
+        if (changed) prefs(context).edit().putString(KEY, servers.toString()).apply();
+        return changed;
+    }
+
+    /** 两条配置是否等价（用于恢复时判断有没有变化，避免每次启动都写盘）。 */
+    private static boolean sameConfig(JSONObject a, JSONObject b) {
+        return a.optString("type", "").equals(b.optString("type", ""))
+                && a.optString("host", "").equals(b.optString("host", ""))
+                && a.optInt("port", 0) == b.optInt("port", 0)
+                && a.optString("share", "").equals(b.optString("share", ""))
+                && a.optString("path", "").equals(b.optString("path", ""))
+                && a.optString("user", "").equals(b.optString("user", ""))
+                && a.optString("pass", "").equals(b.optString("pass", ""))
+                && a.optString("name", "").equals(b.optString("name", ""))
+                && a.optBoolean("secure", false) == b.optBoolean("secure", false)
+                && a.optBoolean("cleanup", true) == b.optBoolean("cleanup", true);
+    }
+
     static void remove(Context context, String id) {
         if (id == null || id.isEmpty()) return;
         JSONArray servers = load(context);
@@ -132,8 +209,7 @@ final class RemoteStore {
         prefs(context).edit().putString(KEY, next.toString()).apply();
     }
 
-    /** 页面提交的是「可能没保存过的草稿」：密码空但有 id 时，用存下来的密码补上（测试连接用）。 */
-    static JSONObject withSecret(Context context, JSONObject draft) throws Exception {
+    /** 页面提交的是「可能没保存过的草稿」：密码空但有 id 时，用存下来的密码补上（测试连接用）。 */    static JSONObject withSecret(Context context, JSONObject draft) throws Exception {
         JSONObject server = new JSONObject(draft == null ? "{}" : draft.toString());
         if (server.optString("pass", "").isEmpty()) {
             JSONObject old = find(context, server.optString("id", ""));

@@ -104,6 +104,8 @@ function publicView(item) {
     secure: !!item.secure,
     cleanup: item.cleanup !== false,
     hasPass: !!item.pass,
+    // 设备端本地的 id：手机重装/换机后靠它把配置认回来（列表恢复用）
+    localId: item.localId || '',
     // 配置是在哪台设备上填的：SMB/FTP 要靠它中转；空 = 直接在服务端/网页上添加
     deviceId: item.deviceId || '',
     deviceName: item.deviceName || '',
@@ -149,9 +151,12 @@ function createStorages(options) {
       try {
         const item = normalize(remote || {});
         const localId = text(remote && remote.id, 40) || crypto.randomBytes(4).toString('hex');
-        const id = `d_${deviceId}_${localId}`.slice(0, 120);
+        // 同一个 localId 在账号里只留一条：手机重装/换机后从后端恢复，再次上报时沿用原来的 id，
+        // 否则每重装一次就会凭空多出一份重复配置。
+        const existing = items.find(entry => entry.userId === userId && entry.localId === localId && entry.deviceId);
+        const id = existing ? existing.id : `d_${deviceId}_${localId}`.slice(0, 120);
         keep.add(id);
-        const previous = items.find(entry => entry.id === id);
+        const previous = existing || items.find(entry => entry.id === id);
         items = items.filter(entry => entry.id !== id);
         items.push({
           ...item,
@@ -171,6 +176,21 @@ function createStorages(options) {
     // 这台设备名下、这次没上报的（设备上删了）清掉
     items = items.filter(entry => !(entry.deviceId === deviceId && entry.userId === userId) || keep.has(entry.id));
     persist();
+  }
+
+  /**
+   * 手机恢复用：本人名下全部存储，带明文口令。
+   * 只给已登录的本账号调用（token 鉴权），列表接口 publicView 永远不含口令。
+   */
+  function restore(userId) {
+    return items.filter(item => item.userId === userId)
+      .sort((a, b) => (a.updatedAt || 0) - (b.updatedAt || 0))
+      .map(item => ({
+        ...publicView(item),
+        pass: item.pass || '',
+        localId: item.localId || '',
+        deviceId: item.deviceId || '',
+      }));
   }
 
   function save(userId, input) {
@@ -242,7 +262,7 @@ function createStorages(options) {
     return { url: target, size };
   }
 
-  return { file, list, find, syncDevice, save, remove, upload };
+  return { file, list, find, syncDevice, restore, save, remove, upload };
 }
 
 module.exports = { createStorages, TYPES };

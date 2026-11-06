@@ -1902,6 +1902,16 @@ async function loadRemoteServers(force) {
   return remoteServers;
 }
 
+/* 账号里的远程服务器配置回填完成（登录后 / 冷启动）：
+   原生侧已经写进本地，这里只要把缓存丢掉重拉一遍，界面就跟着更新。
+   正在编辑表单时不重画，免得把用户填了一半的内容冲掉。 */
+window.hgRemotesRestored = () => {
+  remoteServers = null;
+  loadRemoteServers(true).then(() => {
+    if (remotePop && !remotePop.hidden && remoteEditing === null) renderRemotePop();
+  }).catch(() => { });
+};
+
 async function openDevicePicker() {
   try {
     const data = await api('download-targets');

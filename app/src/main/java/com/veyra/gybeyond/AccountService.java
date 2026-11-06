@@ -9,6 +9,7 @@ import android.media.ExifInterface;
 import android.net.Uri;
 import android.util.Base64;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
@@ -400,7 +401,14 @@ final class AccountService {
         }
     }
 
-    /** 登录态后端请求（NAS 下载任务等），给 MainActivity dispatch 使用。 */
+    /** 登录态后端请求（NAS 下载任务等），给 MainActivity dispatch 使用。 */    /** 账号名下的远程服务器配置（含口令）：重装/换机后回填本机，配置跟账号走。 */
+    JSONArray restoreRemotes() throws Exception {
+        if (!isLoggedIn()) return new JSONArray();
+        JSONObject result = getJson("api/storages/restore");
+        JSONArray arr = result.optJSONArray("storages");
+        return arr == null ? new JSONArray() : arr;
+    }
+
     JSONObject postJson(String path, JSONObject body) throws Exception {
         if (!isLoggedIn()) throw new IllegalStateException("请先登录");
         return call("POST", path, body, true);
