@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import type { DownloadTask } from '../shared/types';
 import { ffmpegAvailable, lanAddress, userDataDir } from './paths';
-import { fetchBinary } from './http';
+import { fetchBinary, fetchBinaryFast } from './http';
 import { serverModules } from './server-modules';
 import { playSource } from './huangguo';
 import { session } from './session';
@@ -112,7 +112,9 @@ async function fetchMedia(url: string, referer: string): Promise<Buffer> {
 
   const current = session();
   if (!current?.server) throw new Error('走后端转发需要先登录服务器');
-  return fetchBinary(
+  /* 走 Node 长连接而不是 curl：播放时每 4 秒就有一个分片请求，
+     起进程 + 重新握手会让「解析到了但流加载失败」变成常态。 */
+  return fetchBinaryFast(
     `${current.server}/api/huangguo-proxy?url=${encodeURIComponent(url)}`,
     30000,
     headers,

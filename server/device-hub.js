@@ -28,10 +28,12 @@ function text(value, max) {
 
 function createDeviceHub(options) {
   const file = path.join(options.dataDir, 'devices.json');
-  let state = { devices: {}, commands: [] };
+  let state = { devices: {}, commands: [], revoked: {} };
   try {
     const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
-    if (raw && raw.devices && Array.isArray(raw.commands)) state = { devices: raw.devices, commands: raw.commands };
+    if (raw && raw.devices && Array.isArray(raw.commands)) {
+      state = { devices: raw.devices, commands: raw.commands, revoked: raw.revoked || {} };
+    }
   } catch { /* 首次运行或文件损坏：从空状态开始 */ }
 
   let saveTimer = null;
@@ -73,6 +75,14 @@ function createDeviceHub(options) {
   function register(user, info) {
     const id = text(info && info.id, 64);
     if (!DEVICE_ID_RE.test(id)) { const e = new Error('设备标识不合法'); e.statusCode = 400; throw e; }
+    // 被移除的设备：必须先在别处重新登录（登录会解除标记），否则心跳一律拒绝
+    const revoked = state.revoked[id];
+    if (revoked && revoked.userId === user.id) {
+      const e = new Error('这台设备已被移除，请重新登录');
+      e.statusCode = 403;
+      e.revoked = true;
+      throw e;
+    }
     const now = Date.now();
     const previous = state.devices[id];
     const device = {
@@ -132,6 +142,45 @@ function createDeviceHub(options) {
     return true;
   }
 
+  /** 改名：只改显示名，不动设备身份，也不需要动态码。 */
+  function rename(deviceId, userId, name) {
+    const device = state.devices[deviceId];
+    if (!device || device.userId !== userId) {
+      const e = new Error('设备不存在'); e.statusCode = 404; throw e;
+    }
+    const next = text(name, 24);
+    if (!next) { const e = new Error('设备名不能为空'); e.statusCode = 400; throw e; }
+    device.name = next;
+    persist();
+    return publicDevice(device);
+  }
+
+  /**
+   * 移除设备：删掉记录 + 打上撤销标记。
+   * 标记不清掉的话，那台设备下一次心跳就会把自己重新注册回来 —— 等于没删。
+   * 用户在任意一端重新登录时（login 路由）会调用 clearRevoked 解除。
+   */
+  function revoke(deviceId, userId) {
+    const device = state.devices[deviceId];
+    if (!device || device.userId !== userId) {
+      const e = new Error('设备不存在'); e.statusCode = 404; throw e;
+    }
+    state.revoked[deviceId] = { userId, at: Date.now() };
+    delete state.devices[deviceId];
+    state.commands = state.commands.filter(c => c.deviceId !== deviceId);
+    persistNow();
+    return true;
+  }
+
+  /** 重新登录 = 重新授权这台设备，撤销标记作废。 */
+  function clearRevoked(userId) {
+    let changed = false;
+    for (const [id, item] of Object.entries(state.revoked)) {
+      if (item.userId === userId) { delete state.revoked[id]; changed = true; }
+    }
+    if (changed) persistNow();
+  }
+
   function createCommand(deviceId, payload, type) {
     const device = state.devices[deviceId];
     if (!device) { const e = new Error('设备不在线或未注册'); e.statusCode = 404; throw e; }
@@ -186,7 +235,7 @@ function createDeviceHub(options) {
         payload: c.payload, createdAt: c.createdAt, updatedAt: c.updatedAt, error: c.error }));
   }
 
-  return { register, poll, ack, list, remove, createCommand, commands, file };
+  return { register, poll, ack, list, remove, rename, revoke, clearRevoked, createCommand, commands, file };
 }
 
 module.exports = { createDeviceHub, ONLINE_MS };

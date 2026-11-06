@@ -1,9 +1,12 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import type { CategoryPayload, HomePayload, SeriesDetail, SeriesCard } from '../shared/types';
 import { serverModules } from './server-modules';
 import { fetchText } from './http';
 import * as huangguo from './huangguo';
 import type { ContentSource } from './source';
 import { playUrl, prepare } from './media';
+import { userDataDir } from './paths';
 
 const SITE = 'https://hongguoduanju.com';
 
@@ -25,14 +28,64 @@ function toCards(list: any): SeriesCard[] {
   return (Array.isArray(list) ? list : []).map(toCard).filter(Boolean) as SeriesCard[];
 }
 
+/* ---------------- 本地缓存（stale-while-revalidate） ----------------
+ * 私密源解析一次要好几秒（还要经后端转发），每次进首页都从零加载、整屏骨架屏，
+ * 体感非常差。这里把上一次的结果落盘：进来先立刻用缓存渲染，
+ * 新数据回来且确实有变化时再整体替换；拉取失败就继续用旧的。
+ */
+const CACHE_TTL = 12 * 3600 * 1000;
+
+function cachePath(key: string): string {
+  const dir = path.join(userDataDir, 'catalog-cache');
+  fs.mkdirSync(dir, { recursive: true });
+  return path.join(dir, `${key.replace(/[^A-Za-z0-9:_-]/g, '_').slice(0, 80)}.json`);
+}
+
+function writeCache(key: string, payload: unknown): void {
+  try {
+    fs.writeFileSync(cachePath(key), JSON.stringify({ at: Date.now(), payload }));
+  } catch {
+    /* 缓存写不进去不影响主流程 */
+  }
+}
+
+function readCache<T>(key: string): T | null {
+  try {
+    const raw = JSON.parse(fs.readFileSync(cachePath(key), 'utf8')) as { at: number; payload: T };
+    if (!raw || Date.now() - Number(raw.at || 0) > CACHE_TTL) return null;
+    return raw.payload;
+  } catch {
+    return null;
+  }
+}
+
+export function cachedHome(source: ContentSource): HomePayload | null {
+  return readCache<HomePayload>(`home:${source}`);
+}
+
+export function cachedCategory(source: ContentSource, params: { type?: string; slug?: string; page?: number }): CategoryPayload | null {
+  const page = Math.min(100, Math.max(1, Number(params.page) || 1));
+  return readCache<CategoryPayload>(`cat:${source}:${params.type || 'short'}:${params.slug || ''}:${page}`);
+}
+
+export function cachedDetail(source: ContentSource, id: string): SeriesDetail | null {
+  return readCache<SeriesDetail>(`detail:${source}:${id}`);
+}
+
 export async function home(source: ContentSource): Promise<HomePayload> {
-  if (source === 'huangguo') return huangguo.home();
+  if (source === 'huangguo') {
+    const payload = await huangguo.home();
+    writeCache(`home:${source}`, payload);
+    return payload;
+  }
   const data = await serverModules().content.home();
-  return {
+  const payload = {
     slides: toCards(data?.slides || data?.items),
     homepageRecommend: toCards(data?.homepageRecommend || data?.recommend?.items),
     homepageNewest: toCards(data?.homepageNewest || data?.newest?.items),
   };
+  writeCache(`home:${source}`, payload);
+  return payload;
 }
 
 export async function category(
@@ -40,20 +93,25 @@ export async function category(
   params: { type?: string; slug?: string; page?: number },
 ): Promise<CategoryPayload> {
   const page = Math.min(100, Math.max(1, Number(params.page) || 1));
+  const cacheKey = `cat:${source}:${params.type || 'short'}:${params.slug || ''}:${page}`;
   if (source === 'huangguo') {
     const result = await huangguo.category(params.slug || '', page);
-    return { items: result.items, title: result.title, page, hasMore: result.hasMore, total: result.items.length };
+    const payload = { items: result.items, title: result.title, page, hasMore: result.hasMore, total: result.items.length };
+    writeCache(cacheKey, payload);
+    return payload;
   }
   const query = { type: params.type === 'comic' ? 'comic' : 'short', slug: params.slug || '', page };
   const data = await serverModules().content.category(query);
   const items = toCards(data?.items);
-  return {
+  const payload = {
     items,
     title: data?.title ? String(data.title) : '',
     total: Number(data?.total) || 0,
     page,
     hasMore: items.length >= 20,
   };
+  writeCache(cacheKey, payload);
+  return payload;
 }
 
 export async function tags(source: ContentSource): Promise<{ items: { name: string; slug: string; type: string }[] }> {
@@ -90,7 +148,11 @@ export async function search(source: ContentSource, q: string): Promise<{ items:
 export async function detail(source: ContentSource, id: string): Promise<SeriesDetail> {
   const seriesId = String(id || '').trim();
   if (!seriesId) throw new Error('缺少剧集 id');
-  if (source === 'huangguo') return huangguo.detail(seriesId);
+  if (source === 'huangguo') {
+    const payload = await huangguo.detail(seriesId);
+    writeCache(`detail:${source}:${id}`, payload);
+    return payload;
+  }
 
   const { hgApp, contentModule } = serverModules();
   const html = await fetchText(`${SITE}/detail/${encodeURIComponent(seriesId)}`, 12000);
@@ -120,7 +182,7 @@ export async function detail(source: ContentSource, id: string): Promise<SeriesD
     ? rawEpisodes.map((ep, index) => Number(ep?.number || ep?.index || index + 1))
     : vids.map((_, index) => index + 1);
 
-  return {
+  const payload: SeriesDetail = {
     id: seriesId,
     title: String(page.series_title || video.series_title || page.title || ''),
     cover: String(page.series_cover || video.series_cover || ''),
@@ -131,6 +193,8 @@ export async function detail(source: ContentSource, id: string): Promise<SeriesD
     vids,
     tags: Array.isArray(video.category_list) ? video.category_list.map(String) : [],
   };
+  writeCache(`detail:${source}:${id}`, payload);
+  return payload;
 }
 
 /**

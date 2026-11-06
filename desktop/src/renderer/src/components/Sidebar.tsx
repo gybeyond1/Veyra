@@ -9,9 +9,7 @@ interface Props {
   source: 'hongguo' | 'huangguo';
   activeDownloads: number;
   onNav: (view: View) => void;
-  onPrivate: () => void;
   onOpenSettings: () => void;
-  onLogout: () => void;
 }
 
 const items: { key: View; label: string; icon: JSX.Element }[] = [
@@ -74,11 +72,8 @@ export default function Sidebar({
   source,
   activeDownloads,
   onNav,
-  onPrivate,
   onOpenSettings,
-  onLogout,
 }: Props) {
-  const [menuOpen, setMenuOpen] = useState(false);
   const [avatarBroken, setAvatarBroken] = useState(false);
   const base = server.replace(/\/+$/, '');
   const avatar = !avatarBroken && base ? `${base}${user.avatar || `/api/avatar/${user.id}.jpg`}` : '';
@@ -111,51 +106,16 @@ export default function Sidebar({
       </nav>
 
       <div className="side-bottom">
-        <div className="account-wrap">
-          {menuOpen && (
-            <>
-              <div className="account-scrim" onClick={() => setMenuOpen(false)} />
-              <div className="account-menu">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onPrivate();
-                  }}
-                >
-                  <span className="menu-lock">{source === 'huangguo' ? '🔓' : '🔒'}</span>
-                  {source === 'huangguo' ? '返回公开模式' : '进入私密模式'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onOpenSettings();
-                  }}
-                >
-                  设置
-                </button>
-                <button type="button" onClick={onLogout}>
-                  退出登录
-                </button>
-              </div>
-            </>
-          )}
-          <button
-            type="button"
-            className={`account${menuOpen ? ' open' : ''}`}
-            onClick={() => setMenuOpen((current) => !current)}
-          >
-            <span className="avatar">
-              {avatar && <img src={avatar} alt="" onError={() => setAvatarBroken(true)} />}
-              <em>{(user.username || '?').slice(0, 1).toUpperCase()}</em>
-            </span>
-            <div className="account-meta">
-              <strong>{user.username}</strong>
-            </div>
-            <span className="account-more">⋯</span>
-          </button>
-        </div>
+        {/* 点头像直接进设置：私密模式开关、退出登录都在里面，侧栏不再挂二级菜单 */}
+        <button type="button" className="account" onClick={onOpenSettings} title="设置">
+          <span className="avatar">
+            {avatar && <img src={avatar} alt="" onError={() => setAvatarBroken(true)} />}
+            <em>{(user.username || '?').slice(0, 1).toUpperCase()}</em>
+          </span>
+          <div className="account-meta">
+            <strong>{user.username}</strong>
+          </div>
+        </button>
       </div>
     </aside>
   );

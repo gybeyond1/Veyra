@@ -40,6 +40,18 @@ export default function BrowsePage({ mode = 'category', seed = '', source, onOpe
     let alive = true;
     setLoading(true);
     setError('');
+    /* 分类页同样先铺缓存：切分类时立刻有内容，新数据回来再替换。
+       已经有新数据（prev 非空）时不覆盖，避免慢一步的缓存把结果顶掉。 */
+    if (mode === 'category') {
+      call<CategoryPayload | null>('catalog.cachedCategory', { type, slug, page, source })
+        .then((cached) => {
+          if (!alive || !cached?.items?.length) return;
+          setItems((prev) => (prev.length ? prev : cached.items));
+          setHasMore((prev) => prev || !!cached.hasMore);
+          setLoading(false);
+        })
+        .catch(() => undefined);
+    }
     const job =
       mode === 'search'
         ? submitted

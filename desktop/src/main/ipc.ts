@@ -1,6 +1,15 @@
 import { BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
+interface DeviceRow {
+  id: string;
+  name: string;
+  model?: string;
+  platform?: string;
+  online?: boolean;
+  lastSeen?: number;
+}
+
 import type { Api, ApiName, ApiResult, AppSettings, DownloadTask, SessionState, UpdateInfo } from '../shared/types';
 import { requestJson } from './http';
 import { readSettings, writeSettings } from './store';
@@ -153,6 +162,13 @@ const handlers: { [K in ApiName]: (...args: any[]) => any } = {
   'auth.qrStop': () => qrlogin.stop(),
 
   'catalog.home': (payload?: { source?: string }) => catalog.home(source.requireSource(payload?.source)),
+  // 上一轮的结果：渲染层先拿它铺满界面，新数据回来再整体替换（不闪骨架屏）
+  'catalog.cachedHome': (payload?: { source?: string }) =>
+    catalog.cachedHome(source.requireSource(payload?.source)),
+  'catalog.cachedCategory': (payload: { source?: string; type?: string; slug?: string; page?: number }) =>
+    catalog.cachedCategory(source.requireSource(payload?.source), payload),
+  'catalog.cachedDetail': (payload: { source?: string; id: string }) =>
+    catalog.cachedDetail(source.requireSource(payload?.source), payload.id),
   'catalog.category': (payload: { source?: string; type?: string; slug?: string; page?: number }) =>
     catalog.category(source.requireSource(payload?.source), payload),
   'catalog.tags': (payload?: { source?: string }) => catalog.tags(source.requireSource(payload?.source)),
@@ -168,9 +184,41 @@ const handlers: { [K in ApiName]: (...args: any[]) => any } = {
   'source.leave': () => source.leavePrivate(),
 
   'update.check': () => update.check(),
-  'update.install': async (payload: { url: string }) => {
+  'update.install': async (payload: { url: string; latest?: string }) => {
     if (!/^https?:\/\//i.test(payload.url)) throw new Error('下载地址无效');
-    await shell.openExternal(payload.url);
+    // 内置下载：下到临时目录后直接拉起安装程序，不再把用户甩给浏览器
+    return update.install(payload.url, String(payload.latest || ''));
+  },
+
+  /* 设备管理：改名不需要动态码；移除会让那台设备退出登录，需要 6 位动态码 */
+  'devices.list': async () => {
+    const current = session();
+    if (!current) throw new Error('请先登录');
+    const data = await requestJson<{ devices?: DeviceRow[] }>(current.server, '/api/devices', {
+      token: current.token,
+      timeoutMs: 10000,
+    });
+    return Array.isArray(data?.devices) ? data.devices : [];
+  },
+  'devices.rename': async (payload: { id: string; name: string }) => {
+    const current = session();
+    if (!current) throw new Error('请先登录');
+    return requestJson(current.server, '/api/devices/rename', {
+      method: 'POST',
+      body: { id: payload?.id, name: payload?.name },
+      token: current.token,
+      timeoutMs: 10000,
+    });
+  },
+  'devices.revoke': async (payload: { id: string; code: string }) => {
+    const current = session();
+    if (!current) throw new Error('请先登录');
+    return requestJson(current.server, `/api/devices/${encodeURIComponent(payload?.id || '')}`, {
+      method: 'DELETE',
+      body: { code: payload?.code },
+      token: current.token,
+      timeoutMs: 10000,
+    });
   },
 
   'downloads.list': () => downloads.list(),

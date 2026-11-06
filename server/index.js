@@ -1168,6 +1168,14 @@ app.delete('/api/storages/:id', auth, (req, res) => {
 app.get('/api/storages/restore', auth, (req, res) => {
   res.json({ storages: storages.restore(req.user.id) });
 });
+// 管理台：设备改名（不需要动态码）
+app.post('/api/admin/devices/rename', requireAdmin, (req, res) => {
+  const id = String((req.body && req.body.id) || '').trim();
+  const device = deviceHub.list('').find((item) => item.id === id);
+  if (!device) return res.status(404).json({ error: '设备不存在' });
+  try { res.json({ device: deviceHub.rename(id, device.userId, String((req.body && req.body.name) || '')) }); }
+  catch (e) { res.status(e.statusCode || 400).json({ error: e.message }); }
+});
 app.get('/api/admin/storages', requireAdmin, (req, res) => {
   res.json({ storages: storages.list(String(req.query.userId || '').trim()) });
 });
@@ -1323,6 +1331,25 @@ app.post('/api/devices/ack', auth, (req, res) => {
 app.get('/api/devices', auth, (req, res) => {
   res.json({ devices: deviceHub.list(req.user.id) });
 });
+
+// 改名：不需要动态码（只是给设备起个好认的名字）
+app.post('/api/devices/rename', auth, (req, res) => {
+  try {
+    const device = deviceHub.rename(String(req.body.id || ''), req.user.id, String(req.body.name || ''));
+    res.json({ device });
+  } catch (e) { res.status(e.statusCode || 400).json({ error: e.message }); }
+});
+
+// 移除设备：会同时让那台设备的登录失效，属于破坏性操作，必须当前动态码。
+app.delete('/api/devices/:id', auth, (req, res) => {
+  const code = String((req.body && req.body.code) || req.query.code || '').replace(/\D/g, '');
+  if (code.length !== OTP_DIGITS) return res.status(400).json({ error: '请输入 6 位动态码' });
+  if (!verifyOtp(code)) return res.status(400).json({ error: '动态码不正确' });
+  try {
+    deviceHub.revoke(String(req.params.id || ''), req.user.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(e.statusCode || 400).json({ error: e.message }); }
+});
 app.post('/api/devices/cast', auth, (req, res) => {
   const body = req.body || {};
   const deviceId = String(body.deviceId || '').trim();
@@ -1354,8 +1381,16 @@ app.get('/api/admin/devices', requireAdmin, (req, res) => {
   const userId = String(req.query.userId || '').trim();
   res.json({ devices: deviceHub.list(userId) });
 });
+// 移除设备：会让那台设备退出登录，破坏性操作，必须当前动态码
 app.delete('/api/admin/devices/:id', requireAdmin, (req, res) => {
-  res.json({ ok: deviceHub.remove(String(req.params.id || '')) });
+  const code = String((req.body && req.body.code) || req.query.code || '').replace(/\D/g, '');
+  if (code.length !== OTP_DIGITS) return res.status(400).json({ error: '请输入 6 位动态码' });
+  if (!verifyOtp(code)) return res.status(400).json({ error: '动态码不正确' });
+  const id = String(req.params.id || '');
+  const device = deviceHub.list('').find((item) => item.id === id);
+  if (!device) return res.status(404).json({ error: '设备不存在' });
+  try { deviceHub.revoke(id, device.userId); res.json({ ok: true }); }
+  catch (e) { res.status(e.statusCode || 400).json({ error: e.message }); }
 });
 app.get('/api/admin/device-tasks', requireAdmin, (req, res) => {
   res.json({ tasks: deviceHub.commands({ deviceId: String(req.query.deviceId || '').trim() }) });
@@ -1415,6 +1450,9 @@ app.post('/api/login', (req, res) => {
   const device = String(req.body.device || '').trim();
   if (device && device !== user.device) { user.device = device; user.updatedAt = Date.now(); }
   flush();
+  // 重新登录 = 重新授权这台设备：清掉设备管理里点过的「移除」标记，
+  // 否则被删的设备重新登录后心跳仍被拒，等于自己把自己锁在门外。
+  deviceHub.clearRevoked(user.id);
   res.json({ token: issueToken(user.id), user: publicUser(user) });
 });
 

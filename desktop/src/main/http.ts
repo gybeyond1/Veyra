@@ -126,6 +126,90 @@ export function requestJson<T = unknown>(base: string, pathname: string, options
 
 const MOBILE_UA = 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36';
 
+/* ---------------- Node 原生抓取（长连接） ----------------
+ * 只用于「协议、自家后端」这类不需要伪装 TLS 指纹的地址。
+ * 起 curl 子进程一请求一个进程，首页几十张封面 + 播放时每 4 秒一个分片，
+ * 光进程创建就把 Windows 拖死，也是「PC 私密模式比手机慢一大截」的主因。
+ */
+const agents = {
+  http: new http.Agent({ keepAlive: true, maxSockets: 8 }),
+  https: new https.Agent({ keepAlive: true, maxSockets: 8 }),
+};
+
+function nodeGet(url: string, timeoutMs: number, headers?: Record<string, string>, binary = false): Promise<any> {
+  return new Promise((resolve, reject) => {
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      reject(new Error('地址无效'));
+      return;
+    }
+    const isHttps = parsed.protocol === 'https:';
+    const request = (isHttps ? https : http).request(
+      {
+        protocol: parsed.protocol,
+        hostname: parsed.hostname,
+        port: parsed.port || (isHttps ? 443 : 80),
+        path: `${parsed.pathname}${parsed.search}`,
+        method: 'GET',
+        headers: { 'User-Agent': MOBILE_UA, ...(headers || {}) },
+        agent: agents[isHttps ? 'https' : 'http'],
+        timeout: timeoutMs,
+        rejectUnauthorized: false,
+      },
+      (response) => {
+        const chunks: Buffer[] = [];
+        response.on('data', (chunk) => chunks.push(chunk as Buffer));
+        response.on('end', () => {
+          const buffer = Buffer.concat(chunks);
+          const status = response.statusCode || 0;
+          if (status >= 400) {
+            reject(new HttpError(status, `HTTP ${status}`));
+            return;
+          }
+          if (binary) {
+            resolve(buffer);
+            return;
+          }
+          resolve(decode(buffer, String(response.headers['content-encoding'] || '')));
+        });
+        response.on('error', (error) => reject(new Error(friendlyNetworkError(error as NodeJS.ErrnoException))));
+      },
+    );
+    request.on('timeout', () => request.destroy(new Error('请求超时')));
+    request.on('error', (error: NodeJS.ErrnoException) => reject(new Error(friendlyNetworkError(error))));
+    request.end();
+  });
+}
+
+/** 抓文本（走 Node 长连接，用于自家后端通道）。 */
+export function fetchTextFast(url: string, timeoutMs = 10000, headers?: Record<string, string>): Promise<string> {
+  return nodeGet(url, timeoutMs, headers, false);
+}
+
+/** 抓二进制（走 Node 长连接，用于自家后端通道）。 */
+export function fetchBinaryFast(url: string, timeoutMs = 10000, headers?: Record<string, string>): Promise<Buffer> {
+  return nodeGet(url, timeoutMs, headers, true);
+}
+
+/**
+ * 简单并发闸门：封面一次最多同时抓 N 张。
+ * 不限并发的话，一个 40 张卡片的分类页会瞬间起 40 个 curl，
+ * 后端通道被自己打满，反而大量超时、封面缺失。
+ */
+export function limitConcurrency<T>(items: T[], size: number, worker: (item: T, index: number) => Promise<void>): Promise<void> {
+  const queue = items.map((item, index) => ({ item, index }));
+  const workers = Array.from({ length: Math.max(1, Math.min(size, queue.length)) }, async () => {
+    for (;;) {
+      const next = queue.shift();
+      if (!next) return;
+      await worker(next.item, next.index);
+    }
+  });
+  return Promise.all(workers).then(() => undefined);
+}
+
 /**
  * 抓网页文本：先走系统 curl。
  * 红果/黄果的边缘节点会按 TLS 指纹拦 Node 客户端，curl 反而正常；

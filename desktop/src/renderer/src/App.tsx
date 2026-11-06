@@ -229,14 +229,7 @@ export default function App() {
         source={source}
         activeDownloads={activeDownloads.length}
         onNav={(next) => setView(next)}
-        onPrivate={togglePrivate}
         onOpenSettings={() => setSettingsOpen(true)}
-        onLogout={async () => {
-          await call('auth.logout');
-          setSession({ server: session.server, user: null });
-          setSource('hongguo');
-          setTasks([]);
-        }}
       />
 
       <main className="main">
@@ -329,6 +322,18 @@ export default function App() {
               notify={notify}
               onSaved={(next) => setSettings(next)}
               onClose={() => setSettingsOpen(false)}
+              source={source}
+              onTogglePrivate={async () => {
+                setSettingsOpen(false);
+                await togglePrivate();
+              }}
+              onLogout={async () => {
+                await call('auth.logout');
+                setSettingsOpen(false);
+                setSession({ server: session.server, user: null });
+                setSource('hongguo');
+                setTasks([]);
+              }}
             />
           </div>
         </div>

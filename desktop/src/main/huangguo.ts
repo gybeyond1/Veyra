@@ -1,7 +1,10 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import * as cheerio from 'cheerio';
 import type { HomePayload, SeriesCard, SeriesDetail } from '../shared/types';
-import { fetchBinary, fetchText } from './http';
+import { fetchBinary, fetchBinaryFast, fetchText, fetchTextFast, limitConcurrency } from './http';
+import { userDataDir } from './paths';
 import { readSettings } from './store';
 import { session } from './session';
 
@@ -53,7 +56,8 @@ async function load(pathname: string, referer = '/'): Promise<{ html: string; si
     for (const site of SITES) {
       try {
         const target = `${site}${pathname}`;
-        const html = await fetchText(
+        // 自家后端不需要伪装 TLS 指纹：走 Node 长连接，比一页起一个 curl 快一个量级
+        const html = await fetchTextFast(
           `${current.server}/api/huangguo-proxy?url=${encodeURIComponent(target)}`,
           20000,
           { Referer: `${REFERER}${referer}`, 'User-Agent': UA },
@@ -111,31 +115,70 @@ function decodeCover(buffer: Buffer): Buffer | null {
 
 const coverCache = new Map<string, string>();
 
+function coverDiskPath(url: string): string {
+  const dir = path.join(userDataDir, 'cover-cache');
+  const name = crypto.createHash('sha1').update(url).digest('hex');
+  return path.join(dir, `${name}.img`);
+}
+
+/** 封面落盘：重启、换页都不用再走一遍网络（私密源封面本来就难拿，拿到一张存一张）。 */
+function readCoverDisk(url: string): string {
+  try {
+    const file = coverDiskPath(url);
+    const meta = fs.statSync(file);
+    if (Date.now() - meta.mtimeMs > 14 * 24 * 3600_000) return '';
+    const data = fs.readFileSync(file);
+    if (data.length < 128) return '';
+    const mime = data[0] === 0xff ? 'image/jpeg' : data[0] === 0x89 ? 'image/png' : 'image/gif';
+    return `data:${mime};base64,${data.toString('base64')}`;
+  } catch {
+    return '';
+  }
+}
+
+function writeCoverDisk(url: string, image: Buffer): void {
+  try {
+    const file = coverDiskPath(url);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, image);
+  } catch {
+    /* 缓存写不进去不影响播放 */
+  }
+}
+
 async function coverData(raw: string): Promise<string> {
   const url = text(raw);
   if (!url) return '';
   const cached = coverCache.get(url);
   if (cached) return cached;
+  const disk = readCoverDisk(url);
+  if (disk) {
+    coverCache.set(url, disk);
+    return disk;
+  }
   try {
+    const mode = Number(readSettings().proxyMode) || 3;
+    const headers = { Referer: `${REFERER}/`, 'User-Agent': UA };
     let buffer: Buffer;
-    try {
-      buffer = await fetchBinary(url, 12000, { Referer: `${REFERER}/`, 'User-Agent': UA });
-    } catch (error) {
-      // 封面 CDN 直连失败时同样借后端通道（后端会把加密封面解成真图）
+    if (mode === 3) {
       const current = session();
-      if (!current?.server) throw error;
-      buffer = await fetchBinary(
+      if (!current?.server) throw new Error('未登录');
+      // 自家后端：Node 长连接，别一图一个 curl 进程
+      buffer = await fetchBinaryFast(
         `${current.server}/api/huangguo-proxy?url=${encodeURIComponent(url)}`,
-        20000,
-        { Referer: `${REFERER}/`, 'User-Agent': UA },
+        25000,
+        headers,
       );
+    } else {
+      buffer = await fetchBinary(url, 12000, headers);
     }
     const image = decodeCover(buffer);
     if (!image) return '';
     const mime = image[0] === 0xff ? 'image/jpeg' : image[0] === 0x89 ? 'image/png' : 'image/gif';
     const value = `data:${mime};base64,${image.toString('base64')}`;
-    if (coverCache.size > 400) coverCache.clear();
+    if (coverCache.size > 600) coverCache.clear();
     coverCache.set(url, value);
+    writeCoverDisk(url, image);
     return value;
   } catch {
     return '';
@@ -172,7 +215,12 @@ function cards($: cheerio.CheerioAPI): SeriesCard[] {
 }
 
 async function withCovers(items: SeriesCard[]): Promise<SeriesCard[]> {
-  return Promise.all(items.map(async (item) => ({ ...item, cover: (await coverData(item.cover)) || item.cover })));
+  // 封面并发压到 6：一次几十个请求会把自己（和后端通道）打满，结果反而一半拿不到
+  const out = items.map((item) => ({ ...item }));
+  await limitConcurrency(out, 6, async (item) => {
+    item.cover = (await coverData(item.cover)) || item.cover;
+  });
+  return out;
 }
 
 export async function home(): Promise<HomePayload> {
@@ -269,8 +317,16 @@ export async function detail(id: string): Promise<SeriesDetail> {
 }
 
 /** 取某一集的 m3u8 地址；第 1 集在详情页，其余在 ep-N 页面。 */
+const playSourceCache = new Map<string, { url: string; referer: string; at: number }>();
+
 export async function playSource(id: string, episode: number): Promise<{ url: string; referer: string }> {
   if (!/^\d+$/.test(id) || episode < 1) throw new Error('无效选集');
+  /* 一次点播会被解析三遍（判流类型 → prepare 预热 → /hg/ 真正的请求），
+     源站风控就是被这种重复请求触发的。10 分钟内复用同一次结果。 */
+  const cacheKey = `${id}-${episode}`;
+  const hit = playSourceCache.get(cacheKey);
+  if (hit && Date.now() - hit.at < 10 * 60_000) return { url: hit.url, referer: hit.referer };
+
   const path = episode === 1 ? `/video/${id}/` : `/video/${id}/ep-${episode}/`;
   const { html } = await load(path, `/video/${id}/`);
   const data = initialData(html);
@@ -280,5 +336,8 @@ export async function playSource(id: string, episode: number): Promise<{ url: st
     text((data.epPlaySrcs as Record<string, string> | undefined)?.[String(episode)]);
   if (!src) throw new Error('这一集没有取到播放地址');
   const url = src.startsWith('//') ? `https:${src}` : new URL(src, `${REFERER}${path}`).toString();
-  return { url, referer: `${REFERER}/video/${id}/${episode === 1 ? '' : `ep-${episode}/`}` };
+  const referer = `${REFERER}/video/${id}/${episode === 1 ? '' : `ep-${episode}/`}`;
+  if (playSourceCache.size > 300) playSourceCache.clear();
+  playSourceCache.set(cacheKey, { url, referer, at: Date.now() });
+  return { url, referer };
 }

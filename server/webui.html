@@ -334,6 +334,9 @@ video{width:100%;border-radius:10px;background:#000}
         <p class="otp-tip" id="otp-unbind-status"></p>
       </div>
     </div>
+    <h2>设备</h2>
+    <p style="font-size:12px;color:var(--mut);margin-bottom:8px">同账号的设备都在这里。改名不需要验证；移除会让它退出登录，需要 6 位动态码。</p>
+    <table><thead><tr><th>设备</th><th>账号</th><th>状态</th><th>操作</th></tr></thead><tbody id="device-rows"><tr><td colspan="4" style="color:var(--mut)">加载中…</td></tr></tbody></table>
     <h2>用户管理</h2>
     <table><thead><tr><th>用户</th><th>用户组</th><th>操作</th></tr></thead><tbody id="user-rows"></tbody></table>
     <div class="row" style="margin-top:16px">
@@ -1506,6 +1509,7 @@ async function loadAdmin(){
     const s=await fetch('/api/admin/settings',{headers:AUTH()}).then(r=>r.json());
     document.getElementById('backend-proxy').value=s.backendProxy||'';
     loadUsers();
+    loadDevices();
   }catch(e){}
 }
 
@@ -1679,6 +1683,45 @@ document.getElementById('btn-admin-diagnose').onclick=async()=>{
 document.getElementById('btn-close-diag').onclick=()=>document.getElementById('diag-overlay').classList.remove('open');
 document.getElementById('diag-overlay').addEventListener('click',e=>{if(e.target.id==='diag-overlay')document.getElementById('diag-overlay').classList.remove('open')});
 
+const PLATFORM_NAMES={android:'手机/平板',tv:'电视',desktop:'电脑'};
+async function loadDevices(){
+  const rows=document.getElementById('device-rows');
+  try{
+    const d=await fetch('/api/admin/devices',{headers:AUTH()}).then(r=>r.json());
+    const list=(d.devices||[]);
+    if(!list.length){rows.innerHTML='<tr><td colspan="4" style="color:var(--mut)">还没有设备上报</td></tr>';return}
+    rows.innerHTML=list.map(v=>{
+      const meta=[PLATFORM_NAMES[v.platform]||v.platform,v.model].filter(Boolean).join(' · ');
+      return '<tr><td><b>'+escapeHtml(v.name||'未命名设备')+'</b><br><span class="k">'+escapeHtml(meta)+'</span></td>'+
+        '<td>'+escapeHtml(v.username||'')+'</td>'+
+        '<td>'+(v.online?'在线':'离线')+'</td>'+
+        '<td><button class="ghost" data-dev-rename="'+escapeHtml(v.id)+'">改名</button>'+
+        '<button class="danger" data-dev-revoke="'+escapeHtml(v.id)+'">移除</button></td></tr>';
+    }).join('');
+    rows.querySelectorAll('[data-dev-rename]').forEach(btn=>btn.onclick=()=>renameDevice(btn.dataset.devRename));
+    rows.querySelectorAll('[data-dev-revoke]').forEach(btn=>btn.onclick=()=>revokeDevice(btn.dataset.devRevoke));
+  }catch(e){
+    rows.innerHTML='<tr><td colspan="4" style="color:var(--err)">设备列表加载失败：'+escapeHtml(e.message)+'</td></tr>';
+  }
+}
+async function renameDevice(id){
+  const name=prompt('新的设备名（最多 24 字）');
+  if(name===null)return;
+  const trimmed=String(name).trim();
+  if(!trimmed){toast('设备名不能为空');return}
+  const r=await fetch('/api/admin/devices/rename',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},AUTH()),body:JSON.stringify({id,name:trimmed})}).then(x=>x.json());
+  toast(r&&r.device?'已改名':(r&&r.error||'改名失败'));
+  loadDevices();
+}
+async function revokeDevice(id){
+  const code=prompt('移除后这台设备会退出登录。\n请输入验证器里的 6 位动态码：');
+  if(code===null)return;
+  const clean=String(code).replace(/\D/g,'');
+  if(clean.length!==6){toast('请输入 6 位动态码');return}
+  const r=await fetch('/api/admin/devices/'+encodeURIComponent(id),{method:'DELETE',headers:Object.assign({'Content-Type':'application/json'},AUTH()),body:JSON.stringify({code:clean})}).then(x=>x.json());
+  toast(r&&r.ok?'设备已移除':(r&&r.error||'移除失败'));
+  loadDevices();
+}
 async function loadUsers(){
   try{
     const ROLE_NAMES={user:'普通用户',vip:'特权组',admin:'管理员'};

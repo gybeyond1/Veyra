@@ -1707,10 +1707,112 @@ input::placeholder {
 
 /* ---- 设置弹窗 ---- */
 .settings-modal {
-  width: min(720px, 92vw);
+  width: min(760px, 92vw);
   max-height: 86vh;
   padding: 0;
+  overflow: hidden;
+  position: relative;
+}
+/* 设置弹窗：外层固定，内容自己滚 —— 关闭按钮永远在右上角，不用滚回顶部 */
+.settings-shell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  max-height: 86vh;
+}
+.settings-scroll {
   overflow: auto;
+  min-height: 0;
+}
+.settings-close {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  z-index: 3;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.settings-close:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.settings-page {
+  padding-right: 56px;
+}
+.danger-text {
+  color: #e26a6a;
+}
+/* 设备管理：一行一台，改名/移除在右边，展开的确认条单独占一行 */
+.device-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+.device-main {
+  flex: 1;
+  min-width: 200px;
+}
+.device-main strong {
+  display: block;
+  font-size: 14px;
+}
+.device-main p {
+  margin: 3px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.device-row .row-ctrl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.device-row .text {
+  width: 160px;
+}
+.device-remove {
+  flex: 1 0 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(226, 106, 106, 0.08);
+  border: 1px solid rgba(226, 106, 106, 0.35);
+}
+.device-remove span {
+  flex: 1;
+  font-size: 12px;
+  color: var(--muted);
+}
+.device-remove .text {
+  width: 110px;
+  letter-spacing: 2px;
+}
+.update-track {
+  height: 6px;
+  margin: 4px 0 14px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.update-track i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s linear;
 }
 .settings-modal .page {
   padding: 22px 24px;

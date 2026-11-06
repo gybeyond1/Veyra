@@ -560,16 +560,50 @@ function itemCard(item) {
     <span class="film-title">${title}</span><span class="film-info">${info}</span></button>`;
 }
 
-function moreCard(kind) {
+/* 「更多推荐」那张卡也要有封面：从本板块里随机挑一张，挑中之后记在本地，
+   以后都用这一张（不每次进首页换一张脸）。 */
+var moreCoverCache = {};
+function moreCoverFor(kind, items) {
+  if (moreCoverCache[kind]) return moreCoverCache[kind];
+  var key = 'veyra-morecover-' + kind;
+  try { var saved = localStorage.getItem(key); if (saved) { moreCoverCache[kind] = saved; return saved; } } catch (ignore) { }
+  var pool = asArray(items).filter(function (item) { return item && item.cover; });
+  var pick = pool.length ? pool[Math.floor(Math.random() * pool.length)].cover : '';
+  if (pick) {
+    moreCoverCache[kind] = pick;
+    try { localStorage.setItem(key, pick); } catch (ignore) { }
+  }
+  return pick;
+}
+
+function moreCard(kind, items) {
+  var cover = moreCoverFor(kind, items);
   return `<button class="film-card more-tile" type="button" data-more="${esc(kind)}" aria-label="查看更多推荐">
-    <span class="poster more-poster"><span class="more-tile-label">更多推荐 ${icon('arrow')}</span></span>
+    <span class="poster more-poster">${cover ? `<img data-cover="${esc(cover)}" alt="">` : ''}<span class="more-veil"></span><span class="more-tile-label">更多推荐 ${icon('arrow')}</span></span>
     <span class="film-title">查看全部</span><span class="film-info">打开完整列表</span></button>`;
+}
+/* 板块不足 5 个时，从同页其它列表里补满：私密首页的「精选推荐」源站只给 4 个，
+   空一格很难看（公开模式是 6 格满的）。补进来的都是同源内容，点开一样能看。 */
+function fillSection(items, pools, count) {
+  var out = asArray(items).slice();
+  var seen = {};
+  out.forEach(function (item) { seen[String(item.id)] = 1; });
+  for (var p = 0; p < pools.length && out.length < count; p++) {
+    var pool = asArray(pools[p]);
+    for (var i = 0; i < pool.length && out.length < count; i++) {
+      var item = pool[i];
+      if (!item || !item.id || seen[String(item.id)]) continue;
+      seen[String(item.id)] = 1;
+      out.push(item);
+    }
+  }
+  return out;
 }
 function section(title, items, kind = '') {
   if (!items.length) return '';
   // 3×2 固定六格：前 5 个放推荐位，第 6 格就是原来右上角「更多」的入口，板块标题行不再带按钮。
   const cells = items.slice(0, 5).map(itemCard);
-  if (kind) cells.push(moreCard(kind));
+  if (kind) cells.push(moreCard(kind, items));
   return `<section class="film-section"><div class="section-heading"><h2>${esc(title)}</h2></div><div class="film-row">${cells.join('')}</div></section>`;
 }
 function homeTagBar() {
@@ -926,7 +960,7 @@ function renderHome() {
       <div class="hero-dots">${slides.map((_, i) => `<i class="${i === index ? 'active' : ''}" data-slide="${i}"></i>`).join('')}</div>
       ${homeTagBar()}
       <div class="home-continue">${continueWatchingMarkup()}</div>
-      ${section('精选推荐', asArray(data.homepageRecommend).length ? asArray(data.homepageRecommend) : asArray(data.recommend?.items).slice(0, 12), 'recommend')}
+      ${section('精选推荐', fillSection(asArray(data.homepageRecommend).length ? asArray(data.homepageRecommend) : asArray(data.recommend?.items).slice(0, 12), [asArray(data.items), asArray(data.homepageNewest), asArray(data.newest?.items), asArray(data.recommend?.items)], 5), 'recommend')}
       ${section(privateMode() ? '最近上新' : '热门漫剧', asArray(data.homepageNewest).length ? asArray(data.homepageNewest) : asArray(data.newest?.items).slice(0, 12), 'newest')}</div>`;
   hydrateImages();
   slides.forEach(item => { if (item.cover) getCover(item.cover).catch(() => {}); });
@@ -1435,6 +1469,7 @@ function hideDownloadSheet() {
 
 var targetDevices = null;
 var targetDeviceKind = 'device';
+var manageDeviceId = '';
 
 function renderDownloadSheet() {
   const sheet = document.getElementById('download-sheet');
@@ -1469,9 +1504,28 @@ function renderDownloadSheet() {
       ? String(d.platform) === 'desktop'
       : String(d.platform) !== 'desktop'));
     sheet.innerHTML = (list.length
-      ? `<div class="download-pick">${list.map(d => `<button type="button" class="download-pick-option" data-dl-device="${esc(d.id)}"><strong>${esc(d.name || '未命名设备')}</strong><small>${d.online ? '在线' : '离线 · 上线后自动开始'}</small></button>`).join('')}</div>`
+      ? `<div class="download-pick">${list.map(d => `<div class="dl-device-row">
+          <button type="button" class="download-pick-option" data-dl-device="${esc(d.id)}"><strong>${esc(d.name || '未命名设备')}</strong><small>${d.online ? '在线' : '离线 · 上线后自动开始'}</small></button>
+          <button type="button" class="dl-device-menu" data-dl-device-menu="${esc(d.id)}" aria-label="管理这台设备">⋯</button>
+        </div>`).join('')}</div>`
       : `<p class="download-parsing">没有在线的${targetDeviceKind === 'desktop' ? '电脑' : '其他设备'}<br><small>在另一端登录同一账号并保持在线</small></p>`)
       + `<div class="download-sheet-buttons"><button type="button" class="dl-secondary" data-dl-back-target="1">返回</button></div>`;
+    return;
+  }
+  if (downloadMode === 'device-manage') {
+    const d = asArray(targetDevices).find(item => String(item.id) === String(manageDeviceId)) || {};
+    sheet.innerHTML = `<div class="dl-manage">
+      <h3>${esc(d.name || '未命名设备')}</h3>
+      <p class="dl-manage-sub">${esc(d.model || '')}${d.online ? ' · 在线' : ' · 离线'}</p>
+      <label class="dl-field"><span>设备名</span><input id="dl-device-name" class="settings-input" type="text" maxlength="24" value="${esc(d.name || '')}" autocomplete="off"></label>
+      <div class="download-sheet-buttons"><button type="button" class="dl-secondary" data-dl-manage-back="1">返回</button><button type="button" class="dl-primary" data-dl-rename="1">保存名字</button></div>
+      <div class="dl-danger-block">
+        <strong>移除这台设备</strong>
+        <p>移除后它会退出登录，重新登录前收不到任何下载指令。需要输入验证器里的 6 位动态码。</p>
+        <label class="dl-field"><span>动态码</span><input id="dl-device-code" class="settings-input" type="text" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="off"></label>
+        <button type="button" class="dl-danger" data-dl-revoke="1">移除设备</button>
+      </div>
+    </div>`;
     return;
   }
   if (downloadMode === 'remote') {
@@ -4038,6 +4092,39 @@ document.addEventListener('click', async event => {
   }
   if (event.target.closest('[data-dl-device]')) {
     submitDownloadTo('device', event.target.closest('[data-dl-device]').dataset.dlDevice);
+    return;
+  }
+  if (event.target.closest('[data-dl-device-menu]')) {
+    manageDeviceId = event.target.closest('[data-dl-device-menu]').dataset.dlDeviceMenu;
+    downloadMode = 'device-manage';
+    renderDownloadSheet();
+    return;
+  }
+  if (event.target.closest('[data-dl-manage-back]')) { downloadMode = 'device'; renderDownloadSheet(); return; }
+  if (event.target.closest('[data-dl-rename]')) {
+    const input = document.getElementById('dl-device-name');
+    const name = String(input && input.value || '').trim();
+    if (!name) { toast('设备名不能为空', true); return; }
+    api('device-rename', { id: manageDeviceId, name }).then(() => {
+      const device = asArray(targetDevices).find(item => String(item.id) === String(manageDeviceId));
+      if (device) device.name = name;
+      toast('已改名');
+      downloadMode = 'device';
+      renderDownloadSheet();
+    }).catch(error => toast(error.message || '改名失败', true));
+    return;
+  }
+  if (event.target.closest('[data-dl-revoke]')) {
+    const input = document.getElementById('dl-device-code');
+    const code = String(input && input.value || '').replace(/\D/g, '');
+    if (code.length !== 6) { toast('请输入 6 位动态码', true); return; }
+    api('device-revoke', { id: manageDeviceId, code }).then(async () => {
+      toast('设备已移除');
+      manageDeviceId = '';
+      downloadMode = 'device';
+      try { const data = await api('download-targets'); targetDevices = asArray(data && data.devices); } catch (ignore) { }
+      renderDownloadSheet();
+    }).catch(error => toast(error.message || '移除失败', true));
     return;
   }
   if (event.target.closest('[data-dl-back-target]')) { downloadMode = 'target'; renderDownloadSheet(); return; }

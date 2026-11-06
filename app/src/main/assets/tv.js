@@ -1035,6 +1035,30 @@ function renderHome() {
 }
 
 var feedToken = 0;
+
+/* 首页缓存：私密源一页要经后端转发好几秒，电视开机先看到一屏骨架很难受。
+   进来先用上一轮的内容铺满，新数据回来且确实变了再整体替换，没变就只补封面。 */
+var FEED_CACHE_TTL = 12 * 3600 * 1000;
+function feedCacheKey(id) { return 'veyra-tv-feed-' + id; }
+function readFeedCache(id) {
+  try {
+    var raw = localStorage.getItem(feedCacheKey(id));
+    if (!raw) return null;
+    var data = JSON.parse(raw);
+    if (!data || !data.at || Date.now() - data.at > FEED_CACHE_TTL) return null;
+    if (!list(data.items).length) return null;
+    return data;
+  } catch (error) { return null; }
+}
+function writeFeedCache(id, items, nextPage) {
+  try {
+    localStorage.setItem(feedCacheKey(id), JSON.stringify({ at: Date.now(), items: list(items).slice(0, 80), nextPage: nextPage || null }));
+  } catch (error) { /* 配额满了就放弃缓存，不影响播放 */ }
+}
+function feedSignature(items) {
+  return list(items).map(function (item) { return String(item && item.id); }).join(',');
+}
+
 /* focusChip=false：这是开机/切页触发的加载，焦点留在原处（侧栏图标）——
    以前不管谁调用都把焦点塞给分类条，分类条在首屏下方，浏览器为了露出它
    会把页面往下滚 100 多像素，「首页」标题头一进去就被顶没了。 */
@@ -1043,7 +1067,13 @@ function loadFeed(id, reset, focusChip) {
   var switched = target !== state.feedId;
   state.feedId = target;
   if (reset || switched) {
-    state.feed = null;
+    var cached = readFeedCache(target);
+    if (cached) {
+      // 有缓存：先把它当当前内容渲染出来，loading 仍然为真（底部会显示还在拉）
+      state.feed = { id: target, items: cached.items, nextPage: cached.nextPage || null, loading: true, error: false };
+    } else {
+      state.feed = null;
+    }
     if (focusChip !== false) state.focusKey = 'chip:' + target;
     if (state.route === 'home') renderHome();
   } else if (state.feed && (state.feed.loading || !state.feed.nextPage)) {
@@ -1057,8 +1087,12 @@ function loadFeed(id, reset, focusChip) {
     var incoming = list(data && data.items);
     var nextPage = data && data.nextPage ? data.nextPage : null;
     if (!state.feed || pageNo === 1) {
+      var before = feedSignature(state.feed && state.feed.items);
+      var after = feedSignature(incoming);
       state.feed = { id: target, items: incoming, nextPage: nextPage, loading: false, error: false };
-      renderHome();
+      writeFeedCache(target, incoming, nextPage);
+      // 和缓存一模一样就别重绘：重绘会让遥控器焦点闪一下
+      if (before !== after) renderHome();
     } else {
       state.feed.items = state.feed.items.concat(incoming);
       state.feed.nextPage = nextPage;

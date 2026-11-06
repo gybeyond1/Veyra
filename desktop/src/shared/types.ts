@@ -191,6 +191,12 @@ export interface Api {
   'auth.qrStop': () => Promise<void>;
 
   'catalog.home': (payload?: { source?: string }) => Promise<HomePayload>;
+  'devices.list': () => Promise<{ id: string; name: string; model?: string; platform?: string; online?: boolean; lastSeen?: number }[]>;
+  'devices.rename': (payload: { id: string; name: string }) => Promise<unknown>;
+  'devices.revoke': (payload: { id: string; code: string }) => Promise<unknown>;
+  'catalog.cachedHome': (payload?: { source?: string }) => Promise<HomePayload | null>;
+  'catalog.cachedCategory': (payload: { source?: string; type?: string; slug?: string; page?: number }) => Promise<CategoryPayload | null>;
+  'catalog.cachedDetail': (payload: { source?: string; id: string }) => Promise<SeriesDetail | null>;
   'catalog.category': (payload: { source?: string; type?: string; slug?: string; page?: number }) => Promise<CategoryPayload>;
   'catalog.tags': (payload?: { source?: string }) => Promise<{ items: { name: string; slug: string; type: string }[] }>;
   'catalog.search': (payload: { source?: string; q: string }) => Promise<{ items: SeriesCard[] }>;

@@ -1251,6 +1251,19 @@ public final class MainActivity extends Activity {
                 out.put("storages", storages.optJSONArray("storages") == null ? new JSONArray() : storages.optJSONArray("storages"));
                 return out;
             }
+            // 设备管理：改名不需要动态码；移除设备等于让它退出登录，要 6 位动态码
+            case "device-rename": {
+                JSONObject body = new JSONObject();
+                body.put("id", args.optString("id"));
+                body.put("name", args.optString("name"));
+                return account.api("POST", "api/devices/rename", body);
+            }
+            case "device-revoke": {
+                JSONObject body = new JSONObject();
+                body.put("code", args.optString("code"));
+                account.api("DELETE", "api/devices/" + args.optString("id"), body);
+                return new JSONObject().put("ok", true);
+            }
             // 把这一集推给指定在线设备去下（后端下发 download 指令）
             case "download-dispatch": {
                 JSONObject body = new JSONObject();
