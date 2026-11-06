@@ -1,0 +1,2 @@
+source=mpv-x86_64-20261101-git-48fca90e8c.7z
+fetched=2026-11-06
