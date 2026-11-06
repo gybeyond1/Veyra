@@ -1590,3 +1590,25 @@ input::placeholder {
 .empty-block.small {
   padding: 22px;
 }
+
+/* 私密模式启动动画：盖满窗口，黑底，不显示任何控件 */
+.intro-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #000;
+  user-select: none;
+  cursor: none;
+}
+.intro-video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+  pointer-events: none;
+  outline: none;
+}

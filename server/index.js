@@ -297,6 +297,18 @@ app.get('/hls.min.js', (_req, res) => {
   res.sendFile(path.join(__dirname, 'hls.min.js'));
 });
 
+// 私密模式启动动画（WebUI 进私密前全屏播放）；sendFile 自带 Range，视频可顺序解码
+app.get('/intro.js', (_req, res) => {
+  res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.sendFile(path.join(__dirname, 'intro.js'));
+});
+
+app.get('/intro.mp4', (_req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.sendFile(path.join(__dirname, 'intro.mp4'));
+});
+
 // ---- Web 端红果内容代理（hongguoduanju.com 公开页，无需签名）----
 const { execFile } = require('child_process');
 

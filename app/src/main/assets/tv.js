@@ -2111,6 +2111,10 @@ function submitOtp() {
   }).then(function (status) {
     otpBusy = false;
     closeOtp();
+    // 动态码通过后先放启动动画，播完再切私密内容
+    var intro = window.veyraIntro ? window.veyraIntro.play() : null;
+    return intro ? intro.then(function () { return status; }) : status;
+  }).then(function (status) {
     applyMode(status, 'huangguo');
   }).catch(function (error) {
     otpBusy = false;

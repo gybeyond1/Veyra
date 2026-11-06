@@ -4429,8 +4429,10 @@ function closeUnlock() {
 async function enterPrivate(password = '') {
   const result = await api('enter-private', { password });
   closeUnlock();
-  if (result.needsAgeConfirmation) document.getElementById('age-gate').hidden = false;
-  else location.reload();
+  if (result.needsAgeConfirmation) { document.getElementById('age-gate').hidden = false; return; }
+  // 先进私密模式页面前放启动动画（无声变有声都靠它自己兜底），播完再重载
+  try { await window.veyraIntro?.play(); } catch (error) { /* 动画失败不影响进入 */ }
+  location.reload();
 }
 async function handleEnterPrivate() {
   if (privateMode()) return;

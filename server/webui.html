@@ -360,6 +360,7 @@ video{width:100%;border-radius:10px;background:#000}
   <div id="gate-err" style="color:var(--err);font-size:13px"></div>
 </div>
 
+<script src="intro.js"></script>
 <script>
 let mode='public', adminToken=localStorage.getItem('veyraAdmin')||'';
 const AUTH=()=>({Authorization:'Bearer '+adminToken});
@@ -394,7 +395,19 @@ document.getElementById('gate-pass').addEventListener('keydown',e=>{if(e.key==='
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.style.display='block';setTimeout(()=>t.style.display='none',2500)}
 
 document.getElementById('mode-public').onclick=()=>setMode('public');
-document.getElementById('mode-private').onclick=()=>setMode('private');
+/* 进私密模式：先全屏放启动动画（动画自带黑底、无控件、点击无响应），播完再切 */
+async function enterPrivateView(){
+  if(mode==='private'){setMode('private');return}
+  var entered=false;
+  if(!document.fullscreenElement&&document.documentElement.requestFullscreen){
+    try{await document.documentElement.requestFullscreen();entered=true}catch(e){}
+  }
+  try{ if(window.veyraIntro) await window.veyraIntro.play(); }catch(e){}
+  // 只为这次动画进的全屏，播完还给用户；本来就在全屏的保持原样
+  if(entered&&document.fullscreenElement){try{await document.exitFullscreen()}catch(e){}}
+  setMode('private');
+}
+document.getElementById('mode-private').onclick=enterPrivateView;
 document.getElementById('search-input').addEventListener('keydown',e=>{if(e.key==='Enter')doSearch()});
 // 刷新当前分类：丢掉缓存重新拉一次（私密源抓取慢时可手动重试）
 document.getElementById('btn-refresh').onclick=async()=>{

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { AppSettings, DownloadTask, RemoteTask, SessionState } from '@shared/types';
 import { call, errorText } from './api';
 import Sidebar from './components/Sidebar';
+import IntroOverlay from './components/IntroOverlay';
 import LoginPage from './pages/LoginPage';
 import HomePage from './pages/HomePage';
 import BrowsePage from './pages/BrowsePage';
@@ -42,6 +43,8 @@ export default function App() {
   const [privateOpen, setPrivateOpen] = useState(false);
   const [privateCode, setPrivateCode] = useState('');
   const [privateBusy, setPrivateBusy] = useState(false);
+  /** 动态码验证通过后先播启动动画，播完再切私密内容 */
+  const [introOpen, setIntroOpen] = useState(false);
   const [toast, setToast] = useState<{ text: string; tone: 'info' | 'error' } | null>(null);
 
   const notify = useCallback((text: string, tone: 'info' | 'error' = 'info') => {
@@ -176,10 +179,9 @@ export default function App() {
     setPrivateBusy(true);
     try {
       await call('source.enter', { code: privateCode });
-      setSource('huangguo');
       setPrivateOpen(false);
-      setView('home');
-      notify('已进入私密模式');
+      // 先放动画；切 source 的动作放到 onDone 里
+      setIntroOpen(true);
     } catch (error) {
       notify(errorText(error), 'error');
     } finally {
@@ -316,6 +318,17 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {introOpen && (
+        <IntroOverlay
+          onDone={() => {
+            setIntroOpen(false);
+            setSource('huangguo');
+            setView('home');
+            notify('已进入私密模式');
+          }}
+        />
       )}
 
       {toast && <div className={`toast ${toast.tone}`}>{toast.text}</div>}

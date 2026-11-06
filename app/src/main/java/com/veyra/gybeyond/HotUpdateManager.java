@@ -363,6 +363,8 @@ final class HotUpdateManager {
                     case "webp": mime = "image/webp"; break;
                     case "gif": mime = "image/gif"; break;
                     case "jpg": case "jpeg": mime = "image/jpeg"; break;
+                    case "mp4": mime = "video/mp4"; break;
+                    case "webm": mime = "video/webm"; break;
                     default: mime = "application/octet-stream";
                 }
             }
