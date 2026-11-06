@@ -552,6 +552,7 @@ function activeOverlay() {
   /* 动态码浮窗优先级最高：它开着的时候背后就是整页海报，
      不锁住的话上下左右会直接选到浮窗后面的剧集封面上。 */
   if (otpPanel && !otpPanel.hidden) return otpPanel;
+  if (sourcePanel && !sourcePanel.hidden) return sourcePanel;
   if (proxyPanel && !proxyPanel.hidden) return proxyPanel;
   if (themePanel && !themePanel.hidden) return themePanel;
   if (updateLayer && !updateLayer.hidden) return updateLayer;
@@ -898,8 +899,28 @@ function gridMarkup(items, emptyText) {
 }
 
 /* ---------------- 分类：和安卓端一致，按内容源取真实分类 id ---------------- */
+/* 接口型源（剧果/野果/帝果…）的分类由后端给：先「全部 / 最新」，
+   后面接源站自己的题材分类。黄果保持原来四个固定分类。 */
+var siteCats = [['', '全部'], ['new', '最新']];
+
+function applySiteCategories() {
+  if (privateSite.id === 'huangguo') return;
+  api('tags').then(function (data) {
+    var rows = (data && data.items) || [];
+    var list = [['', '全部'], ['new', '最新']];
+    for (var i = 0; i < rows.length && list.length < 8; i++) {
+      var row = rows[i] || {};
+      if (!row.slug || row.slug === 'new') continue;
+      list.push([row.slug, row.name || row.slug]);
+    }
+    siteCats = list;
+    if (state.route === 'home') renderHome();
+  }).catch(function () { });
+}
+
 function categoryList() {
   if (state.source === 'huangguo') {
+    if (privateSite.id !== 'huangguo') return siteCats;
     return [['ai-duanju', '成人短剧'], ['ai-manju', '成人漫剧'], ['ai-huanlian', 'AI换脸'], ['ai-mogai', 'AI魔改']];
   }
   /* 前两个是常规分类，后四个是红果的热播榜（后端按榜单页解析，卡片带名次角标）。
@@ -1734,6 +1755,7 @@ window.veyraTvKey = function (code) {
 
 window.hgBack = function () {
   if (otpPanel && !otpPanel.hidden) { closeOtp(); state.focusKey = 'acct:mode'; restoreFocus(); return true; }
+  if (sourcePanel && !sourcePanel.hidden) { closeSourcePanel(); return true; }
   if (proxyPanel && !proxyPanel.hidden) { closeProxy(); return true; }
   if (themePanel && !themePanel.hidden) { closeTheme(); return true; }
   if (updateLayer && !updateLayer.hidden) { closeUpdatePanel(); return true; }
@@ -1841,7 +1863,11 @@ document.addEventListener('click', function (event) {
   }
   if (target.closest('#account-close')) { closeAccount(); return; }
   if (target.closest('#account-mode')) { switchMode(); return; }
+  if (target.closest('#account-source')) { openSourcePanel(); return; }
   if (target.closest('#account-proxy')) { openProxy(); return; }
+  if (target.closest('#source-close')) { closeSourcePanel(); return; }
+  var sitePick = target.closest('[data-site-pick]');
+  if (sitePick) { pickSite(sitePick.getAttribute('data-site-pick'), sitePick.getAttribute('data-site-name')); return; }
   var proxyModeBtn = target.closest('[data-proxy-mode]');
   if (proxyModeBtn) { selectProxyMode(Number(proxyModeBtn.getAttribute('data-proxy-mode')) || 3); return; }
   if (target.closest('#proxy-save')) { saveProxyAddress(false); return; }
@@ -1933,9 +1959,19 @@ window.hgTvLogin = function (ok) {
   }).catch(function () { });
 };
 
+/* 当前私密源要在首屏渲染前拿到：接口型源的两级 tab 跟黄果不一样 */
+api('private-site').then(function (data) {
+  if (!data || !data.id) return;
+  privateSite = { id: data.id, name: data.name || data.id };
+  if (data.id !== 'huangguo' && typeof applySiteCategories === 'function') applySiteCategories();
+}).catch(function () { });
+
 /* ---------------- 黄果网络通道：直连 / 代理 / 后端转发 ----------------
    跟手机端同一套原生设置（ProxySettings），电视上选完就是同一份配置，
    私密内容下次请求立刻按新模式走，不用重启。 */
+var sourcePanel = document.getElementById('source');
+var sourceListEl = document.getElementById('source-list');
+var privateSite = { id: 'huangguo', name: '黄果' };
 var proxyPanel = document.getElementById('proxy');
 var proxyModesEl = document.getElementById('proxy-modes');
 var proxyAddressInput = document.getElementById('proxy-address');
@@ -2024,6 +2060,68 @@ function selectProxyMode(value) {
     toast('已切换：' + (PROXY_MODE_NAMES[value] || ''));
     state.focusKey = 'proxy:' + value;
     restoreFocus();
+  }).catch(function (error) {
+    toast((error && error.message) || '切换失败', true);
+  });
+}
+
+/* ---------------- 私密内容源 ----------------
+   黄果是端侧解析（三通道），其余源走后端网关。
+   切完清掉 feed 缓存并回首页，遥控器不用再做别的。 */
+function renderSourceList(sources) {
+  if (!sourceListEl) return;
+  var rows = [{ id: 'huangguo', name: '黄果', description: '视频 · AI · 旧版（直连 / 代理 / 后端）' }];
+  for (var i = 0; i < sources.length; i++) {
+    var row = sources[i] || {};
+    if (!row.id || row.id === 'huangguo') continue;
+    rows.push({ id: row.id, name: row.name || row.id, description: row.description || '' });
+  }
+  var html = '';
+  for (var j = 0; j < rows.length; j++) {
+    var item = rows[j];
+    var active = item.id === privateSite.id;
+    html += '<button type="button" class="source-item' + (active ? ' is-active' : '') + '" data-focusable'
+      + ' data-key="source:' + esc(item.id) + '" data-site-pick="' + esc(item.id) + '" data-site-name="' + esc(item.name) + '">'
+      + '<strong>' + esc(item.name) + '</strong><small>' + esc(item.description) + '</small></button>';
+  }
+  sourceListEl.innerHTML = html;
+}
+
+function openSourcePanel() {
+  if (accountPanel) accountPanel.hidden = true;
+  if (sourcePanel) sourcePanel.hidden = false;
+  renderSourceList([]);
+  state.focusKey = 'source:' + privateSite.id;
+  restoreFocus();
+  api('private-sites').then(function (data) {
+    renderSourceList((data && data.sources) || []);
+    state.focusKey = 'source:' + privateSite.id;
+    restoreFocus();
+  }).catch(function () { });
+}
+
+function closeSourcePanel() {
+  if (sourcePanel) sourcePanel.hidden = true;
+  if (accountPanel) accountPanel.hidden = false;
+  state.focusKey = 'acct:source';
+  restoreFocus();
+}
+
+function pickSite(id, name) {
+  if (!id || id === privateSite.id) { closeSourcePanel(); return; }
+  api('private-site', { id: id, name: name || id }).then(function (result) {
+    privateSite = { id: (result && result.id) || id, name: (result && result.name) || name || id };
+    closeSourcePanel();
+    toast('已切换到 ' + privateSite.name);
+    /* 上一个源的首页缓存不能留：不清的话会先闪一遍别的源的内容 */
+    try {
+      for (var i = localStorage.length - 1; i >= 0; i--) {
+        var key = localStorage.key(i);
+        if (key && key.indexOf('veyra-tv-feed-') === 0) localStorage.removeItem(key);
+      }
+    } catch (error) { }
+    state.feed = null;
+    go('home');
   }).catch(function (error) {
     toast((error && error.message) || '切换失败', true);
   });

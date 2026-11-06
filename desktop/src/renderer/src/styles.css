@@ -1753,6 +1753,45 @@ input::placeholder {
   color: #e26a6a;
 }
 /* 设备管理：一行一台，改名/移除在右边，展开的确认条单独占一行 */
+/* 私密内容源：一行一个，当前源高亮；点一下换源并重载 */
+.site-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.site-choice {
+  flex: 1 1 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-2);
+  text-align: left;
+  cursor: pointer;
+}
+.site-choice strong {
+  font-size: 13px;
+}
+.site-choice small {
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.site-choice.is-active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel-2));
+}
+.site-choice.is-active strong {
+  color: var(--accent);
+}
+.site-choice:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .device-row {
   display: flex;
   flex-wrap: wrap;

@@ -148,6 +148,8 @@ export default function SettingsPage({ settings, notify, onSaved, onClose, sourc
 
           <DevicePanel notify={notify} />
 
+          {source === 'huangguo' && <PrivateSitePanel notify={notify} />}
+
           <section className="panel">
             <h2>下载</h2>
             <div className="row">
@@ -459,6 +461,71 @@ function DevicePanel({ notify }: { notify: (text: string, tone?: 'info' | 'error
           )}
         </div>
       ))}
+    </section>
+  );
+}
+
+interface SiteRow {
+  id: string;
+  name: string;
+  description?: string;
+}
+
+/**
+ * 私密内容源：黄果是内置解析（直连/代理/走后端），其余源由后端网关统一解析。
+ * 切换后整页重载：首页/分类/详情的缓存都按源存，混着显示比刷新一次更难受。
+ */
+function PrivateSitePanel({ notify }: { notify: (text: string, tone?: 'info' | 'error') => void }) {
+  const [sites, setSites] = useState<SiteRow[]>([]);
+  const [current, setCurrent] = useState('huangguo');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    call<AppSettings>('app.settings')
+      .then((data) => setCurrent(String(data?.privateSite || 'huangguo')))
+      .catch(() => undefined);
+    call<SiteRow[]>('privateSite.sources')
+      .then((rows) => setSites(Array.isArray(rows) ? rows : []))
+      .catch(() => setSites([]));
+  }, []);
+
+  async function pick(id: string) {
+    if (id === current || busy) return;
+    setBusy(true);
+    try {
+      await call('app.saveSettings', { privateSite: id });
+      notify('已切换内容源，正在刷新');
+      // 换源等于换一套内容：缓存、片单、当前页全部重来，重载最干净
+      setTimeout(() => location.reload(), 260);
+    } catch (issue) {
+      notify(errorText(issue), 'error');
+      setBusy(false);
+    }
+  }
+
+  const rows: SiteRow[] = [
+    { id: 'huangguo', name: '黄果', description: '视频 · AI · 旧版（直连 / 代理 / 后端）' },
+    ...sites.filter((row) => row.id && row.id !== 'huangguo'),
+  ];
+
+  return (
+    <section className="panel">
+      <h2>私密内容源</h2>
+      <p className="hint">黄果在电脑上直连/代理/走后端；其它源由后端解析，需要登录同一个账号。</p>
+      <div className="site-picker">
+        {rows.map((row) => (
+          <button
+            key={row.id}
+            type="button"
+            className={`site-choice${row.id === current ? ' is-active' : ''}`}
+            disabled={busy}
+            onClick={() => void pick(row.id)}
+          >
+            <strong>{row.name}</strong>
+            <small>{row.description || ''}</small>
+          </button>
+        ))}
+      </div>
     </section>
   );
 }

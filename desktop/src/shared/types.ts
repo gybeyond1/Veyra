@@ -23,6 +23,8 @@ export interface AppSettings {
   proxy: string;
   /** 私密源通道：1 仅直连 / 2 仅代理 / 3 走后端转发（与手机端同一套语义） */
   proxyMode: 1 | 2 | 3;
+  /** 私密内容源：huangguo = 内置网页解析，其它 = 后端网关（剧果/野果/帝果…） */
+  privateSite: string;
   autoMerge: boolean;
   keepEpisodes: boolean;
   lastAccount: string;
@@ -177,6 +179,7 @@ export interface ServerInfo {
 export interface Api {
   'app.info': () => Promise<ServerInfo>;
   'app.settings': () => Promise<AppSettings>;
+  'privateSite.sources': () => Promise<{ id: string; name: string; description?: string }[]>;
   'app.saveSettings': (patch: Partial<AppSettings>) => Promise<AppSettings>;
   'app.pickDownloadDir': () => Promise<string>;
   'app.openPath': (target: string) => Promise<void>;

@@ -516,7 +516,7 @@ body.page-windowed #stage{overflow:hidden}
 /* 弹层（登录 / 账号 / 主题 / 更新）统一走深色底 + 浅色字。
    主题底色可能是白/黄/粉，弹层如果沿用主题文字色会出现「深字压深底」
    直接看不见 —— 简洁白下打开主题面板就是这个情况。 */
-#login,#account,#theme{
+#login,#account,#theme,#source{
   color:#F2F3F5;
   --text:#F2F3F5;
   --muted:rgba(255,255,255,.66);
@@ -564,6 +564,13 @@ body.page-windowed #stage{overflow:hidden}
 /* ---------------- 黄果网络通道 ----------------
    三个模式横排（老内核不认 flex gap，间距一律用 margin），
    代理地址靠手机扫码填，遥控器只用方向键选模式。 */
+#source{
+  position:absolute;left:0;right:0;top:0;bottom:0;z-index:31;
+  background:rgba(6,8,10,.97);
+  display:flex;align-items:center;justify-content:center;
+  color:#F2F3F5;
+}
+#source[hidden]{display:none}
 #proxy{
   position:absolute;left:0;right:0;top:0;bottom:0;z-index:29;
   background:rgba(6,8,10,.97);
@@ -617,6 +624,15 @@ body.page-windowed #stage{overflow:hidden}
 }
 .proxy-cap{font-size:2rem;color:#cfd4da;margin:0;line-height:1.8;max-width:52rem}
 .proxy-actions .btn{margin:0 1.2rem 0 0;min-width:18rem}
+
+/* ---------------- 私密内容源 ---------------- */
+.source-list{display:flex;flex-direction:column;gap:1.6rem;margin:0 0 2.6rem}
+.source-item{display:flex;flex-direction:column;gap:.8rem;padding:2.2rem 2.6rem;border:2px solid var(--panel-2);border-radius:1.4rem;background:rgba(255,255,255,.04);text-align:left;color:#F2F3F5}
+.source-item strong{font-size:2.4rem;font-weight:700}
+.source-item small{font-size:1.7rem;color:var(--muted);line-height:1.45}
+.source-item.is-active{border-color:var(--accent)}
+.source-item.is-active strong{color:var(--accent)}
+.source-item.is-focused{border-color:var(--accent);box-shadow:0 0 0 3px rgba(255,255,255,.18)}
 
 /* ---------------- 动态码 ----------------
    遥控器只有方向键，6 位数字靠屏幕上的九宫格输，焦点走统一的 .is-focused 环。 */

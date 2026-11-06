@@ -302,6 +302,9 @@ video{width:100%;border-radius:10px;background:#000}
     <input id="backend-proxy" placeholder="http://ip:port 或 socks5://ip:port">
     <div class="row"><button id="btn-save-proxy">保存</button><button class="ghost" id="btn-test-proxy">测试</button></div>
     <p id="proxy-status" style="font-size:12px;color:var(--mut)"></p>
+    <h2>私密内容源</h2>
+    <p style="font-size:12px;color:var(--mut)">黄果在浏览器里直连；其它源由后端统一解析（剧果 / 野果 / 帝果 …）</p>
+    <select id="private-site" style="width:100%"></select>
     <h2>私密播放通道</h2>
     <p style="font-size:12px;color:var(--mut)">私密模式（黄果）播放/封面走哪种方式，立即生效</p>
     <div class="radio-group">
@@ -428,6 +431,7 @@ document.getElementById('btn-refresh').onclick=async()=>{
 const drawer=document.getElementById('drawer');
 const drawerMask=document.getElementById('drawer-mask');
 function openDrawer(){
+  loadPrivateSites();
   drawer.classList.add('open');drawerMask.classList.add('open');
   // 手机「我的」现在直接进这里，所以未登录时必须先给登录框，不能空着显示一块没数据的面板
   const logged=!!adminToken;
@@ -459,6 +463,42 @@ function setMode(m){
 // ---- 分区视图：公开「短剧/漫剧」、私密「剧场/AI」；首页已移除，接口与 APK 同源 ----
 let view='adult', subTab=0, hgCat='', publicSlug='', publicName='', searching=false;
 const PRIVATE_SUBS={adult:['ai-duanju','ai-manju'],ai:['ai-huanlian','ai-mogai']};
+/* 私密内容源：黄果 = 浏览器直连解析；其它 = 后端 /api/sources/{site}/* */
+const SITE_KEY='veyraPrivateSite';
+let privateSite=localStorage.getItem(SITE_KEY)||'huangguo';
+let privateSiteList=[];
+const remotePrivate=()=>mode==='private'&&privateSite!=='huangguo';
+/* 接口型源没有黄果那套成人/AI 四分类，两级 tab 都退化成「全部 / 最新」 */
+const privateSubs=()=>remotePrivate()?{adult:['','new'],ai:['','new']}:PRIVATE_SUBS;
+const privateSubNames=()=>remotePrivate()?{adult:['全部','最新'],ai:['全部','最新']}:PRIVATE_SUB_NAMES;
+function siteApi(path){
+  return fetch('/api/sources/'+encodeURIComponent(privateSite)+'/'+path,{headers:AUTH()}).then(r=>r.json().then(d=>{
+    if(!r.ok)throw new Error(d.error||('HTTP '+r.status));return d;
+  }));
+}
+function loadPrivateSites(){
+  const sel=document.getElementById('private-site');
+  if(!sel)return;
+  const paint=()=>{
+    sel.innerHTML=privateSiteList.map(s=>'<option value="'+escapeHtml(s.id)+'">'+escapeHtml(s.name)+'</option>').join('');
+    sel.value=privateSite;
+  };
+  paint();
+  fetch('/api/sources',{headers:AUTH()}).then(r=>r.json()).then(d=>{
+    privateSiteList=[{id:'huangguo',name:'黄果（浏览器直连）'}].concat((d&&d.sources)||[]);
+    if(!privateSiteList.some(s=>s.id===privateSite))privateSite='huangguo';
+    paint();
+  }).catch(()=>{privateSiteList=[{id:'huangguo',name:'黄果（浏览器直连）'}];paint()});
+}
+document.addEventListener('change',e=>{
+  if(e.target.id!=='private-site')return;
+  privateSite=e.target.value;
+  localStorage.setItem(SITE_KEY,privateSite);
+  resetCatalog();hgCat='';subTab=0;
+  loadPrivateSites();
+  loadView().catch(()=>{});
+  toast('已切换内容源：'+(privateSiteList.find(s=>s.id===privateSite)||{}).name||'');
+});
 const PRIVATE_SUB_NAMES={adult:['成人短剧','成人漫剧'],ai:['AI换脸','AI魔改']};
 const PUBLIC_POPULAR=[['short:romance','爱情'],['short:period','年代'],['short:comeback','逆袭'],['short:suspense','悬疑'],['comic:creative','脑洞'],['comic:fantasy','玄幻'],['comic:apocalypse','末世'],['comic:adventure','冒险']];
 let catalogEpoch=0,catalogItems=[],catalogNextPage=null,catalogLoading=false;
@@ -547,7 +587,7 @@ async function loadView(options){
   subtitle.textContent=mode==='public'?(adult?'真人演的看了不烧心':'探索热门漫剧。'):(adult?'短剧与漫剧，走进不同的人生。':'换脸与魔改，探索影像新可能。');
   if(mode==='private'){
     st.style.display='flex';
-    st.innerHTML=PRIVATE_SUB_NAMES[view].map((n,i)=>'<button type="button" class="'+(i===subTab?'active':'')+'" data-sub="'+i+'">'+n+'</button>').join('');
+    st.innerHTML=privateSubNames()[view].map((n,i)=>'<button type="button" class="'+(i===subTab?'active':'')+'" data-sub="'+i+'">'+n+'</button>').join('');
     st.querySelectorAll('[data-sub]').forEach(b=>b.onclick=()=>{subTab=Number(b.dataset.sub);loadView()});
   }else{
     renderPublicTagStrip();
@@ -645,9 +685,19 @@ async function loadCategoryView(force){
   }
   const epoch=++catalogEpoch;
   try{
-    const id=PRIVATE_SUBS[view][subTab],r=await fetch(hgProxy(HUANGGUO_BASE+id+'/'));
+    const id=privateSubs()[view][subTab];
+    let items;
+    if(remotePrivate()){
+      const data=await siteApi('category?slug='+encodeURIComponent(id)+'&page=1');
+      items=(data.items||[]).map(x=>({id:x.id,title:x.title,cover:x.cover,description:x.description||'',badge:x.episodeLabel||'',score:x.score||''}));
+      if(epoch!==catalogEpoch)return;
+      cachePut(key,items,null);
+      grid.classList.remove('app-grid');grid.style.display='grid';renderGrid(items);
+      return;
+    }
+    const r=await fetch(hgProxy(HUANGGUO_BASE+id+'/'));
     if(!r.ok)throw new Error('黄果源 '+r.status+'：请在管理抽屉配置可用的 backendProxy 后端代理');
-    const items=parseHuangguoHtml(await r.text());
+    items=parseHuangguoHtml(await r.text());
     if(epoch!==catalogEpoch)return;
     cachePut(key,items,null);
     grid.classList.remove('app-grid');grid.style.display='grid';renderGrid(items);
@@ -826,7 +876,7 @@ function renderGrid(items,target){
   if(host===grid)_items=rows;
   if(!rows.length){host.innerHTML='<div class="loading">暂无内容</div>';return}
   host.innerHTML=rows.map((it,i)=>{
-    const src=it.cover?(mode==='public'?coverSrc(it.cover):proxyUrl(it.cover)):'';
+    const src=it.cover?(mode==='public'?coverSrc(it.cover):(remotePrivate()?it.cover:proxyUrl(it.cover))):'';
     return '<div class="card-poster" data-i="'+i+'">'+
       '<img class="poster-img" src="'+src+'" loading="lazy" onerror="fallbackCover(this)"'+(src?'':' style="background:#1a1e26"')+'>'+
       '<div class="poster-title">'+escapeHtml(it.title)+'</div>'+
@@ -875,7 +925,7 @@ function openDetail(i){
   document.getElementById('d-badge').textContent=it.badge||'';
   const img=document.getElementById('d-poster');
   img.onerror=()=>fallbackCover(img);
-  img.src=it.cover?(mode==='public'?coverSrc(it.cover):proxyUrl(it.cover)):'';
+  img.src=it.cover?(mode==='public'?coverSrc(it.cover):(remotePrivate()?it.cover:proxyUrl(it.cover))):'';
   document.getElementById('ep-list').innerHTML='<div class="loading" style="padding:20px">正在获取选集…</div>';
   document.getElementById('player-wrap').classList.remove('open');
   document.getElementById('dl-status').textContent='';
@@ -884,9 +934,24 @@ function openDetail(i){
   document.getElementById('detail-overlay').classList.add('open');
   if(mode==='public'){
     loadPublicDetail(it,0);
+  }else if(remotePrivate()){
+    loadSourceDetail(it);
   }else{
     loadHuangguoDetail(it);
   }
+}
+
+// 接口型源：选集和播放地址都由后端给，这边只负责渲染
+function loadSourceDetail(it){
+  siteApi('detail?id='+encodeURIComponent(it.id)).then(d=>{
+    const eps=(d.episodes||[]).map(e=>({number:Number(e.number)||0})).filter(e=>e.number>0);
+    _detail={id:d.id||it.id,title:d.title||it.title,seriesId:d.id||it.id,eps:eps,vids:[],cover:d.cover||it.cover||''};
+    document.getElementById('d-desc').textContent=d.description||'';
+    document.getElementById('d-badge').textContent=d.episodeLabel||it.badge||'';
+    renderEpisodes();
+  }).catch(e=>{
+    document.getElementById('ep-list').innerHTML='<div class="loading">选集获取失败：'+escapeHtml(e.message)+'</div>';
+  });
 }
 
 // 公开模式选集：失败自动重试一次，仍失败则显示具体原因 + 手动重试
@@ -1021,6 +1086,14 @@ function playEpisode(j,resumeSec){
   if(mode==='public'){
     if(!ep.vid){document.getElementById('player-wrap').classList.remove('open');toast('该集暂无可播放地址（vid 缺失）');return}
     attachPlayer('/api/web/hongguo/stream?vid='+encodeURIComponent(ep.vid),doResume);
+  }else if(remotePrivate()){
+    siteApi('episode?id='+encodeURIComponent(_detail.id)+'&episode='+ep.number).then(d=>{
+      if(!d.source)throw new Error('后端没有返回播放地址');
+      attachPlayer(d.source,doResume);
+    }).catch(e=>{
+      document.getElementById('player-wrap').classList.remove('open');
+      toast('播放失败：'+e.message);
+    });
   }else{
     if(ep.playUrl){attachPlayer(ep.playUrl,doResume);return}
     const u=ep.detailUrl||_detail.id;

@@ -14,6 +14,7 @@ export const defaultSettings: AppSettings = {
   theme: 'dark',
   proxy: '',
   proxyMode: 3,
+  privateSite: 'huangguo',
   autoMerge: true,
   keepEpisodes: false,
   lastAccount: '',

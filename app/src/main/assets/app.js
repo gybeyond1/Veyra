@@ -67,12 +67,29 @@ const state = {
   sourceGroup: '', sourceQueue: [], previous: null, compactHeld: false,
   detailProgress: null
 };
-contentReady = api('content-status').then(status => {
+/* 当前私密源：黄果走端侧三通道，其余源由后端网关解析。
+   必须在 contentReady 赋值「之前」发请求 —— contentReady 还没就绪时 api 才直接下发，
+   否则回调里再调 api 会等 contentReady 自己，直接死锁。 */
+const privateSiteReady = api('private-site').catch(() => ({ id: 'huangguo', name: '黄果' }));
+contentReady = Promise.all([api('content-status'), privateSiteReady]).then(([status, site]) => {
   contentSource = status.source || 'hongguo';
   state.privateUnlocked = Boolean(status.unlocked);
+  state.privateSite = site && site.id ? site : { id: 'huangguo', name: '黄果' };
   // 启动即拉取黄果网络通道（避免重启后 state.proxyMode 未初始化导致下载误判手机直连）
   try { api('get-proxy-mode').then(v => { state.proxyMode = Number(v) || 3; }).catch(() => {}); } catch (ignore) {}
   document.title = 'Veyra';
+  if (privateMode() && state.privateSite && state.privateSite.id && state.privateSite.id !== 'huangguo') {
+    /* 接口型源没有黄果那套"成人/漫剧 + 分类"结构：
+       一级仍是两个 tab，但内容换成「全部 / 最新」，具体题材走「全部类型」页（后端分类）。 */
+    categoryIds.adult = ['', 'new'];
+    categoryIds.ai = ['', 'new'];
+    CATEGORY_NAMES[''] = '全部';
+    CATEGORY_NAMES['new'] = '最新';
+    const adultLabel = document.querySelector('[data-nav="adult"] > span:last-child');
+    const aiLabel = document.querySelector('[data-nav="ai"] > span:last-child');
+    if (adultLabel) adultLabel.textContent = '全部';
+    if (aiLabel) aiLabel.textContent = '最新';
+  }
   if (!privateMode()) {
     /* 公开源：短剧/漫剧之外再挂上站点的四个热播榜，作为同一页里的二级切换。
        榜单只有红果站点有，私密源（黄果）保持原样。 */
@@ -1661,6 +1678,7 @@ function renderSettings() {
   content.innerHTML = `<div class="settings-page"><button type="button" class="listing-back" data-back="1">${icon('back')} 返回我的</button><h1>设置</h1>
     ${window.renderAppearance ? window.renderAppearance() : ''}
     <section><button type="button" class="settings-link" data-account-management="1"><span><strong>账号管理</strong><small>${state.account.loggedIn ? esc(state.account.username) : '登录或注册账号'}</small></span>${icon('arrow')}</button></section>
+    ${privateMode() ? `<section><button type="button" class="settings-link" data-source-open><span><strong>私密内容源</strong><small data-source-summary>${esc((state.privateSite && state.privateSite.name) || '黄果')}</small></span>${icon('arrow')}</button></section>` : ''}
     <section><button type="button" class="settings-link" data-proxy-open><span><strong>黄果网络通道</strong><small data-proxy-summary>${esc(proxySummaryText())}</small></span>${icon('arrow')}</button></section>
     <section><button type="button" class="settings-link" data-remote-open><span><strong>远程服务器</strong><small data-remote-summary>${esc(remoteSummaryText())}</small></span>${icon('arrow')}</button></section>
     <section><button type="button" class="settings-link" data-about-open><span><strong>关于 Veyra</strong><small>项目地址 · GPL-3.0 开源</small></span>${icon('arrow')}</button></section></div>`;
@@ -1839,6 +1857,62 @@ function buildProxyPopHtml() {
     </div>
   </div>`;
 }
+/* ---------------- 私密内容源 ---------------- */
+var sourcePop = null;
+function ensureSourcePop() {
+  if (sourcePop && document.body.contains(sourcePop)) return sourcePop;
+  sourcePop = document.createElement('div');
+  sourcePop.className = 'appearance-scrim';
+  sourcePop.hidden = true;
+  sourcePop.addEventListener('click', event => {
+    if (event.target === sourcePop || event.target.closest('[data-source-close]')) { closeSourcePop(); return; }
+    const pick = event.target.closest('[data-site-id]');
+    if (pick) pickPrivateSite(pick.dataset.siteId, pick.dataset.siteName);
+  });
+  document.body.appendChild(sourcePop);
+  return sourcePop;
+}
+function buildSourcePopHtml() {
+  const current = (state.privateSite && state.privateSite.id) || 'huangguo';
+  /* 黄果是内置源（端侧解析 + 三通道），永远排第一；其余是后端网关支持的源 */
+  const rows = [{ id: 'huangguo', name: '黄果', description: '视频 · AI · 旧版（直连 / 代理 / 后端）' }]
+    .concat(asArray(state.privateSites));
+  return `<div class="appearance-pop account-pop proxy-pop" role="dialog" aria-modal="true" aria-labelledby="source-title">
+    <div class="appearance-head"><h2 id="source-title">私密内容源</h2><button type="button" class="appearance-close" data-source-close aria-label="关闭">✕</button></div>
+    <p class="appearance-note">黄果在手机上直连；其余源由后端解析，需要登录同一个账号，切完自动刷新首页。</p>
+    <div class="site-list">${rows.map(row => `<button type="button" class="site-option${row.id === current ? ' is-active' : ''}" data-site-id="${esc(row.id)}" data-site-name="${esc(row.name)}"><strong>${esc(row.name)}</strong><small>${esc(row.description || '')}</small></button>`).join('')}</div>
+  </div>`;
+}
+async function openSourcePop() {
+  ensureSourcePop();
+  sourcePop.innerHTML = buildSourcePopHtml();
+  sourcePop.hidden = false;
+  document.body.classList.add('appearance-open');
+  try {
+    const data = await api('private-sites');
+    state.privateSites = asArray(data && data.sources);
+    sourcePop.innerHTML = buildSourcePopHtml();
+  } catch (ignore) { /* 拉不到后端清单就只显示黄果 */ }
+}
+function closeSourcePop() {
+  if (!sourcePop || sourcePop.hidden) return;
+  sourcePop.hidden = true;
+  document.body.classList.remove('appearance-open');
+}
+async function pickPrivateSite(id, name) {
+  if (!id) return;
+  if (id === ((state.privateSite && state.privateSite.id) || 'huangguo')) { closeSourcePop(); return; }
+  try {
+    const result = await api('private-site', { id, name });
+    state.privateSite = { id: (result && result.id) || id, name: (result && result.name) || name };
+    state.home = null; state.category = null; state.tags = null;
+    closeSourcePop();
+    toast(`已切换到 ${state.privateSite.name}`);
+    goHome();
+  } catch (error) { toast(error.message || '切换失败', true); }
+}
+window.__veyraSourceBack = () => { if (sourcePop && !sourcePop.hidden) { closeSourcePop(); return true; } return false; };
+
 function ensureProxyPop() {
   if (proxyPop && document.body.contains(proxyPop)) return proxyPop;
   proxyPop = document.createElement('div');
@@ -3992,6 +4066,7 @@ document.addEventListener('click', async event => {
   if (event.target.closest('[data-apply-resources]')) { api('apply-hot-update').catch(error => toast(error.message, true)); return; }
   if (event.target.closest('[data-account-management]')) { openAccountPop(); return; }
   if (event.target.closest('[data-qr-login]')) { startQrScan(); return; }
+  if (event.target.closest('[data-source-open]')) { openSourcePop(); return; }
   if (event.target.closest('[data-proxy-open]')) { openProxyPop(); return; }
   if (event.target.closest('[data-about-open]')) { openAboutPop(); return; }
   // ---- 远程服务器配置 ----

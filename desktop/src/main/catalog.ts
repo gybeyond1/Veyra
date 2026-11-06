@@ -4,6 +4,7 @@ import type { CategoryPayload, HomePayload, SeriesDetail, SeriesCard } from '../
 import { serverModules } from './server-modules';
 import { fetchText } from './http';
 import * as huangguo from './huangguo';
+import * as remoteSite from './remote-site';
 import type { ContentSource } from './source';
 import { playUrl, prepare } from './media';
 import { userDataDir } from './paths';
@@ -73,6 +74,8 @@ export function cachedDetail(source: ContentSource, id: string): SeriesDetail | 
 }
 
 export async function home(source: ContentSource): Promise<HomePayload> {
+  // 私密模式选了接口型源（剧果/野果/帝果…）：后端网关直接给 Veyra 结构，不用本地解析
+  if (source === 'huangguo' && remoteSite.active()) return remoteSite.home();
   if (source === 'huangguo') {
     const payload = await huangguo.home();
     writeCache(`home:${source}`, payload);
@@ -94,6 +97,7 @@ export async function category(
 ): Promise<CategoryPayload> {
   const page = Math.min(100, Math.max(1, Number(params.page) || 1));
   const cacheKey = `cat:${source}:${params.type || 'short'}:${params.slug || ''}:${page}`;
+  if (source === 'huangguo' && remoteSite.active()) return remoteSite.category(params.slug || '', page);
   if (source === 'huangguo') {
     const result = await huangguo.category(params.slug || '', page);
     const payload = { items: result.items, title: result.title, page, hasMore: result.hasMore, total: result.items.length };
@@ -140,6 +144,7 @@ export async function tags(source: ContentSource): Promise<{ items: { name: stri
 export async function search(source: ContentSource, q: string): Promise<{ items: SeriesCard[] }> {
   const keyword = String(q || '').trim();
   if (!keyword) return { items: [] };
+  if (source === 'huangguo' && remoteSite.active()) return { items: await remoteSite.search(keyword) };
   if (source === 'huangguo') return { items: await huangguo.search(keyword) };
   const data = await serverModules().content.search(keyword);
   return { items: toCards(data?.items) };
@@ -148,6 +153,7 @@ export async function search(source: ContentSource, q: string): Promise<{ items:
 export async function detail(source: ContentSource, id: string): Promise<SeriesDetail> {
   const seriesId = String(id || '').trim();
   if (!seriesId) throw new Error('缺少剧集 id');
+  if (source === 'huangguo' && remoteSite.active()) return remoteSite.detail(seriesId);
   if (source === 'huangguo') {
     const payload = await huangguo.detail(seriesId);
     writeCache(`detail:${source}:${id}`, payload);
@@ -210,6 +216,8 @@ export async function play(
 ): Promise<{ url: string; kind: 'hls' | 'file' }> {
   if (!id) throw new Error('缺少剧集 id');
   const number = Math.max(1, Number(episode) || 1);
+  // 接口型源：后端已经签发了带签名 cookie 的 stream 地址，直接交给 mpv
+  if (source === 'huangguo' && remoteSite.active()) return remoteSite.play(id, number);
   const needH264 = !hevcOk;
   const kind = await prepare(source, id, number, needH264);
   return { url: playUrl(source, id, number, needH264 && kind === 'file'), kind };

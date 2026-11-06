@@ -850,6 +850,19 @@ app.get('/api/huangguo-proxy', async (req, res) => {
   attempt(target, false);
 });
 
+// 私密模式多源网关（剧果 / 野果 / 帝果 / 禁果短剧 / 黄果视频 / 黄果 AI / 黄果旧版）。
+// 解析集中在这里，四端只传「哪个源、哪一页」，播放走 /api/sources/stream 令牌地址。
+// 鉴权同时接受账号 token 与 WebUI 管理员 token（WebUI 也要能浏览私密源）。
+const sourceGate = (req, res, next) => {
+  const token = (String(req.headers.authorization || '').match(/^Bearer\s+(\S+)$/) || [])[1] || '';
+  const session = token && sessions[token];
+  if (session && users[session.userId]) { req.user = users[session.userId]; session.lastSeen = Date.now(); return next(); }
+  const expiry = token && adminSessions.get(token);
+  if (expiry && expiry > Date.now()) { req.user = { id: 'admin', role: 'admin', username: 'admin' }; return next(); }
+  return res.status(401).json({ error: '登录已失效，请重新登录' });
+};
+require('./sources').mount(app, { gate: sourceGate });
+
 // 代理诊断：管理员可查看任意 URL 的代理判定与结果（排查封面/分片 403）
 app.get('/api/debug/proxy', requireAdmin, (req, res) => {
   const target = String(req.query.url || '');

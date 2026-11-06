@@ -16,6 +16,7 @@ import { readSettings, writeSettings } from './store';
 import { session, normalizeServer } from './session';
 import * as auth from './auth';
 import * as catalog from './catalog';
+import * as remoteSite from './remote-site';
 import * as downloads from './downloads';
 import * as remote from './remote';
 import * as qrlogin from './qrlogin';
@@ -91,6 +92,9 @@ const handlers: { [K in ApiName]: (...args: any[]) => any } = {
   }),
 
   'app.settings': () => settings(),
+
+  // 后端支持的私密内容源（剧果/野果/帝果…）；黄果是内置源，前端自己补一项
+  'privateSite.sources': () => remoteSite.sources(),
 
   'app.saveSettings': (patch: Partial<AppSettings>) => {
     const next = writeSettings(patch);

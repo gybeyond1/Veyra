@@ -67,11 +67,24 @@
       <p class="account-version" id="account-version">版本 —</p>
       <div class="account-actions">
         <button id="account-mode" class="btn" type="button" data-focusable data-key="acct:mode">进入私密模式</button>
+        <button id="account-source" class="btn" type="button" data-focusable data-key="acct:source">私密内容源</button>
         <button id="account-proxy" class="btn" type="button" data-focusable data-key="acct:proxy">黄果网络通道</button>
         <button id="account-theme" class="btn" type="button" data-focusable data-key="acct:theme">主题设置</button>
         <button id="account-logout" class="btn" type="button" data-focusable data-key="acct:logout">退出登录</button>
         <button id="account-update" class="btn ghost" type="button" data-focusable data-key="acct:update">检查更新</button>
         <button id="account-close" class="btn ghost" type="button" data-focusable data-key="acct:close">关闭</button>
+      </div>
+    </section>
+  </div>
+
+  <!-- 私密内容源：黄果走端侧三通道，其余源由后端解析；遥控器可直接选 -->
+  <div id="source" hidden>
+    <section class="proxy-box">
+      <h1>私密内容源</h1>
+      <p class="proxy-sub">黄果在电视上直连；其余源由后端解析，切完自动刷新首页。</p>
+      <div class="source-list" id="source-list"></div>
+      <div class="proxy-actions">
+        <button id="source-close" class="btn ghost" type="button" data-focusable data-key="source:close">关闭</button>
       </div>
     </section>
   </div>

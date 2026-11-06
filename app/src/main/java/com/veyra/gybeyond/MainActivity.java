@@ -1169,6 +1169,18 @@ public final class MainActivity extends Activity {
           }
           ProxySettings.setMode(this, args.optInt("value", ProxySettings.MODE_BACKEND)); return true;
         }
+        // 后端支持的私密源清单（剧果/野果/帝果……），设置页据此渲染可选项
+        if ("private-sites".equals(action)) return account.getJson("api/sources");
+        // 私密源切换：黄果保持原三通道；剧果/野果/帝果等接口型源统一走后端网关
+        if ("private-site".equals(action)) {
+            if (args.has("id")) {
+                PrivateSite.set(this, args.optString("id"), args.optString("name"));
+                rebindContent();   // 立即换源，不用重启
+                // 缓存是给上一个源存的（首页/分类/详情），不清会先闪一遍别的源的内容
+                store.clearCache();
+            }
+            return new JSONObject().put("id", PrivateSite.get(this)).put("name", PrivateSite.name(this));
+        }
         if ("test-proxy".equals(action)) return testProxy();
         // ---- 远程服务器（SMB / WebDAV / FTP）：配置 + 传输 ----
         // 这三个协议的客户端都在手机侧直连局域网，不经后端：后端可能跑在公网 VPS 上，
