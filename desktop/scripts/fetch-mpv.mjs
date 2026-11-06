@@ -76,13 +76,33 @@ async function download(url, dest) {
       process.stdout.write(`\r[mpv] 下载中 ${(done / 1024 / 1024).toFixed(1)} MB${pct}   `);
     }
   });
+  /* 等 close 而不是 finish：finish 只表示数据交给了写入流，句柄可能还开着。
+     Windows 上紧接着用 7za 解压会因为「文件被另一个进程占用」读到 0 字节 —— 
+     上一次 CI 就是栽在这里。 */
   await new Promise((resolve, reject) => {
-    res.pipe(file);
-    file.on('finish', resolve);
-    file.on('error', reject);
     res.on('error', reject);
+    file.on('error', reject);
+    file.on('close', resolve);
+    res.pipe(file);
   });
   process.stdout.write('\n');
+  const size = fs.statSync(dest).size;
+  if (size < 1024 * 1024) throw new Error(`下载不完整（${size} 字节）`);
+  if (total && size !== total) throw new Error(`下载不完整（${size}/${total} 字节）`);
+}
+
+/** 下载失败重试一次：SourceForge 偶尔掐连接，重试比让人手动重跑省钱。 */
+async function downloadWithRetry(url, dest) {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      await download(url, dest);
+      return;
+    } catch (error) {
+      if (attempt === 2) throw error;
+      console.log(`[mpv] 下载失败（${error.message}），重试一次`);
+      try { fs.rmSync(dest, { force: true }); } catch { /* 本来就是残文件 */ }
+    }
+  }
 }
 
 /**
@@ -113,7 +133,7 @@ try {
     const url = process.env.MPV_URL || (await latestAsset());
     console.log(`[mpv] 从 ${url} 下载`);
     archive = path.join(tmp, 'mpv.7z');
-    await download(url, archive);
+    await downloadWithRetry(url, archive);
   }
 
   const unpacked = path.join(tmp, 'unpacked');
