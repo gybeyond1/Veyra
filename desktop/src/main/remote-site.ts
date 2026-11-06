@@ -98,9 +98,29 @@ export async function detail(id: string): Promise<SeriesDetail> {
   };
 }
 
-/** 播放地址：后端签发的一次性 stream 地址（带签名 cookie），10 分钟有效 */
+/**
+ * 网络模式是私密模式的全局设置（1 仅直连 / 2 仅代理 / 3 走后端转发）。
+ * 接口型源的列表/详情恒由后端解析，只有取播放地址这一段受它影响：
+ *   仅直连 → 后端只发源站真实地址，播放器直连；仅代理 → 后端经代理取流；转发 → 后端直连取流。
+ */
+function netQuery(): string {
+  const settings = readSettings();
+  const mode = settings.proxyMode === 1 || settings.proxyMode === 2 ? settings.proxyMode : 3;
+  let query = `&net=${mode}`;
+  if (mode === 2) {
+    const raw = String(settings.proxy || '').trim();
+    if (raw) {
+      // 设置里允许只填 host:port，后端要完整 URL 才认
+      const address = /^[a-z0-9]+:\/\//i.test(raw) ? raw : `http://${raw}`;
+      query += `&proxy=${encodeURIComponent(address)}`;
+    }
+  }
+  return query;
+}
+
+/** 播放地址：net=3 时是后端签发的一次性 stream 地址；net=1 时是源站真实地址 */
 export async function play(id: string, episode: number): Promise<{ url: string; kind: 'hls' | 'file' }> {
-  const data = await get<any>(`episode?id=${encodeURIComponent(id)}&episode=${Math.max(1, episode)}`);
+  const data = await get<any>(`episode?id=${encodeURIComponent(id)}&episode=${Math.max(1, episode)}${netQuery()}`);
   const url = String(data?.source || '');
   if (!/^https?:\/\//i.test(url)) throw new Error('后端没有返回可播放地址');
   return { url, kind: 'hls' };

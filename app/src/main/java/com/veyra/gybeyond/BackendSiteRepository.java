@@ -75,7 +75,26 @@ final class BackendSiteRepository {
     }
 
     JSONObject episode(String id, int number) throws Exception {
-        return call("episode?id=" + URLEncoder.encode(id, "UTF-8") + "&episode=" + Math.max(1, number));
+        StringBuilder path = new StringBuilder("episode?id=").append(URLEncoder.encode(id, "UTF-8"))
+                .append("&episode=").append(Math.max(1, number));
+        /*
+         * 网络模式是私密模式的全局设置，接口型源只有取播放地址这一段受它影响：
+         *   仅直连 → 后端只下发源站真实地址，播放器直连，后端不代取；
+         *   仅代理 → 后端经代理取流（优先用下面这个地址，没填就用管理台配的后端代理）；
+         *   走后端转发 → 后端直连取流（默认）。
+         * 列表/详情恒由后端解析，不受模式影响。
+         */
+        int mode = ProxySettings.mode(context);
+        path.append("&net=").append(mode);
+        if (mode == ProxySettings.MODE_PROXY) {
+            String address = ProxySettings.address(context);
+            if (!address.isEmpty()) {
+                // 设置里允许只填 host:port，后端的代理校验要求完整 URL
+                if (!address.matches("(?i)^[a-z0-9]+://.*")) address = "http://" + address;
+                path.append("&proxy=").append(URLEncoder.encode(address, "UTF-8"));
+            }
+        }
+        return call(path.toString());
     }
 
     /** 分类页直接当"全部类型"用：接口型源没有黄果那种标签树 */

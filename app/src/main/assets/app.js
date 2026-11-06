@@ -1839,11 +1839,11 @@ function updateProxySummary() {
 var proxyPop = null;
 function buildProxyPopHtml() {
   return `<div class="appearance-pop account-pop proxy-pop" role="dialog" aria-modal="true" aria-labelledby="proxy-title">
-    <div class="appearance-head"><h2 id="proxy-title">黄果网络通道</h2><button type="button" class="appearance-close" data-proxy-close aria-label="关闭">✕</button></div>
-    <p class="appearance-note">仅黄果/私密模式生效，红果永远直连不受影响；选择后立即生效，无需重启。</p>
+    <div class="appearance-head"><h2 id="proxy-title">私密网络模式</h2><button type="button" class="appearance-close" data-proxy-close aria-label="关闭">✕</button></div>
+    <p class="appearance-note">只对私密模式生效，且对所选内容源全部有效：黄果走本机通道，剧果/野果等由服务器按同一模式取流。公开内容永远直连。</p>
     <div class="settings-storage">${privateMode() ? '<button type="button" data-return-public>返回红果（公开模式）</button>' : '<button type="button" data-enter-private>进入私密模式</button>'}</div>
     <div class="proxy-test-row">
-      <input id="proxy-address" class="settings-input" type="text" placeholder="代理地址 host:port，如 192.168.31.108:7893" value="${esc(state.proxy || '')}" autocomplete="off" aria-label="黄果代理地址">
+      <input id="proxy-address" class="settings-input" type="text" placeholder="代理地址 host:port，如 192.168.31.108:7893" value="${esc(state.proxy || '')}" autocomplete="off" aria-label="代理地址">
       <button type="button" id="proxy-test" class="proxy-test-btn">检测</button>
     </div>
     <span id="proxy-test-result" class="proxy-test-result" hidden></span>
@@ -1879,7 +1879,7 @@ function buildSourcePopHtml() {
     .concat(asArray(state.privateSites));
   return `<div class="appearance-pop account-pop proxy-pop" role="dialog" aria-modal="true" aria-labelledby="source-title">
     <div class="appearance-head"><h2 id="source-title">私密内容源</h2><button type="button" class="appearance-close" data-source-close aria-label="关闭">✕</button></div>
-    <p class="appearance-note">黄果在手机上直连；其余源由后端解析，需要登录同一个账号，切完自动刷新首页。</p>
+    <p class="appearance-note">黄果在本机解析（直连/代理/后端三通道）；剧果/野果等由服务器解析，需要登录同一个账号，切完自动刷新首页。</p>
     <div class="site-list">${rows.map(row => `<button type="button" class="site-option${row.id === current ? ' is-active' : ''}" data-site-id="${esc(row.id)}" data-site-name="${esc(row.name)}"><strong>${esc(row.name)}</strong><small>${esc(row.description || '')}</small></button>`).join('')}</div>
   </div>`;
 }

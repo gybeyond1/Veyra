@@ -81,7 +81,7 @@
   <div id="source" hidden>
     <section class="proxy-box">
       <h1>私密内容源</h1>
-      <p class="proxy-sub">黄果在电视上直连；其余源由后端解析，切完自动刷新首页。</p>
+      <p class="proxy-sub">黄果在本机解析（直连/代理/后端）；剧果/野果等由服务器解析，切完自动刷新首页。</p>
       <div class="source-list" id="source-list"></div>
       <div class="proxy-actions">
         <button id="source-close" class="btn ghost" type="button" data-focusable data-key="source:close">关闭</button>
@@ -92,14 +92,14 @@
   <!-- 私密内容的网络通道：直连 / 代理 / 后端转发三选一，逻辑跟手机端完全一致 -->
   <div id="proxy" hidden>
     <section class="proxy-box">
-      <h1>黄果网络通道</h1>
-      <p class="proxy-sub">只对私密内容生效，公开内容永远直连；选完立即生效，不用重启。</p>
+      <h1>私密网络模式</h1>
+      <p class="proxy-sub">只对私密内容生效，对所选内容源全部有效；公开内容永远直连，选完立即生效。</p>
       <div class="proxy-modes" id="proxy-modes">
         <button class="proxy-mode" type="button" data-proxy-mode="1" data-focusable data-key="proxy:1">
           <strong>仅直连</strong><small>用电视自己的网络，走系统 VPN / 全局代理</small>
         </button>
         <button class="proxy-mode" type="button" data-proxy-mode="2" data-focusable data-key="proxy:2">
-          <strong>仅代理</strong><small>只走下面填的代理地址，连不上就报错</small>
+          <strong>仅代理</strong><small>走下面填的代理地址；黄果用本机，其它源由后端走同一地址</small>
         </button>
         <button class="proxy-mode" type="button" data-proxy-mode="3" data-focusable data-key="proxy:3">
           <strong>走后端转发</strong><small>全部经后端中转（仅管理员与特权组）</small>

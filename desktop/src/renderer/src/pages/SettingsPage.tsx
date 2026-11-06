@@ -209,12 +209,12 @@ export default function SettingsPage({ settings, notify, onSaved, onClose, sourc
           </section>
 
           <section className="panel">
-            <h2>私密源通道</h2>
-            <p className="hint">只影响黄果/私密模式；公开内容永远直连。切换立即生效。</p>
+            <h2>私密网络模式</h2>
+            <p className="hint">只影响私密模式，对所选内容源全部有效；公开内容永远直连。切换立即生效。</p>
             <div className="mode-group">
               {[
                 { value: 1 as const, title: '仅直连', desc: '用本机网络，失败直接报错' },
-                { value: 2 as const, title: '仅代理', desc: '只用下面填的代理地址' },
+                { value: 2 as const, title: '仅代理', desc: '黄果用下面地址，其它源由服务器走同一地址' },
                 { value: 3 as const, title: '走后端转发', desc: '由服务器代取，服务器可配代理' },
               ].map((item) => (
                 <button
@@ -231,7 +231,7 @@ export default function SettingsPage({ settings, notify, onSaved, onClose, sourc
             <div className="row">
               <div>
                 <strong>代理地址</strong>
-                <p>形如 192.168.31.108:7893 或 http://127.0.0.1:7890，仅「仅代理」时使用。</p>
+                <p>形如 192.168.31.108:7893 或 http://127.0.0.1:7890，仅「仅代理」时使用；会一并交给服务器代取。</p>
               </div>
               <input
                 className="text"
@@ -511,7 +511,7 @@ function PrivateSitePanel({ notify }: { notify: (text: string, tone?: 'info' | '
   return (
     <section className="panel">
       <h2>私密内容源</h2>
-      <p className="hint">黄果在电脑上直连/代理/走后端；其它源由后端解析，需要登录同一个账号。</p>
+      <p className="hint">黄果在本机解析（直连/代理/走后端）；其它源由服务器解析，需要登录同一个账号。</p>
       <div className="site-picker">
         {rows.map((row) => (
           <button

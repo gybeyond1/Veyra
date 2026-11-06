@@ -3,6 +3,8 @@ data
 test
 *.log
 hongguo-signer
+# Go 签名器的构建产物（运行时用 hongguo-signer/ 里的二进制）
+hongguo_sign
 start.sh
 .dockerignore
 Dockerfile

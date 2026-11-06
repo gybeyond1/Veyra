@@ -100,6 +100,48 @@ function request(url, options = {}) {
   });
 }
 
+/**
+ * 经代理抓取：私密模式的「仅代理」通道。
+ *
+ * 为什么这里退回 curl（而不是给 Node 套 agent）：socks5 需要额外依赖，
+ * 而 proxy-fetch.js 已经在用系统 curl 做 http/socks5 双协议，Dockerfile 也装了 curl。
+ * 代价是每个请求一个进程，只用在用户显式选了「仅代理」的分支上。
+ */
+function requestViaProxy(url, options = {}, proxyUrl) {
+  const { requestThroughProxy } = require('../proxy-fetch');
+  const { headers = {}, timeout = 15000, maxBytes = 8 << 20, method = 'GET', body } = options;
+  // curl 走代理时自己处理压缩，不要再要求 gzip（否则拿到的是压缩字节没人解）
+  const clean = { ...headers };
+  delete clean['Accept-Encoding'];
+  return new Promise((resolve, reject) => {
+    const sent = body ? (typeof body === 'string' ? Buffer.from(body) : body) : null;
+    if (sent) clean['Content-Length'] = String(sent.length);
+    requestThroughProxy(
+      url,
+      proxyUrl,
+      { headers: clean, timeout, maxBytes, redirects: 3 },
+      (error, result) => {
+        if (error) return reject(error);
+        if (method !== 'GET' && method !== 'POST') {
+          // curl 分支只按 GET 发；POST 的源目前没有，留个明确的错而不是静默降级
+          return reject(new Error('仅代理通道暂不支持该请求方法'));
+        }
+        resolve({
+          status: result.status,
+          headers: result.headers || {},
+          body: result.body,
+          text: () => result.body.toString('utf8'),
+        });
+      }
+    );
+  });
+}
+
+/** 有代理走代理，没代理走原生 keep-alive 直连。 */
+function requestVia(url, options = {}, proxyUrl = '') {
+  return proxyUrl ? requestViaProxy(url, options, proxyUrl) : request(url, options);
+}
+
 /** GET JSON：非 2xx 或不是 JSON 都抛错，调用方决定怎么兜底。 */
 async function getJSON(url, options = {}) {
   const res = await request(url, { ...options, headers: { Accept: 'application/json, text/plain, */*', ...(options.headers || {}) } });
@@ -222,6 +264,7 @@ function baseUrlOf(req) {
 
 module.exports = {
   request,
+  requestVia,
   getJSON,
   cached,
   cacheGet,

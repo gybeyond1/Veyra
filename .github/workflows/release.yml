@@ -117,6 +117,10 @@ jobs:
           # gzip 用 -6：镜像里大部分是已压缩的 layer，-9 压不出体积还多花几分钟。
           docker pull --platform linux/amd64 "$IMG"
           docker image inspect --format 'amd64 离线包: {{.Os}}/{{.Architecture}}' "$IMG"
+          # 镜像自检：0.28.9 的 Dockerfile 逐个文件 COPY，新增 server/sources/ 时漏了一行，
+          # 线上容器直接 MODULE_NOT_FOUND。这里在发版前把常驻模块 require 一遍，
+          # 少文件当场红，而不是等用户 docker compose up 才发现。
+          docker run --rm --entrypoint node "$IMG" -e "require('./sources'); require('./device-hub'); require('./app-updater'); console.log('镜像自检通过：模块齐全')"
           docker save "$IMG" | gzip -6 > "veyra-backend-${VER}-amd64.tar.gz"
 
           docker pull --platform linux/arm64 "$IMG"

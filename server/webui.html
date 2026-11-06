@@ -305,11 +305,12 @@ video{width:100%;border-radius:10px;background:#000}
     <h2>私密内容源</h2>
     <p style="font-size:12px;color:var(--mut)">黄果在浏览器里直连；其它源由后端统一解析（剧果 / 野果 / 帝果 …）</p>
     <select id="private-site" style="width:100%"></select>
-    <h2>私密播放通道</h2>
-    <p style="font-size:12px;color:var(--mut)">私密模式（黄果）播放/封面走哪种方式，立即生效</p>
+    <h2>私密网络模式</h2>
+    <p style="font-size:12px;color:var(--mut)">对私密模式的所有源生效：直连=浏览器自己连源站（受跨域限制），代理=后端代走代理，转发=后端直连代取代取</p>
     <div class="radio-group">
-      <label id="ch-relay" data-ch="relay">后端转发</label>
-      <label id="ch-direct" data-ch="direct">直连</label>
+      <label id="ch-relay" data-ch="relay">走后端转发</label>
+      <label id="ch-proxy" data-ch="proxy">仅代理</label>
+      <label id="ch-direct" data-ch="direct">仅直连</label>
     </div>
     <h2>二步验证</h2>
     <div id="otp-unbound">
@@ -708,18 +709,27 @@ async function loadCategoryView(force){
   }
 }
 
-// ---- 私密播放通道（localStorage 持久化） ----
+// ---- 私密网络模式（localStorage 持久化，对私密模式所有源生效） ----
+// relay 走后端转发 / proxy 仅代理（后端代走代理） / direct 仅直连（浏览器直连源站）
 const channelKey='veyraPrivateChannel';
 let privateChannel=localStorage.getItem(channelKey)||'relay';
+if(!['relay','proxy','direct'].includes(privateChannel))privateChannel='relay';
 function loadChannelUi(){
-  document.getElementById('ch-relay').classList.toggle('active',privateChannel==='relay');
-  document.getElementById('ch-direct').classList.toggle('active',privateChannel==='direct');
+  document.querySelectorAll('#drawer [data-ch]').forEach(l=>{
+    l.classList.toggle('active',l.dataset.ch===privateChannel);
+  });
 }
 document.querySelectorAll('#drawer [data-ch]').forEach(l=>l.onclick=()=>{
-  privateChannel=l.dataset.ch;localStorage.setItem(channelKey,privateChannel);loadChannelUi();toast('私密通道：'+(privateChannel==='relay'?'后端转发':'直连'));
+  privateChannel=l.dataset.ch;localStorage.setItem(channelKey,privateChannel);loadChannelUi();
+  toast('网络模式：'+({relay:'走后端转发',proxy:'仅代理',direct:'仅直连'})[privateChannel]);
 });
+/* 接口型源的 net 参数：直连=1 代理=2 转发=3，与手机/电视/电脑同一套编号 */
+function netQuery(){
+  const mode=({direct:1,proxy:2,relay:3})[privateChannel]||3;
+  return '&net='+mode;
+}
 function proxyUrl(u){
-  if(privateChannel==='relay')return hgProxy(u);
+  if(privateChannel!=='direct')return hgProxy(u);
   // 直连模式：https 页面加载 http 资源会被浏览器拦（混合内容），统一升 https 尝试
   return u.replace(/^http:\/\//i,'https://');
 }
@@ -1087,7 +1097,7 @@ function playEpisode(j,resumeSec){
     if(!ep.vid){document.getElementById('player-wrap').classList.remove('open');toast('该集暂无可播放地址（vid 缺失）');return}
     attachPlayer('/api/web/hongguo/stream?vid='+encodeURIComponent(ep.vid),doResume);
   }else if(remotePrivate()){
-    siteApi('episode?id='+encodeURIComponent(_detail.id)+'&episode='+ep.number).then(d=>{
+    siteApi('episode?id='+encodeURIComponent(_detail.id)+'&episode='+ep.number+netQuery()).then(d=>{
       if(!d.source)throw new Error('后端没有返回播放地址');
       attachPlayer(d.source,doResume);
     }).catch(e=>{
@@ -1689,7 +1699,7 @@ document.getElementById('btn-admin-diagnose').onclick=async()=>{
   document.getElementById('diag-overlay').classList.add('open');
   const body=document.getElementById('diag-body');
   body.textContent='诊断中…\n';
-  const lines=['== Veyra 私密源诊断 ==','私密站点: '+HUANGGUO_BASE,'转发通道: '+(privateChannel==='relay'?'后端转发':'直连')+'\n'];
+  const lines=['== Veyra 私密源诊断 ==','私密站点: '+HUANGGUO_BASE,'网络模式: '+({relay:'走后端转发',proxy:'仅代理',direct:'仅直连'})[privateChannel]+'\n'];
   const debug=(label,url)=>fetch('/api/debug/proxy?url='+encodeURIComponent(url),{headers:AUTH()}).then(r=>r.json()).then(d=>{
     lines.push('['+label+']');
     lines.push('  URL: '+String(d.target||url).slice(0,140));

@@ -9,9 +9,11 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund --prefer-offline
 
-# 业务代码（.dockerignore 排除 node_modules/test/data/旧签名器）
+# 业务代码整目录复制，靠 .dockerignore 排除 node_modules/test/data。
+# 以前是逐个文件列举，0.28.9 新增 server/sources/ 时漏写了一行，
+# 镜像里 index.js require('./sources') 直接 MODULE_NOT_FOUND 起不来 —— 不再列举。
 # hongguo-sign.js：红果签名链 JS 内嵌实现（hongguo-app.js require 依赖，缺失会导致取流失败）
-COPY index.js webui.html downloader.js hongguo-app.js hongguo-content.js hongguo-decrypt.js proxy-fetch.js ssrf-guard.js hls.min.js hongguo-sign.js device-hub.js app-updater.js storages.js release-hook.js intro.js intro.mp4 ./
+COPY . ./
 
 ENV PORT=8080
 EXPOSE 8080

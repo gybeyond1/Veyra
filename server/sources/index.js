@@ -14,7 +14,7 @@
  * recommend / newest / episodes[].number|url），所以前端数据层不用改，只加"切源"。
  */
 
-const { request, cached, issueToken, readToken, rewritePlaylist, baseUrlOf } = require('./util');
+const { request, requestVia, cached, issueToken, readToken, rewritePlaylist, baseUrlOf } = require('./util');
 const { assertPublicUrl } = require('../ssrf-guard');
 
 const providers = [
@@ -42,6 +42,42 @@ function list() {
 function publicDetail(info) {
   const { _episodes, ...rest } = info;
   return rest;
+}
+
+/* ---------------- 网络模式 ----------------
+ * 私密模式的全局设置：1 仅直连 / 2 仅代理 / 3 走后端转发（默认）。
+ * 黄果在客户端有自己的一套通道实现；接口型源的解析只能跑在服务端，
+ * 所以这三档落在「取流」这一段上，语义保持一致：
+ *   1 仅直连   → 只发源站真实地址，播放器自己连，后端不代取一个字节（源站拦 Referer 就按失败报错）
+ *   2 仅代理   → 后端经代理取流：优先用客户端传上来的代理地址，没传就用管理台配置的后端代理
+ *   3 走后端转发 → 后端直连取流（默认，最稳，含签名续期）
+ */
+const NET_DIRECT = 1;
+const NET_PROXY = 2;
+const NET_BACKEND = 3;
+
+/** 代理地址只接受代理协议，避免这个参数变成任意跳板 */
+function safeProxy(raw) {
+  const value = String(raw || '').trim().slice(0, 200);
+  if (!value) return '';
+  try {
+    const parsed = new URL(value);
+    return /^(http|https|socks5):$/.test(parsed.protocol) ? value : '';
+  } catch {
+    return '';
+  }
+}
+
+function netOf(req, deps) {
+  const mode = Number(req.query.net) || NET_BACKEND;
+  if (mode === NET_DIRECT) return { mode, proxy: '' };
+  if (mode !== NET_PROXY) return { mode: NET_BACKEND, proxy: '' };
+  const raw = String(req.query.proxy || '').trim();
+  const own = safeProxy(raw);
+  if (own) return { mode, proxy: own };
+  // 客户端没填或填坏时退回管理台配的后端代理
+  const fallback = deps && deps.getProxy ? safeProxy(deps.getProxy()) : '';
+  return { mode, proxy: fallback, badProxy: Boolean(raw) && !own };
 }
 
 /**
@@ -113,9 +149,12 @@ async function stream(req, res) {
   };
   if (token.userAgent) headers['User-Agent'] = token.userAgent;
 
+  // 「仅代理」的令牌带着代理地址，播放列表 / 密钥 / 分片全部经它出去
+  const proxy = token.proxy || '';
+
   let upstream;
   try {
-    upstream = await request(target.toString(), { headers, timeout: 25000, maxBytes: MEDIA_MAX });
+    upstream = await requestVia(target.toString(), { headers, timeout: 25000, maxBytes: MEDIA_MAX }, proxy);
     /*
      * 野果这类源的播放地址带十几秒有效的签名，用户点开暂停一会儿再播就会 403。
      * 根地址失效时让 provider 重新要一次，分片/子列表不重签（它们由播放列表实时下发）。
@@ -128,7 +167,7 @@ async function stream(req, res) {
         headers.Referer = fresh.referer || headers.Referer;
         if (fresh.cookie) headers.Cookie = fresh.cookie;
         target = new URL(fresh.url);
-        upstream = await request(target.toString(), { headers, timeout: 25000, maxBytes: MEDIA_MAX });
+        upstream = await requestVia(target.toString(), { headers, timeout: 25000, maxBytes: MEDIA_MAX }, proxy);
       }
     }
   } catch (error) {
@@ -169,6 +208,8 @@ async function stream(req, res) {
         id: token.id,
         episode: token.episode,
         hosts: [...hosts],
+        // 「仅代理」的通道必须逐层继承，否则子列表一分片就退回直连
+        proxy: token.proxy,
       });
     }
     const body = rewritePlaylist(text, target.toString(), (absolute) =>
@@ -269,8 +310,10 @@ function mount(app, deps) {
   });
 
   /**
-   * 某一集的播放信息：source 换成后端 media 令牌地址，播放器直接播。
-   * 令牌绑当前账号，10 分钟过期。
+   * 某一集的播放信息。
+   *   net=3（默认）→ source 换成后端 media 令牌地址，播放器直接播，令牌绑账号 10 分钟。
+   *   net=1 仅直连 → source 就是源站真实地址，一个字节都不经后端；headers 给能注入请求头的端用。
+   *   net=2 仅代理 → 令牌里带代理，后端经代理取流。
    */
   app.get('/api/sources/:source/episode', auth, async (req, res) => {
     if (!needUser(req, res)) return;
@@ -278,8 +321,61 @@ function mount(app, deps) {
     if (!provider) return;
     const id = String(req.query.id || '');
     const number = Math.max(1, Number(req.query.episode) || 1);
+    const { mode: net, proxy, badProxy } = netOf(req, deps);
+    if (net === NET_PROXY && !proxy) {
+      return res.status(400).json({
+        error: badProxy
+          ? '代理地址格式不支持，只接受 http:// 或 socks5://'
+          : '「仅代理」还没填代理地址：设置里填，或让管理员在管理台配好',
+      });
+    }
     try {
       const info = await provider.episode(id, number);
+      const headers = {};
+      if (info.referer) headers.Referer = info.referer;
+      if (info.cookie) headers.Cookie = info.cookie;
+      if (info.userAgent) headers['User-Agent'] = info.userAgent;
+
+      if (net === NET_DIRECT && provider.noDirect) {
+        // 这个源只能后端代取（比如剧果的 CloudFront 签名 Cookie 播放器带不上），
+        // 与其让用户看到莫名 403，不如自动降级并说明原因
+        const notice = `${provider.name}的播放要签名 Cookie，播放器带不上，已自动走后端转发`;
+        const token = issueToken(req.user.id, {
+          url: info.url,
+          referer: info.referer,
+          cookie: info.cookie,
+          userAgent: info.userAgent,
+          source: provider.id,
+          id,
+          episode: number,
+        });
+        return res.json({
+          id,
+          episode: number,
+          title: info.title || '',
+          cover: info.cover || '',
+          source: `${baseUrlOf(req)}/api/sources/stream?t=${token}`,
+          net: NET_BACKEND,
+          fallback: true,
+          notice,
+          nextUrl: '',
+        });
+      }
+
+      if (net === NET_DIRECT) {
+        return res.json({
+          id,
+          episode: number,
+          title: info.title || '',
+          cover: info.cover || '',
+          source: info.url,
+          direct: true,
+          net,
+          headers,
+          nextUrl: '',
+        });
+      }
+
       const token = issueToken(req.user.id, {
         url: info.url,
         referer: info.referer,
@@ -289,6 +385,7 @@ function mount(app, deps) {
         // 供 provider.refresh 重新签发（野果的播放地址只有十几秒有效）
         id,
         episode: number,
+        proxy,
       });
       res.json({
         id,
@@ -296,6 +393,7 @@ function mount(app, deps) {
         title: info.title || '',
         cover: info.cover || '',
         source: `${baseUrlOf(req)}/api/sources/stream?t=${token}`,
+        net,
         nextUrl: '',
       });
     } catch (error) {

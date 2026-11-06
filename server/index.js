@@ -861,7 +861,8 @@ const sourceGate = (req, res, next) => {
   if (expiry && expiry > Date.now()) { req.user = { id: 'admin', role: 'admin', username: 'admin' }; return next(); }
   return res.status(401).json({ error: '登录已失效，请重新登录' });
 };
-require('./sources').mount(app, { gate: sourceGate });
+// 私密多源网关：「仅代理」通道没带客户端代理地址时，退回管理台配置的后端代理
+require('./sources').mount(app, { gate: sourceGate, getProxy: () => backendProxy });
 
 // 代理诊断：管理员可查看任意 URL 的代理判定与结果（排查封面/分片 403）
 app.get('/api/debug/proxy', requireAdmin, (req, res) => {
