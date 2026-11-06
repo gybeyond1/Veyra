@@ -10,6 +10,8 @@
  */
 
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const { request } = require('./util');
 
 const BASE = 'https://dr6skssi3nxbk.cloudfront.net';
@@ -23,7 +25,43 @@ const FALLBACK = {
   paramIv: 'BxJand%xf5h3sycH',
 };
 
-const state = { token: '', device: '', protocol: null, protocolAt: 0, cat: null, catAt: 0 };
+/*
+ * 首次请求要先抓前端页、再抓打包脚本、才能拿到密钥，串起来好几秒；
+ * 国内连 CloudFront 更慢，用户点进去就是白屏。所以把上次解析到的协议和设备号落盘，
+ * 重启后直接用，只有解密失败时才重新抓。
+ */
+const CACHE_FILE = path.join(process.env.DATA_DIR || path.join(__dirname, '..', 'data'), 'legacy-protocol.json');
+
+function loadSaved() {
+  try {
+    const saved = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
+    if (!saved || !saved.interfaceKey || !saved.paramKey || !saved.paramIv) return null;
+    // 密钥偶尔会被官方换掉，一周后强制重抓一次，别拿过期的一直撞
+    if (Date.now() - Number(saved.at || 0) > 7 * 24 * 3600 * 1000) return null;
+    return saved;
+  } catch {
+    return null;
+  }
+}
+
+function saveState() {
+  try {
+    fs.mkdirSync(path.dirname(CACHE_FILE), { recursive: true });
+    fs.writeFileSync(CACHE_FILE, JSON.stringify({ ...state.protocol, device: state.device, at: state.protocolAt }));
+  } catch {
+    /* 落盘失败不影响请求，下次再抓一遍 */
+  }
+}
+
+const saved = loadSaved();
+const state = {
+  token: '',
+  device: (saved && saved.device) || '',
+  protocol: saved ? { interfaceKey: saved.interfaceKey, paramKey: saved.paramKey, paramIv: saved.paramIv } : null,
+  protocolAt: saved ? Number(saved.at) : 0,
+  cat: null,
+  catAt: 0,
+};
 
 /* ---------------- 加解密 ---------------- */
 
@@ -66,26 +104,62 @@ function decryptResponse(dataString, interfaceKey) {
 
 /* ---------------- 协议 ---------------- */
 
-async function protocol() {
-  if (state.protocol && Date.now() - state.protocolAt < 24 * 3600 * 1000) return state.protocol;
-  try {
-    const page = await request(`${FRONT}/`, { headers: { Referer: `${FRONT}/` }, timeout: 15000, maxBytes: 1 << 20 });
-    const html = page.text();
-    const entryRef = [...html.matchAll(/<script[^>]*type="module"[^>]*src="([^"]+)"/g)].map((m) => m[1])[0];
-    if (!entryRef) throw new Error('未找到前端脚本');
-    const script = (await request(new URL(entryRef, `${FRONT}/`).toString(), { headers: { Referer: `${FRONT}/` }, timeout: 20000, maxBytes: 4 << 20 })).text();
-    const pick = (name) => {
-      const match = new RegExp(`["']${name}["']\\s*[:,]\\s*["']([^"'\\\\\\r\\n]+)["']`).exec(script);
-      return match ? match[1] : '';
-    };
-    const found = { interfaceKey: pick('interfaceKey'), paramKey: pick('parameterKey'), paramIv: pick('parameterIv') };
-    if (!found.interfaceKey || found.paramKey.length !== 16 || found.paramIv.length !== 16) throw new Error('协议解析失败');
-    state.protocol = found;
-    state.protocolAt = Date.now();
-  } catch {
-    state.protocol = FALLBACK;
-    state.protocolAt = Date.now();
+let refreshing = null;
+
+/**
+ * 抓一次官网脚本把新密钥捞回来。失败就保持原值，绝不把已经能用的密钥冲掉。
+ * 同一个进程里只跑一份，并发请求共用。
+ */
+function refreshProtocol() {
+  if (refreshing) return refreshing;
+  refreshing = (async () => {
+    try {
+      const page = await request(`${FRONT}/`, { headers: { Referer: `${FRONT}/` }, timeout: 8000, maxBytes: 1 << 20 });
+      const html = page.text();
+      const entryRef = [...html.matchAll(/<script[^>]*type="module"[^>]*src="([^"]+)"/g)].map((m) => m[1])[0];
+      if (!entryRef) throw new Error('未找到前端脚本');
+      const script = (await request(new URL(entryRef, `${FRONT}/`).toString(), { headers: { Referer: `${FRONT}/` }, timeout: 10000, maxBytes: 4 << 20 })).text();
+      const pick = (name) => {
+        const match = new RegExp(`["']${name}["']\\s*[:,]\\s*["']([^"'\\\\\\r\\n]+)["']`).exec(script);
+        return match ? match[1] : '';
+      };
+      const found = { interfaceKey: pick('interfaceKey'), paramKey: pick('parameterKey'), paramIv: pick('parameterIv') };
+      if (!found.interfaceKey || found.paramKey.length !== 16 || found.paramIv.length !== 16) throw new Error('协议解析失败');
+      state.protocol = found;
+      state.protocolAt = Date.now();
+      saveState();
+    } catch {
+      if (!state.protocol) {
+        state.protocol = FALLBACK;
+        state.protocolAt = Date.now();
+      }
+    } finally {
+      refreshing = null;
+    }
+    return state.protocol;
+  })();
+  return refreshing;
+}
+
+/**
+ * force=true 才阻塞等新密钥（登录/解密失败时用）；
+ * 平时直接用手上这份，过期了就后台换，别让首屏等抓脚本。
+ * 首次冷启动连缓存都没有，也先拿内置那份顶上 —— 那份和官网当前脚本是一致的。
+ */
+async function protocol(force) {
+  if (force) {
+    state.protocol = null;
+    state.protocolAt = 0;
+    return refreshProtocol();
   }
+  if (state.protocol && Date.now() - state.protocolAt < 24 * 3600 * 1000) return state.protocol;
+  if (state.protocol) {
+    refreshProtocol();
+    return state.protocol;
+  }
+  state.protocol = FALLBACK;
+  state.protocolAt = Date.now();
+  refreshProtocol();
   return state.protocol;
 }
 
@@ -95,29 +169,38 @@ function userAgent() {
 
 async function login(force) {
   if (state.token && !force) return state.token;
-  if (!state.device) state.device = crypto.randomBytes(4).toString('hex').toUpperCase() + Date.now();
-  const keys = await protocol();
-  const res = await request(`${BASE}/api/app/mine/login/h5`, {
-    method: 'POST',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      temp: 'test',
-      'X-User-Agent': userAgent(),
-      Origin: FRONT,
-      Referer: `${FRONT}/`,
-      'User-Agent': UA,
-    },
-    body: JSON.stringify({ data: encryptParam({ devID: state.device, sysType: 'ios', isAppStore: false }, Buffer.from(keys.paramKey), Buffer.from(keys.paramIv)) }),
-    timeout: 20000,
-  });
-  const envelope = JSON.parse(res.text());
-  let data = envelope.data;
-  if (typeof data === 'string') data = JSON.parse(decryptResponse(data, Buffer.from(keys.interfaceKey)).toString('utf8'));
-  const token = data && (data.token || data.accessToken);
-  if (!token) throw new Error('黄果旧版访客登录失败');
-  state.token = String(token);
-  return state.token;
+  if (!state.device) {
+    state.device = crypto.randomBytes(4).toString('hex').toUpperCase() + Date.now();
+    saveState();
+  }
+  const keys = force ? await protocol(true) : await protocol();
+  try {
+    const res = await request(`${BASE}/api/app/mine/login/h5`, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        temp: 'test',
+        'X-User-Agent': userAgent(),
+        Origin: FRONT,
+        Referer: `${FRONT}/`,
+        'User-Agent': UA,
+      },
+      body: JSON.stringify({ data: encryptParam({ devID: state.device, sysType: 'ios', isAppStore: false }, Buffer.from(keys.paramKey), Buffer.from(keys.paramIv)) }),
+      timeout: 8000,
+    });
+    const envelope = JSON.parse(res.text());
+    let data = envelope.data;
+    if (typeof data === 'string') data = JSON.parse(decryptResponse(data, Buffer.from(keys.interfaceKey)).toString('utf8'));
+    const token = data && (data.token || data.accessToken);
+    if (!token) throw new Error('黄果旧版访客登录失败');
+    state.token = String(token);
+    return state.token;
+  } catch (error) {
+    // 内置那份密钥可能真被官方换了：重抓一次脚本再来，别让用户看到"登录失败"
+    if (!force) return login(true);
+    throw error;
+  }
 }
 
 /** 统一请求：参数加密进 data，响应按需解密 */
@@ -136,7 +219,7 @@ async function api(path, params, retried = false) {
   };
   if (params) url += `${url.includes('?') ? '&' : '?'}data=${encodeURIComponent(encryptParam(params, Buffer.from(keys.paramKey), Buffer.from(keys.paramIv)))}`;
 
-  const res = await request(url, { headers, timeout: 20000, maxBytes: 8 << 20 });
+  const res = await request(url, { headers, timeout: 15000, maxBytes: 8 << 20 });
   let envelope;
   try {
     envelope = JSON.parse(res.text());

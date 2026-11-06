@@ -372,7 +372,7 @@ video{width:100%;border-radius:10px;background:#000}
 let mode='public', adminToken=localStorage.getItem('veyraAdmin')||'';
 const AUTH=()=>({Authorization:'Bearer '+adminToken});
 const grid=document.getElementById('grid');
-const HUANGGUO_BASE='https://www.pqhybuxo.cc/';
+const HUANGGUO_BASE='https://huangguoai.io/';
 let _items=[], _detail=null; // _detail={id,title,seriesId,eps:[{number}],vids:[]}
 
 async function gateLogin(){
@@ -783,7 +783,7 @@ function parseHuangguoHtml(html){
     let u=href;try{u=new URL(href,base).toString()}catch{return}
     if(!/detail|video|play|show|vod|info|series|drama/i.test(u))return;
     // 私密站三子域（thu/www/m）指向同一内容：seen 去重前归一化为 www
-    let uKey=u;try{const x=new URL(u);if(x.hostname.endsWith('.pqhybuxo.cc'))x.hostname='www.pqhybuxo.cc';uKey=x.toString()}catch{}
+    let uKey=u;try{const x=new URL(u);if(/\.(pqhybuxo\.cc|gitiecgad\.cc)$/i.test(x.hostname))x.hostname='huangguoai.io';uKey=x.toString()}catch{}
     if(seen.has(uKey))return;seen.add(uKey);
     let c=cover||'';try{if(c)c=new URL(c,base).toString()}catch{}
     items.push({id:u,title:(title||'').trim(),cover:c,coverFrom:String(cover||'').slice(0,140),badge:'',detailUrl:u});
@@ -1151,6 +1151,19 @@ async function extractVideoSrcAsync(html,base){
       const fhtml=await r.text();
       const s=extractVideoSrc(fhtml,frameUrl);
       if(s)return s;
+    }catch{}
+  }
+  // 5) 2026-11 改版：详情页不再内嵌播放地址，改成 /api/videos/:id/play 单独下发
+  const vm2=base.match(/\/video\/(\d+)(?:\/ep-(\d+))?/);
+  if(vm2){
+    try{
+      const api=new URL(`/api/videos/${vm2[1]}/play?ep=${vm2[2]||1}`,base).toString();
+      const r=await fetch(hgProxy(api));
+      if(r.ok){
+        const j=await r.json();
+        const u=j&&j.data&&j.data.video_url;
+        if(u)return new URL(u,base).toString();
+      }
     }catch{}
   }
   return '';

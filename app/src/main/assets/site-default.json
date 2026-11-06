@@ -1,6 +1,10 @@
 {
- "origin": "https://thu.pqhybuxo.cc",
- "origins": ["https://thu.pqhybuxo.cc", "https://www.pqhybuxo.cc", "https://m.pqhybuxo.cc"],
+ "origin": "https://huangguoai.io",
+ "origins": [
+  "https://huangguoai.io",
+  "https://0624.gitiecgad.cc",
+  "https://thu.pqhybuxo.cc"
+ ],
  "headers": {
   "User-Agent": "Mozilla/5.0 (Linux; Android) AppleWebKit/537.36 Chrome/130 Mobile Safari/537.36",
   "Referer": "{origin}/"
@@ -18,7 +22,8 @@
   "detail": "/video/{id}/",
   "episodeFirst": "/video/{id}/",
   "episode": "/video/{id}/ep-{episode}/",
-  "search": "/search/?keyword={query}",
+  "playApi": "/api/videos/{id}/play?ep={episode}",
+  "search": "/search/video/{query}/",
   "tagSitemap": "/sitemap/tag/1.xml"
  },
  "patterns": {

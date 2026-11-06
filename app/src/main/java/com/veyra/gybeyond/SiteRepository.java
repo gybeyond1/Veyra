@@ -50,6 +50,11 @@ final class SiteRepository {
     private static final int CHANNEL_TIMEOUT_MS = 5_000;   // 直连/代理通道超时
     private static final int BACKEND_READ_TIMEOUT_MS = 12_000;
     private final okhttp3.OkHttpClient backendClient;
+    /**
+     * 直连/代理通道里 301 最终落到的域名，由 page() 确认页面有效后才采用。
+     * 用 ThreadLocal：首页会并行抓多个分类，共用一个字段会串台。
+     */
+    private final ThreadLocal<String> landedOrigin = new ThreadLocal<>();
 
     SiteRepository(Context context) { this(context, HotUpdateManager.get(context).currentSite()); }
 
@@ -118,6 +123,10 @@ final class SiteRepository {
         connection.setUseCaches(false);
         try {
             int status = connection.getResponseCode();
+            // 跟随重定向后 connection 指向最终地址；黄果换域名靠这个跟上
+            URL landed = connection.getURL();
+            if (landed != null && landed.getHost() != null)
+                landedOrigin.set(landed.getProtocol() + "://" + landed.getHost());
             if (status < 200 || status >= 300) throw new IllegalStateException("站点请求失败（" + status + "）");
             try (InputStream stream = connection.getInputStream(); ByteArrayOutputStream bytes = new ByteArrayOutputStream()) {
                 byte[] buffer = new byte[8192];
@@ -170,29 +179,38 @@ final class SiteRepository {
      */
     private Document page(String path) throws Exception {
         if (!path.startsWith("/") || path.startsWith("//")) throw new IllegalArgumentException("无效路径");
+        landedOrigin.remove();
         int mode = ProxySettings.mode(appContext);
         if (mode == ProxySettings.MODE_DIRECT) {
-            byte[] body = fetchDirect(profile.origin() + path);
-            if (body.length < 1000) throw new IllegalStateException("站点暂时返回空页面");
-            return Jsoup.parse(new String(body, StandardCharsets.UTF_8), profile.origin());
+            return parse(fetchDirect(profile.origin() + path));
         }
         if (mode == ProxySettings.MODE_PROXY) {
             if (proxyAddress.isEmpty()) throw new IOException("未配置代理地址");
-            byte[] body = fetchViaProxy(profile.origin() + path);
-            if (body.length < 1000) throw new IllegalStateException("站点暂时返回空页面");
-            return Jsoup.parse(new String(body, StandardCharsets.UTF_8), profile.origin());
+            return parse(fetchViaProxy(profile.origin() + path));
         }
         for (int attempt = 0; attempt < profile.sourceCount(); attempt++) {
             try {
-                byte[] body = fetchViaBackend(profile.origin() + path);
-                if (body.length < 1000) throw new IllegalStateException("站点暂时返回空页面");
-                return Jsoup.parse(new String(body, StandardCharsets.UTF_8), profile.origin());
+                return parse(fetchViaBackend(profile.origin() + path));
             } catch (Exception error) {
                 if (attempt + 1 < profile.sourceCount() && profile.switchSource()) continue; // 换备用源
                 throw error;
             }
         }
         throw new IllegalStateException("所有通道与站点源均不可用");
+    }
+
+    /**
+     * 页面拿到并解析成功，才认 301 落到的域名。
+     * 顺序很关键：先确认抓回来的是真页面，再改 origin，
+     * 否则一个鉴权跳转就能把站点地址带偏，而站点地址是持久化的。
+     */
+    private Document parse(byte[] body) throws Exception {
+        if (body.length < 1000) throw new IllegalStateException("站点暂时返回空页面");
+        Document document = Jsoup.parse(new String(body, StandardCharsets.UTF_8), profile.origin());
+        String landed = landedOrigin.get();
+        landedOrigin.remove();
+        if (landed != null) profile.adoptOrigin(landed);
+        return document;
     }
 
     private static String text(Element element) {
@@ -678,7 +696,16 @@ final class SiteRepository {
         Element node = document.selectFirst(profile.selector("content"));
         if (node == null) throw new IllegalStateException("未取得播放信息");
         JSONObject data = profile.mapJson(new JSONObject(node.data().isEmpty() ? node.text() : node.data()), "content");
-        String videoSrc = channelizedUrl(data.optString("videoSrc"));
+        String videoSrc = data.optString("videoSrc").trim();
+        // 2026-11 改版：详情页不再塞播放地址（videoSrc 留空），改成 /api/videos/:id/play 单独下发
+        if (videoSrc.isEmpty()) {
+            JSONObject play = playAddress(id, number);
+            videoSrc = play.optString("video_url").trim();
+            if (videoSrc.isEmpty()) throw new IllegalStateException("播放接口没有给出地址");
+            String title = play.optString("title").trim();
+            if (!title.isEmpty()) data.put("title", title);
+        }
+        videoSrc = channelizedUrl(videoSrc);
         String base = ServerConfig.get(appContext);
         boolean viaBackend = !base.isEmpty() && videoSrc.startsWith(base + "api/huangguo-proxy?");
         if (!id.equals(String.valueOf(data.opt("id"))) || !(videoSrc.startsWith("https://") || viaBackend)) {
@@ -692,6 +719,20 @@ final class SiteRepository {
         result.put("cover", channelizedUrl(data.optString("coverSrc", data.optString("posterSrc"))));
         result.put("nextUrl", attr(document.selectFirst(profile.selector("next")), "href"));
         return result;
+    }
+
+    /**
+     * 新版详情页的播放地址在这个接口里，返回 { data: { video_url, title, ... } }。
+     * 同样走当前通道：仅直连/仅代理自己取，走后端则交后端代取。
+     */
+    private JSONObject playAddress(String id, int number) throws Exception {
+        String path = profile.route("playApi", "id", id, "episode", String.valueOf(number));
+        byte[] body = fetch(profile.origin() + path);
+        if (body.length == 0) throw new IllegalStateException("播放接口返回空");
+        JSONObject envelope = new JSONObject(new String(body, StandardCharsets.UTF_8));
+        JSONObject data = envelope.optJSONObject("data");
+        if (data == null) throw new IllegalStateException("播放接口没有返回数据");
+        return data;
     }
 
     String coverData(String value) throws Exception {

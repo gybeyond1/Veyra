@@ -11,14 +11,15 @@
 
 const { request } = require('./util');
 
+/*
+ * 2026-11 换站：老镜像（thu.lbvrhyir.cc / pku.xxbgwypx.cc / *.ediayikma.cc）
+ * 要么 301 到新站、要么直接不通，POST 到边缘入口更是连不上。
+ * 现在官方主域是 huangguoai.io，带日期的 gitiecgad.cc 是同一套站的轮换域名，
+ * 两个都留着：日期域名哪天再换，主域还能兜。
+ */
 const MIRRORS = [
-  'https://huangguoai.com',
-  'https://thu.lbvrhyir.cc',
-  'https://thu.agdkczeyx.cc',
-  'https://pku.xxbgwypx.cc',
-  'https://ttvoij.ediayikma.cc',
-  'https://thu.ediayikma.cc',
-  'https://fdu.ediayikma.cc',
+  'https://huangguoai.io',
+  'https://0624.gitiecgad.cc',
 ];
 
 const AI_CATEGORIES = [

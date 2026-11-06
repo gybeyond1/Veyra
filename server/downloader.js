@@ -381,9 +381,9 @@ function startTask(task) {
 //   → m3u8(master) 递归展开（解包 video.225600.xyz 代理层/相对路径补全/子流）
 //   → 下载全部分片 + #EXT-X-KEY（AES-128）→ 写本地 playlist.m3u8 → ffmpeg -c copy 封装 mp4
 //   与 APK/WebUI 播放同源取流，天然兼容源站防盗链与加密。
-// 站点顺序：m 站优先（与 APK 播放链路同源，videoSrc 是 media playlist 直接分片；
-// www/thu 站的 videoSrc 可能是 variant 多清晰度子流，递归展开子流 CDN 会被风控返回 600KB 二进制）
-const HUANGGUO_SITES = ['https://m.pqhybuxo.cc', 'https://www.pqhybuxo.cc', 'https://thu.pqhybuxo.cc'];
+// 2026-11 换站：pqhybuxo.cc 整族只剩 301，实体内容在 huangguoai.io。
+// 带日期的 gitiecgad.cc 是同一套站的轮换域名，旧域留最后兜底。
+const HUANGGUO_SITES = ['https://huangguoai.io', 'https://0624.gitiecgad.cc', 'https://thu.pqhybuxo.cc'];
 
 function readBackendProxy() {
   try {
@@ -539,7 +539,12 @@ async function huangguoDownloadEpisode(seriesId, number, dir, plainFile) {
         || (html.match(/videoInitialData["']?\s*[:=]\s*(\{[\s\S]*?\})\s*;/) || [])[1];
       if (!jsonText) throw new Error('页面无 videoInitialData');
       const data = JSON.parse(jsonText.replace(/^[\s\S]*?(?=\{)/, ''));
-      const src = data.videoSrc || (Array.isArray(data.videoSrcList) ? data.videoSrcList[0] : '');
+      let src = data.videoSrc || (Array.isArray(data.videoSrcList) ? data.videoSrcList[0] : '');
+      if (!src) {
+        // 2026-11 改版：详情页不再塞播放地址，改由 /api/videos/:id/play 单独下发
+        const apiRes = await hgRequest(`${site}/api/videos/${seriesId}/play?ep=${number}`, `${site}/video/${seriesId}/`, 1 * 1024 * 1024);
+        try { src = JSON.parse(apiRes.toString('utf8')).data.video_url || ''; } catch { src = ''; }
+      }
       if (!src) throw new Error('videoSrc 为空');
       masterSite = site; // 记住解析出 m3u8 的站点，防盗链 Referer 必须用播放页所属站点
       masterUrl = resolveHuangguoUri(src, `${site}/video/${seriesId}/`);
@@ -551,9 +556,9 @@ async function huangguoDownloadEpisode(seriesId, number, dir, plainFile) {
     }
   }
   if (!masterUrl) throw new Error('解析播放地址失败（' + errors.join(' | ') + '）');
-  // Referer 与 APK 播放链路一致（m.pqhybuxo.cc）：源站/CDN 防盗链校验播放页域名，
-  // www/thu 站域名作为 Referer 会被 302 到 CDN 后返回风控二进制（600KB 垃圾）导致 m3u8 展开失败
-  const referer = `https://m.pqhybuxo.cc/video/${seriesId}/` + (first ? '' : `ep-${number}/`);
+  // Referer 用主站域名：源站/CDN 防盗链校验播放页域名，对不上的会被 302 到 CDN
+  // 后返回风控二进制（600KB 垃圾）导致 m3u8 展开失败
+  const referer = `https://huangguoai.io/video/${seriesId}/` + (first ? '' : `ep-${number}/`);
   let plan;
   try {
     plan = await expandHuangguoM3u8(masterUrl, referer, 0);
@@ -581,7 +586,7 @@ async function huangguoDownloadEpisode(seriesId, number, dir, plainFile) {
   // 下载失败自动重试：403/瞬时限流换 Referer 变体（www/thu/m 站点域名各试一次），仍失败才报错
   const segFiles = new Array(plan.segments.length);
   let nextSeg = 0;
-  const segReferers = [referer, `https://www.pqhybuxo.cc/video/${seriesId}/` + (first ? '' : `ep-${number}/`), `https://thu.pqhybuxo.cc/video/${seriesId}/` + (first ? '' : `ep-${number}/`)];
+  const segReferers = [referer, `https://0624.gitiecgad.cc/video/${seriesId}/` + (first ? '' : `ep-${number}/`), `https://thu.pqhybuxo.cc/video/${seriesId}/` + (first ? '' : `ep-${number}/`)];
   await Promise.all(Array.from({ length: Math.min(6, plan.segments.length) }, async () => {
     while (nextSeg < plan.segments.length) {
       const i = nextSeg++;
@@ -633,7 +638,7 @@ async function runTask(task) {
 
   // 黄果（私密）源：记录播放页 Referer 基准（分片/CDN 防盗链校验），并预取每集 m3u8
   if (task.source === 'huangguo' && !task._hgPlayReferer) {
-    task._hgPlayReferer = `https://www.pqhybuxo.cc/video/${task.seriesId}/`;
+    task._hgPlayReferer = `https://huangguoai.io/video/${task.seriesId}/`;
   }
 
   // 红果 App 取流升级（v0.13.45）：官方接口多清晰度选最高档（随机设备+签名，NAS 家宽出口）。

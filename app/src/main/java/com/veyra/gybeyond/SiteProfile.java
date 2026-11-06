@@ -12,17 +12,26 @@ import java.util.regex.Pattern;
 
 /** Immutable rules for one screen/playback session; callers keep the same request interface. */
 final class SiteProfile {
+    /** 黄果系域名会整批轮换（旧域 301 到新域），落到新域后记在这里，重启也不用再跳一次。 */
+    private static final String PREFS = "veyra-site-origin";
+    private static final String KEY_ORIGIN = "origin";
+    private static final Pattern ORIGIN = Pattern.compile("https://[a-zA-Z0-9.-]+");
+
     private final JSONObject rules;
+    private final Context appContext;
     final String[] origins;      // 主源 + 备用源（互相兜底），顺序即优先级
     final String fingerprint;
     private int sourceIndex = 0;
 
     SiteProfile(Context context, JSONObject overrides) throws Exception {
+        appContext = context.getApplicationContext();
         JSONObject defaults = new JSONObject(new String(HotUpdateManager.read(
                 context.getAssets().open("site-default.json"), 128 * 1024), StandardCharsets.UTF_8));
         rules = merge(defaults, overrides == null ? new JSONObject() : overrides);
-        // 源列表解析：热更新/内置若显式给了 "origin"，作为首选源；再接 "origins" 数组；去重保序
+        // 源列表解析：上次落到的域名 > 热更新/内置 "origin" > "origins" 数组；去重保序
         java.util.LinkedHashSet<String> sourceSet = new java.util.LinkedHashSet<>();
+        String remembered = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_ORIGIN, "");
+        if (remembered != null && ORIGIN.matcher(remembered).matches()) sourceSet.add(remembered);
         if (overrides != null && overrides.has("origin") && !overrides.getString("origin").trim().isEmpty())
             sourceSet.add(overrides.getString("origin").trim());
         JSONArray originList = rules.optJSONArray("origins");
@@ -84,6 +93,34 @@ final class SiteProfile {
         return true;
     }
     int sourceCount() { return origins.length; }
+
+    /**
+     * 记下 301 落到的真实域名。黄果每换一次域名，内置配置就过期一次；
+     * 靠这里跟上，用户不用等发版，也不会因为旧域多跳一层而卡住。
+     * 只认纯 https 域名，越界的一律丢弃。
+     */
+    synchronized void adoptOrigin(String value) {
+        if (value == null) return;
+        String origin = value.replaceAll("/+$", "");
+        if (!ORIGIN.matcher(origin).matches()) return;
+        for (int i = 0; i < origins.length; i++) {
+            if (origins[i].equalsIgnoreCase(origin)) {
+                sourceIndex = i;
+                remember(origin);
+                return;
+            }
+        }
+        origins[0] = origin;   // 新域名顶到首位，原来的主域退到备位继续兜底
+        sourceIndex = 0;
+        remember(origin);
+    }
+
+    private void remember(String origin) {
+        if (appContext == null) return;
+        String current = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_ORIGIN, "");
+        if (origin.equals(current)) return;
+        appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_ORIGIN, origin).apply();
+    }
 
     JSONObject object(String key) { return rules.optJSONObject(key); }
     String selector(String key) { return object("selectors").optString(key); }

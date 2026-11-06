@@ -21,6 +21,7 @@ __pycache__/
 .local-docs/
 Android Version/
 server/node_modules/
+server/data/
 chengzi-data/
 app/libs/
 

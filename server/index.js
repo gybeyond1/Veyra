@@ -99,9 +99,21 @@ const ADMIN_SESSION_TTL_MS = 8 * 3600 * 1000; // 管理员会话 8 小时
 const adminSessions = new Map(); // adminToken -> expiry ms
 
 // 黄果站点域名白名单（后端转发接口只允许抓这些域名，避免变成开放代理）
-// 主站为 *.pqhybuxo.cc 系；封面 CDN pic.drleao.cn / 详情图 expose.eisees.com；视频播放 yd-hls.hzjvlo.cn；
+// 主站 2026-11 从 *.pqhybuxo.cc 迁到 huangguoai.io；封面 CDN pic.drleao.cn / 详情图 expose.eisees.com；视频播放 yd-*.hzjvlo.cn；
 // hongguoduanju.com 为红果官方站（搜索联想接口 /incent_resource/suggestion 补全短剧名用）
-const HUANGGUO_HOST_RE = /(^|\.)(pqhybuxo\.cc|im41z53s\.cc|huangguoju\.com|drleao\.cn|eisees\.com|hzjvlo\.cn|hongguoduanju\.com|douyinpic\.com|douyinvod\.com|byteicdn\.com|byteimg\.com|bytetos\.com)$/i;
+// 黄果系站点会整批换域名（2026-11 从 pqhybuxo.cc 换到 huangguoai.io / gitiecgad.cc），
+// 白名单没跟上的话，「走后端转发」连首页都 403（代理只转发媒体资源）。
+// 除内置表外，运维可用 HUANGGUO_EXTRA_HOSTS=a.com,b.com 临时补，不必等发版。
+const HUANGGUO_EXTRA = String(process.env.HUANGGUO_EXTRA_HOSTS || '')
+  .split(',')
+  .map((item) => item.trim().toLowerCase())
+  .filter((item) => /^[a-z0-9.-]+$/.test(item))
+  .map((item) => item.replace(/\./g, '\\.'));
+const HUANGGUO_HOST_RE = new RegExp(
+  '(^|\\.)(pqhybuxo\\.cc|gitiecgad\\.cc|huangguoai\\.io|im41z53s\\.cc|huangguoju\\.com|drleao\\.cn|eisees\\.com|hzjvlo\\.cn|hongguoduanju\\.com|douyinpic\\.com|douyinvod\\.com|byteicdn\\.com|byteimg\\.com|bytetos\\.com'
+    + (HUANGGUO_EXTRA.length ? '|' + HUANGGUO_EXTRA.join('|') : '') + ')$',
+  'i'
+);
 // 这个端点是匿名的（WebView 的 <img>/播放器带不了 Authorization），目标 URL 又完全由调用方给，
 // 所以必须两道闸：白名单外的域名只允许媒体资源（防止被当通用代理），以及 ssrf-guard 的公网校验。
 // 确实需要放开时设 PROXY_STRICT=0（不建议）。

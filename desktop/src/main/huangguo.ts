@@ -17,8 +17,9 @@ import { session } from './session';
  * 被 CDN 改坏的 PNG 头字节（0x14 → 0x1a），否则整张图显示不出来。
  */
 
-const SITES = ['https://m.pqhybuxo.cc', 'https://www.pqhybuxo.cc', 'https://thu.pqhybuxo.cc'];
-const REFERER = 'https://m.pqhybuxo.cc';
+// 2026-11 换站：旧域 pqhybuxo.cc 只做 301，实际内容在 huangguoai.io
+const SITES = ['https://huangguoai.io', 'https://0624.gitiecgad.cc', 'https://thu.pqhybuxo.cc'];
+const REFERER = 'https://huangguoai.io';
 const COVER_KEY = Buffer.from('f5d965df75336270', 'utf8');
 const COVER_IV = Buffer.from('97b60374abc2fbe1', 'utf8');
 
@@ -265,7 +266,7 @@ export async function category(slug: string, page: number): Promise<{ items: Ser
 export async function search(keyword: string): Promise<SeriesCard[]> {
   const query = text(keyword);
   if (!query) return [];
-  const path = `/search/?keyword=${encodeURIComponent(query)}`;
+  const path = `/search/video/${encodeURIComponent(query)}/`;
   const { html } = await load(path, path);
   return withCovers(dedupe(cards(cheerio.load(html))));
 }
@@ -330,10 +331,20 @@ export async function playSource(id: string, episode: number): Promise<{ url: st
   const path = episode === 1 ? `/video/${id}/` : `/video/${id}/ep-${episode}/`;
   const { html } = await load(path, `/video/${id}/`);
   const data = initialData(html);
-  const src =
+  let src =
     text(data.videoSrc) ||
     (Array.isArray(data.videoSrcList) ? text(data.videoSrcList[0]) : '') ||
     text((data.epPlaySrcs as Record<string, string> | undefined)?.[String(episode)]);
+  if (!src) {
+    // 2026-11 改版：详情页的 videoSrc 留空，播放地址改由独立接口下发
+    const { html: apiBody } = await load(`/api/videos/${id}/play?ep=${episode}`, `/video/${id}/`);
+    try {
+      const payload = JSON.parse(apiBody) as { data?: { video_url?: string } };
+      src = text(payload?.data?.video_url);
+    } catch {
+      src = '';
+    }
+  }
   if (!src) throw new Error('这一集没有取到播放地址');
   const url = src.startsWith('//') ? `https:${src}` : new URL(src, `${REFERER}${path}`).toString();
   const referer = `${REFERER}/video/${id}/${episode === 1 ? '' : `ep-${episode}/`}`;

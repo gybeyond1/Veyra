@@ -351,9 +351,9 @@ function popcount(n) {
 // ===== NAS 自主系列解析（手机端只推 seriesId/title/集数，不再解析 URL）=====
 
 const MIRROR_ORIGINS = [
+  'https://huangguoai.io',
+  'https://0624.gitiecgad.cc',
   'https://thu.pqhybuxo.cc',
-  'https://www.pqhybuxo.cc',
-  'https://m.pqhybuxo.cc',
 ];
 
 function httpGet(url, headers) {
@@ -430,7 +430,14 @@ async function fetchWebUrl(id, episode) {
       const m = body.match(/<script[^>]*id="videoInitialData"[^>]*>([\s\S]*?)<\/script>/);
       if (!m) continue;
       const data = JSON.parse(m[1]);
-      const src = data.videoSrc;
+      let src = data.videoSrc;
+      // 2026-11 改版：详情页不再塞播放地址，改由 /api/videos/:id/play 单独下发
+      if (!(typeof src === 'string' && /^https?:\/\//.test(src))) {
+        const api = await httpGet(`${origin}/api/videos/${id}/play?ep=${episode}`, { Referer: `${origin}/video/${id}/` });
+        if (api.status === 200) {
+          try { src = JSON.parse(api.body).data.video_url || ''; } catch { src = ''; }
+        }
+      }
       if (typeof src === 'string' && /^https?:\/\//.test(src)) return { url: src, referer: origin };
     } catch { /* 换下一个 origin */ }
   }
