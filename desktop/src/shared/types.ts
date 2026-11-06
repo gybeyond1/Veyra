@@ -21,6 +21,8 @@ export interface AppSettings {
   concurrency: number;
   theme: 'dark' | 'light';
   proxy: string;
+  /** 私密源通道：1 仅直连 / 2 仅代理 / 3 走后端转发（与手机端同一套语义） */
+  proxyMode: 1 | 2 | 3;
   autoMerge: boolean;
   keepEpisodes: boolean;
   lastAccount: string;
@@ -219,7 +221,7 @@ export interface Api {
   'player.mpvStatus': () => Promise<{ position: number; duration: number; paused: boolean }>;
   'player.mpvClose': () => Promise<void>;
 
-  'sync.pull': () => Promise<{ payload: Record<string, unknown> }>;
+  'sync.pull': (payload?: { source?: 'hongguo' | 'huangguo' }) => Promise<{ payload: Record<string, unknown> }>;
   'sync.push': (payload: { library: Record<string, unknown> }) => Promise<{ ok: boolean; at: number }>;
 }
 

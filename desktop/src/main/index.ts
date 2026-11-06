@@ -80,12 +80,6 @@ function buildMenu(): void {
             void shell.openExternal(PROJECT_URL);
           },
         },
-        {
-          label: '项目主页',
-          click: () => {
-            void shell.openExternal(PROJECT_URL);
-          },
-        },
       ],
     },
   ];

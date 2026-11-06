@@ -3,6 +3,7 @@ import https from 'node:https';
 import { execFile } from 'node:child_process';
 import { URL } from 'node:url';
 import zlib from 'node:zlib';
+import { readSettings } from './store';
 
 export interface JsonOptions {
   method?: string;
@@ -132,6 +133,12 @@ const MOBILE_UA = 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120
  */
 function curlArgs(url: string, timeoutMs: number, headers?: Record<string, string>): string[] {
   const args = ['-s', '-L', '-m', String(Math.max(3, Math.round(timeoutMs / 1000)))];
+  // 「仅代理」模式：所有外网请求都走用户填的代理；本地回环（自家后端）永远直连
+  const settings = readSettings();
+  const local = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])/i.test(url);
+  if (settings.proxyMode === 2 && settings.proxy && !local) {
+    args.push('-x', settings.proxy.trim());
+  }
   const custom = headers || {};
   if (!Object.keys(custom).some((key) => key.toLowerCase() === 'user-agent')) args.push('-A', MOBILE_UA);
   for (const [key, value] of Object.entries(custom)) {

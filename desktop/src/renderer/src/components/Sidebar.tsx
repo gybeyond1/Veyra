@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { AccountUser } from '@shared/types';
 import type { View } from '../App';
 
@@ -9,6 +10,7 @@ interface Props {
   activeDownloads: number;
   onNav: (view: View) => void;
   onPrivate: () => void;
+  onOpenSettings: () => void;
   onLogout: () => void;
 }
 
@@ -63,26 +65,31 @@ const items: { key: View; label: string; icon: JSX.Element }[] = [
       </svg>
     ),
   },
-  {
-    key: 'settings',
-    label: '设置',
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-        <circle cx="12" cy="12" r="3.2" />
-        <path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6" strokeLinecap="round" />
-      </svg>
-    ),
-  },
 ];
 
-export default function Sidebar({ view, user, server, source, activeDownloads, onNav, onPrivate, onLogout }: Props) {
+export default function Sidebar({
+  view,
+  user,
+  server,
+  source,
+  activeDownloads,
+  onNav,
+  onPrivate,
+  onOpenSettings,
+  onLogout,
+}: Props) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [avatarBroken, setAvatarBroken] = useState(false);
+  const base = server.replace(/\/+$/, '');
+  const avatar = !avatarBroken && base ? `${base}${user.avatar || `/api/avatar/${user.id}.jpg`}` : '';
+
   return (
     <aside className="sidebar">
       <div className="brand">
-        <span className="brand-mark">V</span>
+        <img className="brand-logo" src="./logo.png" alt="Veyra" />
         <div className="brand-text">
           <strong>Veyra</strong>
-          <small>桌面端</small>
+          <small>{source === 'huangguo' ? '私密模式' : '桌面端'}</small>
         </div>
       </div>
 
@@ -104,25 +111,49 @@ export default function Sidebar({ view, user, server, source, activeDownloads, o
       </nav>
 
       <div className="side-bottom">
-        <button
-          type="button"
-          className={`private-toggle${source === 'huangguo' ? ' on' : ''}`}
-          onClick={onPrivate}
-          title={source === 'huangguo' ? '切回公开内容' : '输入动态码进入私密模式'}
-        >
-          <span className="lock">{source === 'huangguo' ? '🔓' : '🔒'}</span>
-          <span>{source === 'huangguo' ? '私密模式 · 已开启' : '私密模式'}</span>
-        </button>
-        <div className="side-foot">
-          <div className="account">
-          <span className="avatar">{(user.username || '?').slice(0, 1).toUpperCase()}</span>
-          <div className="account-meta">
-            <strong>{user.username}</strong>
-            <small title={server}>{server.replace(/^https?:\/\//, '')}</small>
-          </div>
-        </div>
-          <button type="button" className="ghost tiny" onClick={onLogout}>
-            退出
+        <div className="account-wrap">
+          {menuOpen && (
+            <>
+              <div className="account-scrim" onClick={() => setMenuOpen(false)} />
+              <div className="account-menu">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onPrivate();
+                  }}
+                >
+                  <span className="menu-lock">{source === 'huangguo' ? '🔓' : '🔒'}</span>
+                  {source === 'huangguo' ? '返回公开模式' : '进入私密模式'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onOpenSettings();
+                  }}
+                >
+                  设置
+                </button>
+                <button type="button" onClick={onLogout}>
+                  退出登录
+                </button>
+              </div>
+            </>
+          )}
+          <button
+            type="button"
+            className={`account${menuOpen ? ' open' : ''}`}
+            onClick={() => setMenuOpen((current) => !current)}
+          >
+            <span className="avatar">
+              {avatar && <img src={avatar} alt="" onError={() => setAvatarBroken(true)} />}
+              <em>{(user.username || '?').slice(0, 1).toUpperCase()}</em>
+            </span>
+            <div className="account-meta">
+              <strong>{user.username}</strong>
+            </div>
+            <span className="account-more">⋯</span>
           </button>
         </div>
       </div>

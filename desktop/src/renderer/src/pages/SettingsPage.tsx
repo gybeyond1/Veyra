@@ -7,9 +7,10 @@ interface Props {
   settings: AppSettings | null;
   notify: (text: string, tone?: 'info' | 'error') => void;
   onSaved: (settings: AppSettings) => void;
+  onClose?: () => void;
 }
 
-export default function SettingsPage({ settings, notify, onSaved }: Props) {
+export default function SettingsPage({ settings, notify, onSaved, onClose }: Props) {
   const [info, setInfo] = useState<ServerInfo | null>(null);
   const [draft, setDraft] = useState<AppSettings | null>(settings);
   const [saving, setSaving] = useState(false);
@@ -72,20 +73,16 @@ export default function SettingsPage({ settings, notify, onSaved }: Props) {
   return (
     <div className="page settings-page">
       <div className="page-head">
-        <h1>设置</h1>
-        <p>改动即时保存。下载目录和并发数对之后新建的任务生效。</p>
-      </div>
-
-      <section className="panel">
-        <h2>账号</h2>
-        <div className="row">
-          <div>
-            <strong>服务器</strong>
-            <p>{draft.server || '未设置'}</p>
-          </div>
+        <div>
+          <h1>设置</h1>
+          <p>改动即时保存。下载目录和并发数对之后新建的任务生效。</p>
         </div>
-        <p className="hint">换服务器需要先退出登录，再在登录页填写新地址。</p>
-      </section>
+        {onClose && (
+          <button type="button" className="ghost" onClick={onClose}>
+            关闭
+          </button>
+        )}
+      </div>
 
       <section className="panel">
         <h2>下载</h2>
@@ -146,16 +143,35 @@ export default function SettingsPage({ settings, notify, onSaved }: Props) {
       </section>
 
       <section className="panel">
-        <h2>网络</h2>
+        <h2>私密源通道</h2>
+        <p className="hint">只影响黄果/私密模式；公开内容永远直连。切换立即生效。</p>
+        <div className="mode-group">
+          {[
+            { value: 1 as const, title: '仅直连', desc: '用本机网络，失败直接报错' },
+            { value: 2 as const, title: '仅代理', desc: '只用下面填的代理地址' },
+            { value: 3 as const, title: '走后端转发', desc: '由服务器代取，服务器可配代理' },
+          ].map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              className={`mode-option${draft.proxyMode === item.value ? ' active' : ''}`}
+              onClick={() => save({ proxyMode: item.value })}
+            >
+              <strong>{item.title}</strong>
+              <small>{item.desc}</small>
+            </button>
+          ))}
+        </div>
         <div className="row">
           <div>
-            <strong>出站代理</strong>
-            <p>形如 http://127.0.0.1:7890，留空表示直连。用于部分源站的线路。</p>
+            <strong>代理地址</strong>
+            <p>形如 192.168.31.108:7893 或 http://127.0.0.1:7890，仅「仅代理」时使用。</p>
           </div>
           <input
             className="text"
             value={draft.proxy}
-            placeholder="留空直连"
+            placeholder="host:port"
+            disabled={draft.proxyMode !== 2}
             onChange={(event) => setDraft({ ...draft, proxy: event.target.value })}
             onBlur={() => save({ proxy: draft.proxy })}
           />

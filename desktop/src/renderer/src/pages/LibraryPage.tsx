@@ -4,6 +4,7 @@ import { call, errorText } from '../api';
 import Cover from '../components/Cover';
 
 interface Props {
+  source: 'hongguo' | 'huangguo';
   onOpen: (id: string, fallback: { title: string; cover: string }) => void;
 }
 
@@ -36,7 +37,7 @@ function progressText(item: LibraryItem): string {
   return `第 ${episode} 集 · ${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
-export default function LibraryPage({ onOpen }: Props) {
+export default function LibraryPage({ source, onOpen }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [bookmarks, setBookmarks] = useState<LibraryItem[]>([]);
@@ -46,7 +47,7 @@ export default function LibraryPage({ onOpen }: Props) {
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    call<{ payload: Record<string, any> }>('sync.pull')
+    call<{ payload: Record<string, any> }>('sync.pull', { source })
       .then((data) => {
         if (!alive) return;
         const payload = data?.payload || {};
@@ -59,7 +60,7 @@ export default function LibraryPage({ onOpen }: Props) {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [source]);
 
   const items = tab === 'history' ? history : bookmarks;
   const stats = useMemo(
@@ -71,7 +72,7 @@ export default function LibraryPage({ onOpen }: Props) {
     <div className="page">
       <div className="page-head">
         <h1>我的</h1>
-        <p>和手机端同一个账号：这里看到的是手机上最近在看的剧和收藏。</p>
+        <p>只显示{source === 'huangguo' ? '私密' : '公开'}模式的记录，和手机端同一个账号。</p>
       </div>
 
       <div className="seg">

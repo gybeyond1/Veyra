@@ -1433,6 +1433,9 @@ function hideDownloadSheet() {
   updateBackEnabled();
 }
 
+var targetDevices = null;
+var targetDeviceKind = 'device';
+
 function renderDownloadSheet() {
   const sheet = document.getElementById('download-sheet');
   if (!sheet) return;
@@ -1451,14 +1454,24 @@ function renderDownloadSheet() {
     if (remoteServers === null) {
       loadRemoteServers(true).then(() => { if (downloadMode === 'target') renderDownloadSheet(); }).catch(() => {});
     }
-    const hasRemote = !!(remoteServers && remoteServers.length);
     sheet.innerHTML = `<div class="download-pick">
       <button type="button" class="download-pick-option" data-dl-pick="phone"><strong>下载到手机</strong></button>
-      <button type="button" class="download-pick-option" data-dl-pick="remote"><strong>下载到远程服务器</strong>${hasRemote ? '' : '<small>还没配置服务器</small>'}</button>
       <button type="button" class="download-pick-option" data-dl-pick="nas" ${isAdmin ? '' : 'disabled'}><strong>下载到 NAS</strong>${isAdmin ? '' : '<small>仅管理员可用</small>'}</button>
+      <button type="button" class="download-pick-option" data-dl-pick="desktop"><strong>下载到电脑</strong></button>
+      <button type="button" class="download-pick-option" data-dl-pick="device"><strong>下载到其他设备</strong></button>
+      <button type="button" class="download-pick-option" data-dl-pick="remote"><strong>下载到远程服务器</strong></button>
       ${canDebug ? '<button type="button" class="download-pick-option" data-dl-pick="phone-debug"><strong>下载到手机（调试）</strong><small>保留 TS 与 Key，不自动合并，导出调试包</small></button>' : ''}
-      <p class="download-nas-note">${state.account.loggedIn ? '' : 'NAS 下载需要先登录账号。'}</p>
     </div>`;
+    return;
+  }
+  if (downloadMode === 'device') {
+    const list = asArray(targetDevices).filter(d => (targetDeviceKind === 'desktop'
+      ? String(d.platform) === 'desktop'
+      : String(d.platform) !== 'desktop'));
+    sheet.innerHTML = (list.length
+      ? `<div class="download-pick">${list.map(d => `<button type="button" class="download-pick-option" data-dl-device="${esc(d.id)}"><strong>${esc(d.name || '未命名设备')}</strong><small>${d.online ? '在线' : '离线 · 上线后自动开始'}</small></button>`).join('')}</div>`
+      : `<p class="download-parsing">没有在线的${targetDeviceKind === 'desktop' ? '电脑' : '其他设备'}<br><small>在另一端登录同一账号并保持在线</small></p>`)
+      + `<div class="download-sheet-buttons"><button type="button" class="dl-secondary" data-dl-back-target="1">返回</button></div>`;
     return;
   }
   if (downloadMode === 'remote') {
@@ -1531,6 +1544,21 @@ async function submitDownloadTo(target, remoteId) {
   downloadMode = 'parsing';
   renderDownloadSheet();
   try {
+    if (target === 'device') {
+      const sourceNow = String(state.detail.source || contentSource) === 'huangguo' ? 'huangguo' : 'hongguo';
+      await api('download-dispatch', {
+        source: sourceNow,
+        title: state.detail.title,
+        seriesId: String(state.detail.seriesId || state.detail.id),
+        cover: state.detail.cover || '',
+        episodes,
+        kind: 'device',
+        deviceId: String(remoteId || '')
+      });
+      hideDownloadSheet();
+      toast('已推送到设备，马上开始下载');
+      return;
+    }
     if (target === 'nas') {
       // NAS 自主解析：只推 seriesId/title/集数，由后端调红果 App 接口取流（最高画质档）
       await api('nas-download-start', { source: contentSource, title: state.detail.title, seriesId: String(state.detail.seriesId || state.detail.id), episodes, cover: state.detail.cover || '' });
@@ -1872,6 +1900,18 @@ async function loadRemoteServers(force) {
   const summary = document.querySelector('[data-remote-summary]');
   if (summary) summary.textContent = remoteSummaryText();
   return remoteServers;
+}
+
+async function openDevicePicker() {
+  try {
+    const data = await api('download-targets');
+    targetDevices = asArray(data && data.devices);
+  } catch (error) {
+    toast((error && error.message) || '读取设备列表失败', true);
+    return;
+  }
+  downloadMode = 'device';
+  renderDownloadSheet();
 }
 
 var remotePop = null;
@@ -3965,6 +4005,11 @@ document.addEventListener('click', async event => {
   if (event.target === downloadOverlay) { hideDownloadSheet(); return; }
   if (event.target.closest('[data-dl-pick]')) {
     const pick = event.target.closest('[data-dl-pick]').dataset.dlPick;
+    if (pick === 'desktop' || pick === 'device') {
+      targetDeviceKind = pick;
+      openDevicePicker();
+      return;
+    }
     if (pick === 'remote') {
       // 先进服务器选择步骤；没配服务器就直接引导去设置，别让用户白点
       loadRemoteServers(true).then(list => {
@@ -3979,6 +4024,10 @@ document.addEventListener('click', async event => {
   }
   if (event.target.closest('[data-dl-remote]')) {
     submitDownloadTo('remote', event.target.closest('[data-dl-remote]').dataset.dlRemote);
+    return;
+  }
+  if (event.target.closest('[data-dl-device]')) {
+    submitDownloadTo('device', event.target.closest('[data-dl-device]').dataset.dlDevice);
     return;
   }
   if (event.target.closest('[data-dl-back-target]')) { downloadMode = 'target'; renderDownloadSheet(); return; }

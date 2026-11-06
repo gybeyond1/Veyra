@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import * as cheerio from 'cheerio';
 import type { HomePayload, SeriesCard, SeriesDetail } from '../shared/types';
 import { fetchBinary, fetchText } from './http';
+import { readSettings } from './store';
 import { session } from './session';
 
 /**
@@ -30,16 +31,23 @@ function looksLikeChallenge(html: string): boolean {
 
 async function load(pathname: string, referer = '/'): Promise<{ html: string; site: string }> {
   let last: Error | null = null;
-  for (const site of SITES) {
-    try {
-      const html = await fetchText(site + pathname, 15000, { Referer: `${REFERER}${referer}`, 'User-Agent': UA });
-      if (html && html.length > 200 && !looksLikeChallenge(html)) return { html, site };
-      throw new Error(html && looksLikeChallenge(html) ? '源站风控拦截' : '页面内容为空');
-    } catch (error) {
-      last = error as Error;
+  // 通道是显式选择，不做自动兜底：直连/代理模式下失败就报错，避免用户以为在走代理其实走了后端
+  const mode = Number(readSettings().proxyMode) || 3;
+
+  if (mode !== 3) {
+    for (const site of SITES) {
+      try {
+        const html = await fetchText(site + pathname, 15000, { Referer: `${REFERER}${referer}`, 'User-Agent': UA });
+        if (html && html.length > 200 && !looksLikeChallenge(html)) return { html, site };
+        throw new Error(html && looksLikeChallenge(html) ? '源站风控拦截' : '页面内容为空');
+      } catch (error) {
+        last = error as Error;
+      }
     }
+    throw new Error('私密内容加载失败：' + (last?.message || '网络异常'));
   }
-  // 直连被风控/掉线时借后端通道（后端可配代理，且已经处理过源站白名单）
+
+  // 走后端转发：由服务器代取（服务器侧可配代理，且已处理源站白名单）
   const current = session();
   if (current?.server) {
     for (const site of SITES) {

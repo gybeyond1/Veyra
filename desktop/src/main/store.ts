@@ -13,6 +13,7 @@ export const defaultSettings: AppSettings = {
   concurrency: 6,
   theme: 'dark',
   proxy: '',
+  proxyMode: 3,
   autoMerge: true,
   keepEpisodes: false,
   lastAccount: '',
@@ -29,6 +30,9 @@ export function readSettings(): AppSettings {
     stored = {};
   }
   cachedSettings = { ...defaultSettings, ...stored };
+  // 旧版本没有 proxyMode，默认按「走后端转发」处理，跟手机端一致
+  const mode = Number(cachedSettings.proxyMode);
+  cachedSettings.proxyMode = mode === 1 || mode === 2 ? mode : 3;
   return cachedSettings;
 }
 

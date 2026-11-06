@@ -45,6 +45,8 @@ export default function App() {
   const [privateBusy, setPrivateBusy] = useState(false);
   /** 动态码验证通过后先播启动动画，播完再切私密内容 */
   const [introOpen, setIntroOpen] = useState(false);
+  /** 设置从侧栏挪进左下角头像菜单，这里是弹窗开关 */
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [toast, setToast] = useState<{ text: string; tone: 'info' | 'error' } | null>(null);
 
   const notify = useCallback((text: string, tone: 'info' | 'error' = 'info') => {
@@ -228,6 +230,7 @@ export default function App() {
         activeDownloads={activeDownloads.length}
         onNav={(next) => setView(next)}
         onPrivate={togglePrivate}
+        onOpenSettings={() => setSettingsOpen(true)}
         onLogout={async () => {
           await call('auth.logout');
           setSession({ server: session.server, user: null });
@@ -240,7 +243,7 @@ export default function App() {
         {view === 'home' && <HomePage source={source} onOpen={openDetail} onSearch={startSearch} />}
         {view === 'category' && <BrowsePage source={source} onOpen={openDetail} />}
         {view === 'search' && <BrowsePage mode="search" seed={searchSeed} source={source} onOpen={openDetail} />}
-        {view === 'library' && <LibraryPage onOpen={openDetail} />}
+        {view === 'library' && <LibraryPage source={source} onOpen={openDetail} />}
         {view === 'detail' && (
           <DetailPage
             id={detailId}
@@ -269,7 +272,7 @@ export default function App() {
         )}
         {view === 'downloads' && (
           <DownloadsPage
-            tasks={tasks}
+            tasks={tasks.filter((task) => (task.source || 'hongguo') === source)}
             remote={remoteTasks}
             onRefresh={() => {
               void refreshTasks();
@@ -286,9 +289,7 @@ export default function App() {
             notify={notify}
           />
         )}
-        {view === 'settings' && (
-          <SettingsPage settings={settings} notify={notify} onSaved={(next) => setSettings(next)} />
-        )}
+        {view === 'settings' && <div className="page" />}
       </main>
 
       {privateOpen && (
@@ -316,6 +317,19 @@ export default function App() {
                 {privateBusy ? '验证中…' : '解锁'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {settingsOpen && (
+        <div className="modal-mask" onClick={() => setSettingsOpen(false)}>
+          <div className="modal settings-modal" onClick={(event) => event.stopPropagation()}>
+            <SettingsPage
+              settings={settings}
+              notify={notify}
+              onSaved={(next) => setSettings(next)}
+              onClose={() => setSettingsOpen(false)}
+            />
           </div>
         </div>
       )}

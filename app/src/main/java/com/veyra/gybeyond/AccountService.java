@@ -372,6 +372,11 @@ final class AccountService {
         return output.toByteArray();
     }
 
+    /** 供设备/存储类接口复用：带登录态调用后端，非 2xx 抛 AccountApiException。 */
+    JSONObject api(String method, String path, JSONObject body) throws Exception {
+        return call(method, path, body, true);
+    }
+
     /** 后端 HTTP 调用。非 2xx 抛 AccountApiException（带服务端 error 文案）；网络异常原样抛出。 */
     private JSONObject call(String method, String path, JSONObject body, boolean auth) throws Exception {
         if (baseUrl == null || baseUrl.trim().isEmpty()) {

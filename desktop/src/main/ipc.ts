@@ -213,9 +213,10 @@ const handlers: { [K in ApiName]: (...args: any[]) => any } = {
     mpv.close();
   },
 
-  'sync.pull': async () => {
+  'sync.pull': async (payload?: { source?: 'hongguo' | 'huangguo' }) => {
     const { server, token } = requireOnline();
-    return requestJson<{ payload: Record<string, unknown> }>(server, '/api/library?source=hongguo', { token });
+    const source = payload?.source === 'huangguo' ? 'huangguo' : 'hongguo';
+    return requestJson<{ payload: Record<string, unknown> }>(server, `/api/library?source=${source}`, { token });
   },
 
   'sync.push': async (payload: { library: Record<string, unknown> }) => {

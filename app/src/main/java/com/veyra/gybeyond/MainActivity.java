@@ -1234,6 +1234,30 @@ public final class MainActivity extends Activity {
             case "window-insets": return statusBarInsetDp;
             case "window-safe-insets": return new float[]{bottomInsetDp, leftInsetDp};
             case "account": return account.profile();
+            // 下载目标：在线设备（电脑/其他手机/电视）与远程存储，全部从后端账号维度拉
+            case "download-targets": {
+                JSONObject out = new JSONObject();
+                JSONObject devices = account.api("GET", "api/devices", null);
+                out.put("devices", devices.optJSONArray("devices") == null ? new JSONArray() : devices.optJSONArray("devices"));
+                JSONObject storages = account.api("GET", "api/storages", null);
+                out.put("storages", storages.optJSONArray("storages") == null ? new JSONArray() : storages.optJSONArray("storages"));
+                return out;
+            }
+            // 把这一集推给指定在线设备去下（后端下发 download 指令）
+            case "download-dispatch": {
+                JSONObject body = new JSONObject();
+                body.put("source", args.optString("source"));
+                body.put("title", args.optString("title"));
+                body.put("seriesId", args.optString("seriesId"));
+                body.put("cover", args.optString("cover"));
+                body.put("episodes", args.optJSONArray("episodes") == null ? new JSONArray() : args.optJSONArray("episodes"));
+                JSONObject target = new JSONObject();
+                target.put("kind", args.optString("kind", "device"));
+                if (args.has("deviceId")) target.put("deviceId", args.optString("deviceId"));
+                if (args.has("storageId")) target.put("storageId", args.optString("storageId"));
+                body.put("target", target);
+                return account.api("POST", "api/download/dispatch", body);
+            }
             case "refresh-account": return account.refreshProfileNow(); // 强制拉服务端最新角色/解锁状态（NAS 下载鉴权用）
             case "register": return account.register(args.optString("username"), args.optString("password"), args.optString("server"), args.optString("code"));
             case "login": return account.login(args.optString("username"), args.optString("password"), args.optString("server"));

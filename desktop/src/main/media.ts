@@ -10,6 +10,7 @@ import { fetchBinary } from './http';
 import { serverModules } from './server-modules';
 import { playSource } from './huangguo';
 import { session } from './session';
+import { readSettings } from './store';
 import { list as listTasks } from './downloads';
 
 /**
@@ -103,19 +104,19 @@ function rewritePlaylist(text: string, base: string, referer: string): string {
     .join('\n');
 }
 
-/** 拉源站媒体：直连被风控时退回后端通道，别让一集视频因为一个分片 403 就整段播不了。 */
+/** 拉源站媒体：通道按用户选择走（直连 / 代理 / 后端转发），不自动兜底。 */
 async function fetchMedia(url: string, referer: string): Promise<Buffer> {
-  try {
-    return await fetchBinary(url, HLSTIMEOUT, { Referer: referer, 'User-Agent': 'Mozilla/5.0 (Linux; Android 13) Chrome/130 Mobile Safari/537.36' });
-  } catch (error) {
-    const current = session();
-    if (!current?.server || /^https?:\/\/127\.0\.0\.1/.test(url)) throw error;
-    return fetchBinary(
-      `${current.server}/api/huangguo-proxy?url=${encodeURIComponent(url)}`,
-      30000,
-      { Referer: referer, 'User-Agent': 'Mozilla/5.0 (Linux; Android 13) Chrome/130 Mobile Safari/537.36' },
-    );
-  }
+  const headers = { Referer: referer, 'User-Agent': 'Mozilla/5.0 (Linux; Android 13) Chrome/130 Mobile Safari/537.36' };
+  const mode = Number(readSettings().proxyMode) || 3;
+  if (mode !== 3) return fetchBinary(url, HLSTIMEOUT, headers);
+
+  const current = session();
+  if (!current?.server) throw new Error('走后端转发需要先登录服务器');
+  return fetchBinary(
+    `${current.server}/api/huangguo-proxy?url=${encodeURIComponent(url)}`,
+    30000,
+    headers,
+  );
 }
 
 async function proxySegment(url: string, referer: string): Promise<{ body: Buffer; type: string }> {
