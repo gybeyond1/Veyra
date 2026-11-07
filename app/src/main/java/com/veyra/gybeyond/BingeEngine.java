@@ -446,6 +446,7 @@ public class BingeEngine {
         try {
             currentSource = ready.optString("source");
             currentMime = ready.optString("mimeType", MimeTypes.APPLICATION_M3U8);
+            MediaRequestContext.set(ready, currentSource);
             if (currentSource.isEmpty()) {
                 cb.onShowFailed("暂时取不到播放地址\n上滑换一部");
                 return;

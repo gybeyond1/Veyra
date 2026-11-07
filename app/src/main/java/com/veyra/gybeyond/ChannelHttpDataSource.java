@@ -31,6 +31,9 @@ final class ChannelHttpDataSource extends BaseDataSource implements HttpDataSour
 
     private final String address;                  // "host:port"，null/空 = 直连
     private final Map<String, String> properties = new HashMap<>();
+    /* 直连模式下的源站凭据（Referer / Cookie / UA），由后端 episode 接口下发，见 MediaRequestContext */
+    private final Map<String, String> mediaHeaders;
+    private final String mediaSite;
     private HttpURLConnection connection;
     private InputStream stream;
     private boolean opened;
@@ -42,8 +45,14 @@ final class ChannelHttpDataSource extends BaseDataSource implements HttpDataSour
     @Nullable private DataSpec lastSpec;
 
     ChannelHttpDataSource(String address) {
+        this(address, null, "");
+    }
+
+    ChannelHttpDataSource(String address, @Nullable Map<String, String> mediaHeaders, @Nullable String mediaSite) {
         super(true);
         this.address = address;
+        this.mediaHeaders = mediaHeaders == null ? java.util.Collections.emptyMap() : mediaHeaders;
+        this.mediaSite = mediaSite == null ? "" : mediaSite;
     }
 
     static HttpDataSource.Factory factory(@Nullable String address) {
@@ -117,10 +126,19 @@ final class ChannelHttpDataSource extends BaseDataSource implements HttpDataSour
         conn.setReadTimeout(TIMEOUT_MS);
         conn.setUseCaches(false);
         conn.setInstanceFollowRedirects(true);
-        conn.setRequestProperty("User-Agent", UA);
+        String agent = mediaHeaders.get("User-Agent");
+        conn.setRequestProperty("User-Agent", agent == null || agent.isEmpty() ? UA : agent);
         String host = url.getHost();
-        if (host != null && !host.isEmpty()) {
+        String referer = mediaHeaders.get("Referer");
+        if (referer != null && !referer.isEmpty()) {
+            conn.setRequestProperty("Referer", referer);
+        } else if (host != null && !host.isEmpty()) {
             conn.setRequestProperty("Referer", "https://" + host + "/");
+        }
+        // Cookie 只回源站：分片换到别的 CDN 时带过去反而会被判非法请求
+        String cookie = mediaHeaders.get("Cookie");
+        if (cookie != null && !cookie.isEmpty() && MediaRequestContext.sameSite(host, mediaSite)) {
+            conn.setRequestProperty("Cookie", cookie);
         }
         conn.setRequestProperty("Accept", "*/*");
         if (spec.position > 0) conn.setRequestProperty("Range", "bytes=" + spec.position + "-");
@@ -193,8 +211,17 @@ final class ChannelHttpDataSource extends BaseDataSource implements HttpDataSour
     static final class Factory implements HttpDataSource.Factory {
         private final String address;
         private final Map<String, String> defaultProperties = new HashMap<>();
+        private Map<String, String> mediaHeaders = java.util.Collections.emptyMap();
+        private String mediaSite = "";
 
         Factory(@Nullable String address) { this.address = address; }
+
+        /** 直连源站时贴上去的凭据；每次开播前由 VideoPlaybackCache 重新取一次。 */
+        Factory setMediaHeaders(@Nullable Map<String, String> headers, @Nullable String site) {
+            mediaHeaders = headers == null ? java.util.Collections.emptyMap() : headers;
+            mediaSite = site == null ? "" : site;
+            return this;
+        }
 
         @Override
         public HttpDataSource.Factory setDefaultRequestProperties(Map<String, String> properties) {
@@ -205,7 +232,7 @@ final class ChannelHttpDataSource extends BaseDataSource implements HttpDataSour
 
         @Override
         public ChannelHttpDataSource createDataSource() {
-            ChannelHttpDataSource source = new ChannelHttpDataSource(address);
+            ChannelHttpDataSource source = new ChannelHttpDataSource(address, mediaHeaders, mediaSite);
             source.properties.putAll(defaultProperties);
             return source;
         }

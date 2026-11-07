@@ -6,7 +6,7 @@ import { fetchText } from './http';
 import * as huangguo from './huangguo';
 import * as remoteSite from './remote-site';
 import type { ContentSource } from './source';
-import { playUrl, prepare } from './media';
+import { playUrl, prepare, remoteSitePlayUrl } from './media';
 import { userDataDir } from './paths';
 
 const SITE = 'https://hongguoduanju.com';
@@ -216,8 +216,12 @@ export async function play(
 ): Promise<{ url: string; kind: 'hls' | 'file' }> {
   if (!id) throw new Error('缺少剧集 id');
   const number = Math.max(1, Number(episode) || 1);
-  // 接口型源：后端已经签发了带签名 cookie 的 stream 地址，直接交给 mpv
-  if (source === 'huangguo' && remoteSite.active()) return remoteSite.play(id, number);
+  // 接口型源：三档网络模式都交给本机媒体服务。
+  // 直连时由它带源站 Referer / 签名 Cookie 去取流（后端不参与），
+  // 代理 / 转发时由它转发后端签发的地址 —— 对本机播放器来说都是同一条 127.0.0.1。
+  if (source === 'huangguo' && remoteSite.active()) {
+    return { url: remoteSitePlayUrl(remoteSite.site(), id, number), kind: 'hls' };
+  }
   const needH264 = !hevcOk;
   const kind = await prepare(source, id, number, needH264);
   return { url: playUrl(source, id, number, needH264 && kind === 'file'), kind };

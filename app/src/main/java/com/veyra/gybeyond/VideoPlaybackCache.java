@@ -39,7 +39,10 @@ final class VideoPlaybackCache {
         String proxy = "huangguo".equals(PrivateSite.get(context))
                 && ProxySettings.mode(context) == ProxySettings.MODE_PROXY
                 ? ProxySettings.address(context) : null;
-        DataSource.Factory upstream = new ChannelHttpDataSource.Factory(proxy);
+        // 直连模式下源站要 Referer + 签名 Cookie，后端把这套头随播放地址一起下发，
+        // 这里取当前这一集的凭据贴到清单 / 分片 / 密钥的每条请求上，否则第一步就 403。
+        ChannelHttpDataSource.Factory upstream = new ChannelHttpDataSource.Factory(proxy)
+                .setMediaHeaders(MediaRequestContext.headers(), MediaRequestContext.site());
         CacheDataSource.Factory cached = new CacheDataSource.Factory().setCache(get(context))
                 .setUpstreamDataSourceFactory(upstream).setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR);
         HlsMediaSource.Factory hls = new HlsMediaSource.Factory(type -> type == C.DATA_TYPE_MANIFEST

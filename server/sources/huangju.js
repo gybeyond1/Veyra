@@ -177,8 +177,9 @@ module.exports = {
   name: '剧果',
   description: '热门 · 最新 · 分类短剧',
   content: '短剧',
-  // 分片靠 Set-Cookie 下发的 CloudFront 签名，播放器带不上 Cookie，
-  // 「仅直连」下发裸地址会 403 —— 网关据此自动降级为后端转发
+  // 分片靠 Set-Cookie 下发的 CloudFront 签名，浏览器带不上 Cookie，
+  // 所以 WebUI（不传 carry=1）会据此自动降级为后端转发；
+  // 手机 / 电视 / 电脑的原生播放器能把这套头贴到每条请求上，可以真直连。
   noDirect: true,
   categories,
   home,

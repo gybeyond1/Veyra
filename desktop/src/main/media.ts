@@ -9,6 +9,7 @@ import { ffmpegAvailable, lanAddress, userDataDir } from './paths';
 import { fetchBinary, fetchBinaryFast } from './http';
 import { serverModules } from './server-modules';
 import { playSource } from './huangguo';
+import * as remoteSite from './remote-site';
 import { session } from './session';
 import { readSettings } from './store';
 import { list as listTasks } from './downloads';
@@ -119,6 +120,59 @@ async function fetchMedia(url: string, referer: string): Promise<Buffer> {
     30000,
     headers,
   );
+}
+
+/**
+ * 直连会话：源站凭据（Referer / CloudFront 签名 Cookie）动辄六百多字节，
+ * 不能塞进每个分片的 URL，按 sid 存内存，两小时不用就清掉。
+ */
+const mediaSessions = new Map<string, { headers: Record<string, string>; at: number }>();
+const MEDIA_SESSION_TTL = 2 * 60 * 60 * 1000;
+
+function createMediaSession(headers: Record<string, string>): string {
+  const id = crypto.randomBytes(9).toString('hex');
+  const now = Date.now();
+  for (const [key, value] of mediaSessions) {
+    if (now - value.at > MEDIA_SESSION_TTL) mediaSessions.delete(key);
+  }
+  mediaSessions.set(id, { headers, at: now });
+  return id;
+}
+
+function mediaSessionHeaders(sid: string): Record<string, string> {
+  const hit = mediaSessions.get(sid);
+  if (!hit) return {};
+  hit.at = Date.now();
+  return hit.headers;
+}
+
+/** 同 rewritePlaylist，但分片地址只带 sid，凭据由 /seg 从会话里取。 */
+function rewritePlaylistSession(text: string, base: string, sid: string): string {
+  return text
+    .split(/\r?\n/)
+    .map((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return line;
+      if (trimmed.startsWith('#')) {
+        return line.replace(/URI="([^"]+)"/g, (_all, uri: string) => {
+          const absolute = new URL(uri, base).toString();
+          return `URI="${mediaUrl(`/seg?u=${encode(absolute)}&sid=${sid}`)}"`;
+        });
+      }
+      const absolute = new URL(trimmed, base).toString();
+      return mediaUrl(`/seg?u=${encode(absolute)}&sid=${sid}`);
+    })
+    .join('\n');
+}
+
+async function proxySegmentSession(url: string, sid: string): Promise<{ body: Buffer; type: string }> {
+  const headers = mediaSessionHeaders(sid);
+  const body = await fetchBinaryFast(url, 30000, headers);
+  const head = body.subarray(0, 16).toString('utf8');
+  if (head.startsWith('#EXTM3U')) {
+    return { body: Buffer.from(rewritePlaylistSession(body.toString('utf8'), url, sid), 'utf8'), type: 'application/vnd.apple.mpegurl' };
+  }
+  return { body, type: head.startsWith('\u0000') || body.subarray(0, 3).toString() === 'ID3' ? 'video/mp2t' : 'application/octet-stream' };
 }
 
 async function proxySegment(url: string, referer: string): Promise<{ body: Buffer; type: string }> {
@@ -604,8 +658,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   if (url.pathname === '/seg') {
     const target = decode(url.searchParams.get('u') || '');
     if (!/^https?:\/\//i.test(target)) return json(res, 400, { error: '地址无效' });
+    const sid = url.searchParams.get('sid') || '';
     try {
-      const result = await proxySegment(target, decode(url.searchParams.get('r') || ''));
+      const result = sid
+        ? await proxySegmentSession(target, sid)
+        : await proxySegment(target, decode(url.searchParams.get('r') || ''));
       res.writeHead(200, { 'Content-Type': result.type, 'Content-Length': result.body.length, 'Access-Control-Allow-Origin': '*' });
       res.end(result.body);
     } catch (error) {
@@ -685,6 +742,30 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     return serveHlsFile(req, res, key || '', name || '');
   }
 
+  if (url.pathname.startsWith('/rs/')) {
+    // 接口型源（剧果 / 野果 / 禁果短剧 / 黄果 AI / 黄果旧版）统一走本机媒体服务：
+    // 直连时由这里带上源站凭据去取，代理 / 转发时这里转发后端签发的 stream 地址。
+    // 渲染层只看得到 127.0.0.1，所以三种模式对播放器是同一件事。
+    const [, , site, seriesId, episode] = url.pathname.split('/');
+    if (!site || !seriesId) return json(res, 400, { error: '地址无效' });
+    try {
+      const found = await remoteSite.play(decodeURIComponent(seriesId), Number(episode) || 1);
+      const sid = createMediaSession(found.headers);
+      const body = await fetchBinaryFast(found.url, 30000, found.headers);
+      if (body.subarray(0, 8).toString('utf8').startsWith('#EXTM3U')) {
+        const playlist = rewritePlaylistSession(body.toString('utf8'), found.url, sid);
+        res.writeHead(200, { 'Content-Type': 'application/vnd.apple.mpegurl', 'Access-Control-Allow-Origin': '*' });
+        res.end(playlist);
+        return;
+      }
+      res.writeHead(302, { Location: mediaUrl(`/seg?u=${encode(found.url)}&sid=${sid}`) });
+      res.end();
+    } catch (error) {
+      json(res, 502, { error: (error as Error).message });
+    }
+    return;
+  }
+
   if (url.pathname.startsWith('/hg/')) {
     const [, , seriesId, episode] = url.pathname.split('/');
     try {
@@ -762,6 +843,11 @@ export function info(): { port: number; token: string; lan: string } {
 export function playUrl(source: 'hongguo' | 'huangguo', seriesId: string, episode: number, h264 = false): string {
   const kind = source === 'huangguo' ? 'hg' : 'rg';
   return mediaUrl(`/${kind}/${encodeURIComponent(seriesId)}/${episode}${h264 ? '?h264=1' : ''}`);
+}
+
+/** 接口型源：三档网络模式都在本机媒体服务里收口，渲染层拿到的永远是 127.0.0.1 */
+export function remoteSitePlayUrl(site: string, seriesId: string, episode: number): string {
+  return mediaUrl(`/rs/${encodeURIComponent(site)}/${encodeURIComponent(seriesId)}/${Math.max(1, Number(episode) || 1)}`);
 }
 
 /**

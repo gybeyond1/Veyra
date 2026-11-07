@@ -86,6 +86,9 @@ final class BackendSiteRepository {
          */
         int mode = ProxySettings.mode(context);
         path.append("&net=").append(mode);
+        // 原生播放器能把 Referer / Cookie 原样贴到清单、分片、密钥上，
+        // 带这个标记后「仅直连」才会真的下发源站地址，而不是被后端自动降级
+        path.append("&carry=1");
         if (mode == ProxySettings.MODE_PROXY) {
             String address = ProxySettings.address(context);
             if (!address.isEmpty()) {

@@ -106,7 +106,9 @@ export async function detail(id: string): Promise<SeriesDetail> {
 function netQuery(): string {
   const settings = readSettings();
   const mode = settings.proxyMode === 1 || settings.proxyMode === 2 ? settings.proxyMode : 3;
-  let query = `&net=${mode}`;
+  // carry=1：主进程的本机媒体服务会把 Referer / 签名 Cookie 贴到清单、分片、密钥上，
+  // 所以「仅直连」可以拿到源站真实地址而不是被后端自动降级
+  let query = `&net=${mode}&carry=1`;
   if (mode === 2) {
     const raw = String(settings.proxy || '').trim();
     if (raw) {
@@ -118,12 +120,26 @@ function netQuery(): string {
   return query;
 }
 
-/** 播放地址：net=3 时是后端签发的一次性 stream 地址；net=1 时是源站真实地址 */
-export async function play(id: string, episode: number): Promise<{ url: string; kind: 'hls' | 'file' }> {
+export type PlayResult = {
+  url: string;
+  kind: 'hls' | 'file';
+  direct: boolean;
+  headers: Record<string, string>;
+};
+
+/** 播放地址：net=3/2 时是后端签发的一次性 stream 地址；net=1 时是源站真实地址 + 凭据 */
+export async function play(id: string, episode: number): Promise<PlayResult> {
   const data = await get<any>(`episode?id=${encodeURIComponent(id)}&episode=${Math.max(1, episode)}${netQuery()}`);
   const url = String(data?.source || '');
   if (!/^https?:\/\//i.test(url)) throw new Error('后端没有返回可播放地址');
-  return { url, kind: 'hls' };
+  const headers: Record<string, string> = {};
+  const raw = data?.headers;
+  if (raw && typeof raw === 'object') {
+    for (const [key, value] of Object.entries(raw)) {
+      if (typeof value === 'string' && value) headers[key] = value;
+    }
+  }
+  return { url, kind: /\.mp4(\?|$)/i.test(url) ? 'file' : 'hls', direct: Boolean(data?.direct), headers };
 }
 
 export async function sources(): Promise<{ id: string; name: string; description?: string }[]> {

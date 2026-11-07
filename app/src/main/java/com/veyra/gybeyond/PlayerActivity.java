@@ -1327,6 +1327,8 @@ public final class PlayerActivity extends Activity {
                     if (token != loadToken || destroyed || isFinishing()) return;
                     currentSource = ready.optString("source");
                     currentMime = ready.optString("mimeType", MimeTypes.APPLICATION_M3U8);
+                    // 直连模式：把后端随播放地址下发的 Referer / 签名 Cookie 交给数据源
+                    MediaRequestContext.set(ready, currentSource);
                     // 每次开播按当前通道模式重建数据源（直连/代理/后端转发切换立即生效）
                     MediaItem mediaItem = new MediaItem.Builder().setUri(currentSource).setMediaId(key)
                             .setMimeType(currentMime).build();

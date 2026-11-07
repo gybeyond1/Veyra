@@ -1036,14 +1036,17 @@ document.getElementById('btn-play').onclick=()=>{
 
 // hls.js 播放器统一入口：m3u8 走 Hls（Chrome 原生不支持），mp4 直放
 let _hls=null;
-function attachPlayer(url,onReady){
+function attachPlayer(url,onReady,onFatal){
   const player=document.getElementById('player');
   const wasPlaying=player.getAttribute('data-src')===url;
   if(wasPlaying&&player.readyState>=1){if(onReady)onReady();player.play().catch(()=>{});return}
   if(_hls){_hls.destroy();_hls=null}
   player.removeAttribute('src');player.load();
   player.onloadedmetadata=()=>{if(onReady)onReady()};
-  player.onerror=()=>{toast('播放失败（错误码 '+(player.error?player.error.code:'?')+'），可在 ⚙ 里切换 直连/后端转发 通道再试');};
+  player.onerror=()=>{
+    if(onFatal){const retry=onFatal;onFatal=null;retry();return}
+    toast('播放失败（错误码 '+(player.error?player.error.code:'?')+'），可在 ⚙ 里切换 直连/后端转发 通道再试');
+  };
   // m3u8 判断：直接 .m3u8 或经 hgProxy 代理的 URL（其 url 参数内是带 ?auth_key 的 m3u8，
   // encodeURIComponent 后 ? 变 %3F 导致 /\.m3u8(\?|$)/ 匹配不到 → 必须识别代理路径，否则走原生播放报错误码4）
   if(/\.m3u8(\?|$)/i.test(url)||url.indexOf('/api/huangguo-proxy?')>=0){
@@ -1054,6 +1057,8 @@ function attachPlayer(url,onReady){
     _hls.attachMedia(player);
     _hls.on(Hls.Events.ERROR,(e,data)=>{
       if(data&&data.fatal){
+        // 直连被跨域 / 防盗链拦下时先自动回落一次后端转发，别让用户对着黑屏猜
+        if(onFatal){const retry=onFatal;onFatal=null;if(_hls){_hls.destroy();_hls=null}retry();return}
         const details=data.details||'';
         const net=data.networkDetails&&(data.networkDetails.message||data.networkDetails.statusText)?String(data.networkDetails.message||data.networkDetails.statusText):'';
         const resp=data.response&&data.response.code?('HTTP '+data.response.code):'';
@@ -1097,9 +1102,22 @@ function playEpisode(j,resumeSec){
     if(!ep.vid){document.getElementById('player-wrap').classList.remove('open');toast('该集暂无可播放地址（vid 缺失）');return}
     attachPlayer('/api/web/hongguo/stream?vid='+encodeURIComponent(ep.vid),doResume);
   }else if(remotePrivate()){
-    siteApi('episode?id='+encodeURIComponent(_detail.id)+'&episode='+ep.number+netQuery()).then(d=>{
+    const epPath='episode?id='+encodeURIComponent(_detail.id)+'&episode='+ep.number;
+    const fallback=()=>{
+      // 浏览器直连改不了 Referer，也拿不到源站 Cookie，被拦是常态：
+      // 与其让用户对着黑屏猜，不如立刻用后端转发再要一次地址
+      toast('直连被浏览器拦下（跨域或防盗链），已自动切到后端转发');
+      siteApi(epPath+'&net=3').then(d=>{
+        if(!d.source)throw new Error('后端没有返回播放地址');
+        attachPlayer(d.source,doResume);
+      }).catch(e=>toast('播放失败：'+e.message));
+    };
+    siteApi(epPath+netQuery()).then(d=>{
       if(!d.source)throw new Error('后端没有返回播放地址');
-      attachPlayer(d.source,doResume);
+      if(d.notice)toast(d.notice);
+      // 要源站 Cookie 的源，浏览器不可能带（跨域拿不到、也写不了），直接走后端
+      if(d.direct&&d.requiresCredentials){fallback();return}
+      attachPlayer(d.source,doResume,d.direct?fallback:null);
     }).catch(e=>{
       document.getElementById('player-wrap').classList.remove('open');
       toast('播放失败：'+e.message);

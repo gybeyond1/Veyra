@@ -336,10 +336,15 @@ function mount(app, deps) {
       if (info.cookie) headers.Cookie = info.cookie;
       if (info.userAgent) headers['User-Agent'] = info.userAgent;
 
-      if (net === NET_DIRECT && provider.noDirect) {
-        // 这个源只能后端代取（比如剧果的 CloudFront 签名 Cookie 播放器带不上），
+      // 客户端带 carry=1 表示它会把这几个头原样贴到播放请求上（手机 / 电视 / 电脑
+      // 的原生播放器都能做到）。浏览器做不到 —— 它改不了 Referer，也拿不到源站 Cookie，
+      // 所以 WebUI 不传这个参数，仍按 provider.noDirect 自动降级。
+      const carry = req.query.carry === '1';
+
+      if (net === NET_DIRECT && provider.noDirect && !carry) {
+        // 这个源只能后端代取（比如剧果的 CloudFront 签名 Cookie 浏览器带不上），
         // 与其让用户看到莫名 403，不如自动降级并说明原因
-        const notice = `${provider.name}的播放要签名 Cookie，播放器带不上，已自动走后端转发`;
+        const notice = `${provider.name}的播放要签名 Cookie，当前环境带不上，已自动走后端转发`;
         const token = issueToken(req.user.id, {
           url: info.url,
           referer: info.referer,
@@ -371,7 +376,11 @@ function mount(app, deps) {
           source: info.url,
           direct: true,
           net,
+          // 源站只认这套头：Referer 决定防盗链，Cookie 是 CloudFront 签名 / 登录态。
+          // 客户端必须原样贴到清单、分片、密钥三条请求上，少一条就 403。
           headers,
+          requiresCredentials: Boolean(info.cookie),
+          mimeType: /\.mp4(\?|$)/i.test(info.url) ? 'video/mp4' : 'application/vnd.apple.mpegurl',
           nextUrl: '',
         });
       }
