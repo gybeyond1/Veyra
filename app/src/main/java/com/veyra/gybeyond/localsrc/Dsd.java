@@ -227,6 +227,9 @@ public final class Dsd implements LocalSource {
     }
 
     private static String cardCover(Element link) {
+        // 封面可能就挂在 <a> 自己的 background-image 上（这个站首页就是）
+        String own = backgroundUrl(link.attr("style"));
+        if (!own.isEmpty()) return Net.absolute(link.baseUri(), own);
         for (Element img : link.select("img")) {
             for (String key : new String[]{"data-src", "data-original", "data-echo", "src"}) {
                 String value = img.attr(key).trim();
@@ -237,12 +240,16 @@ public final class Dsd implements LocalSource {
             }
         }
         for (Element node : link.select("div, span, a")) {
-            String style = node.attr("style");
-            if (style.isEmpty()) continue;
-            Matcher hit = Pattern.compile("url\\(\\s*[\"']?([^\"')]+)").matcher(style);
-            if (hit.find()) return hit.group(1);
+            String hit = backgroundUrl(node.attr("style"));
+            if (!hit.isEmpty()) return Net.absolute(link.baseUri(), hit);
         }
         return "";
+    }
+
+    private static String backgroundUrl(String style) {
+        if (style == null || style.isEmpty()) return "";
+        Matcher hit = Pattern.compile("url\\(\\s*[\"']?([^\"')]+)").matcher(style);
+        return hit.find() ? hit.group(1).trim() : "";
     }
 
     /* ---------------- 目录 ---------------- */
@@ -303,6 +310,27 @@ public final class Dsd implements LocalSource {
         } catch (Exception error) {
             return "";
         }
+    }
+
+    private static final Pattern MEDIA_IN_PAGE = Pattern.compile(
+            "(?i)https?://[^\"'\\s<>()\\\\]+\\.m3u8[^\"'\\s<>()\\\\]*");
+
+    /** 整页兜底：JS 里只要拼过 m3u8，正则就能捞出来。 */
+    private static String mediaInPage(String html, String base) {
+        if (html == null || html.isEmpty()) return "";
+        String text = html.replace("\\/", "/");
+        Matcher matcher = MEDIA_IN_PAGE.matcher(text);
+        while (matcher.find()) {
+            String absolute = Net.absolute(base, matcher.group());
+            if (absolute.matches("(?i)^https?://.*\\.m3u8(\\?.*)?$")) return absolute;
+        }
+        return "";
+    }
+
+    private static String brief(String value) {
+        if (value == null || value.isEmpty()) return "无";
+        String text = value.replaceFirst("(?i)^https?://[^/]+", "");
+        return text.length() > 46 ? "…" + text.substring(text.length() - 46) : text;
     }
 
     private List<JSONObject> cards(Document doc) {
@@ -601,7 +629,10 @@ public final class Dsd implements LocalSource {
         String cover = player == null ? "" : player.optString("poster", "").trim();
         if (cover.isEmpty()) cover = meta(doc, "og:image");
         if (cover.isEmpty()) cover = coverOf(doc);
-        if (cover.isEmpty()) cover = rememberedCover(key);
+        // 列表上的封面才是 /video1/<组>/<番号>/1.jpg 那种能反推播放地址的图，
+        // 详情页的 og:image 常常是裁过的缩略图，只用来兜底
+        String cachedCover = rememberedCover(key);
+        if ((cover.isEmpty() || !cover.contains("/video")) && !cachedCover.isEmpty()) cover = cachedCover;
         cover = Net.absolute(data.url, cover);
 
         // 分集：同一个播放页里所有 /vod/play/id/{key}/sid/../nid/.. 链接；
@@ -749,17 +780,22 @@ public final class Dsd implements LocalSource {
         /*
          * 服务端 HTML 里没有 player_aaaa 是常态（正文由 JS 注入），
          * 这时用封面反推 /1000k/index.m3u8 —— 参考实现也是这么做的。
+         * 三个封面来源依次试：详情页的、列表缓存的、整页里翻出来的。
          */
-        if (media.isEmpty()) {
-            media = mediaFromCover(detailCover);
-            if (media.isEmpty() && data != null) {
-                String cover = meta(data.doc, "og:image");
-                if (cover.isEmpty()) cover = coverOf(data.doc);
-                media = mediaFromCover(Net.absolute(data.url, cover));
-            }
+        if (media.isEmpty()) media = mediaFromCover(detailCover);
+        if (media.isEmpty()) media = mediaFromCover(rememberedCover(key));
+        if (media.isEmpty() && data != null) {
+            String cover = meta(data.doc, "og:image");
+            if (cover.isEmpty()) cover = coverOf(data.doc);
+            media = mediaFromCover(Net.absolute(data.url, cover));
+        }
+        // 最后一招：页面里但凡出现过 m3u8，直接拿来用
+        if (media.isEmpty() && data != null) {
+            media = mediaInPage(data.doc.outerHtml(), pageUrl);
         }
         if (media.isEmpty()) {
-            throw failure != null ? failure : new IllegalStateException("帝果这一集没有可直接播放的地址");
+            throw failure != null ? failure : new IllegalStateException(
+                    "帝果没有解析到播放地址（封面 " + brief(detailCover) + "）");
         }
         if (!media.matches("(?i)^https?://.*\\.(m3u8|mp4)(\\?.*)?$")) {
             throw new IllegalStateException("帝果这一集不是可直接播放的媒体");
