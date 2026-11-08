@@ -19,11 +19,14 @@ const { assertPublicUrl } = require('../ssrf-guard');
 
 const providers = [
   require('./huangju'),
-  require('./yeguo'),
   require('./jinguoduanju'),
-  require('./jinguo'),
   require('./cloudfront'),
   require('./huangguoai'),
+  require('./huangdou'),
+  require('./dsd'),
+  // 野果：流只认手机自带 VPN 的出口（机房 IP 被源站风控），后端直连/代理一律取不到分片，
+  //      留着只会让人点进去空等，先下架，实现留在 yeguo.js 里。
+  // 禁果：正片要 VIP，普通账号只给试看，同样下架，实现留在 jinguo.js 里。
 ];
 const byId = new Map(providers.map((item) => [item.id, item]));
 
@@ -588,12 +591,20 @@ function mount(app, deps) {
     } catch (error) {
       return res.status(403).json({ error: error.message });
     }
+    // 有些封面 CDN 只认「住宅 IP / 手机网络」，机房出口一律 403。
+    // 客户端带 redirect=1 时由它自己去取：图片从手机发出，跟后端出口无关。
+    if (req.query.redirect === '1') return res.redirect(302, target.toString());
     try {
-      const upstream = await request(target.toString(), {
-        headers: { Referer: `${target.origin}/`, Accept: 'image/*,*/*' },
-        timeout: 15000,
-        maxBytes: 8 << 20,
-      });
+      // 封面 CDN 的防盗链规则两派都有：有的认 Referer，有的只要带 Referer 就 403
+      // （黄果旧版那张图就是后者）。所以先裸取，被拒了再补源站 Referer 重试一次。
+      const fetchCover = (referer) =>
+        request(target.toString(), {
+          headers: { Accept: 'image/*,*/*', ...(referer ? { Referer: `${target.origin}/` } : {}) },
+          timeout: 15000,
+          maxBytes: 8 << 20,
+        });
+      let upstream = await fetchCover(false);
+      if (upstream.status === 401 || upstream.status === 403) upstream = await fetchCover(true);
       if (upstream.status < 200 || upstream.status >= 300) return res.status(502).json({ error: `封面返回 ${upstream.status}` });
       const type = String(upstream.headers['content-type'] || '');
       res.setHeader('Content-Type', /^image\//.test(type) ? type : 'image/jpeg');

@@ -17,6 +17,14 @@ const agents = {
   'https:': new https.Agent({ keepAlive: true, maxSockets: 24 }),
 };
 
+/* 少数源站的证书是过期的（黄豆的备用线 xqjurgek.top 就是），这些站只用来
+   取剧集数据、不接受任何登录凭证，所以给一个显式放行的 agent；
+   调用方要主动传 insecure: true 才会用到，其它请求照常校验证书。 */
+const looseAgents = {
+  'http:': agents['http:'],
+  'https:': new https.Agent({ keepAlive: true, maxSockets: 24, rejectUnauthorized: false }),
+};
+
 const UA =
   'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36';
 
@@ -32,6 +40,7 @@ function request(url, options = {}) {
     maxBytes = 8 << 20,
     redirects = 3,
     body,
+    insecure = false,
   } = options;
 
   return new Promise((resolve, reject) => {
@@ -49,7 +58,7 @@ function request(url, options = {}) {
       {
         method,
         headers: { 'User-Agent': UA, 'Accept-Encoding': 'gzip, deflate, br', ...headers },
-        agent: agents[target.protocol],
+        agent: (insecure ? looseAgents : agents)[target.protocol],
         timeout,
       },
       (res) => {

@@ -8,6 +8,7 @@
 
 const crypto = require('crypto');
 const { createLegacyClient } = require('./legacy-core');
+const { cached } = require('./util');
 
 const BASE = 'https://dr6skssi3nxbk.cloudfront.net';
 const FRONT = 'https://d2pypzndaqisk.cloudfront.net';
@@ -61,23 +62,28 @@ function card(row, tabName) {
 }
 
 async function tabs() {
-  const data = await api('/api/app/playlet-tab/all');
-  const list = Array.isArray(data) ? data : data.list || [];
-  const items = list.filter((tab) => tab && tab.id && tab.name).map((tab) => ({ id: String(tab.id), name: String(tab.name).slice(0, 24) }));
-  if (!items.length) throw new Error('黄果旧版没有返回可用分类');
-  return items;
+  return cached('cloudfront:tabs', 30 * 60 * 1000, async () => {
+    const data = await api('/api/app/playlet-tab/all');
+    const list = Array.isArray(data) ? data : data.list || [];
+    const items = list.filter((tab) => tab && tab.id && tab.name).map((tab) => ({ id: String(tab.id), name: String(tab.name).slice(0, 24) }));
+    if (!items.length) throw new Error('黄果旧版没有返回可用分类');
+    return items;
+  });
 }
 
 async function tabPage(tabId, page) {
-  const data = await api(`/api/app/playlet/home/tab/${encodeURIComponent(tabId)}`, {
-    pageNumber: page,
-    pageSize: 20,
-    tabSortType: '1',
+  return cached(`cloudfront:tab:${tabId}:${page}`, 3 * 60 * 1000, async () => {
+    const data = await api(`/api/app/playlet/home/tab/${encodeURIComponent(tabId)}`, {
+      pageNumber: page,
+      pageSize: 20,
+      tabSortType: '1',
+    });
+    const rows = Array.isArray(data.list) ? data.list : [];
+    const tabs_ = await tabs();
+    const tab = tabs_.find((item) => item.id === tabId);
+    const items = rows.map((row) => card(row, tab && tab.name)).filter((item) => item.id && item.title);
+    return { items, nextPage: rows.length >= 20 ? page + 1 : null };
   });
-  const rows = Array.isArray(data.list) ? data.list : [];
-  const tab = (await tabs()).find((item) => item.id === tabId);
-  const items = rows.map((row) => card(row, tab && tab.name)).filter((item) => item.id && item.title);
-  return { items, nextPage: rows.length >= 20 ? page + 1 : null };
 }
 
 async function categories() {
@@ -85,9 +91,13 @@ async function categories() {
 }
 
 async function home() {
+  // 两栏并行拉：串行时一次首页要等三趟 CloudFront（分类 + 两栏），
+  // 在慢出口上会顶到客户端超时，表现成「标题封面全白」。
   const list = await tabs();
-  const first = await tabPage(list[0].id, 1);
-  const second = list[1] ? await tabPage(list[1].id, 1).catch(() => ({ items: [], nextPage: null })) : { items: [], nextPage: null };
+  const [first, second] = await Promise.all([
+    tabPage(list[0].id, 1),
+    list[1] ? tabPage(list[1].id, 1).catch(() => ({ items: [], nextPage: null })) : Promise.resolve({ items: [], nextPage: null }),
+  ]);
   return {
     featured: first.items.slice(0, 5).map((item) => ({ ...item, description: item.description || item.title })),
     items: first.items,

@@ -171,7 +171,16 @@ final class BackendSiteRepository {
         byte[] bytes = null;
         if (file.isFile()) bytes = java.nio.file.Files.readAllBytes(file.toPath());
         if (bytes == null || bytes.length < 64) {
-            bytes = account.getBytes("api/sources/" + site + "/cover?url=" + URLEncoder.encode(url, "UTF-8"));
+            String encoded = URLEncoder.encode(url, "UTF-8");
+            try {
+                bytes = account.getBytes("api/sources/" + site + "/cover?url=" + encoded);
+            } catch (Exception first) {
+                /*
+                 * 后端取不到这张图（源站 CDN 会因为机房出口直接 403），那就让它 302 回来，
+                 * 由手机自己去拉：同一张图，出口换成用户的网络就能拿到。
+                 */
+                bytes = account.getBytes("api/sources/" + site + "/cover?redirect=1&url=" + encoded);
+            }
             try (FileOutputStream output = new FileOutputStream(file)) {
                 output.write(bytes);
             }
