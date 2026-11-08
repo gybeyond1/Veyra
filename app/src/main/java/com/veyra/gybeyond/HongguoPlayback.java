@@ -30,10 +30,10 @@ final class HongguoPlayback {
      *
      * 现在详情页/点击播放的瞬间就在后台把播放地址解析好、把 RemoteVideo prepare 好、
      * 顺手把首 4MB 铺上；播放器 open() 直接把这个实例拿走，等于零等待。
-     * 池子只留 3 个，超过 3 分钟没用就丢掉，避免常驻内存。
+     * 池子只留 3 个，超过 5 分钟没用就丢掉，避免常驻内存。
      */
     private static final int READY_LIMIT = 3;
-    private static final long READY_TTL_MS = 180_000L;
+    private static final long READY_TTL_MS = 300_000L;
     private static final Map<String, Ready> READY = new LinkedHashMap<String, Ready>(8, 0.75f, true);
     private static final Map<String, Long> PENDING = new HashMap<>();
     private static final ExecutorService WARM_POOL = Executors.newSingleThreadExecutor(runnable -> {

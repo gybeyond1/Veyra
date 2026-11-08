@@ -200,6 +200,11 @@ public final class PlayerActivity extends Activity {
     private boolean seeking;
     private String currentSource;
     private String currentMime = MimeTypes.APPLICATION_M3U8;
+    /** 当前这一集的取流信息（含 headers），寄存播放器时一起带着走。 */
+    private JSONObject lastMedia;
+    /** 当前播放器挂的监听器，交还播放器前要摘掉，否则旧 Activity 会被一直引用。 */
+    private Player.Listener engineListener;
+    private Player.Listener standbyListener;
     private String standbyMime = MimeTypes.APPLICATION_M3U8;
     private long previewTarget;
     private long previewBucket = -1;
@@ -347,10 +352,62 @@ public final class PlayerActivity extends Activity {
         } catch (Exception error) { finish(); return; }
 
         buildUi();
+        /* 刚从播放页退出来、几秒内又点同一集：直接接管那个播放器。
+           解码器已经 configure 好、缓冲还在原位，画面几乎立刻出来 —— 这是「秒播」和
+           「每次重新起一遍」的差别。接管失败就老老实实新建，不影响功能。 */
+        PlayerKeeper.Session kept = null;
+        try {
+            kept = PlayerKeeper.take(ContentMode.get(this).active() + "#" + cacheKey(currentId, currentEpisode));
+        } catch (Throwable ignored) { }
+        if (kept != null && attachKeptPlayer(kept)) {
+            handler.post(tick);
+            return;
+        }
         player = createEpisodePlayer(false);
         activeView.setPlayer(player);
         loadSelection();
         handler.post(tick);
+    }
+
+    /** 接管寄存的播放器：UI 重新挂一遍，媒体源和解码器保持原样。 */
+    private boolean attachKeptPlayer(PlayerKeeper.Session kept) {
+        try {
+            player = kept.player;
+            currentSource = kept.source;
+            currentMime = kept.mime;
+            activeFirstFrame = kept.firstFrame;
+            MediaRequestContext.set(kept.media, currentSource);
+            switchStartedAt = SystemClock.elapsedRealtime();
+            title.setText(currentItem.optString("title") + " · 第 " + currentEpisode + " 集");
+            episodeText.setText(isAiQueue() ? "AI 作品" : "第 " + currentEpisode + " 集");
+            updateBookmarkButton();
+            lastMedia = kept.media;
+            engineListener = buildEngineListener(player);
+            player.addListener(engineListener);
+            activeView.setPlayer(player);
+            applyPlaybackSpeed(speedLocked ? 2f : manualSpeed);
+            if (activeFirstFrame) {
+                showActiveFrame();
+            } else {
+                skeleton.setVisibility(View.VISIBLE);
+                loading.setVisibility(View.VISIBLE);
+            }
+            // 上一集刚好播完就退出的话，回来从头开始，别停在 ENDED 不动
+            if (player.getPlaybackState() == Player.STATE_ENDED) {
+                player.seekTo(0);
+                player.prepare();
+            }
+            player.setPlayWhenReady(true);
+            armReuseGuard(player);
+            maybePrepareNext();
+            Log.d("HuangGuoPlayback", "adopt " + cacheKey(currentId, currentEpisode)
+                    + " pos=" + kept.position + " frame=" + activeFirstFrame);
+            return true;
+        } catch (Throwable error) {
+            Log.w("HuangGuoPlayback", "adopt failed", error);
+            try { PlayerKeeper.release(); } catch (Throwable ignored) { }
+            return false;
+        }
     }
 
     private ExoPlayer createEpisodePlayer(boolean standby) {
@@ -358,7 +415,15 @@ public final class PlayerActivity extends Activity {
         ExoPlayer engine = new ExoPlayer.Builder(this).setLoadControl(control)
                 .setMediaSourceFactory(VideoPlaybackCache.sources(this)).build();
         if (standby) standbyLoadControl = control;
-        engine.addListener(new Player.Listener() {
+        Player.Listener listener = buildEngineListener(engine);
+        if (standby) standbyListener = listener; else engineListener = listener;
+        engine.addListener(listener);
+        return engine;
+    }
+
+    /** 监听器单独抽出来：接管寄存的播放器时要给新实例重新挂一份。 */
+    private Player.Listener buildEngineListener(ExoPlayer engine) {
+        return new Player.Listener() {
             @Override public void onPlaybackStateChanged(int state) {
                 if (engine != player || currentSource == null || destroyed) return;
                 if (state == Player.STATE_READY) {
@@ -447,8 +512,7 @@ public final class PlayerActivity extends Activity {
                 message.setOnClickListener(view -> loadSelection());
                 Log.e("HuangGuo", "Player error", error);
             }
-        });
-        return engine;
+        };
     }
 
     private void resizeVideo(PlayerView view, androidx.media3.common.VideoSize size) {
@@ -1286,6 +1350,9 @@ public final class PlayerActivity extends Activity {
             currentSource = standbySource;
             currentMime = standbyMime;
             activeFirstFrame = standbyFirstFrame;
+            // 换了播放器，监听器也要跟着换，否则退出时摘不掉旧 Activity 的引用
+            engineListener = standbyListener;
+            standbyListener = null;
             standbyLoadControl.promote();
             standbyPlayer = null;
             standbyKey = null;
@@ -1329,6 +1396,7 @@ public final class PlayerActivity extends Activity {
                     currentMime = ready.optString("mimeType", MimeTypes.APPLICATION_M3U8);
                     // 直连模式：把后端随播放地址下发的 Referer / 签名 Cookie 交给数据源
                     MediaRequestContext.set(ready, currentSource);
+                    lastMedia = ready;
                     // 每次开播按当前通道模式重建数据源（直连/代理/后端转发切换立即生效）
                     MediaItem mediaItem = new MediaItem.Builder().setUri(currentSource).setMediaId(key)
                             .setMimeType(currentMime).build();
@@ -2596,7 +2664,31 @@ public final class PlayerActivity extends Activity {
             getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(backCallback);
         handler.removeCallbacksAndMessages(null);
         worker.shutdownNow();
-        if (player != null) player.release();
+        if (player != null) {
+            /* 正常退出就把它寄存下来：同一集三分钟内再进来直接接管，不用重建解码器。
+               出过错、AI 队列、或是配置变更（转屏）则照旧释放。 */
+            boolean keep = isFinishing() && !isChangingConfigurations()
+                    && currentSource != null && !isAiQueue()
+                    && player.getPlayerError() == null
+                    && player.getPlaybackState() != Player.STATE_IDLE
+                    /* 只有真出过画面才值得留：没出帧的多半是取流/解码有问题，
+                       留着复用反而要等它 2.5 秒兜底，不如重新来一遍 */
+                    && activeFirstFrame;
+            if (keep) {
+                try {
+                    player.pause();
+                    if (engineListener != null) player.removeListener(engineListener);
+                    activeView.setPlayer(null);
+                    PlayerKeeper.keep(player,
+                            ContentMode.get(this).active() + "#" + cacheKey(currentId, currentEpisode),
+                            currentSource, currentMime, player.getCurrentPosition(), activeFirstFrame, lastMedia);
+                    player = null;
+                } catch (Throwable error) {
+                    Log.w("HuangGuoPlayback", "keep player failed", error);
+                }
+            }
+            if (player != null) player.release();
+        }
         super.onDestroy();
     }
 }

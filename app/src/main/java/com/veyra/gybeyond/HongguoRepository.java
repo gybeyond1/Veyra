@@ -17,7 +17,15 @@ import android.util.LruCache;
 
 final class HongguoRepository {
     private final ContentRepository upstream = new ContentRepository(new OkHttpClient(), System::currentTimeMillis);
-    private final LruCache<String, Detail> details = new LruCache<>(32);
+    /*
+     * 详情/播放地址缓存必须是「进程级」的。
+     *
+     * 之前挂在实例上：MainActivity 里一个 HongguoRepository，PlayerActivity 每次又 new 一个，
+     * 于是详情页辛苦预热好的播放地址，进播放页后新实例的缓存是空的，又去重新签名取流 ——
+     * 拿到的是带新签名参数的新 URL，HongguoPlayback 池里按旧 URL 预热好的实例直接作废。
+     * 表现就是「刚看过这一集，退出去再点进来还是要等」。
+     */
+    private static final LruCache<String, Detail> details = new LruCache<>(32);
     private final HongguoGenres genres = new HongguoGenres(upstream.getHttp());
     private final HongguoSearch search = new HongguoSearch(upstream.getHttp());
 
@@ -84,8 +92,8 @@ final class HongguoRepository {
      * 慢的时候一两秒。红果地址带时效，所以只留 8 分钟，过期就重新解析。
      */
     private static final long EPISODE_TTL_MS = 8 * 60 * 1000L;
-    private final LruCache<String, JSONObject> episodes = new LruCache<>(24);
-    private final java.util.Map<String, Long> episodeAt = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final LruCache<String, JSONObject> episodes = new LruCache<>(32);
+    private static final java.util.Map<String, Long> episodeAt = new java.util.concurrent.ConcurrentHashMap<>();
 
     JSONObject episode(String id, int number) throws Exception {
         final String cacheKey = id + "#" + number;
