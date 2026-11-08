@@ -10,8 +10,8 @@ android {
         applicationId 'com.veyra.gybeyond'
         minSdk 26
         targetSdk 36
-        versionCode 418
-        versionName "0.28.20"
+        versionCode 419
+        versionName "0.28.21"
         testInstrumentationRunner 'com.veyra.gybeyond.PlaybackTestRunner'
     }
 
@@ -31,6 +31,16 @@ android {
             // 桌面/应用列表里叫 Veyra TV，跟手机版分得开
             resValue "string", "app_name", "Veyra TV"
         }
+    }
+
+    // 打包内置 so 的只有 libffconcat.so（下载合并用），编译产物只有 arm64-v8a 一套。
+    // 这个 .so 留在 main 源集里的话，电视包同样带着 arm64 库，而索尼/海信那批
+    // MT5896、MT5599 的电视是「64 位芯片 + 32 位用户态」（abilist 只有 armeabi-v7a），
+    // 装包直接 INSTALL_FAILED_NO_MATCHING_ABIS。电视端不做离线下载合并，也用不到它，
+    // 所以把 .so 收进 mobile 专属源集：电视包变成纯 Java 包，任何 ABI 都装得上。
+    sourceSets {
+        mobile { jniLibs.srcDirs = ['src/mobile/jniLibs'] }
+        tv { jniLibs.srcDirs = [] }
     }
 
     signingConfigs {
