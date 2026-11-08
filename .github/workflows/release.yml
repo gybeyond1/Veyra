@@ -44,8 +44,25 @@ jobs:
 
       - name: Set up Kotlin compiler
         run: |
-          curl -fsSL -o /tmp/kotlin.zip https://github.com/JetBrains/kotlin/releases/download/v2.2.10/kotlin-compiler-2.2.10.zip
-          unzip -q /tmp/kotlin.zip -d /opt/kotlin/
+          set -e
+          # GitHub Release 的资产 CDN 会整片 504（2026-11-08 就赶上过一次，构建直接挂在这步）。
+          # 下不下来就退到 Maven Central 逐个取 jar 自己拼一个 kotlinc —— 只走 repo1，稳得多。
+          if curl -fsSL --retry 3 --retry-delay 5 -o /tmp/kotlin.zip \
+              https://github.com/JetBrains/kotlin/releases/download/v2.2.10/kotlin-compiler-2.2.10.zip; then
+            unzip -q /tmp/kotlin.zip -d /opt/kotlin/
+          else
+            echo "GitHub 资产不可用，改从 Maven Central 组装 kotlinc"
+            LIB=/opt/kotlin/kotlinc/lib
+            mkdir -p "$LIB"
+            M=https://repo1.maven.org/maven2
+            curl -fsSL --retry 3 -o "$LIB/kotlin-compiler.jar" "$M/org/jetbrains/kotlin/kotlin-compiler/2.2.10/kotlin-compiler-2.2.10.jar"
+            curl -fsSL --retry 3 -o "$LIB/kotlin-stdlib.jar" "$M/org/jetbrains/kotlin/kotlin-stdlib/2.2.10/kotlin-stdlib-2.2.10.jar"
+            curl -fsSL --retry 3 -o "$LIB/kotlin-reflect.jar" "$M/org/jetbrains/kotlin/kotlin-reflect/2.2.10/kotlin-reflect-2.2.10.jar"
+            curl -fsSL --retry 3 -o "$LIB/kotlin-script-runtime.jar" "$M/org/jetbrains/kotlin/kotlin-script-runtime/2.2.10/kotlin-script-runtime-2.2.10.jar"
+            curl -fsSL --retry 3 -o "$LIB/kotlin-daemon-embeddable.jar" "$M/org/jetbrains/kotlin/kotlin-daemon-embeddable/2.2.10/kotlin-daemon-embeddable-2.2.10.jar"
+            curl -fsSL --retry 3 -o "$LIB/trove4j.jar" "$M/org/jetbrains/intellij/deps/trove4j/1.0.20200330/trove4j-1.0.20200330.jar"
+            curl -fsSL --retry 3 -o "$LIB/annotations.jar" "$M/org/jetbrains/annotations/13.0/annotations-13.0.jar"
+          fi
           echo "KOTLIN_HOME=/opt/kotlin/kotlinc" >> $GITHUB_ENV
 
       # 后端镜像：release 里那份 tar.gz 必须和本次 tag 的 server 代码一致。
