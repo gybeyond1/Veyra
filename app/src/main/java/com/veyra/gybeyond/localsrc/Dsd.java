@@ -161,6 +161,11 @@ public final class Dsd implements LocalSource {
     private static String tidy(String raw) {
         String value = clean(raw);
         if (value.isEmpty()) return "";
+        // <title> / og:title 带着的站点后缀，先摘干净
+        value = value.replaceAll("(?i)^\\s*在线播放\\s*", "");
+        value = value.replaceAll("(?i)\\s*第\\s*\\d+\\s*集.*$", "");
+        value = value.replaceAll("(?i)\\s*[-|_]\\s*(高清资源|懂色帝|在线观看|免费观看).*$", "");
+        value = value.replaceAll("(?i)\\s*\\|\\s*www\\.[^\\s|]+.*$", "");
         for (int i = 0; i < 6; i++) {
             String before = value;
             // 全 88 集 / 更新至12集 —— 这类标签夹在中间也要摘掉
@@ -170,6 +175,9 @@ public final class Dsd implements LocalSource {
             value = value.replaceAll("\\s*\\d{1,2}:\\d{2}(:\\d{2})?\\s*$", "");
             // 脑袋：452346次 02:07:40 剧名（有的模板 DOM 顺序是反的）
             value = value.replaceAll("(?i)^\\s*(\\d+(\\.\\d+)?\\s*(万|亿)?\\s*次|\\d{1,2}:\\d{2}(:\\d{2})?)\\s*", "");
+            // 卡片里用来换行的裸反斜杠
+            value = value.replaceAll("^[\\\\|\\s]+", "");
+            value = value.replaceAll("\\\\", " ");
             value = value.replaceAll("\\s{2,}", " ").trim();
             if (value.equals(before)) break;
         }
@@ -227,6 +235,49 @@ public final class Dsd implements LocalSource {
 
     /* ---------------- 目录 ---------------- */
 
+    /**
+     * 列表卡片上抓到的封面，按 id 存着。
+     *
+     * 播放页的正文是 JS 注入的，服务端 HTML 里只有标题和简介 —— 封面常常拿不到，
+     * 而封面恰好是这个站唯一能反推媒体地址的线索（…/FNS-206/1.jpg → …/FNS-206/1000k/index.m3u8）。
+     */
+    private final Map<String, String> coverCache = new LinkedHashMap<String, String>(64, 0.75f, true) {
+        @Override protected boolean removeEldestEntry(Map.Entry<String, String> eldest) {
+            return size() > 256;
+        }
+    };
+
+    private void remember(String id, String cover) {
+        if (id == null || id.isEmpty() || cover == null || cover.isEmpty()) return;
+        synchronized (coverCache) {
+            coverCache.put(id, cover);
+        }
+    }
+
+    private String rememberedCover(String id) {
+        synchronized (coverCache) {
+            String value = coverCache.get(id);
+            return value == null ? "" : value;
+        }
+    }
+
+    /**
+     * 封面反推媒体地址：/video1/<组>/<番号>/1.jpg → /video1/<组>/<番号>/1000k/index.m3u8。
+     * 这是参考实现里的兜底，也是这个站「没有 player_aaaa 也能播」的关键。
+     */
+    private static String mediaFromCover(String cover) {
+        if (cover == null || cover.isEmpty()) return "";
+        try {
+            java.net.URL url = new java.net.URL(cover);
+            String path = url.getPath() == null ? "" : url.getPath();
+            if (!path.matches("(?i)^/video\\d*/.*/1\\.(jpg|jpeg|png|webp)$")) return "";
+            String directory = path.substring(0, path.lastIndexOf('/'));
+            return url.getProtocol() + "://" + url.getAuthority() + directory + "/1000k/index.m3u8";
+        } catch (Exception error) {
+            return "";
+        }
+    }
+
     private List<JSONObject> cards(Document doc) {
         List<JSONObject> items = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>();
@@ -252,11 +303,13 @@ public final class Dsd implements LocalSource {
             String label = "";
             Matcher total = Pattern.compile("(?:全|更新至|共|已完结)\\s*(\\d+)\\s*集").matcher(clean(link.text()));
             if (total.find()) label = "全 " + total.group(1) + " 集";
+            String cover = cardCover(link);
+            remember(id, cover);
             try {
                 items.add(new JSONObject()
                         .put("id", id)
                         .put("title", title.length() > 200 ? title.substring(0, 200) : title)
-                        .put("cover", cardCover(link))
+                        .put("cover", cover)
                         .put("description", "")
                         .put("score", "")
                         .put("episodeLabel", label)
@@ -508,17 +561,18 @@ public final class Dsd implements LocalSource {
         JSONObject vodData = player == null ? null : player.optJSONObject("vod_data");
 
         String title = vodData == null ? "" : clean(vodData.optString("vod_name", ""));
-        if (title.isEmpty()) title = meta(doc, "og:title");
         if (title.isEmpty()) {
             Element heading = doc.selectFirst("div.video-info h1");
             if (heading == null) heading = doc.selectFirst("h1");
             title = heading == null ? "" : clean(heading.text());
         }
+        if (title.isEmpty()) title = meta(doc, "og:title");
         title = tidy(title);
 
-        String cover = player == null ? "" : player.optString("poster", "");
+        String cover = player == null ? "" : player.optString("poster", "").trim();
         if (cover.isEmpty()) cover = meta(doc, "og:image");
         if (cover.isEmpty()) cover = coverOf(doc);
+        if (cover.isEmpty()) cover = rememberedCover(key);
         cover = Net.absolute(data.url, cover);
 
         // 分集：同一个播放页里所有 /vod/play/id/{key}/sid/../nid/.. 链接；
@@ -553,21 +607,24 @@ public final class Dsd implements LocalSource {
                 bestSid = entry.getKey();
             }
         }
-        if (bestSid == 0 && player != null) {
-            int sid = player.optInt("sid", 1);
-            int nid = player.optInt("nid", 1);
-            if (sid > 0 && nid > 0) {
-                bestSid = sid;
-                Map<Integer, String> line = new LinkedHashMap<>();
-                line.put(nid, data.url);
-                byLine.put(sid, line);
-                Map<Integer, String> label = new LinkedHashMap<>();
-                label.put(nid, "正片");
-                labels.put(sid, label);
-                bestCount = 1;
-            }
+        /*
+         * 这站是「一片一 id」：列表里每条的链接都是 sid/1/nid/1.html，播放页正文又由 JS 注入，
+         * 服务端 HTML 里根本不会出现分集列表。所以「扫不到分集」是常态，不是错误 ——
+         * 直接当单集正片处理，媒体地址由 episode() 用封面反推。
+         */
+        if (bestSid == 0) {
+            int sid = player == null ? 1 : Math.max(1, player.optInt("sid", 1));
+            int nid = player == null ? 1 : Math.max(1, player.optInt("nid", 1));
+            bestSid = sid;
+            Map<Integer, String> single = new LinkedHashMap<>();
+            single.put(nid, data.url);
+            byLine.put(sid, single);
+            Map<Integer, String> label = new LinkedHashMap<>();
+            label.put(nid, "");
+            labels.put(sid, label);
+            bestCount = 1;
         }
-        if (bestSid == 0 || bestCount == 0) throw new IllegalStateException("帝果详情页没有解析到分集");
+        if (bestCount == 0) throw new IllegalStateException("帝果详情页没有解析到分集");
 
         JSONArray listed = new JSONArray();
         JSONArray episodes = new JSONArray();
@@ -576,7 +633,7 @@ public final class Dsd implements LocalSource {
         for (Map.Entry<Integer, String> entry : line.entrySet()) {
             int nid = entry.getKey();
             String text = label.get(nid);
-            if (text == null || text.isEmpty()) text = "第 " + nid + " 集";
+            if (text == null || text.isEmpty()) text = line.size() == 1 ? "正片" : "第 " + nid + " 集";
             try {
                 listed.put(new JSONObject()
                         .put("number", nid)
@@ -640,19 +697,31 @@ public final class Dsd implements LocalSource {
         String pageUrl = playPath(key, sid, number);
         Page data = page(pageUrl);
         JSONObject player = player(data.doc);
-        if (player == null) throw new IllegalStateException("帝果播放页没有解析到播放器参数");
-        if (!key.equals(digits(player.optString("id", "")))) {
-            throw new IllegalStateException("帝果返回的播放器与请求剧集不符");
-        }
-        int trysee = player.optInt("trysee", 0);
+        if (player != null && !key.equals(digits(player.optString("id", "")))) player = null;
+
+        int trysee = player == null ? 0 : player.optInt("trysee", 0);
         if (trysee > 0) throw new IllegalStateException("帝果这一集只能试看，暂未取得正片地址");
 
-        String media = player.optString("url", "").trim();
-        String encrypt = player.optString("encrypt", "0");
-        if ("1".equals(encrypt)) media = decode(media);
-        else if ("2".equals(encrypt)) media = decode(new String(Crypt.unb64(media), java.nio.charset.StandardCharsets.UTF_8));
-        else if (!encrypt.isEmpty() && !"0".equals(encrypt)) throw new IllegalStateException("帝果播放地址编码已变化");
-        media = Net.absolute(pageUrl, media);
+        String media = "";
+        if (player != null) {
+            media = player.optString("url", "").trim();
+            String encrypt = player.optString("encrypt", "0");
+            if ("1".equals(encrypt)) media = decode(media);
+            else if ("2".equals(encrypt)) media = decode(new String(Crypt.unb64(media), java.nio.charset.StandardCharsets.UTF_8));
+            media = Net.absolute(pageUrl, media);
+        }
+        /*
+         * 服务端 HTML 里没有 player_aaaa 是常态（正文由 JS 注入），
+         * 这时用封面反推 /1000k/index.m3u8 —— 参考实现也是这么做的。
+         */
+        if (media.isEmpty()) {
+            media = mediaFromCover(detailCover);
+            if (media.isEmpty()) {
+                String cover = meta(data.doc, "og:image");
+                if (cover.isEmpty()) cover = coverOf(data.doc);
+                media = mediaFromCover(Net.absolute(data.url, cover));
+            }
+        }
         if (media.isEmpty()) throw new IllegalStateException("帝果这一集没有可直接播放的地址");
         if (!media.matches("(?i)^https?://.*\\.(m3u8|mp4)(\\?.*)?$")) {
             throw new IllegalStateException("帝果这一集不是可直接播放的媒体");
