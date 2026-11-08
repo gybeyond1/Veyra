@@ -49,7 +49,7 @@ public final class Huangju implements LocalSource {
 
     /* ---------------- 映射 ---------------- */
 
-    private static JSONObject card(JSONObject row) {
+    private static JSONObject card(JSONObject row) throws Exception {
         JSONArray tags = new JSONArray();
         List<String> names = new ArrayList<>();
         JSONObject category = row.optJSONObject("category");
@@ -167,7 +167,7 @@ public final class Huangju implements LocalSource {
                 .put("newest", new JSONObject().put("items", newItems).put("nextPage", newest.opt("nextPage")));
     }
 
-    private static JSONArray slice(JSONArray rows, int from, int to, boolean fillDescription) {
+    private static JSONArray slice(JSONArray rows, int from, int to, boolean fillDescription) throws Exception {
         JSONArray out = new JSONArray();
         for (int i = from; rows != null && i < rows.length() && i < to; i++) {
             JSONObject row = rows.optJSONObject(i);

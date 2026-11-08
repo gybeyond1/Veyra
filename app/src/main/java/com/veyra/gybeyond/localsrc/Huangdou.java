@@ -137,7 +137,7 @@ public final class Huangdou implements LocalSource {
         return "";
     }
 
-    private static JSONObject card(JSONObject row) {
+    private static JSONObject card(JSONObject row) throws Exception {
         String id = row.optString("id", row.optString("drama_id", "")).replaceAll("^rp_", "");
         int episodes = row.optInt("episode_count", 0);
         String label = firstNonEmpty(row, "update_label", "corner");
@@ -200,7 +200,7 @@ public final class Huangdou implements LocalSource {
                 .put("nextPage", rows.length() >= size ? page + 1 : JSONObject.NULL);
     }
 
-    @Override public JSONArray categories() {
+    @Override public JSONArray categories() throws Exception {
         return new JSONArray()
                 .put(new JSONObject().put("id", "").put("name", "全部"))
                 .put(new JSONObject().put("id", "new").put("name", "最新"));
@@ -219,7 +219,7 @@ public final class Huangdou implements LocalSource {
                         .put("nextPage", first.opt("nextPage")));
     }
 
-    private static JSONArray slice(JSONArray rows, int from, int to, boolean fillDescription) {
+    private static JSONArray slice(JSONArray rows, int from, int to, boolean fillDescription) throws Exception {
         JSONArray out = new JSONArray();
         for (int i = from; rows != null && i < rows.length() && i < to; i++) {
             JSONObject row = rows.optJSONObject(i);

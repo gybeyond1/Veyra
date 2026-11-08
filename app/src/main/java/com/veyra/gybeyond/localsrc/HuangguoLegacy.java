@@ -61,7 +61,7 @@ public final class HuangguoLegacy implements LocalSource {
         return (path.startsWith("upload") ? "https://pic.zdmhyg.cn/" : "https://zzzznnn.lkkwip.cn/") + path;
     }
 
-    private static JSONObject card(JSONObject row, String tabName) {
+    private static JSONObject card(JSONObject row, String tabName) throws Exception {
         int episodes = row.optInt("totalEpisode", row.optInt("updateEpisode", 0));
         JSONArray tags = new JSONArray();
         String anchor = row.optString("anchor", "");
@@ -177,7 +177,7 @@ public final class HuangguoLegacy implements LocalSource {
                 .put("newest", new JSONObject().put("items", b).put("nextPage", two.opt("nextPage")));
     }
 
-    private static JSONArray slice(JSONArray rows, int from, int to, boolean fillDescription) {
+    private static JSONArray slice(JSONArray rows, int from, int to, boolean fillDescription) throws Exception {
         JSONArray out = new JSONArray();
         for (int i = from; rows != null && i < rows.length() && i < to; i++) {
             JSONObject row = rows.optJSONObject(i);

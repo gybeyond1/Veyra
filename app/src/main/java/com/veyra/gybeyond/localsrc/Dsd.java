@@ -221,7 +221,7 @@ public final class Dsd implements LocalSource {
                 .put("newest", new JSONObject().put("items", slice(items, 6, 12)).put("nextPage", first.opt("nextPage")));
     }
 
-    private static JSONArray slice(JSONArray rows, int from, int to) {
+    private static JSONArray slice(JSONArray rows, int from, int to) throws Exception {
         JSONArray out = new JSONArray();
         for (int i = from; rows != null && i < rows.length() && i < to; i++) {
             JSONObject row = rows.optJSONObject(i);

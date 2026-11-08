@@ -159,7 +159,7 @@ public final class HuangguoAi implements LocalSource {
         return list == null ? new JSONArray() : list;
     }
 
-    private JSONObject card(JSONObject row, String category) {
+    private JSONObject card(JSONObject row, String category) throws Exception {
         int episodes = row.optInt("total_episodes", row.optInt("episode_count", 0));
         JSONArray tags = new JSONArray();
         JSONArray raw = row.optJSONArray("tags");
@@ -216,7 +216,7 @@ public final class HuangguoAi implements LocalSource {
         return rows >= size ? page + 1 : JSONObject.NULL;
     }
 
-    @Override public JSONArray categories() {
+    @Override public JSONArray categories() throws Exception {
         JSONArray out = new JSONArray();
         out.put(new JSONObject().put("id", "").put("name", "全部"));
         out.put(new JSONObject().put("id", "new").put("name", "最新"));
@@ -270,7 +270,7 @@ public final class HuangguoAi implements LocalSource {
                 .put("newest", new JSONObject().put("items", feedItems).put("nextPage", feed.opt("nextPage")));
     }
 
-    private static JSONArray slice(JSONArray rows, int from, int to, boolean fillDescription) {
+    private static JSONArray slice(JSONArray rows, int from, int to, boolean fillDescription) throws Exception {
         JSONArray out = new JSONArray();
         for (int i = from; rows != null && i < rows.length() && i < to; i++) {
             JSONObject row = rows.optJSONObject(i);
