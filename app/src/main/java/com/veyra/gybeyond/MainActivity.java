@@ -1169,8 +1169,32 @@ public final class MainActivity extends Activity {
           }
           ProxySettings.setMode(this, args.optInt("value", ProxySettings.MODE_BACKEND)); return true;
         }
-        // 后端支持的私密源清单（剧果/野果/帝果……），设置页据此渲染可选项
-        if ("private-sites".equals(action)) return account.getJson("api/sources");
+        // 私密源清单：端侧能解析的排前面（不依赖后端，手机直接连源站），
+        // 其余由后端下发的再补在后面。后端连不上源站时，这几个源照样能用。
+        if ("private-sites".equals(action)) {
+            JSONArray sources = new JSONArray();
+            java.util.Set<String> seen = new java.util.HashSet<>();
+            for (String[] row : com.veyra.gybeyond.localsrc.LocalSources.CATALOG) {
+                seen.add(row[0]);
+                sources.put(new JSONObject().put("id", row[0]).put("name", row[1])
+                        .put("description", row[2]).put("content", row[3]).put("local", true));
+            }
+            try {
+                JSONObject remote = account.getJson("api/sources");
+                JSONArray rows = remote.optJSONArray("sources");
+                for (int i = 0; rows != null && i < rows.length(); i++) {
+                    JSONObject row = rows.optJSONObject(i);
+                    if (row == null) continue;
+                    String id = row.optString("id", "");
+                    if (id.isEmpty() || seen.contains(id)) continue;
+                    seen.add(id);
+                    sources.put(row);
+                }
+            } catch (Exception ignore) {
+                // 后端不可达就只用端侧那几个，功能不至于全空
+            }
+            return new JSONObject().put("sources", sources);
+        }
         // 私密源切换：黄果保持原三通道；剧果/野果/帝果等接口型源统一走后端网关
         if ("private-site".equals(action)) {
             if (args.has("id")) {

@@ -144,6 +144,14 @@ final class LocalPlaybackGateway {
      * @param headers 后端随地址下发的 Referer / Cookie / User-Agent 等
      */
     String open(String url, Map<String, String> headers) throws IOException {
+        return open(url, headers, null);
+    }
+
+    /**
+     * 带兜底密钥的版本：黄豆的清单偶尔不带 EXT-X-KEY，hls_key 在播放接口里单独下发，
+     * 由网关在 {@code /key} 请求上直接吐出来。
+     */
+    String open(String url, Map<String, String> headers, byte[] key) throws IOException {
         prune();
         byte[] random = new byte[16];
         new SecureRandom().nextBytes(random);
@@ -155,7 +163,7 @@ final class LocalPlaybackGateway {
         String contentType = guessType(url, "application/vnd.apple.mpegurl");
         String kind = "application/vnd.apple.mpegurl".equals(contentType) ? "entry_playlist" : "media";
 
-        Session session = new Session(token, referer, hostOf(url), headers, null);
+        Session session = new Session(token, referer, hostOf(url), headers, key);
         Asset entry = new Asset(kind, url, contentType, null);
         sessions.put(token, session);
         return assetUrl(session, entry);

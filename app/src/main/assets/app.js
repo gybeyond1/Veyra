@@ -1881,7 +1881,7 @@ function buildSourcePopHtml() {
     .concat(asArray(state.privateSites));
   return `<div class="appearance-pop account-pop proxy-pop" role="dialog" aria-modal="true" aria-labelledby="source-title">
     <div class="appearance-head"><h2 id="source-title">私密内容源</h2><button type="button" class="appearance-close" data-source-close aria-label="关闭">✕</button></div>
-    <p class="appearance-note">黄果在本机解析（直连/代理/后端三通道）；剧果/野果等由服务器解析，需要登录同一个账号，切完自动刷新首页。</p>
+    <p class="appearance-note">黄果旧版 / 黄果 AI / 黄豆 / 帝果 / 剧果 都在手机上直接取数，请求走你自己的网络，不经过服务器；其余源仍由服务器解析。切完自动刷新首页。</p>
     <div class="site-list">${rows.map(row => `<button type="button" class="site-option${row.id === current ? ' is-active' : ''}" data-site-id="${esc(row.id)}" data-site-name="${esc(row.name)}"><strong>${esc(row.name)}</strong><small>${esc(row.description || '')}</small></button>`).join('')}</div>
   </div>`;
 }
