@@ -30,6 +30,9 @@ jobs:
         run: npm ci --no-audit --no-fund
         env:
           ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+          # ffmpeg-static 的 postinstall 默认从 github.com 拉二进制，GitHub 资产 CDN
+          # 时不时整片 504，整条桌面流水线就卡在这一步。走 npmmirror 的同名目录。
+          FFMPEG_BINARIES_URL: https://registry.npmmirror.com/-/binary/ffmpeg-static
 
       - name: 版本号
         if: github.event.inputs.version != ''
