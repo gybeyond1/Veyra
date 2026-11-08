@@ -29,6 +29,8 @@ final class DualContentRepository {
     JSONObject search(String term, boolean suggest) throws Exception { return privateMode() ? (remote != null ? remote.search(term, suggest) : huangguo.search(term, suggest)) : hongguo.search(term); }
     JSONObject detail(String id) throws Exception { return privateMode() ? (remote != null ? remote.detail(id) : huangguo.detail(id)) : hongguo.detail(id); }
     JSONObject episode(String id, int number) throws Exception { return privateMode() ? (remote != null ? remote.episode(id, number) : huangguo.episode(id, number)) : hongguo.episode(id, number); }
+    /** 红果专用：后台把某集解析好并预热首片；私密模式（黄果/接口型源）没有这条链路。 */
+    void prewarmEpisode(String id, int number) { if (!privateMode()) hongguo.prewarm(id, number); }
     String coverData(String url) throws Exception { return privateMode() ? (remote != null ? remote.coverData(url) : huangguo.coverData(url)) : hongguo.coverData(url); }
     JSONObject tags() throws Exception {
         return privateMode() ? (remote != null ? remote.tags() : huangguo.tags()) : hongguo.tags();

@@ -76,7 +76,22 @@ final class HongguoRepository {
             episodes.put(new JSONObject().put("number", i + 1).put("videoId", detail.getEpisodes().get(i)));
         return result.put("episodes", episodes).put("episodeLabel", "共 " + episodes.length() + " 集");
     }
+    /*
+     * 播放地址缓存。
+     *
+     * 同一集反复点开（退出再进、切回上一集）不该每次都重新签名取流：
+     * 一次 resolve 就是一次 device 参数拼装 + 签名 + 一次 HTTPS 往返，
+     * 慢的时候一两秒。红果地址带时效，所以只留 8 分钟，过期就重新解析。
+     */
+    private static final long EPISODE_TTL_MS = 8 * 60 * 1000L;
+    private final LruCache<String, JSONObject> episodes = new LruCache<>(24);
+    private final java.util.Map<String, Long> episodeAt = new java.util.concurrent.ConcurrentHashMap<>();
+
     JSONObject episode(String id, int number) throws Exception {
+        final String cacheKey = id + "#" + number;
+        JSONObject cached = episodes.get(cacheKey);
+        Long at = episodeAt.get(cacheKey);
+        if (cached != null && at != null && System.currentTimeMillis() - at < EPISODE_TTL_MS) return cached;
         Detail detail = details.get(id);
         if (detail == null) { detail = upstream.detail(id); details.put(id, detail); }
         if (number < 1 || number > detail.getEpisodes().size()) throw new IllegalArgumentException("无效集数");
@@ -92,7 +107,45 @@ final class HongguoRepository {
             for (byte b : key) hex.append(String.format("%02x", b));
             result.put("key", hex.toString());
         }
+        episodes.put(cacheKey, result);
+        episodeAt.put(cacheKey, System.currentTimeMillis());
         return result;
+    }
+
+    /*
+     * 预热点播。
+     *
+     * 用户从「看到详情页」到「点播放」之间通常有好几秒，这段时间足够把播放地址解析好、
+     * 把 RemoteVideo prepare 好、首 4MB 铺进内存。点下去时播放器 open() 直接命中，
+     * 首帧只剩解码器启动的时间 —— guoapp「一点就播」就是这么来的。
+     */
+    private static final java.util.concurrent.ExecutorService PREWARM_POOL =
+            java.util.concurrent.Executors.newFixedThreadPool(2, runnable -> {
+                Thread thread = new Thread(runnable, "hongguo-prewarm");
+                thread.setDaemon(true);
+                return thread;
+            });
+    private static final java.util.Set<String> PREWARMING =
+            java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<String, Boolean>());
+
+    void prewarm(String id, int number) {
+        if (id == null || id.isEmpty() || number < 1) return;
+        final String key = id + "#" + number;
+        if (!PREWARMING.add(key)) return;
+        try {
+            PREWARM_POOL.execute(() -> {
+                try {
+                    JSONObject data = episode(id, number);
+                    HongguoPlayback.warm(data.optString("source"));
+                } catch (Exception ignored) {
+                    // 预热失败无所谓：真点播时还会走一次完整流程
+                } finally {
+                    PREWARMING.remove(key);
+                }
+            });
+        } catch (Throwable error) {
+            PREWARMING.remove(key);
+        }
     }
 
     /*

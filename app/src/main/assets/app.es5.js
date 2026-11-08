@@ -1086,6 +1086,8 @@ async function resumeFromHome(id) {
   if (!item || String(item.id) !== id) return;
   const source = contentSource;
   const episode = Math.max(1, Number(item.episode) || 1) + (item.completed ? 1 : 0);
+  // 点下去就预热，和 goDetail 的请求并行，别串着等
+  api("prewarm", { id, episode }).catch(() => {});
   const token = routeToken + 1;
   await goDetail(id);
   if (routeToken !== token || contentSource !== source || state.route !== "detail" || state.detailLoading || String((_a2 = state.detail) == null ? void 0 : _a2.id) !== id) return;
@@ -4702,8 +4704,13 @@ document.addEventListener("click", async (event) => {
   const historyCard = event.target.closest("[data-history-id]");
   if (historyCard) {
     const id = historyCard.dataset.historyId;
+    const episode = Number(historyCard.dataset.historyEpisode || 1);
     if (historyCard.dataset.historyCompleted === "true") goDetail(id, historyCard);
-    else goDetail(id).then(() => openPlayer(Number(historyCard.dataset.historyEpisode || 1)));
+    else {
+      // 列表点「继续看」时先让原生端把取流跑起来，别等详情页这一圈网络走完才开始
+      api("prewarm", { id, episode }).catch(() => {});
+      goDetail(id).then(() => openPlayer(episode));
+    }
     return;
   }
   if (event.target.closest("[data-all-tags]")) {
