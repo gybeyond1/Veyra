@@ -129,10 +129,12 @@ final class ChannelHttpDataSource extends BaseDataSource implements HttpDataSour
         String agent = mediaHeaders.get("User-Agent");
         conn.setRequestProperty("User-Agent", agent == null || agent.isEmpty() ? UA : agent);
         String host = url.getHost();
+        // 本机播放网关自己会补 Referer，别在这儿塞一个 127.0.0.1 上去
+        boolean local = host != null && (host.equals("127.0.0.1") || host.equalsIgnoreCase("localhost"));
         String referer = mediaHeaders.get("Referer");
         if (referer != null && !referer.isEmpty()) {
             conn.setRequestProperty("Referer", referer);
-        } else if (host != null && !host.isEmpty()) {
+        } else if (!local && host != null && !host.isEmpty()) {
             conn.setRequestProperty("Referer", "https://" + host + "/");
         }
         // Cookie 只回源站：分片换到别的 CDN 时带过去反而会被判非法请求

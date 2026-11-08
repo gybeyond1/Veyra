@@ -2,255 +2,31 @@
 /**
  * 黄果旧版（cloudfront 上那套 App 接口）
  *
- * 请求参数 AES 加密进 data 字段，响应再按 interfaceKey 派生密钥解一遍，
- * 还要带一个伪造的设备号换访客 token —— 客户端复刻这套不现实，只能服务端做。
- *
- * 协议密钥（interfaceKey / parameterKey / parameterIv）写在官网前端脚本里，
- * 这里启动时抓一次缓存 24 小时，抓不到就用内置的那份（和官方脚本当前一致）。
+ * 协议在 legacy-core 里，这里只负责：域名、UA、设备号格式，以及把接口数据
+ * 映射成 Veyra 的卡片结构。
  */
 
 const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
-const { request } = require('./util');
+const { createLegacyClient } = require('./legacy-core');
 
 const BASE = 'https://dr6skssi3nxbk.cloudfront.net';
 const FRONT = 'https://d2pypzndaqisk.cloudfront.net';
 const CDN = 'https://sjljsla.lkkwip.cn';
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6 Mobile/15E148 Safari/604.1';
 
-const FALLBACK = {
-  interfaceKey: '65dc07d1b7915c6b2937432b091837a7',
-  paramKey: 'BxJand%xf5h3sycH',
-  paramIv: 'BxJand%xf5h3sycH',
-};
+const client = createLegacyClient({
+  key: 'cloudfront',
+  name: '黄果旧版',
+  bases: [BASE],
+  front: FRONT,
+  cdn: CDN,
+  ua: UA,
+  // 黄果旧版设备号是 8 位十六进制 + 毫秒时间戳（iOS 那套）
+  userAgent: (device) => `BuildID=com.abc.Butterfly;SysType=ios;DevID=${device};Ver=1.0.0;DevType=iPhone;DeviceBrand=APPLE;DeviceModel=iPhone;SystemName=iOS;SystemVersion=18.7;Terminal=1;IsH5=1;Sid=00000000000000000000000000000000`,
+  newDevice: () => crypto.randomBytes(4).toString('hex').toUpperCase() + Date.now(),
+});
 
-/*
- * 首次请求要先抓前端页、再抓打包脚本、才能拿到密钥，串起来好几秒；
- * 国内连 CloudFront 更慢，用户点进去就是白屏。所以把上次解析到的协议和设备号落盘，
- * 重启后直接用，只有解密失败时才重新抓。
- */
-const CACHE_FILE = path.join(process.env.DATA_DIR || path.join(__dirname, '..', 'data'), 'legacy-protocol.json');
-
-function loadSaved() {
-  try {
-    const saved = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
-    if (!saved || !saved.interfaceKey || !saved.paramKey || !saved.paramIv) return null;
-    // 密钥偶尔会被官方换掉，一周后强制重抓一次，别拿过期的一直撞
-    if (Date.now() - Number(saved.at || 0) > 7 * 24 * 3600 * 1000) return null;
-    return saved;
-  } catch {
-    return null;
-  }
-}
-
-function saveState() {
-  try {
-    fs.mkdirSync(path.dirname(CACHE_FILE), { recursive: true });
-    fs.writeFileSync(CACHE_FILE, JSON.stringify({ ...state.protocol, device: state.device, at: state.protocolAt }));
-  } catch {
-    /* 落盘失败不影响请求，下次再抓一遍 */
-  }
-}
-
-const saved = loadSaved();
-const state = {
-  token: '',
-  device: (saved && saved.device) || '',
-  protocol: saved ? { interfaceKey: saved.interfaceKey, paramKey: saved.paramKey, paramIv: saved.paramIv } : null,
-  protocolAt: saved ? Number(saved.at) : 0,
-  cat: null,
-  catAt: 0,
-};
-
-/* ---------------- 加解密 ---------------- */
-
-function pkcs7(buffer) {
-  const pad = 16 - (buffer.length % 16);
-  return Buffer.concat([buffer, Buffer.alloc(pad, pad)]);
-}
-
-function unpad(buffer) {
-  const pad = buffer[buffer.length - 1];
-  return pad > 0 && pad <= 16 ? buffer.subarray(0, buffer.length - pad) : buffer;
-}
-
-function encryptParam(value, key, iv) {
-  const cipher = crypto.createCipheriv('aes-128-cbc', key, iv);
-  cipher.setAutoPadding(false);
-  return Buffer.concat([cipher.update(pkcs7(Buffer.from(JSON.stringify(value)))), cipher.final()]).toString('base64');
-}
-
-/** 响应解密：前 12 字节是随机前缀，用它和 interfaceKey 派生出 AES 的 key 与 iv */
-function decryptResponse(dataString, interfaceKey) {
-  const payload = Buffer.from(String(dataString).trim(), 'base64');
-  if (payload.length < 12) throw new Error('响应密文过短');
-  const prefix = payload.subarray(0, 12);
-  const mixed = Buffer.concat([interfaceKey, prefix]);
-  const half = mixed.length >> 1;
-  const seed = crypto.createHash('sha256').update(mixed).digest().subarray(8, 24);
-  const left = Buffer.concat([seed, mixed.subarray(0, half)]);
-  const right = Buffer.concat([mixed.subarray(half), seed]);
-  const h1 = crypto.createHash('sha256').update(left).digest();
-  const h2 = crypto.createHash('sha256').update(right).digest();
-  const key = Buffer.concat([h1.subarray(0, 8), h2.subarray(8, 24), h1.subarray(24)]);
-  const iv = Buffer.concat([h2.subarray(0, 4), h1.subarray(12, 20), h2.subarray(28)]);
-  const body = payload.subarray(12);
-  if (body.length % 16) throw new Error('响应密文未对齐');
-  const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
-  decipher.setAutoPadding(false);
-  return unpad(Buffer.concat([decipher.update(body), decipher.final()]));
-}
-
-/* ---------------- 协议 ---------------- */
-
-let refreshing = null;
-
-/**
- * 抓一次官网脚本把新密钥捞回来。失败就保持原值，绝不把已经能用的密钥冲掉。
- * 同一个进程里只跑一份，并发请求共用。
- */
-function refreshProtocol() {
-  if (refreshing) return refreshing;
-  refreshing = (async () => {
-    try {
-      const page = await request(`${FRONT}/`, { headers: { Referer: `${FRONT}/` }, timeout: 8000, maxBytes: 1 << 20 });
-      const html = page.text();
-      const entryRef = [...html.matchAll(/<script[^>]*type="module"[^>]*src="([^"]+)"/g)].map((m) => m[1])[0];
-      if (!entryRef) throw new Error('未找到前端脚本');
-      const script = (await request(new URL(entryRef, `${FRONT}/`).toString(), { headers: { Referer: `${FRONT}/` }, timeout: 10000, maxBytes: 4 << 20 })).text();
-      const pick = (name) => {
-        const match = new RegExp(`["']${name}["']\\s*[:,]\\s*["']([^"'\\\\\\r\\n]+)["']`).exec(script);
-        return match ? match[1] : '';
-      };
-      const found = { interfaceKey: pick('interfaceKey'), paramKey: pick('parameterKey'), paramIv: pick('parameterIv') };
-      if (!found.interfaceKey || found.paramKey.length !== 16 || found.paramIv.length !== 16) throw new Error('协议解析失败');
-      state.protocol = found;
-      state.protocolAt = Date.now();
-      saveState();
-    } catch {
-      if (!state.protocol) {
-        state.protocol = FALLBACK;
-        state.protocolAt = Date.now();
-      }
-    } finally {
-      refreshing = null;
-    }
-    return state.protocol;
-  })();
-  return refreshing;
-}
-
-/**
- * force=true 才阻塞等新密钥（登录/解密失败时用）；
- * 平时直接用手上这份，过期了就后台换，别让首屏等抓脚本。
- * 首次冷启动连缓存都没有，也先拿内置那份顶上 —— 那份和官网当前脚本是一致的。
- */
-async function protocol(force) {
-  if (force) {
-    state.protocol = null;
-    state.protocolAt = 0;
-    return refreshProtocol();
-  }
-  if (state.protocol && Date.now() - state.protocolAt < 24 * 3600 * 1000) return state.protocol;
-  if (state.protocol) {
-    refreshProtocol();
-    return state.protocol;
-  }
-  state.protocol = FALLBACK;
-  state.protocolAt = Date.now();
-  refreshProtocol();
-  return state.protocol;
-}
-
-function userAgent() {
-  return `BuildID=com.abc.Butterfly;SysType=ios;DevID=${state.device || '00000000000000000000000000000'};Ver=1.0.0;DevType=iPhone;DeviceBrand=APPLE;DeviceModel=iPhone;SystemName=iOS;SystemVersion=18.7;Terminal=1;IsH5=1;Sid=00000000000000000000000000000000`;
-}
-
-async function login(force) {
-  if (state.token && !force) return state.token;
-  if (!state.device) {
-    state.device = crypto.randomBytes(4).toString('hex').toUpperCase() + Date.now();
-    saveState();
-  }
-  const keys = force ? await protocol(true) : await protocol();
-  try {
-    const res = await request(`${BASE}/api/app/mine/login/h5`, {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        temp: 'test',
-        'X-User-Agent': userAgent(),
-        Origin: FRONT,
-        Referer: `${FRONT}/`,
-        'User-Agent': UA,
-      },
-      body: JSON.stringify({ data: encryptParam({ devID: state.device, sysType: 'ios', isAppStore: false }, Buffer.from(keys.paramKey), Buffer.from(keys.paramIv)) }),
-      timeout: 8000,
-    });
-    const envelope = JSON.parse(res.text());
-    let data = envelope.data;
-    if (typeof data === 'string') data = JSON.parse(decryptResponse(data, Buffer.from(keys.interfaceKey)).toString('utf8'));
-    const token = data && (data.token || data.accessToken);
-    if (!token) throw new Error('黄果旧版访客登录失败');
-    state.token = String(token);
-    return state.token;
-  } catch (error) {
-    // 内置那份密钥可能真被官方换了：重抓一次脚本再来，别让用户看到"登录失败"
-    if (!force) return login(true);
-    throw error;
-  }
-}
-
-/** 统一请求：参数加密进 data，响应按需解密 */
-async function api(path, params, retried = false) {
-  const keys = await protocol();
-  const token = await login();
-  let url = `${BASE}${path}`;
-  const headers = {
-    Accept: 'application/json',
-    temp: 'test',
-    'X-User-Agent': userAgent(),
-    Origin: FRONT,
-    Referer: `${FRONT}/`,
-    'User-Agent': UA,
-    Authorization: token,
-  };
-  if (params) url += `${url.includes('?') ? '&' : '?'}data=${encodeURIComponent(encryptParam(params, Buffer.from(keys.paramKey), Buffer.from(keys.paramIv)))}`;
-
-  const res = await request(url, { headers, timeout: 15000, maxBytes: 8 << 20 });
-  let envelope;
-  try {
-    envelope = JSON.parse(res.text());
-  } catch {
-    throw new Error(`黄果旧版返回 ${res.status}`);
-  }
-  const code = String(envelope.code === undefined || envelope.code === null ? '' : envelope.code).replace(/"/g, '');
-  if (code && code !== '200' && code !== '0' && code !== 'null') {
-    // 5005/5009：访客 token 过期，重登一次
-    if ((code === '5005' || code === '5009') && !retried) {
-      state.token = '';
-      return api(path, params, true);
-    }
-    throw new Error(`黄果旧版：${String(envelope.msg || code).slice(0, 100)}`);
-  }
-  let data = envelope.data;
-  if (typeof data === 'string' && envelope.hash) {
-    try {
-      data = JSON.parse(decryptResponse(data, Buffer.from(keys.interfaceKey)).toString('utf8'));
-    } catch {
-      if (!retried) {
-        state.token = '';
-        state.protocol = null;
-        return api(path, params, true);
-      }
-      throw new Error('黄果旧版响应解密失败');
-    }
-  }
-  if (data === null || data === undefined) throw new Error('黄果旧版没有返回数据');
-  return data;
-}
+const api = client.api;
 
 /* ---------------- 数据映射 ---------------- */
 
@@ -285,13 +61,10 @@ function card(row, tabName) {
 }
 
 async function tabs() {
-  if (state.cat && Date.now() - state.catAt < 10 * 60 * 1000) return state.cat;
   const data = await api('/api/app/playlet-tab/all');
   const list = Array.isArray(data) ? data : data.list || [];
   const items = list.filter((tab) => tab && tab.id && tab.name).map((tab) => ({ id: String(tab.id), name: String(tab.name).slice(0, 24) }));
   if (!items.length) throw new Error('黄果旧版没有返回可用分类');
-  state.cat = items;
-  state.catAt = Date.now();
   return items;
 }
 
@@ -374,11 +147,10 @@ async function play(id, number) {
   const info = await detail(id);
   const hit = info._episodes.find((item) => item.number === number);
   if (!hit || !hit.videoUrl) throw new Error('这一集没有可用的播放地址');
-  const token = await login();
-  const query = new URLSearchParams({ token, c: CDN }).toString();
+  const target = await client.playUrl(hit.videoUrl);
   return {
-    url: `${BASE}/api/app/vid/h5/m3u8/${encodeURIComponent(hit.videoUrl)}?${query}`,
-    referer: `${FRONT}/`,
+    url: target.url,
+    referer: target.referer,
     title: info.title,
     cover: info.cover,
   };

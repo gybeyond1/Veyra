@@ -97,7 +97,45 @@ final class BackendSiteRepository {
                 path.append("&proxy=").append(URLEncoder.encode(address, "UTF-8"));
             }
         }
-        return call(path.toString());
+        JSONObject data = call(path.toString());
+        /*
+         * 「仅直连」拿到的是源站真实地址 + 一套凭据。播放器自己贴头只能在
+         * 清单这一层生效，分片和 AES 密钥一旦换域名就掉（而且 ExoPlayer 不肯
+         * 替你去求密钥）。所以这里转一手：把地址交给本机网关，播放器只跟
+         * 127.0.0.1 说话，由网关带着凭据去取清单、分片、密钥。
+         *
+         * 这一层是 guoapp 的做法，也是「开 VPN 就能播」的关键——取流请求
+         * 从手机发出，走 VPN 的 TUN，后端完全不承载媒体流量。
+         */
+        if (data.optBoolean("direct")) {
+            String origin = data.optString("source", "");
+            if (origin.startsWith("http://") || origin.startsWith("https://")) {
+                LocalPlaybackGateway gateway = LocalPlaybackGateway.get(context);
+                if (gateway != null) {
+                    try {
+                        JSONObject raw = data.optJSONObject("headers");
+                        java.util.Map<String, String> headers = new java.util.LinkedHashMap<>();
+                        if (raw != null) {
+                            for (java.util.Iterator<String> keys = raw.keys(); keys.hasNext(); ) {
+                                String key = keys.next();
+                                String value = raw.optString(key, "");
+                                if (!key.isEmpty() && !value.isEmpty()) headers.put(key, value);
+                            }
+                        }
+                        String local = gateway.open(origin, headers);
+                        data.put("source", local);
+                        data.put("localGateway", true);
+                        data.put("origin", origin);
+                        // 凭据已经交给网关，别再让播放器贴一遍到 127.0.0.1 上
+                        data.remove("headers");
+                    } catch (Exception error) {
+                        // 网关没起来就退回原来的直连方式，至少还有一半能播
+                        android.util.Log.w("VeyraLocalGateway", "接管失败，回退直连: " + error.getMessage());
+                    }
+                }
+            }
+        }
+        return data;
     }
 
     /** 分类页直接当"全部类型"用：接口型源没有黄果那种标签树 */

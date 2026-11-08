@@ -21,6 +21,7 @@ const providers = [
   require('./huangju'),
   require('./yeguo'),
   require('./jinguoduanju'),
+  require('./jinguo'),
   require('./cloudfront'),
   require('./huangguoai'),
 ];
