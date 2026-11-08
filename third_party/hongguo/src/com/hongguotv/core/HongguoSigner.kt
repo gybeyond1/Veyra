@@ -320,8 +320,28 @@ object HongguoSigner {
     }
 
     // ---------- 主流程：签名取流（空响应冷却重试 + 换设备 ≤3 轮） ----------
+    // ---------- 设备号缓存 ----------
+    /*
+     * 设备注册是一次额外的 HTTPS 往返（几百毫秒到一秒），原来每次点开一集都重注册一遍。
+     * guoapp 的做法是注册一次就存下来、只有被风控才轮换，这里对齐：
+     * 首次注册落盘，之后直接复用；取流连续失败才换新设备并覆盖缓存。
+     */
+    private fun loadDevice(): Pair<String, String>? = try {
+        val prefs = AppContext.get().getSharedPreferences("hongguo-device", android.content.Context.MODE_PRIVATE)
+        val did = prefs.getString("device_id", "").orEmpty()
+        val iid = prefs.getString("install_id", "").orEmpty()
+        if (did.matches(Regex("\\d{1,32}")) && iid.matches(Regex("\\d{1,32}")) && did != "0" && iid != "0") did to iid else null
+    } catch (_: Throwable) { null }
+
+    private fun saveDevice(device: Pair<String, String>) {
+        try {
+            AppContext.get().getSharedPreferences("hongguo-device", android.content.Context.MODE_PRIVATE)
+                .edit().putString("device_id", device.first).putString("install_id", device.second).apply()
+        } catch (_: Throwable) { }
+    }
+
     fun resolve(vid: String): StreamInfo {
-        var device = registerDevice() ?: (newDeviceId() to newDeviceId())
+        var device = loadDevice() ?: registerDevice()?.also { saveDevice(it) } ?: (newDeviceId() to newDeviceId())
         var lastErr: Exception? = null
         var attempts = 0
         var rotations = 0
@@ -334,7 +354,7 @@ object HongguoSigner {
                 android.util.Log.w("HongguoSigner", "取流失败 attempt=$attempts: ${e.message}")
                 attempts++
                 if (attempts >= 2 && rotations < 2) {
-                    device = registerDevice() ?: (newDeviceId() to newDeviceId())
+                    device = registerDevice()?.also { saveDevice(it) } ?: (newDeviceId() to newDeviceId())
                     rotations++
                     attempts = 0
                     Thread.sleep(1200)

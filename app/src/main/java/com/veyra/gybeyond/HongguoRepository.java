@@ -80,7 +80,7 @@ final class HongguoRepository {
         Detail detail = details.get(id);
         if (detail == null) { detail = upstream.detail(id); details.put(id, detail); }
         if (number < 1 || number > detail.getEpisodes().size()) throw new IllegalArgumentException("无效集数");
-        StreamInfo info = upstream.stream(id, detail.getEpisodes().get(number - 1), 1080);
+        StreamInfo info = resolveStream(id, detail.getEpisodes().get(number - 1));
         HongguoPlayback.register(info);
         JSONObject result = new JSONObject().put("id", id).put("episode", number)
                 .put("source", info.getUrl())
@@ -93,6 +93,52 @@ final class HongguoRepository {
             result.put("key", hex.toString());
         }
         return result;
+    }
+
+    /*
+     * 取流顺序：本机签名直连优先。
+     *
+     * 直连（HongguoSigner）拿到的是 CENC 加密的原始 mp4，播放器边读边解密，Range 流式，
+     * 地址到手就能出画 —— guoapp 就是这一条路，点开即播。
+     * 后端 /api/web/hongguo/stream 走的是「ffmpeg 把整集转封装成明文 mp4 再 sendFile」，
+     * 第一遍必须等整集下完转完才给响应，一集几十秒；同名文件存在时才快。
+     * 之前把后端排在前面，等于每次新集都先等转封装，这才是「点开要等」的主因。
+     *
+     * 直连连续失败（红果空响应风控）就冷却 5 分钟，期间直接走后端，避免每次白等 8 秒。
+     */
+    private static final java.util.concurrent.ExecutorService RESOLVE_POOL =
+            java.util.concurrent.Executors.newFixedThreadPool(3, runnable -> {
+                Thread thread = new Thread(runnable, "hongguo-resolve");
+                thread.setDaemon(true);
+                return thread;
+            });
+    private static final java.util.concurrent.atomic.AtomicInteger DIRECT_MISSES =
+            new java.util.concurrent.atomic.AtomicInteger();
+    private static volatile long directHoldUntil = 0L;
+    private static final long DIRECT_COOLDOWN_MS = 5 * 60 * 1000L;
+    private static final long DIRECT_TIMEOUT_MS = 6000L;
+
+    private StreamInfo resolveStream(String id, String vid) throws Exception {
+        if (System.currentTimeMillis() >= directHoldUntil) {
+            java.util.concurrent.Callable<StreamInfo> call =
+                    () -> com.hongguotv.core.HongguoSigner.INSTANCE.resolve(vid);
+            java.util.concurrent.Future<StreamInfo> task = RESOLVE_POOL.submit(call);
+            try {
+                StreamInfo direct = task.get(DIRECT_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+                if (direct != null && direct.getUrl() != null && direct.getUrl().startsWith("http")) {
+                    DIRECT_MISSES.set(0);
+                    return direct;
+                }
+            } catch (Exception error) {
+                task.cancel(true);
+                // 第一次失败不立刻判死：偶发空响应重试一次还是很快的
+                if (DIRECT_MISSES.incrementAndGet() >= 2) {
+                    directHoldUntil = System.currentTimeMillis() + DIRECT_COOLDOWN_MS;
+                    DIRECT_MISSES.set(0);
+                }
+            }
+        }
+        return upstream.stream(id, vid, 1080);
     }
     String coverData(String url) throws Exception {
         if (!url.startsWith("https://")) throw new IllegalArgumentException("无效封面地址");
