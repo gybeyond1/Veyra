@@ -16,7 +16,7 @@ import java.util.Map;
  * 搬到客户端的原因很简单：这些接口在用户后端（国内机房）上会 ECONNRESET，
  * 而同一台手机开着 VPN 却通 —— 那就让请求从手机发出去。
  */
-final class LegacyCore {
+public final class LegacyCore {
 
     /** 官网脚本里那套密钥；抓不到脚本时用它顶上。 */
     static final String FALLBACK_INTERFACE = "65dc07d1b7915c6b2937432b091837a7";
@@ -24,7 +24,7 @@ final class LegacyCore {
     static final String FALLBACK_IV = "BxJand%xf5h3sycH";
 
     /** 设备号 / token 的落地位置：客户端用 SharedPreferences，桌面验证用内存。 */
-    interface Store {
+    public interface Store {
         String get(String key);
         void put(String key, String value);
     }
