@@ -61,6 +61,17 @@ public final class Dsd implements LocalSource {
     }
 
     private Page page(String path) throws Exception {
+        return page(path, SITE + "/");
+    }
+
+    /**
+     * 必须带 Referer。
+     *
+     * 这个站的播放页有防盗链：不带 Referer 的请求会被对端直接掐断
+     * （OkHttp 报 "connection closed"，看起来像「连不上」，其实站点是通的）。
+     * 首页和详情页不校验，所以之前只有播放页炸。
+     */
+    private Page page(String path, String referer) throws Exception {
         String url = path.matches("(?i)^https?://.*") ? path
                 : SITE + (path.startsWith("/") ? "" : "/") + path;
         Net.Res res;
@@ -68,7 +79,8 @@ public final class Dsd implements LocalSource {
             res = Net.get(url, Net.headers(
                     "User-Agent", UA,
                     "Accept", "text/html,application/xhtml+xml",
-                    "Accept-Language", "zh-CN,zh;q=0.9"), 12000, 6L << 20);
+                    "Accept-Language", "zh-CN,zh;q=0.9",
+                    "Referer", referer == null || referer.isEmpty() ? SITE + "/" : referer), 12000, 6L << 20);
         } catch (Exception error) {
             throw new IllegalStateException("帝果连不上（" + error.getMessage() + "）", error);
         }
@@ -247,16 +259,31 @@ public final class Dsd implements LocalSource {
         }
     };
 
-    private void remember(String id, String cover) {
-        if (id == null || id.isEmpty() || cover == null || cover.isEmpty()) return;
+    /** 列表上的标题同理：详情页正文由 JS 注入，服务端 HTML 里可能连 h1 都没有。 */
+    private final Map<String, String> titleCache = new LinkedHashMap<String, String>(64, 0.75f, true) {
+        @Override protected boolean removeEldestEntry(Map.Entry<String, String> eldest) {
+            return size() > 256;
+        }
+    };
+
+    private void remember(String id, String title, String cover) {
+        if (id == null || id.isEmpty()) return;
         synchronized (coverCache) {
-            coverCache.put(id, cover);
+            if (title != null && !title.isEmpty()) titleCache.put(id, title);
+            if (cover != null && !cover.isEmpty()) coverCache.put(id, cover);
         }
     }
 
     private String rememberedCover(String id) {
         synchronized (coverCache) {
             String value = coverCache.get(id);
+            return value == null ? "" : value;
+        }
+    }
+
+    private String rememberedTitle(String id) {
+        synchronized (coverCache) {
+            String value = titleCache.get(id);
             return value == null ? "" : value;
         }
     }
@@ -304,7 +331,7 @@ public final class Dsd implements LocalSource {
             Matcher total = Pattern.compile("(?:全|更新至|共|已完结)\\s*(\\d+)\\s*集").matcher(clean(link.text()));
             if (total.find()) label = "全 " + total.group(1) + " 集";
             String cover = cardCover(link);
-            remember(id, cover);
+            remember(id, title, cover);
             try {
                 items.add(new JSONObject()
                         .put("id", id)
@@ -567,6 +594,8 @@ public final class Dsd implements LocalSource {
             title = heading == null ? "" : clean(heading.text());
         }
         if (title.isEmpty()) title = meta(doc, "og:title");
+        if (title.isEmpty()) title = clean(doc.title());
+        if (title.isEmpty()) title = rememberedTitle(key);
         title = tidy(title);
 
         String cover = player == null ? "" : player.optString("poster", "").trim();
@@ -695,8 +724,15 @@ public final class Dsd implements LocalSource {
         if (!found) throw new IllegalStateException("帝果没有第 " + number + " 集");
 
         String pageUrl = playPath(key, sid, number);
-        Page data = page(pageUrl);
-        JSONObject player = player(data.doc);
+        Page data = null;
+        Exception failure = null;
+        try {
+            data = page(pageUrl);
+        } catch (Exception error) {
+            // 播放页被防盗链掐断也要能播：下面还有封面反推这条路
+            failure = error;
+        }
+        JSONObject player = data == null ? null : player(data.doc);
         if (player != null && !key.equals(digits(player.optString("id", "")))) player = null;
 
         int trysee = player == null ? 0 : player.optInt("trysee", 0);
@@ -716,13 +752,15 @@ public final class Dsd implements LocalSource {
          */
         if (media.isEmpty()) {
             media = mediaFromCover(detailCover);
-            if (media.isEmpty()) {
+            if (media.isEmpty() && data != null) {
                 String cover = meta(data.doc, "og:image");
                 if (cover.isEmpty()) cover = coverOf(data.doc);
                 media = mediaFromCover(Net.absolute(data.url, cover));
             }
         }
-        if (media.isEmpty()) throw new IllegalStateException("帝果这一集没有可直接播放的地址");
+        if (media.isEmpty()) {
+            throw failure != null ? failure : new IllegalStateException("帝果这一集没有可直接播放的地址");
+        }
         if (!media.matches("(?i)^https?://.*\\.(m3u8|mp4)(\\?.*)?$")) {
             throw new IllegalStateException("帝果这一集不是可直接播放的媒体");
         }
