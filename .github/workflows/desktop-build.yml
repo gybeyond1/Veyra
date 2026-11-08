@@ -58,6 +58,8 @@ jobs:
         run: npx electron-builder --win --x64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
+          # NSIS / winCodeSign 也从 GitHub 拉，同样会 504；镜像里有同名资产
+          ELECTRON_BUILDER_BINARIES_MIRROR: https://npmmirror.com/mirrors/electron-builder-binaries/
 
       - uses: actions/upload-artifact@v4
         with:
