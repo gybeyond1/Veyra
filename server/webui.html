@@ -1793,6 +1793,41 @@ document.getElementById('btn-admin-diagnose').onclick=async()=>{
     lines.push('[最近播放源] 暂无（去私密模式点一集播放后再诊断）\n');
   }
   body.textContent=lines.join('\n');
+
+  // 2) 源体检：后端逐源真跑 首页→分类→详情→播放地址→清单→密钥→分片。
+  //    哪一层断了一眼能看见，比「黑屏/转圈」这种描述有用得多。
+  lines.push('\n== 源体检（后端实际取流，逐个源）==');
+  body.textContent=lines.join('\n');
+  try{
+    const listRes=await fetch('/api/sources',{headers:AUTH()});
+    const listData=await listRes.json();
+    if(!listRes.ok)throw new Error(listData.error||('HTTP '+listRes.status));
+    for(const site of (listData.sources||[])){
+      lines.push('\n· '+site.name+' 体检中…');
+      body.textContent=lines.join('\n');
+      try{
+        const r=await fetch('/api/sources/diag?site='+encodeURIComponent(site.id),{headers:AUTH()});
+        const d=await r.json();
+        if(!r.ok)throw new Error(d.error||('HTTP '+r.status));
+        const item=(d.results||[])[0];
+        if(!item)throw new Error('没有返回结果');
+        const summary=(item.ok?'[通过] ':'[失败] ')+item.name+' ('+item.id+') '+item.ms+'ms';
+        const rows=(item.steps||[]).map(s=>'  '+(s.ok?'✓':'✗')+' '+s.name+' '+s.ms+'ms  '+s.detail);
+        // 把最后那条「体检中…」换成结果
+        const last=lines.lastIndexOf('· '+site.name+' 体检中…');
+        if(last>=0)lines.splice(last,1);
+        lines.push(summary,...rows);
+      }catch(e){
+        const last=lines.lastIndexOf('· '+site.name+' 体检中…');
+        if(last>=0)lines.splice(last,1);
+        lines.push('[失败] '+site.name+'：'+e.message);
+      }
+      body.textContent=lines.join('\n');
+    }
+  }catch(e){
+    lines.push('源体检不可用：'+e.message+'（后端若是旧镜像，没有 /api/sources/diag）');
+  }
+  body.textContent=lines.join('\n');
 };
 document.getElementById('btn-close-diag').onclick=()=>document.getElementById('diag-overlay').classList.remove('open');
 document.getElementById('diag-overlay').addEventListener('click',e=>{if(e.target.id==='diag-overlay')document.getElementById('diag-overlay').classList.remove('open')});

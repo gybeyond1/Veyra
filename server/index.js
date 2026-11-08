@@ -287,6 +287,9 @@ function needUser(req, res) {
 
 const app = express();
 app.disable('x-powered-by');
+// 反代（nginx / Cloudflare / 宝塔）后面要能读到真实协议与域名，
+// 否则播放列表里拼出来的地址会是 http，https 页面一加载就被判混合内容。
+app.set('trust proxy', true);
 // 顺手留一份原始 body：GitHub webhook 的 HMAC 签名必须按「收到的字节」算，
 // 解析成对象再 JSON.stringify 回去，空格、转义、键序都可能变，验签必挂。
 app.use(express.json({

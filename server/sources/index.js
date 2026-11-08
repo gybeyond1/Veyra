@@ -150,6 +150,17 @@ async function stream(req, res) {
   };
   if (token.userAgent) headers['User-Agent'] = token.userAgent;
 
+  /*
+   * Range 必须一路透到源站。播放器取分片、seek、以及 iOS 原生 HLS 都会先发
+   * Range: bytes=0-1 探能力；后端若吞掉它回 200 全量，播放器会判定「服务端不支持
+   * 断点」，seek 失效、大分片整段重下，弱网下直接卡死。
+   */
+  const rangeHeader = String(req.headers.range || '').trim();
+  if (rangeHeader) {
+    headers.Range = rangeHeader;
+    headers['Accept-Encoding'] = 'identity'; // 压缩字节与 Range 互斥
+  }
+
   // 「仅代理」的令牌带着代理地址，播放列表 / 密钥 / 分片全部经它出去
   const proxy = token.proxy || '';
 
@@ -173,6 +184,11 @@ async function stream(req, res) {
     }
   } catch (error) {
     return res.status(502).json({ error: '上游连接失败：' + (error.message || '') });
+  }
+  if (upstream.status === 416 && rangeHeader) {
+    res.status(416);
+    if (upstream.headers['content-range']) res.setHeader('Content-Range', String(upstream.headers['content-range']));
+    return res.end();
   }
   if (upstream.status < 200 || upstream.status >= 300) {
     return res.status(502).json({ error: `上游返回 ${upstream.status}` });
@@ -221,7 +237,12 @@ async function stream(req, res) {
     return res.end(Buffer.from(body, 'utf8'));
   }
 
+  res.status(upstream.status === 206 ? 206 : 200);
+  const contentRange = upstream.headers['content-range'];
+  if (contentRange) res.setHeader('Content-Range', String(contentRange));
+  res.setHeader('Accept-Ranges', 'bytes');
   res.setHeader('Content-Type', mediaType(target.pathname, type));
+  res.setHeader('Content-Length', String(upstream.body.length));
   res.setHeader('Cache-Control', 'no-store');
   res.end(upstream.body);
 }
@@ -239,6 +260,144 @@ function mount(app, deps) {
   app.get('/api/sources', auth, (req, res) => {
     if (!needUser(req, res)) return;
     res.json({ sources: list() });
+  });
+
+  /*
+   * 一键体检。用户报「这个源用不了」，先跑这个：首页 → 分类 → 详情 → 播放地址 →
+   * 清单 → 子清单 → 密钥 → 分片，每步成败与耗时都留痕。断在哪一层一眼看得见，
+   * 不用再靠「黑屏」「转圈」这类描述去猜，也省掉「是不是你没更新」的来回。
+   */
+  const DIAG_UA = 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36';
+
+  async function diagnose(provider, budgetMs) {
+    const deadline = Date.now() + budgetMs;
+    const steps = [];
+    const push = (name, ok, started, detail) => steps.push({ name, ok, ms: Date.now() - started, detail: String(detail || '') });
+    const run = async (name, fn, required) => {
+      if (Date.now() > deadline) throw Object.assign(new Error('体检总时长超限'), { steps });
+      const started = Date.now();
+      try {
+        const result = await fn();
+        push(name, true, started, result && result.detail);
+        return result && result.value;
+      } catch (error) {
+        push(name, false, started, error.message || '失败');
+        if (required) throw Object.assign(new Error(error.message || '失败'), { steps });
+        return null;
+      }
+    };
+    const firstUriOf = (text) => {
+      for (const line of text.split('\n')) {
+        const value = line.trim();
+        if (value && !value.startsWith('#')) return value;
+      }
+      return '';
+    };
+
+    const home = await run('首页', async () => {
+      const data = await provider.home();
+      const items = data.homepageRecommend || data.items || data.featured || data.recommend || [];
+      if (!items.length) throw new Error('没有条目');
+      return { detail: `${items.length} 条，首条《${items[0].title}》`, value: items[0] };
+    }, true);
+
+    await run('分类', async () => {
+      const items = provider.categories ? await provider.categories() : [];
+      if (!items.length) throw new Error('分类为空');
+      return { detail: `${items.length} 个：${items.slice(0, 4).map((item) => item.name).join('/')}` };
+    }, false);
+
+    await run('详情', async () => {
+      const detail = await provider.detail(home.id);
+      const episodes = (detail && detail.episodes) || [];
+      if (!episodes.length) throw new Error('没有分集');
+      return { detail: `${episodes.length} 集` };
+    }, false);
+
+    const info = await run('播放地址', async () => {
+      const result = await provider.episode(home.id, 1);
+      if (!result || !result.url) throw new Error('源站没给地址');
+      return { detail: result.url.slice(0, 96), value: result };
+    }, true);
+
+    const headers = { 'User-Agent': info.userAgent || DIAG_UA, Accept: '*/*' };
+    if (info.referer) headers.Referer = info.referer;
+    if (info.cookie) headers.Cookie = info.cookie;
+
+    const fetchText = async (url) => {
+      const response = await request(url, { headers, maxBytes: MEDIA_MAX, timeout: 20000 });
+      if (response.status !== 200) throw new Error(`源站返回 ${response.status}`);
+      return response.text();
+    };
+
+    let baseUrl = info.url;
+    let playlist = '';
+    await run('清单', async () => {
+      playlist = await fetchText(info.url);
+      if (!playlist.startsWith('#EXTM3U')) throw new Error('不是 m3u8');
+      return { detail: `${playlist.split('\n').length} 行` };
+    }, true);
+
+    // master → 变体清单，最多再下钻两层（剧果是三层结构）
+    for (let round = 0; round < 2 && /#EXT-X-STREAM-INF/.test(playlist); round += 1) {
+      const uri = firstUriOf(playlist);
+      if (!uri) break;
+      const next = new URL(uri, baseUrl).toString();
+      const text = await run(round === 0 ? '子清单' : '子清单(2)', async () => {
+        const body = await fetchText(next);
+        if (!body.startsWith('#EXTM3U')) throw new Error('不是 m3u8');
+        return { detail: `${body.split('\n').length} 行`, value: body };
+      }, false);
+      if (!text) break;
+      baseUrl = next;
+      playlist = text;
+    }
+
+    const keyLine = playlist.split('\n').find((line) => line.startsWith('#EXT-X-KEY') && !/METHOD=NONE/.test(line));
+    const keyUri = keyLine && /URI="([^"]+)"/.exec(keyLine);
+    if (keyUri) {
+      await run('解密密钥', async () => {
+        const response = await request(new URL(keyUri[1], baseUrl).toString(), { headers, maxBytes: 8192, timeout: 20000 });
+        if (response.status !== 200) throw new Error(`源站返回 ${response.status}`);
+        if (response.body.length !== 16) throw new Error(`返回 ${response.body.length} 字节，应为 16`);
+        return { detail: '16 字节，AES-128 正常' };
+      }, false);
+    }
+
+    const segment = firstUriOf(playlist);
+    if (segment) {
+      await run('分片', async () => {
+        const response = await request(new URL(segment, baseUrl).toString(), { headers, maxBytes: MEDIA_MAX, timeout: 25000 });
+        if (response.status !== 200) throw new Error(`源站返回 ${response.status}`);
+        return { detail: `${(response.body.length / 1024).toFixed(0)}KB` };
+      }, false);
+    }
+    return steps;
+  }
+
+  app.get('/api/sources/diag', auth, async (req, res) => {
+    if (!needUser(req, res)) return;
+    const site = String(req.query.site || '');
+    const targets = site ? [byId.get(site)].filter(Boolean) : providers;
+    if (!targets.length) return res.status(404).json({ error: '未知的源' });
+    const results = [];
+    for (const provider of targets) {
+      const started = Date.now();
+      let steps = [];
+      try {
+        steps = await diagnose(provider, site ? 60000 : 25000);
+      } catch (error) {
+        steps = error.steps || steps;
+      }
+      results.push({
+        id: provider.id,
+        name: provider.name,
+        ms: Date.now() - started,
+        ok: steps.length > 0 && steps.every((item) => item.ok),
+        steps,
+      });
+    }
+    res.json({ results });
   });
 
   const providerOf = (req, res) => {

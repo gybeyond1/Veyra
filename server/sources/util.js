@@ -255,11 +255,21 @@ function rewritePlaylist(text, baseUrl, wrap) {
     });
 }
 
+/**
+ * 回给播放器的绝对地址前缀。
+ * 不能按 host 猜协议：很多人用 http://公网IP:8080 直连，猜成 https 后播放器会去敲
+ * 一个根本没开 TLS 的端口，表现就是清单加载不出来、黑屏。优先取反代透传的
+ * x-forwarded-proto，其次 express 解析出的 req.protocol。
+ */
 function baseUrlOf(req) {
   const host = String(req.headers.host || '');
   const only = host.split(':')[0].toLowerCase();
   const isPrivate = /^(localhost|127\.0\.0\.1|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(only);
-  return `${isPrivate ? 'http' : 'https'}://${host}`;
+  const forwarded = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+  const protocol = forwarded === 'https' || forwarded === 'http'
+    ? forwarded
+    : (req.protocol === 'https' ? 'https' : (isPrivate ? 'http' : (req.protocol || 'http')));
+  return `${protocol}://${host}`;
 }
 
 module.exports = {
