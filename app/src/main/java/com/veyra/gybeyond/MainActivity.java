@@ -216,6 +216,13 @@ public final class MainActivity extends Activity {
             if (isDestroyed() || isFinishing()) return;
             String log = readCrashLast();
             if (log == null) return;
+            /*
+             * 先删快照再弹窗，不能等 dismiss 回调。
+             * 这弹窗之前是 setCancelable(false)、按钮又拿不到遥控器焦点，
+             * 电视上根本关不掉 → dismiss 不触发 → 快照永远留在盘里 → 每次启动都弹，App 没法用。
+             * 删在这里，哪怕用户这次仍然关不掉、直接强杀进程，下次启动也是干净的。
+             */
+            try { new java.io.File(getFilesDir(), "crash_last.log").delete(); } catch (Exception ignored) { }
             showCrashDialog(log);
         }, 700);
     }
@@ -229,12 +236,20 @@ public final class MainActivity extends Activity {
             tv.setTextSize(12f);
             tv.setTextColor(0xFFDFE3EA);
             tv.setPadding(28, 22, 28, 22);
+            // 文本本身不抢焦点，否则遥控器上下键会在正文里打转，永远到不了按钮
+            tv.setFocusable(false);
+            tv.setFocusableInTouchMode(false);
             android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+            scroll.setFocusable(false);
             scroll.addView(tv, new FrameLayout.LayoutParams(-1, -2));
+            // 日志动辄几十行，限高，别把下面两个按钮顶到屏幕外面
+            int maxHeight = (int) (getResources().getDisplayMetrics().heightPixels * 0.45f);
+            FrameLayout holder = new FrameLayout(this);
+            holder.addView(scroll, new FrameLayout.LayoutParams(-1, maxHeight));
 
             android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(this)
                     .setTitle("检测到上次崩溃")
-                    .setView(scroll)
+                    .setView(holder)
                     .setPositiveButton("复制日志", (d, w) -> {
                         try {
                             ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
@@ -243,13 +258,37 @@ public final class MainActivity extends Activity {
                         } catch (Exception ignored) { }
                     })
                     .setNegativeButton("关闭", null)
-                    .setCancelable(false)
+                    // 电视上必须能按返回键退出：原来是 false，遥控器又没焦点，等于锁死
+                    .setCancelable(true)
                     .create();
+            // 遥控器：返回 / 确定 / 菜单 任意一个都当"关闭"
+            dialog.setOnKeyListener((d, keyCode, event) -> {
+                if (event.getAction() != android.view.KeyEvent.ACTION_DOWN) return false;
+                switch (keyCode) {
+                    case android.view.KeyEvent.KEYCODE_BACK:
+                    case android.view.KeyEvent.KEYCODE_DPAD_CENTER:
+                    case android.view.KeyEvent.KEYCODE_ENTER:
+                    case android.view.KeyEvent.KEYCODE_NUMPAD_ENTER:
+                    case android.view.KeyEvent.KEYCODE_MENU:
+                    case android.view.KeyEvent.KEYCODE_ESCAPE:
+                        d.dismiss();
+                        return true;
+                    default:
+                        return false;
+                }
+            });
             // 无论复制还是关闭，dismiss 后清掉快照，避免每次启动重复弹
             dialog.setOnDismissListener(d -> {
                 try { new java.io.File(getFilesDir(), "crash_last.log").delete(); } catch (Exception ignored) { }
             });
             dialog.show();
+            // 焦点直接压在「关闭」上，按遥控器确定键就能关
+            android.widget.Button close = dialog.getButton(android.content.DialogInterface.BUTTON_NEGATIVE);
+            if (close != null) {
+                close.setFocusable(true);
+                close.setFocusableInTouchMode(true);
+                close.requestFocus();
+            }
         } catch (Exception e) {
             android.util.Log.e(TAG, "崩溃弹窗失败", e);
         }
