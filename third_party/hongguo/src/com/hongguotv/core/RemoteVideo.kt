@@ -96,10 +96,14 @@ class RemoteVideo(val info: StreamInfo) : Closeable {
                          */
                         val declared = body.contentLength()
                         val source = body.source()
+                        // okio 各版本 source.skip() 的返回值不一样（Boolean / Long 都出现过），
+                        // 这里自己读一块丢一块，不依赖它的签名
+                        val discard = ByteArray(64 * 1024)
                         var skipped = 0L
                         while (skipped < start) {
-                            val step = source.skip(start - skipped)
-                            if (step <= 0L) break
+                            val take = minOf(discard.size.toLong(), start - skipped).toInt()
+                            val step = source.read(discard, 0, take)
+                            if (step < 0) break
                             skipped += step
                         }
                         val want = (end - start + 1).toInt()
