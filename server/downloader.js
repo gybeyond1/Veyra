@@ -567,11 +567,33 @@ function buildPlan(infos) {
   if (aDowngrade) notes.push(`多数派音频 ${aSample.audioCodec}/${aSample.aProfile || '?'} 不统一，全部转 aac_low`);
   return { timescale, video, audio, steps, notes, videoGroups: vGroups.length, audioGroups: aGroups.length };
 }
-function runFFmpeg(args, progressCb) {
+/**
+ * 跑一段 ffmpeg。
+ * progressTotal > 0 时开 -progress，按输出时间轴回报 0~1 的进度 ——
+ * 整轨重编码要跑好几分钟，没有进度条的话前端看起来就是卡死。
+ */
+function runFFmpeg(args, progressCb, progressTotal) {
   return new Promise((resolve, reject) => {
-    const proc = spawn('ffmpeg', ['-hide_banner', '-nostdin', '-nostats', '-loglevel', 'error', '-y', ...args]);
+    const head = ['-hide_banner', '-nostdin', '-nostats', '-loglevel', 'error'];
+    if (progressTotal > 0) head.push('-progress', 'pipe:1');
+    const proc = spawn('ffmpeg', [...head, '-y', ...args]);
     let stderr = '';
-    proc.stderr.on('data', d => { stderr += d.toString(); if (stderr.length > 4096) stderr = stderr.slice(-4096); });
+    proc.stderr.on('data', d => { stderr += d.toString(); if (stderr.length > 8192) stderr = stderr.slice(-8192); });
+    if (progressTotal > 0 && progressCb) {
+      let buf = '';
+      let last = -1;
+      proc.stdout.on('data', d => {
+        buf += d.toString();
+        const lines = buf.split('\n');
+        buf = lines.pop() || '';
+        for (const line of lines) {
+          const m = line.match(/^out_time_us=(\d+)/);
+          if (!m) continue;
+          const pct = Math.max(0, Math.min(99, Math.round((Number(m[1]) / 1e6) / progressTotal * 100)));
+          if (pct !== last) { last = pct; progressCb(pct / 100); }
+        }
+      });
+    }
     proc.on('close', code => {
       if (code === 0) { if (progressCb) progressCb(1); resolve(); }
       else reject(new Error('FFmpeg 处理失败: ' + stderr.slice(0, 500)));
@@ -736,8 +758,7 @@ async function mergeEpisodes(episodeFiles, outputPath, workDir, report) {
   if (wholeAudio) {
     console.log(`[merge] 音频整轨重编码：消除 ${infos.length - 1} 处集边界接缝，`
       + `视频保持 copy（音频 ${(totalDur / 60).toFixed(1)} 分钟）`);
-    report(66, `音频整轨重编码（${(totalDur / 60).toFixed(0)} 分钟音频，消除拼接点）`);
-    concatArgs.push('-map', '0:a:0?', '-c:v', 'copy',
+    report(66, `音频整轨重编码（${(totalDur / 60).toFixed(0)} 分钟音频，消除拼接点）`);    concatArgs.push('-map', '0:a:0?', '-c:v', 'copy',
       '-c:a', 'aac', '-profile:a', 'aac_low', '-b:a', '128k',
       '-ar', String(aT.sampleRate), '-ac', String(aT.channels),
       '-af', `aresample=${aT.sampleRate}:async=1:first_pts=0`,
@@ -752,7 +773,11 @@ async function mergeEpisodes(episodeFiles, outputPath, workDir, report) {
   if (vT.codec === 'h264') concatArgs.push('-tag:v', 'avc3');
   else if (vT.codec === 'hevc') concatArgs.push('-tag:v', 'hev1');
   concatArgs.push('-y', outputPath);
-  await runFFmpeg(concatArgs);
+  await runFFmpeg(concatArgs,
+    wholeAudio
+      ? (f) => report(66 + Math.round(f * 29), f >= 1 ? '音频重编码完成，收尾' : `音频整轨重编码 ${Math.round(f * 100)}%`)
+      : null,
+    wholeAudio ? totalDur : 0);
 
   // ---- 产物体检：音频解不干净就整轨重编码再合一次，绝不再静默出片 ----
   const expectAudio = aT.present;
@@ -1280,7 +1305,9 @@ async function mergeStage(task, dir, workDir) {
   const outputPath = safeJoin(dir, outName);
   task.status = 'merging';
   task.progress.phase = 'merging';
-  task.progress.percent = 98;
+  /* 合并从 0 开始算：以前预置 98，紧接着 mergeEpisodes 又 report(0) 把进度条打回 0，
+     前端看起来就是"进度条先满再倒退"。 */
+  task.progress.percent = 0;
   task.progress.detail = `开始合并（成功 ${okEpisodes.length} 集${(task.failedEpisodes || []).length ? `，跳过失败 ${task.failedEpisodes.length} 集` : ''}）`;
   touch(task);
   const files = task.episodes.map((_, i) => safeJoin(dir, epName(i + 1)))
@@ -1335,7 +1362,7 @@ function mergeTask(id, owner, isAdmin) {
   t.error = '';
   t.status = 'merging';
   t.progress.phase = 'merging';
-  t.progress.percent = 98;
+  t.progress.percent = 0;
   t.progress.detail = '开始合并';
   touch(t);
   mergeStage(t, dir, workDir).catch(err => {
