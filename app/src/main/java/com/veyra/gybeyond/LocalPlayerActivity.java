@@ -221,23 +221,9 @@ public final class LocalPlayerActivity extends Activity {
         titleView = label("", 15f, Color.WHITE);
         titleView.setSingleLine(true);
         titleView.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        // 右边给「选集」留位，免得长剧名压到按钮下面
-        titleView.setPadding(dp(56), dp(12), dp(64), 0);
+        titleView.setPadding(dp(56), dp(12), dp(8), 0);
         topBar.addView(titleView, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER_VERTICAL));
-
-        /* 顶栏常驻「选集」：底栏那个只在控制栏可见时出现（3 秒自动隐藏），
-         * 未合并的分集播放想换集，用户第一反应是看顶栏。没有分集文件时不显示。 */
-        TextView topEpisodes = label("选集", 13f, Color.WHITE);
-        topEpisodes.setGravity(Gravity.CENTER);
-        topEpisodes.setPadding(dp(12), dp(8), dp(8), dp(8));
-        topEpisodes.setOnClickListener(v -> toggleEpisodes());
-        topEpisodes.setVisibility(episodes.length() > 0 ? View.VISIBLE : View.GONE);
-        FrameLayout.LayoutParams topEpLp = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.END | Gravity.CENTER_VERTICAL);
-        topEpLp.rightMargin = dp(10);
-        topBar.addView(topEpisodes, topEpLp);
 
         root.addView(topBar, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP));
@@ -298,9 +284,13 @@ public final class LocalPlayerActivity extends Activity {
 
         episodesBtn = label("选集", 13f, Color.WHITE);
         episodesBtn.setGravity(Gravity.CENTER);
-        episodesBtn.setPadding(dp(10), 0, dp(10), 0);
+        episodesBtn.setSingleLine(true);
+        episodesBtn.setPadding(dp(4), 0, dp(4), 0);
         episodesBtn.setOnClickListener(v -> toggleEpisodes());
-        bar.addView(episodesBtn, barLp());
+        // 比图标按钮宽一点：38dp 放两个 13sp 汉字会折行成竖排「选 / 集」
+        bar.addView(episodesBtn, new LinearLayout.LayoutParams(dp(48), dp(38)));
+        // 没有分集文件（合并产物且分集已清理）时不必占位
+        episodesBtn.setVisibility(episodes.length() > 0 ? View.VISIBLE : View.GONE);
 
         zone.addView(bar, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
