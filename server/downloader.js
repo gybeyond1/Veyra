@@ -37,6 +37,9 @@ let CONCURRENCY = Math.max(1, parseInt(process.env.DOWNLOAD_CONCURRENCY || '2', 
 /** 合并后是否保留分集文件（桌面端在设置里可关，后端保持原来的「合并即清理」） */
 let KEEP_EPISODES = false;
 const RETRIES = 2;
+/** 合并前后是否做音频解码体检（坏音轨宁可报错也不静默出片）。VEYRA_AUDIT_AUDIO=0 可关。 */
+const AUDIT_AUDIO = process.env.VEYRA_AUDIT_AUDIO !== '0';
+const AUDIT_TIMEOUT_MS = 5 * 60 * 1000;
 const TASKS_FILE = path.join(DATA_DIR, 'downloads.json');
 const REDOWNLOAD_TIMEOUT_MS = 30 * 60 * 1000; // 播放地址默认时效：超时后任务判失败（APK 重新提交）
 
@@ -208,6 +211,7 @@ function probeFile(file) {
     videoTB: video.time_base || '',
     audioCodec: audio ? audio.codec_name : null,
     aProfile: audio ? audio.profile || '' : '',
+    aTag: audio ? (audio.codec_tag_string || '') : '',
     sampleRate: audio ? Number(audio.sample_rate) : 0,
     channels: audio ? Number(audio.channels) : 0,
     layout: audio ? audio.channel_layout || '' : '',
@@ -221,7 +225,41 @@ function probeFile(file) {
   };
 }
 function videoKey(info) { return `${info.videoCodec}|${info.width}x${info.height}|${info.vProfile}|${info.pixFmt}|${info.vTag}`; }
-function audioKey(info) { return `${info.audioCodec}|${info.aProfile}|${info.sampleRate}|${info.layout}`; }
+// 声道数必须进 key：channel_layout 有些片源是空的，5.1 和 stereo 会被判成"同一类"直接 copy，
+// 播出来就是爆音/串音。codec_tag 也一起比，避免 ADTS→MP4 这类封装差异混过去。
+function audioKey(info) { return `${info.audioCodec}|${info.aProfile}|${info.sampleRate}|${info.channels}|${info.layout}|${info.aTag}`; }
+
+/**
+ * 音频全解码体检：只解音轨、输出到 null，统计真正的解码错误。
+ * ffmpeg -v error 时 stderr 只剩错误行，正常文件是空的。
+ */
+function decodeErrors(file, selector) {
+  const out = spawnSync('ffmpeg', ['-v', 'error', '-nostdin', '-i', file, '-map', selector, '-f', 'null', '-'],
+    { encoding: 'utf8', timeout: AUDIT_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 });
+  if (out.error) return { errors: 1, sample: String(out.error.message || out.error).slice(0, 200) };
+  const lines = String(out.stderr || '').split('\n').map(s => s.trim()).filter(Boolean);
+  // 只认真正的解码/封装错误；时间戳不单调这类"提示"不算（很多正常片源也有）
+  const real = lines.filter(l => /error|invalid|cannot|corrupt|truncat|fail|missing|decode|illegal/i.test(l)
+    && !/non monotonically increasing|Application provided invalid/i.test(l));
+  return { errors: real.length, sample: real.slice(0, 2).join(' | ').slice(0, 300) };
+}
+
+/** 合并产物体检：参数是否落到目标值 + 音频能不能完整解码。 */
+function auditOutput(file, targetSR, targetCh, expectAudio) {
+  let info = null;
+  try { info = probeFile(file); } catch (e) { return { audioErrors: 1, sample: '产物无法解析: ' + e.message, problems: [], text: '' }; }
+  const problems = [];
+  if (expectAudio && !info.audioCodec) problems.push('产物里没有音轨');
+  if (expectAudio && info.audioCodec) {
+    if (targetSR && info.sampleRate && Number(info.sampleRate) !== Number(targetSR)) problems.push(`采样率 ${info.sampleRate}≠${targetSR}`);
+    if (targetCh && info.channels && Number(info.channels) !== Number(targetCh)) problems.push(`声道 ${info.channels}≠${targetCh}`);
+  }
+  const health = expectAudio ? decodeErrors(file, '0:a:0?') : { errors: 0, sample: '' };
+  const audioErrors = health.errors + problems.filter(p => p === '产物里没有音轨').length;
+  const text = [info.videoCodec ? info.videoCodec.toUpperCase() : '视频?',
+    info.audioCodec ? `${info.audioCodec.toUpperCase()} ${info.sampleRate || '?'}Hz ${info.channels || '?'}ch` : '无音轨'].join(' + ');
+  return { audioErrors, sample: health.sample, problems, info, text };
+}
 function majorityKey(infos, key) {
   const counts = new Map();
   for (const info of infos) { const k = key(info); counts.set(k, (counts.get(k) || 0) + 1); }
@@ -278,12 +316,26 @@ function runFFmpeg(args, progressCb) {
 /** 合并分集 -> 单文件（对照 juku-backend media_merge.go）。workDir 为 .merge-work 断点续传目录，全部成功后才清理。 */
 async function mergeEpisodes(episodeFiles, outputPath, workDir, report) {
   const infos = [];
+  const corrupt = [];
   for (let i = 0; i < episodeFiles.length; i++) {
     report(Math.round(i * 5 / episodeFiles.length), `检测分集编码 ${i + 1}/${episodeFiles.length}`);
     try { infos.push(probeFile(episodeFiles[i])); }
     catch (e) { throw new Error(`第 ${i + 1} 集编码检测失败: ${e.message}`); }
+    // 逐集听一遍音轨：分片下载残缺会留下"能封装但解不出来"的坏帧，
+    // 这种集直接 -c:a copy 过去就是满耳朵噪音，必须当集就抓出来。
+    if (AUDIT_AUDIO && infos[i].audioCodec) {
+      const health = decodeErrors(episodeFiles[i], '0:a:0?');
+      if (health.errors > 0) {
+        infos[i].audioErrors = health.errors;
+        corrupt.push(`第${i + 1}集(${health.errors}处)`);
+        console.warn(`[merge] 第 ${i + 1} 集音频解码异常 ${health.errors} 处：${health.sample}`);
+      }
+    }
   }
   const plan = buildPlan(infos);
+  // 音轨本身就有坏帧的集，强制重编码一遍再过一遍解码器（多数坏帧会被 AAC 解码器容错掉，
+  // 剩下的交给产物校验兜底），至少不会原样 copy 进成品。
+  for (let i = 0; i < infos.length; i++) if (infos[i].audioErrors) plan.steps[i].audio = true;
   const prepared = new Array(episodeFiles.length);
   const majority = infos.reduce((a, b) => (videoKey(b) === plan.video ? b : a));
   const targetW = majority.width, targetH = majority.height;
@@ -356,7 +408,32 @@ async function mergeEpisodes(episodeFiles, outputPath, workDir, report) {
   else if (majority.videoCodec === 'hevc') concatArgs.push('-tag:v', 'hev1');
   concatArgs.push('-y', outputPath);
   await runFFmpeg(concatArgs);
+
+  // ---- 产物体检：音频解不干净就整轨重编码再合一次，绝不再静默出片 ----
+  const expectAudio = infos.some(i => i.audioCodec);
+  report(96, '校验合并产物音轨');
+  let audit = auditOutput(outputPath, targetSR, targetCh, expectAudio);
+  if (audit.audioErrors > 0 && expectAudio) {
+    console.warn(`[merge] 产物音频校验未通过（${audit.audioErrors} 处）：${audit.sample}`);
+    report(97, `音轨校验未通过（${audit.audioErrors} 处），整轨重编码后再合一次`);
+    const retryArgs = ['-copyts', '-protocol_whitelist', 'file,pipe', '-f', 'concat', '-safe', '0', '-i', listFile,
+      '-map', '0:v:0', '-map', '0:a:0?', '-sn', '-dn', '-c:v', 'copy',
+      '-c:a', 'aac', '-profile:a', 'aac_low', '-b:a', '192k', '-ar', String(targetSR), '-ac', String(targetCh),
+      '-video_track_timescale', String(plan.timescale), '-movflags', '+faststart'];
+    if (majority.videoCodec === 'h264') retryArgs.push('-tag:v', 'avc3');
+    else if (majority.videoCodec === 'hevc') retryArgs.push('-tag:v', 'hev1');
+    retryArgs.push('-y', outputPath);
+    await runFFmpeg(retryArgs);
+    audit = auditOutput(outputPath, targetSR, targetCh, expectAudio);
+  }
+  if (audit.audioErrors > 0) {
+    throw new Error(`合并产物音频有 ${audit.audioErrors} 处解码错误`
+      + (corrupt.length ? `，疑似这些集下载不完整：${corrupt.slice(0, 5).join('、')}${corrupt.length > 5 ? ` 等 ${corrupt.length} 集` : ''}` : '')
+      + '，请删掉对应集重新下载后再合并');
+  }
+  if (audit.problems.length) console.warn(`[merge] 产物音频参数偏差（不影响播放）：${audit.problems.join('，')}`);
   report(100, '合并完成');
+  return { text: audit.text, corrupt: corrupt.length };
 }
 
 // ---- 任务执行 ----
@@ -852,7 +929,7 @@ async function mergeStage(task, dir, workDir) {
   touch(task);
   const files = task.episodes.map((_, i) => safeJoin(dir, epName(i + 1)))
     .filter((f, i) => !task.episodes[i].failed);
-  await mergeEpisodes(files, outputPath, workDir, (percent, detail) => {
+  const summary = await mergeEpisodes(files, outputPath, workDir, (percent, detail) => {
     task.progress.percent = percent;
     task.progress.detail = detail;
     touch(task);
@@ -875,7 +952,7 @@ async function mergeStage(task, dir, workDir) {
   } catch { /* ignore */ }
   task.status = 'done';
   task.output = outputPath;
-  task.progress = { phase: 'done', episode: okEpisodes.length, total: task.episodes.length, percent: 100, detail: '完成' };
+  task.progress = { phase: 'done', episode: okEpisodes.length, total: task.episodes.length, percent: 100, detail: summary && summary.text ? `完成（${summary.text}，音频校验通过）` : '完成' };
   touch(task);
   flushStore(true);
 }
