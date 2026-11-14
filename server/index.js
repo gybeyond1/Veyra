@@ -1032,11 +1032,16 @@ app.get('/api/download/tasks/:id/episodes', requireDownloadAuth, (req, res) => {
     const dir = downloader.taskDirOf(t);
     const fs2 = require('fs');
     const eps = [];
-    for (let i = 0; i < t.episodes.length; i++) {
-      const f = downloader.safeJoin(dir, downloader.epName(i + 1));
+    /* 集号必须用任务里的真实集号：只下 16/19/21 时，文件名是「第16集.mp4」…
+     * 以前按数组下标写 i+1，返回的 1/2/3 在目录里根本不存在，手机端拿去拼地址就 404。 */
+    for (const ep of t.episodes) {
+      const no = Number(ep && ep.index) || 0;
+      if (no <= 0) continue;
+      const name = downloader.epName(no);
+      const f = downloader.safeJoin(dir, name);
       let size = 0, exists = false;
       try { exists = fs2.existsSync(f); if (exists) size = fs2.statSync(f).size; } catch { /* ignore */ }
-      eps.push({ index: i + 1, name: downloader.epName(i + 1), exists, size });
+      eps.push({ index: no, name, exists, size });
     }
     res.json({ taskId: t.id, title: t.title, episodes: eps });
   } catch (e) { res.status(400).json({ error: e.message }); }
@@ -1050,13 +1055,22 @@ app.get('/api/download/files/:id/:index', requireDownloadAuth, (req, res) => {
     if (idx === 0) {
       // index=0：拉取 NAS 合并产物（<title>_全N集.mp4，任务目录内唯一非分集 mp4）
       const dir = downloader.taskDirOf(t);
-      const merged = require('fs').readdirSync(dir).find(k => k.endsWith('.mp4') && !/^第\d+集\.mp4$/.test(k));
+      /* 分集可能被系统撞名成「第16集_1793285687971.mp4」，也算分集，
+       * 否则会被当成合并产物发出去，播到一半就断。 */
+      const merged = require('fs').readdirSync(dir).find(k => k.endsWith('.mp4') && !/^第\d+集(?:_\d+)?\.mp4$/.test(k));
       if (!merged) return res.status(404).json({ error: '合并产物不存在' });
       return res.sendFile(downloader.safeJoin(dir, merged));
     }
-    if (!(idx >= 1 && idx <= t.episodes.length)) return res.status(400).json({ error: '集数非法' });
-    const f = downloader.safeJoin(downloader.taskDirOf(t), downloader.epName(idx));
-    if (!require('fs').existsSync(f)) return res.status(404).json({ error: `第 ${idx} 集文件不存在` });
+    /* :index 是「真实集号」（文件 第16集.mp4 ↔ 16）。
+     * 旧客户端（≤0.28.36）传的是「第几个分集」，这里兜底映射一次，避免升级包没到位时全 404。 */
+    const nums = t.episodes.map(e => Number(e && e.index) || 0).filter(n => n > 0);
+    let epNo = idx;
+    if (!nums.includes(idx)) {
+      if (idx >= 1 && idx <= nums.length) epNo = nums[idx - 1];
+      else return res.status(400).json({ error: '集数非法' });
+    }
+    const f = downloader.safeJoin(downloader.taskDirOf(t), downloader.epName(epNo));
+    if (!require('fs').existsSync(f)) return res.status(404).json({ error: `第 ${epNo} 集文件不存在` });
     res.sendFile(f);
   } catch (e) { res.status(400).json({ error: e.message }); }
 });

@@ -1434,7 +1434,9 @@ function retryFailedEpisodes(id, owner, isAdmin) {
   t.failedEpisodes = [];
   t.error = '';
   for (const f of failed) {
-    const ep = t.episodes[f.index - 1];
+    /* f.index 是真实集号（可能是 16），不是数组下标 —— 以前写 index-1，
+     * 只下 16/19/21 那种任务会取到 undefined，点「重试失败集」等于什么都没做。 */
+    const ep = t.episodes.find(e => Number(e && e.index) === Number(f.index));
     if (ep) { ep._ok = false; ep.failed = false; ep.error = ''; }
   }
   t.status = 'queued';
@@ -1496,6 +1498,9 @@ function publicTask(t) {
     failedEpisodes: failedEpisodes.map(f => ({ index: f.index, error: f.error || '' })),
     createdAt: t.createdAt, updatedAt: t.updatedAt,
     episodeCount: t.episodes.length, owner: t.owner,
+    /* 真实集号列表（只下 16/19/21 时就是 16,19,21）。
+     * 客户端拼 NAS 文件地址必须用它，别拿 episodeCount 从 1 数到 N。 */
+    episodes: t.episodes.map(e => Number(e && e.index) || 0).filter(n => n > 0),
     upload: t.upload || null,
     percent: p.percent || (t.status === 'done' ? 100 : 0),
     detail: p.detail || (t.status === 'done' ? '完成' : ''),

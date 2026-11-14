@@ -1505,14 +1505,43 @@ public final class MainActivity extends Activity {
                     throw new IllegalStateException("NAS 任务尚未完成（" + task.optString("status") + "）");
                 int count = task.optInt("episodeCount", 0);
                 String title = task.optString("title", "NAS 下载");
+                /* 分集地址必须按「真实集号」拼：任务只下 16/19/21 时，NAS 上文件叫
+                 * 「第16集.mp4」，以前按 1..count 拼 files/{id}/1、/2、/3，全部 404，
+                 * 用户看到的就是「服务器上找不到这个文件」。 */
                 // 地址必须走 endpoint()：baseUrl 末尾自带 "/"，手写 "/api" 会拼出 "//api"，后端 404。
                 JSONArray eps = new JSONArray();
-                for (int i = 1; i <= count; i++) {
-                    eps.put(new JSONObject().put("index", i)
-                            .put("url", endpoint(account.baseUrl(), "/api/download/files/" + nasId + "/" + i)));
+                // 新后端直接在任务里给真实集号；老后端再单独问 /episodes；都没有才退回 1..N
+                JSONArray known = task.optJSONArray("episodes");
+                if (known != null && known.length() > 0) {
+                    for (int i = 0; i < known.length(); i++) {
+                        int no = known.optInt(i, 0);
+                        if (no <= 0) continue;
+                        eps.put(new JSONObject().put("index", no)
+                                .put("url", endpoint(account.baseUrl(), "/api/download/files/" + nasId + "/" + no)));
+                    }
+                } else {
+                    try {
+                        JSONArray list = account.getJson("api/download/tasks/" + nasId + "/episodes").optJSONArray("episodes");
+                        if (list != null) {
+                            for (int i = 0; i < list.length(); i++) {
+                                JSONObject e = list.optJSONObject(i);
+                                if (e == null) continue;
+                                int no = e.optInt("index", 0);
+                                if (no <= 0) continue;
+                                eps.put(new JSONObject().put("index", no)
+                                        .put("url", endpoint(account.baseUrl(), "/api/download/files/" + nasId + "/" + no)));
+                            }
+                        }
+                    } catch (Exception ignore) { /* 老后端没有这个接口：退回 1..N */ }
+                }
+                if (eps.length() == 0) {
+                    for (int i = 1; i <= count; i++) {
+                        eps.put(new JSONObject().put("index", i)
+                                .put("url", endpoint(account.baseUrl(), "/api/download/files/" + nasId + "/" + i)));
+                    }
                 }
                 String mergedUrl = endpoint(account.baseUrl(), "/api/download/files/" + nasId + "/0");
-                String firstEpUrl = count > 0 ? endpoint(account.baseUrl(), "/api/download/files/" + nasId + "/1") : mergedUrl;
+                String firstEpUrl = eps.length() > 0 ? eps.optJSONObject(0).optString("url", mergedUrl) : mergedUrl;
                 // status=done 才是「已合并」，这时才有 files/{id}/0；ready 只是下载完，直接播第 1 集，
                 // 省掉一次注定 404 的请求（以前固定先探合并产物，未合并时白闪一下再回退）。
                 boolean hasMerged = "done".equals(task.optString("status"));
