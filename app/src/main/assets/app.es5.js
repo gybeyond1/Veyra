@@ -1336,7 +1336,7 @@ function backfillNasCovers(nasTasks) {
   }
 }
 function downloadListSignature(phone, nas) {
-  const red = (t) => [t.id, t.status, t.percent, t.doneCount, t.totalCount, t.nasTaskId, t.cover].map((v) => v == null ? "" : v).join("|");
+  const red = (t) => [t.id, t.status, t.percent, t.doneCount, t.totalCount, t.nasTaskId, t.cover, t.detail].map((v) => v == null ? "" : v).join("|");
   const remote = [...remoteJobs.values()].map((j) => [j.taskId, j.status, j.percent, j.serverName, j.error].map((v) => v == null ? "" : v).join("|")).join(";");
   return [...phone.map(red), ...nas.map(red), remote].join(",");
 }
@@ -1511,7 +1511,8 @@ function coverForTask(task) {
   return task.cover || loadTitleCovers().get(String(task.title || "")) || "";
 }
 function downloadTaskRow(task, kind) {
-  const running = task.status === "running";
+  const running = downloadTaskActive(task);
+  const merging = task.status === "merging";
   const statusText = downloadStatusText(task, kind);
   const remoteKind = kind === "desktop" || kind === "tv" || kind === "android";
   const deviceLabel = kind === "desktop" ? "\u7535\u8111" : kind === "tv" ? "\u7535\u89C6" : "\u624B\u673A";
@@ -1523,7 +1524,7 @@ function downloadTaskRow(task, kind) {
   const transferBtn = canTransfer ? `<button type="button" class="dl-cancel dl-transfer" data-dl-transfer="${esc(task.id)}">${remoteJob && remoteJob.status === "failed" ? "\u91CD\u4F20" : "\u4F20\u5230\u670D\u52A1\u5668"}</button>` : "";
   const transferCancel = remoteJob && (remoteJob.status === "running" || remoteJob.status === "queued") ? `<button type="button" class="dl-cancel" data-dl-transfer-cancel="${esc(remoteJob.id)}">\u53D6\u6D88\u4F20\u8F93</button>` : "";
   const output = task.output && (task.output.startsWith("content://") || task.output.startsWith("file://")) ? "\u5DF2\u4FDD\u5B58\u5230\u7CFB\u7EDF\u4E0B\u8F7D\u76EE\u5F55" : task.output || "";
-  const cancelBtn = running ? `<button type="button" class="dl-cancel" data-dl-cancel="${kind}" data-dl-id="${esc(task.id)}">\u53D6\u6D88</button>` : "";
+  const cancelBtn = running && !merging ? `<button type="button" class="dl-cancel" data-dl-cancel="${kind}" data-dl-id="${esc(task.id)}">\u53D6\u6D88</button>` : "";
   const retryBtn = !running && kind === "phone" && (task.status === "failed" || task.status === "canceled") && !(task.error || "").includes("\u5408\u5E76\u5931\u8D25") ? `<button type="button" class="dl-cancel dl-retry" data-dl-retry="phone" data-dl-id="${esc(task.id)}">\u91CD\u8BD5</button>` : "";
   const failedList = task.failedEpisodes || [];
   const srcNote = task.detail && task.detail.includes("\uFF08") ? (task.detail.match(/（([^）]*)）/) || [])[1] || "" : "";
@@ -1534,7 +1535,9 @@ function downloadTaskRow(task, kind) {
   const failedInfo = failedList.length > 0 ? `<span class="dl-error" data-dl-copy="${esc(task.id)}" data-dl-log="${esc("\u5931\u8D25\u96C6: " + failedList.map((f) => "\u7B2C" + f.index + "\u96C6(" + (f.error || "") + ")").join("\uFF1B"))}" title="\u70B9\u51FB\u590D\u5236\u5931\u8D25\u660E\u7EC6">\u5931\u8D25 ${failedList.length} \u96C6\uFF1A${esc(failedList.slice(0, 3).map((f) => "\u7B2C" + f.index + "\u96C6").join("\u3001"))}${failedList.length > 3 ? " \u7B49" : ""}</span>` : "";
   const errLog = task.error || task.debug || "";
   const errBlock = errLog ? `<span class="dl-error" data-dl-copy="${esc(task.id)}" data-dl-log="${esc(errLog.replace(/\n/g, "\\n"))}" title="\u70B9\u51FB\u590D\u5236\u5168\u90E8\u65E5\u5FD7">${task.error ? task.error.split("\n").slice(0, 4).map(esc).join("<br>") : '<span class="dl-log-link">\u590D\u5236\u5408\u5E76\u65E5\u5FD7</span>'}</span>` : "";
-  const detailHint = task.detail && (/片/.test(task.detail) || task.detail.includes("\u5408\u5E76\u4E2D")) ? ` \xB7 <span class="dl-detail-hint">${esc(task.detail)}</span>` : "";
+  const detailText = (task.detail || "").trim();
+  const detailHint = detailText && !merging && (running || /片/.test(detailText)) ? ` \xB7 <span class="dl-detail-hint">${esc(detailText)}</span>` : "";
+  const metaMid = merging ? detailText || "\u5408\u5E76\u4E2D" : task.doneCount === task.totalCount && !running ? "\u5DF2\u4E0B\u8F7D\u5168\u90E8\u96C6" : failedList.length ? `\u5931\u8D25 ${failedList.length} \u96C6` : "";
   const playAttr = kind === "nas" ? "data-dl-play-nas" : remoteKind ? "data-dl-play-device" : "data-dl-play";
   const playHint = kind === "nas" ? "\u64AD\u653E NAS \u6210\u54C1" : remoteKind ? `\u64AD\u653E${deviceLabel}\u4E0A\u7684\u6210\u54C1` : "\u672C\u5730\u64AD\u653E";
   const playTile = `<button type="button" class="download-cover" ${playAttr}="${esc(task.id)}" aria-label="${playHint}\u300A${esc(task.title || "\u672A\u77E5\u5267\u96C6")}\u300B">
@@ -1542,7 +1545,7 @@ function downloadTaskRow(task, kind) {
     <span class="download-cover-hint">${playHint}</span></button>`;
   return `<div class="download-card">${playTile}<div class="download-task">
     <div class="download-task-head"><strong>${esc(task.title || "\u672A\u77E5\u5267\u96C6")}</strong>${sourceBadge}<span class="dl-status ${running ? "is-running" : ""}">${statusText}</span></div>
-    <div class="download-task-meta">${task.doneCount}/${task.totalCount} \u96C6 \xB7 ${task.doneCount === task.totalCount && task.status !== "running" ? "\u5DF2\u4E0B\u8F7D\u5168\u90E8\u96C6" : failedList.length ? `\u5931\u8D25 ${failedList.length} \u96C6` : ""}${srcNote ? ` \xB7 <b class="dl-src-note">${esc(srcNote)}</b>` : ""}${detailHint}${remoteText ? ` \xB7 <span class="dl-remote-note ${remoteJob.status}">${esc(remoteText)}</span>` : ""}</div>
+    <div class="download-task-meta">${task.doneCount}/${task.totalCount} \u96C6${metaMid ? ` \xB7 ${esc(metaMid)}` : ""}${srcNote ? ` \xB7 <b class="dl-src-note">${esc(srcNote)}</b>` : ""}${detailHint}${remoteText ? ` \xB7 <span class="dl-remote-note ${remoteJob.status}">${esc(remoteText)}</span>` : ""}</div>
     <div class="download-track"><i style="width:${Math.max(0, Math.min(100, Number(task.percent) || 0))}%"></i></div>
     <div class="download-task-foot">${output ? `<span class="dl-output">${esc(output)}</span>` : ""}${failedInfo}${errBlock}${transferBtn}${transferCancel}${mergeBtn}${retryFailedBtn}${retryBtn}${cancelBtn}${deleteBtn}</div>
   </div></div>`;
@@ -1563,6 +1566,8 @@ function downloadStatusText(task, kind) {
     if (d.includes("\u62C9\u53D6")) return d.replace(/已从 NAS /, "\u4ECE NAS ");
     return "\u7B49\u5F85 NAS \u4E0B\u8F7D";
   }
+  if (task.status === "merging") return "\u5408\u5E76\u4E2D";
+  if (task.status === "queued") return "\u6392\u961F\u4E2D";
   if (task.status === "ready") return failedCount > 0 ? `\u5DF2\u4E0B\u8F7D \xB7 \u5931\u8D25${failedCount}\u96C6` : "\u5DF2\u4E0B\u8F7D \xB7 \u5F85\u5408\u5E76";
   if (task.status === "done") {
     if (kind === "nas") return "\u5DF2\u4E0B\u8F7D \xB7 \u5DF2\u5408\u5E76";

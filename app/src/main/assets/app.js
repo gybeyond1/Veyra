@@ -1199,7 +1199,9 @@ function backfillNasCovers(nasTasks) {
 
 // 仅当任务状态真正变化时才重建列表，避免滑动落位后无谓重绘（那一闪）。
 function downloadListSignature(phone, nas) {
-  const red = t => [t.id, t.status, t.percent, t.doneCount, t.totalCount, t.nasTaskId, t.cover].map(v => v == null ? '' : v).join('|');
+  // detail 也要进签名：合并阶段百分比会长时间停在同一位数，只有"第 63 集/第 64 集"这类文字在变，
+  // 不带上它就轮询不重绘，进度文字定在打开那一刻。
+  const red = t => [t.id, t.status, t.percent, t.doneCount, t.totalCount, t.nasTaskId, t.cover, t.detail].map(v => v == null ? '' : v).join('|');
   // 远程传输进度也算进签名：否则 2s 轮询时列表不重绘，传输百分比永远停在打开那一瞬
   const remote = [...remoteJobs.values()]
     .map(j => [j.taskId, j.status, j.percent, j.serverName, j.error].map(v => v == null ? '' : v).join('|'))
@@ -1367,7 +1369,10 @@ function coverForTask(task) {
 }
 
 function downloadTaskRow(task, kind) {
-  const running = task.status === 'running';
+  // NAS 任务的状态是 queued/downloading/merging，不是 'running'；
+  // 以前只认 'running'，NAS 合并中会被当成"已结束"，按钮和状态文案全错。
+  const running = downloadTaskActive(task);
+  const merging = task.status === 'merging';
   const statusText = downloadStatusText(task, kind);
   // 下载行来源：本机 / NAS / 同一账号下在线设备（电脑、电视、另一台手机）
   const remoteKind = kind === 'desktop' || kind === 'tv' || kind === 'android';
@@ -1389,7 +1394,8 @@ function downloadTaskRow(task, kind) {
     ? `<button type="button" class="dl-cancel" data-dl-transfer-cancel="${esc(remoteJob.id)}">取消传输</button>` : '';
   // 直写导出后 output 是 file:// 路径（不再走 MediaStore 的 content://），两者都按「已保存」展示
   const output = task.output && (task.output.startsWith('content://') || task.output.startsWith('file://')) ? '已保存到系统下载目录' : task.output || '';
-  const cancelBtn = running ? `<button type="button" class="dl-cancel" data-dl-cancel="${kind}" data-dl-id="${esc(task.id)}">取消</button>` : '';
+  // 合并中不给取消：后端删任务会把分集目录整个 rm，正在被 ffmpeg 读的文件会中途消失
+  const cancelBtn = running && !merging ? `<button type="button" class="dl-cancel" data-dl-cancel="${kind}" data-dl-id="${esc(task.id)}">取消</button>` : '';
   const retryBtn = !running && kind === 'phone' && (task.status === 'failed' || task.status === 'canceled') && !(task.error || '').includes('合并失败')
     ? `<button type="button" class="dl-cancel dl-retry" data-dl-retry="phone" data-dl-id="${esc(task.id)}">重试</button>` : '';
   const failedList = task.failedEpisodes || [];
@@ -1408,7 +1414,15 @@ function downloadTaskRow(task, kind) {
   const errLog = task.error || task.debug || '';
   const errBlock = errLog
     ? `<span class="dl-error" data-dl-copy="${esc(task.id)}" data-dl-log="${esc(errLog.replace(/\n/g, '\\n'))}" title="点击复制全部日志">${task.error ? task.error.split('\n').slice(0, 4).map(esc).join('<br>') : '<span class="dl-log-link">复制合并日志</span>'}</span>` : '';
-  const detailHint = task.detail && (/片/.test(task.detail) || task.detail.includes('合并中')) ? ` · <span class="dl-detail-hint">${esc(task.detail)}</span>` : '';
+  const detailText = (task.detail || '').trim();
+  // 进行中的任务把后端给的阶段文字原样透出来（"按多数派转码音轨 第 63 集"、"音频整轨重编码 42%"），
+  // 跟 WebUI 里看到的一致；合并阶段这段直接占 meta 行，不重复挂 hint。
+  const detailHint = detailText && !merging && (running || /片/.test(detailText))
+    ? ` · <span class="dl-detail-hint">${esc(detailText)}</span>` : '';
+  // meta 中段：合并中显示后端阶段；下载中留空（阶段文字由 detailHint 出），避免出现「·  ·」
+  const metaMid = merging
+    ? (detailText || '合并中')
+    : (task.doneCount === task.totalCount && !running ? '已下载全部集' : (failedList.length ? `失败 ${failedList.length} 集` : ''));
   const playAttr = kind === 'nas' ? 'data-dl-play-nas' : remoteKind ? 'data-dl-play-device' : 'data-dl-play';
   const playHint = kind === 'nas' ? '播放 NAS 成品' : remoteKind ? `播放${deviceLabel}上的成品` : '本地播放';
   const playTile = `<button type="button" class="download-cover" ${playAttr}="${esc(task.id)}" aria-label="${playHint}《${esc(task.title || '未知剧集')}》">
@@ -1416,7 +1430,7 @@ function downloadTaskRow(task, kind) {
     <span class="download-cover-hint">${playHint}</span></button>`;
   return `<div class="download-card">${playTile}<div class="download-task">
     <div class="download-task-head"><strong>${esc(task.title || '未知剧集')}</strong>${sourceBadge}<span class="dl-status ${running ? 'is-running' : ''}">${statusText}</span></div>
-    <div class="download-task-meta">${task.doneCount}/${task.totalCount} 集 · ${task.doneCount === task.totalCount && task.status !== 'running' ? '已下载全部集' : (failedList.length ? `失败 ${failedList.length} 集` : '')}${srcNote ? ` · <b class="dl-src-note">${esc(srcNote)}</b>` : ''}${detailHint}${remoteText ? ` · <span class="dl-remote-note ${remoteJob.status}">${esc(remoteText)}</span>` : ''}</div>
+    <div class="download-task-meta">${task.doneCount}/${task.totalCount} 集${metaMid ? ` · ${esc(metaMid)}` : ''}${srcNote ? ` · <b class="dl-src-note">${esc(srcNote)}</b>` : ''}${detailHint}${remoteText ? ` · <span class="dl-remote-note ${remoteJob.status}">${esc(remoteText)}</span>` : ''}</div>
     <div class="download-track"><i style="width:${Math.max(0, Math.min(100, Number(task.percent) || 0))}%"></i></div>
     <div class="download-task-foot">${output ? `<span class="dl-output">${esc(output)}</span>` : ''}${failedInfo}${errBlock}${transferBtn}${transferCancel}${mergeBtn}${retryFailedBtn}${retryBtn}${cancelBtn}${deleteBtn}</div>
   </div></div>`;
@@ -1440,6 +1454,9 @@ function downloadStatusText(task, kind) {
     if (d.includes('拉取')) return d.replace(/已从 NAS /, '从 NAS ');
     return '等待 NAS 下载';
   }
+  // NAS 端合并：状态码直接就是 merging，具体在做什么看 detail（逐集转码 / 音频整轨重编码 / 校验）
+  if (task.status === 'merging') return '合并中';
+  if (task.status === 'queued') return '排队中';
   if (task.status === 'ready') return failedCount > 0 ? `已下载 · 失败${failedCount}集` : '已下载 · 待合并';
   if (task.status === 'done') {
     if (kind === 'nas') return '已下载 · 已合并';
