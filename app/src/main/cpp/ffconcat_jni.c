@@ -225,14 +225,44 @@ static void scan_fill_extradata(AVFormatContext* in, int vIdx, int aIdx,
 typedef struct {
     int codec;        /* AVCodecID */
     int profile;      /* AVCodecParameters.profile：区分 AAC-LC(2)/AAC-HE(SBR,5) 等 */
+    int aot;          /* 归一后的 AAC 对象类型（FF_PROFILE_AAC_*）：帧长 1024/2048 的判据 */
     int sample_rate;  /* Hz */
     int channels;     /* 声道数 */
     int count;        /* 出现次数（多数派统计） */
 } AudioInfo;
 
+/* AAC 帧长混装判定（等价后端 downloader.js 的 aacAot + aacProfileKey）。
+ * AOT 2=LC(1024 样本/帧) / 5=SBR(HE,2048) / 29=PS(HEv2,2048)：同一轨里混装两种帧长，
+ * 容器 stts 只能声明一种，解码器按声明的粒度切样本 → 残帧 → 整帧噪声或直接丢弃
+ * （现象：局部没声音、快拖爆音、seek 乱码）。
+ * extradata 的 AudioSpecificConfig 首 5 bit 是一手证据；mpegts 源 extradata 常为空，
+ * 此时退回容器 profile 枚举。返回值统一到 FF_PROFILE_AAC_* 体系，便于直接比较。 */
+static int aac_norm_profile(AVCodecParameters* cp) {
+    if (!cp) return FF_PROFILE_AAC_LOW;
+    int aot = 0;
+    if (cp->extradata && cp->extradata_size >= 1) {
+        aot = (cp->extradata[0] >> 3) & 0x1F;
+        if (aot == 31 && cp->extradata_size >= 2)
+            aot = 32 + (((cp->extradata[0] & 0x07) << 3) | ((cp->extradata[1] >> 5) & 0x07));
+    }
+    if (aot == 1) return FF_PROFILE_AAC_MAIN;
+    if (aot == 2) return FF_PROFILE_AAC_LOW;
+    if (aot == 5) return FF_PROFILE_AAC_HE;
+    if (aot == 29) return FF_PROFILE_AAC_HE_V2;
+    /* extradata 缺失/无法识别 → 容器 profile 兜底；未知一律按 LC（绝大多数源） */
+    int pf = cp->profile;
+    if (pf == FF_PROFILE_AAC_HE || pf == FF_PROFILE_AAC_HE_V2 || pf == FF_PROFILE_AAC_MAIN) return pf;
+    return FF_PROFILE_AAC_LOW;
+}
+
+/* AOT 是否 2048 样本/帧（HE 系）。混装时全片统一到 LC(1024) 是唯一兼容解。 */
+static int aac_aot_is_long_frame(int aot) {
+    return aot == FF_PROFILE_AAC_HE || aot == FF_PROFILE_AAC_HE_V2;
+}
+
 /* 探测单个分集的音频参数；无音频轨时 codec=0（不计入多数派，与后端 filter(audioCodec) 一致） */
 static void probe_audio_params(const char* path, const char* key, AudioInfo* ai) {
-    ai->codec = 0; ai->profile = 0; ai->sample_rate = 0; ai->channels = 0;
+    ai->codec = 0; ai->profile = 0; ai->aot = 0; ai->sample_rate = 0; ai->channels = 0;
     AVFormatContext* in = NULL;
     AVDictionary* opts = NULL;
     if (key && *key) av_dict_set(&opts, "decryption_key", key, 0);
@@ -244,7 +274,8 @@ static void probe_audio_params(const char* path, const char* key, AudioInfo* ai)
         if (a >= 0 && in->streams[a]->codecpar) {
             AVCodecParameters* cp = in->streams[a]->codecpar;
             ai->codec = cp->codec_id;
-            ai->profile = cp->profile;
+            ai->aot = (cp->codec_id == AV_CODEC_ID_AAC) ? aac_norm_profile(cp) : 0;
+            ai->profile = ai->aot ? ai->aot : cp->profile;
             ai->sample_rate = cp->sample_rate;
             ai->channels = (cp->ch_layout.nb_channels > 0) ? cp->ch_layout.nb_channels : cp->channels;
         }
@@ -252,8 +283,10 @@ static void probe_audio_params(const char* path, const char* key, AudioInfo* ai)
     avformat_close_input(&in);
 }
 
-/* 计算多数派音频参数（等价后端 buildPlan：majorityKey(audioKey)；无音频轨的集不参与） */
-static void majority_audio(AudioInfo* infos, int n, AudioInfo* out) {
+/* 计算多数派音频参数（等价后端 buildPlan：majorityKey(audioKey)；无音频轨的集不参与）。
+ * mixed 输出：全季是否出现两种以上 AAC 帧长（LC 1024 / HE 2048 混装）——
+ * 混装必须整轨重建音轨，逐集 copy 只会把残帧原样搬进产物。 */
+static void majority_audio(AudioInfo* infos, int n, AudioInfo* out, int* mixed) {
     AudioInfo uniq[64];
     int uniqN = 0;
     for (int i = 0; i < n; i++) {
@@ -275,6 +308,15 @@ static void majority_audio(AudioInfo* infos, int n, AudioInfo* out) {
     int best = -1, bestCnt = 0;
     for (int j = 0; j < uniqN; j++) {
         if (uniq[j].count > bestCnt) { bestCnt = uniq[j].count; best = j; }
+    }
+    /* 帧长混装统计（只算 AAC 且有音频的集）：出现两类不同的「是否长帧」即混装 */
+    if (mixed) {
+        int seenShort = 0, seenLong = 0;
+        for (int i = 0; i < n; i++) {
+            if (infos[i].codec != AV_CODEC_ID_AAC || infos[i].sample_rate <= 0) continue;
+            if (aac_aot_is_long_frame(infos[i].aot)) seenLong = 1; else seenShort = 1;
+        }
+        *mixed = (seenShort && seenLong) ? 1 : 0;
     }
     if (best >= 0) {
         *out = uniq[best];
@@ -298,6 +340,139 @@ typedef struct {
     int width;        /* 多数派代表集的宽（缩放到该尺寸 + 黑边 pad） */
     int height;
 } VideoTarget;
+
+/* ---- 音频整轨重建（等价后端 0.28.32「音频整轨重编码」，仅用于 AAC 帧长混装的季）----
+ * 视频包仍走 -c copy（画质零损失）；音频包解码 → swr 统一到 LC/目标采样率/目标声道
+ * → 单个 AAC 编码器连续编码。编码输入帧的 PTS 由「累计样本数」重排，天然无缝无重叠：
+ * 集边界接缝与源里的时间戳重叠同时归零（后端实测每个接缝残留 1 帧 = 23ms priming）。
+ * 只在混装季启用；全季 AOT 一致的季保持纯 copy，零开销零风险。 */
+typedef struct {
+    int active;
+    AVCodecContext* enc;     /* 整季复用的 AAC 编码器 */
+    AVStream* st;            /* 输出音频流 */
+    int sample_rate;
+    int channels;
+    AVCodecContext* dec;     /* 解码器（首包惰性创建，全季复用） */
+    SwrContext* swr;
+    int in_sr, in_fmt, in_ch;
+    AVFrame* ifr;            /* 解码帧 */
+    AVFrame* ofr;            /* 编码输入帧 */
+    int64_t next_pts;        /* 已送编码器样本数：重排 PTS 的唯一依据 */
+    int64_t frames, bad;
+} AudioFix;
+
+/* 重采样器跟随实际解码帧参数重建（HE 解码输出 2×采样率、PS 输出单声道，跨集会变） */
+static int afix_swr(AudioFix* af, AVFrame* f) {
+    int ch = (f->ch_layout.nb_channels > 0) ? f->ch_layout.nb_channels : 1;
+    if (af->swr && af->in_sr == f->sample_rate && af->in_fmt == f->format && af->in_ch == ch) return 0;
+    if (af->swr) swr_free(&af->swr);
+    AVChannelLayout inCh = {0}, outCh = {0};
+    if (f->ch_layout.nb_channels > 0) {
+        if (av_channel_layout_copy(&inCh, &f->ch_layout) < 0) return AVERROR(EINVAL);
+    } else {
+        av_channel_layout_default(&inCh, ch);
+    }
+    av_channel_layout_default(&outCh, af->channels);
+    int rc = swr_alloc_set_opts2(&af->swr, &outCh, AV_SAMPLE_FMT_FLTP, af->sample_rate,
+                                 &inCh, (enum AVSampleFormat)f->format, f->sample_rate, 0, NULL);
+    av_channel_layout_uninit(&inCh);
+    av_channel_layout_uninit(&outCh);
+    if (rc < 0 || !af->swr || swr_init(af->swr) < 0) { if (af->swr) swr_free(&af->swr); return AVERROR(EINVAL); }
+    af->in_sr = f->sample_rate; af->in_fmt = f->format; af->in_ch = ch;
+    return 0;
+}
+
+/* 送一帧进编码器并写出所有已产出的包（pts 由 ofr->pts 带入，单位 1/sample_rate） */
+static int afix_encode(AudioFix* af, AVFormatContext* oc, long* written) {
+    int rc = avcodec_send_frame(af->enc, af->ofr);
+    if (rc < 0) return rc;
+    AVPacket* op = av_packet_alloc();
+    if (!op) return AVERROR(ENOMEM);
+    while (avcodec_receive_packet(af->enc, op) >= 0) {
+        op->stream_index = af->st->index;
+        op->pos = -1;
+        int wr = av_interleaved_write_frame(oc, op);
+        if (wr < 0) { av_packet_free(&op); return wr; }
+        if (written) (*written)++;
+        av_packet_unref(op);
+    }
+    av_packet_free(&op);
+    return 0;
+}
+
+/* 处理一个音频包：解码 → 重采样 → 编码 → 写出。坏包/坏帧只计数跳过，不中断整季。 */
+static int afix_packet(AudioFix* af, AVPacket* pkt, AVStream* ain, AVFormatContext* oc,
+                       char* logBuf, long* written) {
+    if (!af->dec) {
+        const AVCodec* dec = avcodec_find_decoder(ain->codecpar->codec_id);
+        if (!dec) { logErrBoth(logBuf, "异常: 找不到音频解码器 codec=%d\n", ain->codecpar->codec_id); return AVERROR(ENOSYS); }
+        af->dec = avcodec_alloc_context3(dec);
+        if (!af->dec) { logErrBoth(logBuf, "异常: 音频解码器上下文分配失败\n"); return AVERROR(ENOMEM); }
+        if (avcodec_parameters_to_context(af->dec, ain->codecpar) < 0) {
+            logErrBoth(logBuf, "异常: 音频解码参数复制失败\n"); return AVERROR(EINVAL);
+        }
+        af->dec->pkt_timebase = ain->time_base;
+        if (avcodec_open2(af->dec, dec, NULL) < 0) { logErrBoth(logBuf, "异常: 音频解码器打开失败\n"); return AVERROR(EINVAL); }
+    }
+    int rc = avcodec_send_packet(af->dec, pkt);
+    if (rc == AVERROR(EAGAIN)) {
+        /* 解码器还有帧没取完：先抽干再重送，直接丢包会在集边界留下空洞 */
+        while (avcodec_receive_frame(af->dec, af->ifr) >= 0) av_frame_unref(af->ifr);
+        rc = avcodec_send_packet(af->dec, pkt);
+    }
+    if (rc < 0) { af->bad++; return 0; }
+    while ((rc = avcodec_receive_frame(af->dec, af->ifr)) >= 0) {
+        if (afix_swr(af, af->ifr) < 0) { af->bad++; av_frame_unref(af->ifr); continue; }
+        int outMax = swr_get_out_samples(af->swr, af->ifr->nb_samples);
+        if (outMax <= 0) { av_frame_unref(af->ifr); continue; }
+        av_frame_unref(af->ofr);
+        af->ofr->format = AV_SAMPLE_FMT_FLTP;
+        af->ofr->sample_rate = af->sample_rate;
+        av_channel_layout_default(&af->ofr->ch_layout, af->channels);
+        af->ofr->nb_samples = outMax;
+        if (av_frame_get_buffer(af->ofr, 0) < 0) { af->bad++; av_frame_unref(af->ifr); continue; }
+        int got = swr_convert(af->swr, af->ofr->data, outMax,
+                              (const uint8_t**)af->ifr->extended_data, af->ifr->nb_samples);
+        if (got <= 0) { av_frame_unref(af->ifr); continue; }
+        af->ofr->nb_samples = got;
+        af->ofr->pts = af->next_pts;
+        af->next_pts += got;
+        if (afix_encode(af, oc, written) < 0) {
+            logErrBoth(logBuf, "异常: 音轨编码写出失败（第 %lld 帧）\n", (long long)af->frames);
+            av_frame_unref(af->ifr);
+            return AVERROR(EIO);
+        }
+        af->frames++;
+        av_frame_unref(af->ifr);
+    }
+    return 0;
+}
+
+/* 收尾：flush 编码器，把缓冲里的最后几帧写出去 */
+static int afix_flush(AudioFix* af, AVFormatContext* oc, long* written) {
+    if (!af->active || !af->enc) return 0;
+    avcodec_send_frame(af->enc, NULL);
+    AVPacket* op = av_packet_alloc();
+    if (!op) return AVERROR(ENOMEM);
+    while (avcodec_receive_packet(af->enc, op) >= 0) {
+        op->stream_index = af->st->index;
+        op->pos = -1;
+        av_interleaved_write_frame(oc, op);
+        if (written) (*written)++;
+        av_packet_unref(op);
+    }
+    av_packet_free(&op);
+    return 0;
+}
+
+static void afix_close(AudioFix* af) {
+    if (af->swr) swr_free(&af->swr);
+    if (af->ifr) av_frame_free(&af->ifr);
+    if (af->ofr) av_frame_free(&af->ofr);
+    if (af->dec) avcodec_free_context(&af->dec);
+    if (af->enc) avcodec_free_context(&af->enc);
+    af->active = 0;
+}
 
 /* 探测单个分集的视频编码与尺寸（多数派判定用）；失败时 codec=0 */
 static void probe_video_codec(const char* path, const char* key, int* codec, int* w, int* h) {
@@ -1084,7 +1259,8 @@ Java_com_veyra_gybeyond_FFmpegConcat_nativeConcat(JNIEnv* env, jclass cls,
                                                   jobjectArray keys,
                                                   jstring outputPath,
                                                   jstring tag,
-                                                  jstring logPath)
+                                                  jstring logPath,
+                                                  jboolean allowRebuild)
 {
     g_err[0] = 0; g_errLen = 0;
 
@@ -1092,10 +1268,12 @@ Java_com_veyra_gybeyond_FFmpegConcat_nativeConcat(JNIEnv* env, jclass cls,
     if (!jstring_to_utf8(env, logPath, logBuf, sizeof(logBuf))) logBuf[0] = 0;
     install_crash_handlers(logBuf);
     stageLog(logBuf, "[nativeConcat] 进入 native 合并");
+    AudioFix afix;
+    memset(&afix, 0, sizeof(afix));   /* 音频整轨重建状态：active=0 时全程不参与 */
 
     int n = inputPaths ? (*env)->GetArrayLength(env, inputPaths) : 0;
     if (n <= 0) { stageLog(logBuf, "[nativeConcat] 失败: 分集数=0"); logStage("参数校验"); logErr("异常: 分集数=%d，无法合并\n", n); return (*env)->NewStringUTF(env, g_err); }
-    if (n > 256) { stageLog(logBuf, "[nativeConcat] 失败: 分集数超上限"); logStage("参数校验"); logErr("异常: 分集数=%d 超过 256 上限\n", n); return (*env)->NewStringUTF(env, g_err); }
+    if (n > 600) { stageLog(logBuf, "[nativeConcat] 失败: 分集数超上限"); logStage("参数校验"); logErr("异常: 分集数=%d 超过 600 上限\n", n); return (*env)->NewStringUTF(env, g_err); }
     stageLog(logBuf, "[nativeConcat] 分集数 = N 正确");
 
     char outBuf[1024];
@@ -1108,7 +1286,9 @@ Java_com_veyra_gybeyond_FFmpegConcat_nativeConcat(JNIEnv* env, jclass cls,
     stageLog(logBuf, "[nativeConcat] 输出 = outBuf / tag = tagBuf");
 
     /* ---- 0. 输入文件校验：不存在/0 字节直接报错，避免 concat 打开坏文件时 native 崩溃 ---- */
-    char origPaths[256][1024];
+    /* 600×1024 = 600KB 放 .bss（不进 JNI 线程栈）。nativeConcat 由 Java 层串行调用，
+     * 不存在并发覆盖；288 集的季以前卡在 256 上限直接失败，这里一并放开。 */
+    static char origPaths[600][1024];
     for (int i = 0; i < n; i++) {
         jstring js = (jstring)(*env)->GetObjectArrayElement(env, inputPaths, i);
         char p[1024];
@@ -1131,8 +1311,9 @@ Java_com_veyra_gybeyond_FFmpegConcat_nativeConcat(JNIEnv* env, jclass cls,
     /* ---- 0.45 音频参数探测：多数派 = 统一音轨目标（等价后端 probeFile/buildPlan
      * majorityKey(audioKey)；无音频轨的集不参与；参数不一致的集在规范化时转码） ---- */
     AudioInfo aTarget;
+    int aMixed = 0;
     {
-        AudioInfo aInfos[256];
+        AudioInfo aInfos[600];
         for (int i = 0; i < n; i++) {
             char k[64] = {0};
             if (keys) {
@@ -1141,10 +1322,12 @@ Java_com_veyra_gybeyond_FFmpegConcat_nativeConcat(JNIEnv* env, jclass cls,
             }
             probe_audio_params(origPaths[i], k, &aInfos[i]);
         }
-        majority_audio(aInfos, n, &aTarget);
-        char wl[160];
-        snprintf(wl, sizeof(wl), "[nativeConcat] 音频多数派目标: codec=%d prof=%d sr=%d ch=%d",
-                 aTarget.codec, aTarget.profile, aTarget.sample_rate, aTarget.channels);
+        majority_audio(aInfos, n, &aTarget, &aMixed);
+        aMixed = aMixed && (allowRebuild == JNI_TRUE);
+        char wl[224];
+        snprintf(wl, sizeof(wl), "[nativeConcat] 音频多数派目标: codec=%d prof=%d sr=%d ch=%d；帧长混装=%s",
+                 aTarget.codec, aTarget.profile, aTarget.sample_rate, aTarget.channels,
+                 aMixed ? "是 → 整轨重建音轨" : "否 → 纯 copy");
         stageLog(logBuf, wl);
     }
 
@@ -1299,19 +1482,68 @@ Java_com_veyra_gybeyond_FFmpegConcat_nativeConcat(JNIEnv* env, jclass cls,
         if (!aout) {
             stageLog(logBuf, "[nativeConcat] 失败: avformat_new_stream(audio)");
             logStage("创建输出流(audio)"); logErr("异常: avformat_new_stream 失败\n");
-            cleanup_output(oc); avformat_close_input(&in); remove(listPath);
+            afix_close(&afix); cleanup_output(oc); avformat_close_input(&in); remove(listPath);
             return (*env)->NewStringUTF(env, g_err);
         }
-        rc = avcodec_parameters_copy(aout->codecpar, ain->codecpar);
-        if (rc < 0) {
-            char e[128] = {0}; av_strerror(rc, e, sizeof(e));
-            stageLog(logBuf, "[nativeConcat] 失败: avcodec_parameters_copy(audio)");
-            logStage("复制音频参数"); logErr("异常: avcodec_parameters_copy(audio) 失败 rc=%d (%s)\n", rc, e);
-            cleanup_output(oc); avformat_close_input(&in); remove(listPath);
-            return (*env)->NewStringUTF(env, g_err);
+        if (aMixed) {
+            /* 帧长混装：输出流交给 AAC 编码器（一律 LC 1024 帧 + 目标采样率/声道）。
+             * 采样率/声道沿用多数派，只把帧长与 profile 统一到兼容性最好的 LC。 */
+            afix.sample_rate = aTarget.sample_rate > 0 ? aTarget.sample_rate : 44100;
+            afix.channels = aTarget.channels > 0 ? aTarget.channels : 2;
+            const AVCodec* aenc = avcodec_find_encoder(AV_CODEC_ID_AAC);
+            if (!aenc) {
+                stageLog(logBuf, "[nativeConcat] 失败: 无 AAC 编码器");
+                logStage("创建音频编码器"); logErr("异常: 无 AAC 编码器（工具链未编译 encoder）\n");
+                afix_close(&afix); cleanup_output(oc); avformat_close_input(&in); remove(listPath);
+                return (*env)->NewStringUTF(env, g_err);
+            }
+            afix.enc = avcodec_alloc_context3(aenc);
+            if (!afix.enc) {
+                afix_close(&afix); cleanup_output(oc); avformat_close_input(&in); remove(listPath);
+                logStage("创建音频编码器"); logErr("异常: AAC 编码器上下文分配失败\n");
+                return (*env)->NewStringUTF(env, g_err);
+            }
+            afix.enc->sample_rate = afix.sample_rate;
+            av_channel_layout_default(&afix.enc->ch_layout, afix.channels);
+            afix.enc->bit_rate = 128000;
+            afix.enc->profile = FF_PROFILE_AAC_LOW;
+            afix.enc->sample_fmt = AV_SAMPLE_FMT_FLTP;
+            afix.enc->time_base = (AVRational){1, afix.sample_rate};
+            if (avcodec_open2(afix.enc, aenc, NULL) < 0) {
+                stageLog(logBuf, "[nativeConcat] 失败: AAC 编码器打开失败");
+                logStage("创建音频编码器"); logErr("异常: AAC 编码器打开失败\n");
+                afix_close(&afix); cleanup_output(oc); avformat_close_input(&in); remove(listPath);
+                return (*env)->NewStringUTF(env, g_err);
+            }
+            avcodec_parameters_from_context(aout->codecpar, afix.enc);
+            aout->codecpar->codec_tag = 0;
+            aout->time_base = (AVRational){1, afix.sample_rate};
+            afix.st = aout;
+            afix.ifr = av_frame_alloc();
+            afix.ofr = av_frame_alloc();
+            if (!afix.ifr || !afix.ofr) {
+                stageLog(logBuf, "[nativeConcat] 失败: 音频帧分配失败");
+                logStage("创建音频编码器"); logErr("异常: 音频帧分配失败\n");
+                afix_close(&afix); cleanup_output(oc); avformat_close_input(&in); remove(listPath);
+                return (*env)->NewStringUTF(env, g_err);
+            }
+            afix.active = 1;
+            char al[200];
+            snprintf(al, sizeof(al), "[nativeConcat] 音频整轨重建：LC/%dHz/%dch/128k，视频保持 copy",
+                     afix.sample_rate, afix.channels);
+            stageLog(logBuf, al);
+        } else {
+            rc = avcodec_parameters_copy(aout->codecpar, ain->codecpar);
+            if (rc < 0) {
+                char e[128] = {0}; av_strerror(rc, e, sizeof(e));
+                stageLog(logBuf, "[nativeConcat] 失败: avcodec_parameters_copy(audio)");
+                logStage("复制音频参数"); logErr("异常: avcodec_parameters_copy(audio) 失败 rc=%d (%s)\n", rc, e);
+                cleanup_output(oc); avformat_close_input(&in); remove(listPath);
+                return (*env)->NewStringUTF(env, g_err);
+            }
+            aout->codecpar->codec_tag = 0;  /* 防污染 tag 校验（validate_codec_tag 拒绝非 mp4 表 tag → INVALIDDATA） */
+            aout->time_base = ain->time_base;
         }
-        aout->codecpar->codec_tag = 0;  /* 防污染 tag 校验（validate_codec_tag 拒绝非 mp4 表 tag → INVALIDDATA） */
-        aout->time_base = ain->time_base;
     }
     stageLog(logBuf, "[nativeConcat] 输出流创建完成(video+audio)");
 
@@ -1359,6 +1591,23 @@ Java_com_veyra_gybeyond_FFmpegConcat_nativeConcat(JNIEnv* env, jclass cls,
         if (si != vIdx && si != aIdx) { av_packet_unref(pkt); continue; }
         if (pkt->size <= 0) { av_packet_unref(pkt); continue; }   /* 跳过 concat 段边界空包 */
         AVStream* inSt = in->streams[si];
+        /* 音频整轨重建：包不进 copy 路径，直接解码 → 重采样 → 重编码，
+         * PTS 由累计样本数重排（天然无缝、无重叠，集边界接缝归零）。 */
+        if (si == aIdx && afix.active) {
+            int arc = afix_packet(&afix, pkt, inSt, oc, logBuf, &written);
+            av_packet_unref(pkt);
+            if (arc < 0) {
+                char e[128] = {0}; av_strerror(arc, e, sizeof(e));
+                stageLog(logBuf, "[nativeConcat] 失败: 音频整轨重建中断");
+                logStage("音频整轨重建");
+                logErr("异常: 音频整轨重建失败 rc=%d (%s)，已编码 %lld 帧 / 跳过 %lld 包\n",
+                       arc, e, (long long)afix.frames, (long long)afix.bad);
+                av_write_trailer(oc); av_packet_free(&pkt);
+                afix_close(&afix); cleanup_output(oc); avformat_close_input(&in); remove(listPath);
+                return (*env)->NewStringUTF(env, g_err);
+            }
+            continue;
+        }
         AVStream* outSt = (si == vIdx) ? vout : aout;
         av_packet_rescale_ts(pkt, inSt->time_base, outSt->time_base);
         pkt->pos = -1;
@@ -1459,12 +1708,21 @@ Java_com_veyra_gybeyond_FFmpegConcat_nativeConcat(JNIEnv* env, jclass cls,
         }
     }
     readErr = rc;
+    if (afix.active) {
+        afix_flush(&afix, oc, &written);
+        char fl[224];
+        snprintf(fl, sizeof(fl), "[nativeConcat] 音频整轨重建完成：编码 %lld 帧，跳过坏包 %lld，音轨时长 %.1fs",
+                 (long long)afix.frames, (long long)afix.bad,
+                 afix.sample_rate > 0 ? (double)afix.next_pts / afix.sample_rate : 0.0);
+        stageLog(logBuf, fl);
+    }
     char done[128]; snprintf(done, sizeof(done), "[nativeConcat] 拷贝完成，共 %ld 包 (av_read_frame rc=%d)", written, readErr);
     stageLog(logBuf, done);
     rc = av_write_trailer(oc);
     stageLog(logBuf, "[nativeConcat] av_write_trailer 完成");
     av_packet_free(&pkt);
     if (abf) av_bsf_free(&abf);
+    afix_close(&afix);
     cleanup_output(oc);   /* 关闭 pb（faststart moov 已写回）+ free context */
     avformat_close_input(&in);
     remove(listPath);

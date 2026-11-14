@@ -1366,9 +1366,10 @@ final class DownloadManager {
         } finally { conn.disconnect(); }
     }
 
-    /** 全局下载闸：整个任务所有集共享 8 个下载槽（单集并发 8 × 多集同时下载会叠加成 24+ 并发，
-     *  把黄果源/CDN 打成 502 限流——v0.18.50/51 实测三集同时重下全部 502）。 */
-    private static final java.util.concurrent.Semaphore DL_GATE = new java.util.concurrent.Semaphore(8, true);
+    /** 全局下载闸：与集并发数一致（DL_CONCURRENCY=10）。原来是 8，会卡住 2 个 worker 空转，
+     *  实际只有 8 集在下载——用户看到的「明明设了 10 个并发却上不去」就是这个闸门。
+     *  每集内部是单连接顺序下载，所以 10 个槽 = 10 条连接，不会像「单集并发 8 × 多集」那样叠加。 */
+    private static final java.util.concurrent.Semaphore DL_GATE = new java.util.concurrent.Semaphore(DL_CONCURRENCY, true);
 
     private void downloadToFile(String url, File out, AtomicLong dlBytes, AtomicLong totalBytes) throws Exception {
         url = curlSafeUrl(url);

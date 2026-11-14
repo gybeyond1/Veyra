@@ -33,7 +33,9 @@ function resolveWritableDir(preferred, fallbacks) {
   return null;
 }
 DATA_DIR = resolveWritableDir(DATA_DIR, [path.join(process.cwd(), 'data'), path.join(os.tmpdir(), 'veyra-data')]) || DATA_DIR;
-let CONCURRENCY = Math.max(1, parseInt(process.env.DOWNLOAD_CONCURRENCY || '2', 10) || 2);
+/* 默认 10 集并发（手机端 DL_CONCURRENCY 同为 10，两端行为一致）。
+ * 环境变量 DOWNLOAD_CONCURRENCY 仍可覆盖，便于临时压测或降速；上限 16 由 setConcurrency 兜住。 */
+let CONCURRENCY = Math.max(1, Math.min(16, parseInt(process.env.DOWNLOAD_CONCURRENCY || '10', 10) || 10));
 /** 合并后是否保留分集文件（桌面端在设置里可关，后端保持原来的「合并即清理」） */
 let KEEP_EPISODES = false;
 const RETRIES = 2;
@@ -115,6 +117,11 @@ function taskDir(t) {
 function epName(i) { return `第${String(i).padStart(2, '0')}集.mp4`; }
 /** 分集密文文件名：第01集.enc（下载中间文件，解密后删除） */
 function epEncName(i) { return `第${String(i).padStart(2, '0')}集.enc`; }
+/** 合并产物名：直接用剧名（用户要求「就叫剧名」），不带 _全N集 后缀。
+ *  同名产物已存在时由调用方决定覆盖，不做 (2) 递增——同一部剧重复合并就是替换旧成片。 */
+function mergedName(t) {
+  return `${sanitizeName(t && t.title)}.mp4`;
+}
 function safeJoin(base, name) {
   const target = path.resolve(base, name);
   if (!target.startsWith(path.resolve(base) + path.sep)) throw new Error('非法路径');
@@ -1091,7 +1098,7 @@ async function runTask(task) {
   const dir = taskDir(task);
   const workDir = safeJoin(dir, '.merge-work');
   fs.mkdirSync(workDir, { recursive: true });
-  const outName = `${sanitizeName(task.title)}_全${task.episodes.length}集.mp4`;
+  const outName = mergedName(task);
   const outputPath = safeJoin(DOWNLOAD_DIR, outName);
 
   // 黄果（私密）源：记录播放页 Referer 基准（分片/CDN 防盗链校验），并预取每集 m3u8
@@ -1301,8 +1308,10 @@ async function mergeStage(task, dir, workDir) {
   // 失败的分集跳过，只合并已成功下载的分集；产物名用成功数
   const okEpisodes = task.episodes.filter(ep => !ep.failed);
   if (okEpisodes.length === 0) throw new Error('没有可合并的成功分集');
-  const outName = `${sanitizeName(task.title)}_全${okEpisodes.length}集.mp4`;
+  const outName = mergedName(task);
   const outputPath = safeJoin(dir, outName);
+  /* 重新合并同一部剧：先删旧成片，避免 ffmpeg 在已有文件上续写/残留旧 moov */
+  try { if (fs.existsSync(outputPath)) fs.rmSync(outputPath, { force: true }); } catch { /* ignore */ }
   task.status = 'merging';
   task.progress.phase = 'merging';
   /* 合并从 0 开始算：以前预置 98，紧接着 mergeEpisodes 又 report(0) 把进度条打回 0，

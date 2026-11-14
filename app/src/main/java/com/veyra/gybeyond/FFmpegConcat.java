@@ -51,8 +51,20 @@ final class FFmpegConcat {
             keyArr[i] = (keys != null && i < keys.size()) ? keys.get(i) : "";
         }
         debug.append("concat 列表: ").append(paths.length).append(" 集 → ").append(output.getAbsolutePath()).append('\n');
-        String err = nativeConcat(paths, keyArr, output.getAbsolutePath(), tag,
-                nativeLog != null ? nativeLog.getAbsolutePath() : "");
+        String logArg = nativeLog != null ? nativeLog.getAbsolutePath() : "";
+        String err = nativeConcat(paths, keyArr, output.getAbsolutePath(), tag, logArg, true);
+        if (err != null && err.contains("音频整轨重建")) {
+            /* 音频整轨重建是这条链路里唯一「新增编码」的分支（AAC 帧长混装时才启用）。
+             * 它失败绝不能把整部剧拖死：清空产物与日志，关掉重建开关，退回纯 copy 重跑一次。
+             * 降级后的行为 = 0.28.33 及以前（逐集 copy + concat），最坏也不会比以前更差。 */
+            debug.append("音频整轨重建失败，降级纯 copy 重试：\n").append(err).append('\n');
+            try { if (output.exists()) output.delete(); } catch (Exception ignored) { }
+            if (nativeLog != null) {
+                try { java.nio.file.Files.write(nativeLog.toPath(), new byte[0]); } catch (Exception ignored) { }
+            }
+            err = nativeConcat(paths, keyArr, output.getAbsolutePath(), tag, logArg, false);
+            if (err == null) debug.append("降级纯 copy 合并成功（音轨未统一，可能有接缝）\n");
+        }
         // 无论成败，把 native 阶段日志（含 [norm] 音轨诊断 / [gap] 跳跃检测）并入 debug，供「复制合并日志」查看
         if (nativeLog != null && nativeLog.exists()) {
             try {
@@ -155,5 +167,7 @@ final class FFmpegConcat {
      * native concat：
      * @return null = 成功；非 null = 失败（错误消息字符串，含失败阶段与 rc 细节）。
      */
-    private static native String nativeConcat(String[] inputPaths, String[] keys, String outputPath, String tag, String logPath);
+    /** allowAudioRebuild=false 时跳过音频整轨重建，纯 copy 合并（降级路径）。 */
+    private static native String nativeConcat(String[] inputPaths, String[] keys, String outputPath, String tag,
+                                             String logPath, boolean allowAudioRebuild);
 }
