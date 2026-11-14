@@ -193,8 +193,8 @@ async function downloadWithFallback(urls, destPath, headers, progressCb, signal)
 
 // ---- 合并（对照 juku-backend media_merge.go / media_merge_plan.go 完整移植）----
 function probeFile(file) {
-  const out = spawnSync('ffprobe', ['-v', 'error', '-show_entries',
-    'stream=index,codec_type,codec_name,width,height,profile,sample_rate,channels,channel_layout,duration,start_time,time_base,pix_fmt,codec_tag_string,r_frame_rate,avg_frame_rate,sample_aspect_ratio,bits_per_raw_sample,field_order,sample_fmt,bits_per_sample',
+  const out = spawnSync('ffprobe', ['-v', 'error', '-show_data', '-show_entries',
+    'stream=index,codec_type,codec_name,width,height,profile,sample_rate,channels,channel_layout,duration,start_time,time_base,pix_fmt,codec_tag_string,r_frame_rate,avg_frame_rate,sample_aspect_ratio,bits_per_raw_sample,field_order,sample_fmt,bits_per_sample,extradata',
     '-of', 'json', file], { encoding: 'utf8', timeout: 60_000 });
   if (out.status !== 0) throw new Error('ffprobe 探测失败: ' + (out.stderr || '').slice(0, 300));
   const parsed = JSON.parse(out.stdout);
@@ -217,6 +217,9 @@ function probeFile(file) {
     fieldOrder: video.field_order || '',
     audioCodec: audio ? audio.codec_name : null,
     aProfile: audio ? audio.profile || '' : '',
+    /* AudioSpecificConfig 里的 AOT：2=LC, 5=SBR(HE), 29=PS(HEv2)。
+     * profile 字符串在 mkv/ts 里经常是空的或者写法不一，extradata 才是一手证据。 */
+    audioAot: audio && audio.codec_name === 'aac' ? aacAot(audio.extradata) : 0,
     aTag: audio ? (audio.codec_tag_string || '') : '',
     sampleRate: audio ? Number(audio.sample_rate) : 0,
     channels: audio ? Number(audio.channels) : 0,
@@ -225,12 +228,30 @@ function probeFile(file) {
     aBitDepth: audio ? Number(audio.bits_per_sample) || 0 : 0,
     audioTB: audio ? audio.time_base || '' : '',
     duration: Number(video.duration) || 0,
+    audioDuration: audio ? Number(audio.duration) || 0 : 0,
     videoStart: Number(video.start_time) || 0,
     audioStart: audio ? Number(audio.start_time) || 0 : 0,
     avOffset: audio ? (Number(video.start_time) || 0) - (Number(audio.start_time) || 0) : 0,
+    /* 音频比视频长多少：正值说明音轨尾巴多出一截。
+     * concat 是按每段的最长流推进的，一段音频多 0.5s，下一集的画面就要晚 0.5s 才开始，
+     * 288 集累下来就是整片音画错位，所以这段必须裁掉。 */
+    avDrift: audio ? (Number(audio.duration) || 0) - (Number(video.duration) || 0) : 0,
     timescale: tb.length === 2 ? Number(tb[1]) || 0 : 0,
     audioTimescale: atb.length === 2 ? Number(atb[1]) || 0 : 0,
   };
+}
+
+/** 从 ffprobe 的 hexdump 里取出 AAC AudioSpecificConfig 首字节的 AOT（前 5 bit）。 */
+function aacAot(extradata) {
+  if (!extradata) return 0;
+  const hex = String(extradata)
+    .replace(/^[ \t]*[0-9a-fA-F]+:[ \t]*/gm, ' ')
+    .trim()
+    .split(/\s{2,}/)[0]
+    .replace(/\s+/g, '');
+  if (!/^[0-9a-fA-F]{2,}$/.test(hex)) return 0;
+  const aot = parseInt(hex.slice(0, 2), 16) >> 3;
+  return aot === 31 ? 0 : aot;
 }
 
 /** 帧率归一化：30000/1001 与 29.97 视为同一个，24 与 24.0 视为同一个。 */
@@ -263,18 +284,59 @@ function normLayout(info) {
   return c === 1 ? 'mono' : c === 2 ? 'stereo' : c === 6 ? '5.1' : c === 8 ? '7.1' : `${c}ch`;
 }
 
+/**
+ * AAC profile 归一化。ffprobe 同一件事有好几种写法：
+ *   LC  → "LC" / "AAC (LC)" / "Low Complexity"
+ *   HE  → "HE-AAC" / "HE-AACv2" / "SBR" / "PS"
+ * 不归一化的话，"LC" 和 "AAC (LC)" 会被判成两个组，白白多转一半集。
+ */
+function normAacProfile(raw) {
+  const p = String(raw || '').trim().toLowerCase();
+  if (!p) return 'lc';
+  if (p.includes('eld')) return 'eld';
+  if (p.includes('he-aacv2') || (p.includes('he-aac') && p.includes('v2'))) return 'hev2';
+  if (p.includes('he-aac') || p.includes('sbr') || p.includes('ps')) return 'he';
+  if (p.includes('lc') || p.includes('low complexity')) return 'lc';
+  if (p.includes('main')) return 'main';
+  return p;
+}
+
+/** 目标音轨能否直接 copy：只有 AAC-LC(AOT=2) 才 copy，HE-AAC(SBR/PS) 一律转 LC。 */
+function aacCopyable(info) {
+  if (!info.audioCodec || String(info.audioCodec).toLowerCase() !== 'aac') return false;
+  return aacProfileKey(info) === 'lc';
+}
+
+/** 日志用的 profile 可读名：有 AOT 就用 AOT 翻，别让 "AAC (LC)" 和 "LC" 两种写法混着显示。 */
+function aProfileText(info) {
+  if (info.audioAot) {
+    const map = { 1: 'Main', 2: 'LC', 3: 'SSR', 4: 'LTP', 5: 'HE-AAC', 29: 'HE-AACv2' };
+    return map[info.audioAot] || `AOT${info.audioAot}`;
+  }
+  return info.aProfile || '-';
+}
+
+/** profile 的比对口径：优先用 extradata 的 AOT，拿不到才退回 profile 字符串。 */
+function aacProfileKey(info) {
+  /* AOT=2 与 "LC"/"AAC (LC)" 是同一种东西，统一归成 lc —— 否则一边有 extradata、
+   * 一边只有 profile 字符串时，同一个音轨会被判成两组，白白多转一半集。 */
+  if (info.audioAot) return info.audioAot === 2 ? 'lc' : `aot${info.audioAot}`;
+  return normAacProfile(info.aProfile);
+}
+
 const NO_AUDIO = '(无音轨)';
 /* 参数比对口径：只要这些字段有一个不同，就认为这一集与主流不一致。
  * 视频：编码、分辨率、profile、像素格式、位深、帧率、宽高比
  * 音频：编码、profile、采样率、声道数、声道布局、采样格式
  * 时间基不参与比对 —— 那个不转码也能修，走重封装（-video_track_timescale）。 */
 function videoKey(info) {
-  return [info.videoCodec, `${info.width}x${info.height}`, info.vProfile, info.pixFmt,
+  return [String(info.videoCodec || '').toLowerCase(), `${info.width}x${info.height}`,
+    String(info.vProfile || '').toLowerCase(), info.pixFmt,
     info.vBitDepth || '', info.frameRate || '', info.sar].join('|');
 }
 function audioKey(info) {
   if (!info.audioCodec) return NO_AUDIO;
-  return [info.audioCodec, info.aProfile, info.sampleRate, info.channels,
+  return [String(info.audioCodec).toLowerCase(), aacProfileKey(info), info.sampleRate, info.channels,
     normLayout(info), info.sampleFmt].join('|');
 }
 
@@ -330,7 +392,6 @@ const H264_PROFILES = { 'constrained baseline': 'baseline', baseline: 'baseline'
  * 否则多数派仍是 av1/vp9、少数派被转成 h264，concat 一 copy 就是花屏。 */
 const MP4_VIDEO = new Set(['h264', 'hevc']);
 const MP4_PIX = new Set(['yuv420p', 'yuvj420p', 'yuv420p10le', 'yuv422p', 'yuv422p10le', 'yuv444p', 'yuv444p10le']);
-const AUDIO_COPY_OK = new Set(['aac']);
 
 /** 视频差异描述：只讲人话，给日志和进度条用。 */
 function videoDiffText(info, target) {
@@ -352,7 +413,7 @@ function audioDiffText(info, target) {
   const out = [];
   if (info.audioCodec !== target.audioCodec) out.push(`编码 ${info.audioCodec}→${target.audioCodec}`);
   // profile 必须比：AAC 的 LC 和 HE-AAC(SBR/PS) 混在一起，播放器按 LC 解就是满耳噪音/变调
-  if (info.aProfile !== target.aProfile) out.push(`profile ${info.aProfile || '-'}→${target.aProfile || '-'}`);
+  if (aacProfileKey(info) !== aacProfileKey(target)) out.push(`profile ${aProfileText(info)}→${aProfileText(target)}`);
   if (Number(info.sampleRate) !== Number(target.sampleRate)) out.push(`采样率 ${info.sampleRate}→${target.sampleRate}`);
   if (Number(info.channels) !== Number(target.channels)) out.push(`声道 ${info.channels}→${target.channels}`);
   if (normLayout(info) !== normLayout(target)) out.push(`声道布局 ${normLayout(info)}→${normLayout(target)}`);
@@ -402,15 +463,15 @@ function buildPlan(infos) {
     groups: vGroups.map(g => ({ key: g.key, n: g.n, first: g.first })),
   };
 
-  // 目标音频：多数派有音轨才有音轨；编码不是 aac 或不是 AAC-LC 时整体转 aac_low
-  // （HE-AAC / HE-AACv2 与 LC 混在一条轨里，播放器按 LC 解就是满耳噪音）
-  const aacLc = !aSample.aProfile || /^lc$/i.test(String(aSample.aProfile).trim());
-  const aDowngrade = !!aSample.audioCodec && (!AUDIO_COPY_OK.has(aSample.audioCodec) || !aacLc);
+  // 目标音频：多数派有音轨才有音轨。
+  // 这里不看票数看兼容性 —— HE-AAC / HE-AACv2 在电视、Android 硬解、Emby 上兼容性都差，
+  // 被按 LC 解析就是变调/电流声。所以只要多数派不是 AAC-LC，就全部转 aac_low。
+  const aDowngrade = !!aSample.audioCodec && !aacCopyable(aSample);
   const audio = {
     key: aWin.key,
     present: !!aSample.audioCodec,
-    codec: aSample.audioCodec ? (aDowngrade ? 'aac' : aSample.audioCodec) : null,
-    profile: aSample.aProfile,
+    codec: aSample.audioCodec ? 'aac' : null,
+    profile: aSample.audioCodec ? (aDowngrade ? 'LC' : aSample.aProfile) : '',
     sampleRate: aSample.sampleRate || 44100,
     channels: aSample.channels || 2,
     layout: normLayout(aSample),
@@ -427,7 +488,7 @@ function buildPlan(infos) {
       ? { ...vSample, videoCodec: video.codec, pixFmt: video.pixFmt, vProfile: video.profile, vBitDepth: 8 }
       : vSample;
     const aCompare = aDowngrade
-      ? { ...aSample, audioCodec: audio.codec, aProfile: 'LC', sampleFmt: aSample.sampleFmt }
+      ? { ...aSample, audioCodec: audio.codec, aProfile: 'LC', audioAot: 2, sampleFmt: aSample.sampleFmt }
       : aSample;
     const vDiff = videoDiffText(info, vCompare);
     const aDiff = audioDiffText(info, aCompare);
@@ -443,16 +504,20 @@ function buildPlan(infos) {
     const sync = !!info.audioCodec && Math.abs(info.avOffset || 0) > 0.002;
     if (sync) reasons.push(`音画起点差 ${(info.avOffset * 1000).toFixed(0)}ms`);
 
+    // 音轨尾巴比画面长：concat 按每段最长流推进，这一段会拖着后面所有集往后错
+    const trim = !!info.audioCodec && (info.avDrift || 0) > 0.04;
+    if (trim) reasons.push(`音轨比画面长 ${(info.avDrift * 1000).toFixed(0)}ms，裁到画面时长`);
+
     // 音频要重编码的条件：参数与多数派不同、视频转了、音画不同步、编码需降级
     const audioNeeded = !!info.audioCodec && !dropAudio
       && (aDowngrade || videoNeeded || aDiff.length > 0 || sync);
 
-    // 时间基不一致 / 音画不同步：不转码也能修，靠 -video_track_timescale + itsoffset 重封装
+    // 时间基不一致 / 音画不同步 / 音轨过长：不转码也能修，重封装即可
     const tbDiff = info.videoTB !== `1/${timescale}`;
-    const remux = !videoNeeded && (tbDiff || sync || dropAudio);
+    const remux = !videoNeeded && (tbDiff || sync || trim || dropAudio);
     if (remux && tbDiff) reasons.push(`时间基 ${info.videoTB}→1/${timescale}（重封装）`);
 
-    return { video: videoNeeded, audio: audioNeeded, silence, dropAudio, sync, remux, reasons };
+    return { video: videoNeeded, audio: audioNeeded, silence, dropAudio, sync, trim, remux, reasons };
   });
 
   const notes = [];
@@ -506,13 +571,18 @@ async function mergeEpisodes(episodeFiles, outputPath, workDir, report) {
     + ` ${vT.pixFmt}`
     + (aT.present ? ` + ${String(aT.codec).toUpperCase()} ${aT.sampleRate}Hz ${aT.channels}ch` : ' + 无音轨');
   console.log(`[merge] 多数派目标参数：${targetText}（视频 ${plan.videoGroups} 种 / 音频 ${plan.audioGroups} 种）`);
+  const fmtGroup = g => `${String(g.key).split('|').join(' ')} ×${g.n} 集`;
+  console.log(`[merge] 视频分布：${plan.video.groups.map(fmtGroup).join(' / ')}`);
+  console.log(`[merge] 音频分布：${plan.audio.groups.map(fmtGroup).join(' / ')}`);
   for (const note of plan.notes) console.log(`[merge] 整体降级：${note}`);
   const drift = plan.steps.map((s, i) => ({ i: i + 1, reasons: s.reasons })).filter(x => x.reasons.length);
-  if (!drift.length) {
+  const work = plan.steps.filter(s => s.video || s.audio || s.silence || s.dropAudio || s.remux).length;
+  if (!work) {
     console.log('[merge] 全部剧集参数一致，直接无损合并（不转码）');
   } else {
-    for (const d of drift) console.log(`[merge] 第 ${d.i} 集偏离多数派：${d.reasons.join('，')}`);
-    console.log(`[merge] ${drift.length}/${infos.length} 集需对齐：${drift.map(d => d.i).join('、')}`);
+    for (const d of drift.slice(0, 12)) console.log(`[merge] 第 ${d.i} 集偏离多数派：${d.reasons.join('，')}`);
+    if (drift.length > 12) console.log(`[merge] ……其余 ${drift.length - 12} 集同类差异省略`);
+    console.log(`[merge] ${work}/${infos.length} 集需处理（其中 ${drift.length} 集参数与多数派有差异）`);
   }
 
   const prepared = new Array(episodeFiles.length);
@@ -530,20 +600,23 @@ async function mergeEpisodes(episodeFiles, outputPath, workDir, report) {
     const action = step.video ? '按多数派转码视频+音轨'
       : step.silence ? '补静音音轨'
         : step.dropAudio ? '去掉多余音轨'
-          : step.sync ? '校准音画起点'
-            : step.audio ? '按多数派转码音轨' : '无损换封装(统一时间基)';
+          : step.trim ? '裁齐音轨长度'
+            : step.sync ? '校准音画起点'
+              : step.audio ? '按多数派转码音轨' : '无损换封装(统一时间基)';
     report(5 + Math.round(i * 55 / episodeFiles.length), `${action}第 ${i + 1} 集`);
 
     const args = [];
     let audioInput = 0;
     const silence = step.silence;
+    // 起点偏移和音轨过长都靠双输入各自归零：单输入做不到只动音轨不动视频
+    const cut = !step.video && (step.sync || step.trim);
     if (silence) {
       // 这一集压根没有音轨，而多数派有：补一条同参数的静音轨，否则合并后这几集是哑的
       const layout = aT.channels === 1 ? 'mono' : 'stereo';
       args.push('-i', episodeFiles[i]);
       args.push('-f', 'lavfi', '-i', `anullsrc=r=${aT.sampleRate}:cl=${layout}`);
       audioInput = -1;
-    } else if (!step.video && step.audio && info.audioCodec) {
+    } else if (!step.video && (step.audio || cut) && info.audioCodec) {
       // 视频 copy、音频重编码时分别归零：避免 AAC priming 在正向偏移下多出一帧声音。
       args.push('-itsoffset', (-(info.videoStart || 0)).toFixed(6), '-i', episodeFiles[i]);
       args.push('-itsoffset', (-(info.audioStart || 0)).toFixed(6), '-i', episodeFiles[i]);
@@ -580,17 +653,17 @@ async function mergeEpisodes(episodeFiles, outputPath, workDir, report) {
     } else {
       args.push('-map', `${audioInput}:a:0`);
       if (step.audio) {
-        args.push('-c:a', 'aac', '-profile:a', 'aac_low', '-b:a', '192k',
+        args.push('-c:a', 'aac', '-profile:a', 'aac_low', '-b:a', '128k',
           '-ar', String(aT.sampleRate), '-ac', String(aT.channels));
         args.push('-af', `aresample=${aT.sampleRate}:async=1:first_pts=0`);
       } else {
         args.push('-c:a', 'copy');
       }
     }
-    // 转码/补静音时按本集视频时长截断输出，避免 apad 无限补静音导致音画不同步 / ffmpeg 永不结束
-    if ((step.video || step.audio || silence) && info.duration > 0) args.push('-t', String(info.duration));
+    // 转码/补静音/裁齐时按本集视频时长截断输出，避免 apad 无限补静音导致音画不同步 / ffmpeg 永不结束
+    if ((step.video || step.audio || silence || cut) && info.duration > 0) args.push('-t', String(info.duration));
     args.push('-max_muxing_queue_size', '4096');
-    args.push('-video_track_timescale', String(plan.timescale), '-f', 'mp4', '-y', cooked);
+    args.push('-video_track_timescale', String(plan.timescale), '-avoid_negative_ts', 'make_zero', '-f', 'mp4', '-y', cooked);
     await runFFmpeg(args);
     prepared[i] = cooked;
   }
@@ -618,7 +691,7 @@ async function mergeEpisodes(episodeFiles, outputPath, workDir, report) {
     report(97, `音轨校验未通过（${audit.audioErrors} 处），整轨重编码后再合一次`);
     const retryArgs = ['-copyts', '-protocol_whitelist', 'file,pipe', '-f', 'concat', '-safe', '0', '-i', listFile,
       '-map', '0:v:0', '-map', '0:a:0?', '-sn', '-dn', '-c:v', 'copy',
-      '-c:a', 'aac', '-profile:a', 'aac_low', '-b:a', '192k', '-ar', String(aT.sampleRate), '-ac', String(aT.channels),
+      '-c:a', 'aac', '-profile:a', 'aac_low', '-b:a', '128k', '-ar', String(aT.sampleRate), '-ac', String(aT.channels),
       '-video_track_timescale', String(plan.timescale), '-movflags', '+faststart'];
     if (vT.codec === 'h264') retryArgs.push('-tag:v', 'avc3');
     else if (vT.codec === 'hevc') retryArgs.push('-tag:v', 'hev1');
@@ -633,7 +706,7 @@ async function mergeEpisodes(episodeFiles, outputPath, workDir, report) {
   }
   if (audit.problems.length) console.warn(`[merge] 产物音频参数偏差（不影响播放）：${audit.problems.join('，')}`);
   report(100, '合并完成');
-  return { text: audit.text, corrupt: corrupt.length, aligned: drift.length, total: infos.length, target: targetText };
+  return { text: audit.text, corrupt: corrupt.length, aligned: work, drift: drift.length, total: infos.length, target: targetText };
 }
 
 // ---- 任务执行 ----
@@ -1159,7 +1232,7 @@ async function mergeStage(task, dir, workDir) {
     percent: 100,
     detail: summary && summary.text
       ? `完成（${summary.text}；${summary.aligned
-        ? `${summary.aligned}/${summary.total} 集参数与多数派不一致，已对齐后合并`
+        ? `${summary.aligned}/${summary.total} 集已按目标参数统一后合并`
         : '全部剧集参数一致，无损合并'}）`
       : '完成',
   };
