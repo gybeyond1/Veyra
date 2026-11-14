@@ -1741,6 +1741,16 @@ public final class MainActivity extends Activity {
         private volatile float pendingDragVelocity;
         private volatile boolean dragFlushQueued;
 
+        /** 系统级 Toast（屏幕底部的小条）。
+         *  页面自带的 #toast-host 是顶部浮层，位置离拇指远、又容易被顶栏遮住；
+         *  下载提交成功这类「交给后台了」的确认，用原生 Toast 更符合手机习惯。 */
+        @JavascriptInterface public void toast(String message) {
+            if (message == null) return;
+            final String text = message.trim();
+            if (text.isEmpty()) return;
+            runOnUiThread(() -> android.widget.Toast.makeText(MainActivity.this, text, android.widget.Toast.LENGTH_SHORT).show());
+        }
+
         @JavascriptInterface public void setDetailMode(boolean enabled) {
             runOnUiThread(() -> {
                 if (detailSystemBars == enabled) return;

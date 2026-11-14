@@ -146,6 +146,21 @@ function toast(message, info = false) {
   toastTimer = setTimeout(() => toastHost.classList.remove('visible'), 3000);
 }
 
+/**
+ * 系统 Toast：APK 内嵌页面走原生（屏幕底部的小黑条），浏览器 / 网页版回退到页面浮层。
+ * 页面自带的 #toast-host 固定在顶部 75px，位置离手远、又容易被顶栏压住；
+ * 「已开始下载 N 集」这种交给后台的确认提示，用系统 toast 更符合手机习惯。
+ */
+function nativeToast(message, info = false) {
+  try {
+    if (window.AndroidHost && typeof window.AndroidHost.toast === 'function') {
+      window.AndroidHost.toast(String(message == null ? '' : message));
+      return;
+    }
+  } catch (ignore) { /* 桥不可用就走页面提示 */ }
+  toast(message, info);
+}
+
 let finishConfirmation;
 function closeConfirmation(accepted) {
   if (confirmOverlay.hidden) return;
@@ -1507,9 +1522,13 @@ var targetDevices = null;
 var targetDeviceKind = 'device';
 var manageDeviceId = '';
 
+let downloadGridScroll = 0;   // 选集网格的滚动位置，跨重绘保留
+
 function renderDownloadSheet() {
   const sheet = document.getElementById('download-sheet');
   if (!sheet) return;
+  const prevGrid = sheet.querySelector('.download-sheet-grid');
+  if (prevGrid) downloadGridScroll = prevGrid.scrollTop;
   const episodes = asArray(state.detail.episodes);
   if (downloadMode === 'parsing') {
     sheet.innerHTML = `<p class="download-parsing">正在解析播放地址…<br><small>需要逐集解析，请稍候</small></p>`;
@@ -1573,12 +1592,36 @@ function renderDownloadSheet() {
   const all = episodes.map(ep => Number(ep.number) || 0);
   const checked = all.filter(n => downloadSelection.has(n)).length;
   const allSelected = all.length && checked === all.length;
-  sheet.innerHTML = `<div class="download-sheet-toolbar"><button type="button" class="dl-secondary" data-dl-all="1">${allSelected ? '取消全选' : '全选'}</button><span>已选 ${checked}/${all.length} 集</span></div>
+  sheet.innerHTML = `<div class="download-sheet-toolbar"><button type="button" class="dl-secondary" data-dl-all="1">${allSelected ? '取消全选' : '全选'}</button><span data-dl-count>已选 ${checked}/${all.length} 集</span></div>
     <div class="download-sheet-grid">${episodes.map(ep => {
       const n = Number(ep.number) || 0;
       return `<label class="dl-ep ${downloadSelection.has(n) ? 'checked' : ''}" data-dl-ep="${n}"><span>${n}</span></label>`;
     }).join('')}</div>
     <div class="download-sheet-buttons"><button type="button" class="dl-secondary" data-dl-back="1">取消</button><button type="button" class="dl-primary" data-dl-confirm="1" ${checked ? '' : 'disabled'}>下载 ${checked ? checked + ' 集' : ''}</button></div>`;
+  // 列表刚重建时还没有布局高度，直接设 scrollTop 会被夹成 0，等一帧再恢复
+  const gridNow = sheet.querySelector('.download-sheet-grid');
+  if (gridNow && downloadGridScroll > 0) {
+    requestAnimationFrame(() => { gridNow.scrollTop = downloadGridScroll; });
+  }
+}
+
+/** 只刷「已选 X/Y」和下载按钮状态，不重建列表 DOM。
+ *  整块重绘会把 .download-sheet-grid 的滚动位置清零：一季几十集时，
+ *  用户滑到第 80 集点一下选中，界面立刻弹回最前面，等于白滑。 */
+function syncDownloadSheetSelection() {
+  const episodes = asArray(state.detail && state.detail.episodes);
+  const total = episodes.length;
+  let checked = 0;
+  for (const ep of episodes) if (downloadSelection.has(Number(ep.number) || 0)) checked++;
+  const count = document.querySelector('#download-sheet [data-dl-count]');
+  if (count) count.textContent = `已选 ${checked}/${total} 集`;
+  const confirm = document.querySelector('#download-sheet [data-dl-confirm]');
+  if (confirm) {
+    confirm.disabled = checked === 0;
+    confirm.textContent = checked ? `下载 ${checked} 集` : '下载';
+  }
+  const allBtn = document.querySelector('#download-sheet [data-dl-all]');
+  if (allBtn) allBtn.textContent = total && checked === total ? '取消全选' : '全选';
 }
 
 async function resolveEpisodesForDownload(episodes) {
@@ -1646,13 +1689,13 @@ async function submitDownloadTo(target, remoteId) {
         deviceId: String(remoteId || '')
       });
       hideDownloadSheet();
-      toast('已推送到设备，马上开始下载');
+      nativeToast('已推送到设备，马上开始下载');
       return;
     }
     if (target === 'nas') {
       // NAS 自主解析：只推 seriesId/title/集数，由后端调红果 App 接口取流（最高画质档）
       await api('nas-download-start', { source: contentSource, title: state.detail.title, seriesId: String(state.detail.seriesId || state.detail.id), episodes, cover: state.detail.cover || '' });
-      toast('已提交 NAS 下载任务（后端自行解析取流）');
+      nativeToast(`已提交 NAS 下载任务（${episodes.length} 集）`);
     } else {
       // 下载到手机 / 下载到远程服务器。
       // 判定依据优先级：① 当前详情页实际内容源（detail.source，与详情/播放完全一致，杜绝全局模式脱节）；
@@ -1677,11 +1720,16 @@ async function submitDownloadTo(target, remoteId) {
         // 远程服务器：先照常下到手机（同一条链路），下载+合并完成后原生自动上传到所选服务器
         const targetRemote = target === 'remote' ? String(remoteId || '') : '';
         await api('download-start', { source: sourceNow, title: state.detail.title, episodes: resolved, debug, cover: state.detail.cover || '', remoteId: targetRemote });
-        toast(debug
-          ? `调试模式已开始（${resolved.length} 集）：分片下完后会导出「第NN集_调试包.zip」到 Download/Veyra/${state.detail.title}`
-          : targetRemote
-            ? `已开始下载 ${resolved.length} 集`
-            : `判定[源=${sourceNow} 通道=${proxyModeNow}] 已开始下载到手机（手机经代理拉源合并）`);
+        /* 成功提示走系统 Toast（屏幕底部小条）。原来这条塞了「判定[源=… 通道=…]」，
+         * 在顶部浮层里又长又难读；技术细节留 console，用户只需要知道已经开始下了。 */
+        console.log(`[dl-start] 源=${sourceNow} 通道=${proxyModeNow} 集数=${resolved.length} 远程=${targetRemote || '-'}`);
+        if (debug) {
+          toast(`调试模式已开始（${resolved.length} 集）：分片下完后会导出「第NN集_调试包.zip」到 Download/Veyra/${state.detail.title}`);
+        } else if (targetRemote) {
+          nativeToast(`已开始下载 ${resolved.length} 集，完成后自动传到服务器`);
+        } else {
+          nativeToast(`已开始下载 ${resolved.length} 集`);
+        }
       }
     }
     hideDownloadSheet();
@@ -4229,13 +4277,20 @@ document.addEventListener('click', async event => {
     const allSelected = episodes.length && episodes.every(n => downloadSelection.has(n));
     downloadSelection.clear();
     if (!allSelected) episodes.forEach(n => downloadSelection.add(n));
-    renderDownloadSheet();
+    // 同样不重绘：逐格切 class，滚动位置原地不动
+    document.querySelectorAll('#download-sheet .dl-ep').forEach(cell => {
+      cell.classList.toggle('checked', downloadSelection.has(Number(cell.dataset.dlEp)));
+    });
+    syncDownloadSheetSelection();
     return;
   }
   if (event.target.closest('[data-dl-ep]')) {
-    const n = Number(event.target.closest('[data-dl-ep]').dataset.dlEp);
+    const cell = event.target.closest('[data-dl-ep]');
+    const n = Number(cell.dataset.dlEp);
     if (downloadSelection.has(n)) downloadSelection.delete(n); else downloadSelection.add(n);
-    renderDownloadSheet();
+    // 只动这一格 + 顶部计数，绝不重绘列表（重绘 = 滚动条弹回顶部）
+    cell.classList.toggle('checked', downloadSelection.has(n));
+    syncDownloadSheetSelection();
     return;
   }
   if (event.target.closest('[data-dl-play]')) {
