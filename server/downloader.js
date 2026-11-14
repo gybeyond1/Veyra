@@ -39,7 +39,8 @@ let KEEP_EPISODES = false;
 const RETRIES = 2;
 /** 合并前后是否做音频解码体检（坏音轨宁可报错也不静默出片）。VEYRA_AUDIT_AUDIO=0 可关。 */
 const AUDIT_AUDIO = process.env.VEYRA_AUDIT_AUDIO !== '0';
-const AUDIT_TIMEOUT_MS = 5 * 60 * 1000;
+/* 全片音频解码体检的超时。4.8 小时的整季在低功耗 NAS 上要跑两三分钟，5 分钟太紧。 */
+const AUDIT_TIMEOUT_MS = 15 * 60 * 1000;
 const TASKS_FILE = path.join(DATA_DIR, 'downloads.json');
 const REDOWNLOAD_TIMEOUT_MS = 30 * 60 * 1000; // 播放地址默认时效：超时后任务判失败（APK 重新提交）
 
@@ -355,6 +356,46 @@ function decodeErrors(file, selector) {
   return { errors: real.length, sample: real.slice(0, 2).join(' | ').slice(0, 300) };
 }
 
+/**
+ * 接缝体检：统计音轨里「相邻两包几乎重合」的位置。
+ *
+ * 逐集编码再 concat，每个集边界都会留下 1~3 个间隔约等于 0 的包（实测约 3ms 残帧）：
+ * 前一段的尾包还没走完，后一段的首包已经贴上来了。播放器 seek 到集边界时，
+ * 新旧两段样本一起被吐出来 —— 就是拖进度条到集边界听见的咔哒声/爆音。
+ * 视频帧的 46~53ms 空洞也出自同一处（每段最后 1~2 帧被下段的首帧顶掉）。
+ *
+ * 整轨一次性编码的产物这里应当是 0。用固定帧长的中位数做基准，
+ * 只认「比半个帧长还短」的间隔，避免把正常的抖动算成接缝。
+ */
+function seamStats(file) {
+  const out = spawnSync('ffprobe', ['-v', 'error', '-select_streams', 'a:0',
+    '-show_entries', 'packet=pts_time', '-of', 'csv=p=0', file],
+    { encoding: 'utf8', timeout: AUDIT_TIMEOUT_MS, maxBuffer: 96 * 1024 * 1024 });
+  if (out.status !== 0) return { total: 0, seams: 0, dup: 0, frameDur: 0 };
+  const pts = [];
+  for (const line of String(out.stdout || '').split('\n')) {
+    const v = Number(line.trim());
+    if (Number.isFinite(v)) pts.push(v);
+  }
+  if (pts.length < 3) return { total: pts.length, seams: 0, dup: 0, frameDur: 0 };
+  // 帧长基准：取前 800 个正间隔的中位数（AAC 一般是 1024 或 2048 样本，定值）
+  const deltas = [];
+  for (let i = 1; i < pts.length && deltas.length < 800; i++) {
+    const d = pts[i] - pts[i - 1];
+    if (d > 0.0001) deltas.push(d);
+  }
+  deltas.sort((a, b) => a - b);
+  const frameDur = deltas.length ? deltas[Math.floor(deltas.length / 2)] : 0;
+  if (!frameDur) return { total: pts.length, seams: 0, dup: 0, frameDur: 0 };
+  let seams = 0, dup = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const d = pts[i] - pts[i - 1];
+    if (d <= 0) dup++;
+    else if (d < frameDur * 0.5) seams++;
+  }
+  return { total: pts.length, seams, dup, frameDur: Math.round(frameDur * 1e6) / 1e6 };
+}
+
 /** 合并产物体检：参数是否落到目标值 + 音频能不能完整解码。 */
 function auditOutput(file, targetSR, targetCh, expectAudio) {
   let info = null;
@@ -366,10 +407,11 @@ function auditOutput(file, targetSR, targetCh, expectAudio) {
     if (targetCh && info.channels && Number(info.channels) !== Number(targetCh)) problems.push(`声道 ${info.channels}≠${targetCh}`);
   }
   const health = expectAudio ? decodeErrors(file, '0:a:0?') : { errors: 0, sample: '' };
+  const seam = expectAudio && info.audioCodec ? seamStats(file) : { total: 0, seams: 0, dup: 0, frameDur: 0 };
   const audioErrors = health.errors + problems.filter(p => p === '产物里没有音轨').length;
   const text = [info.videoCodec ? info.videoCodec.toUpperCase() : '视频?',
     info.audioCodec ? `${info.audioCodec.toUpperCase()} ${info.sampleRate || '?'}Hz ${info.channels || '?'}ch` : '无音轨'].join(' + ');
-  return { audioErrors, sample: health.sample, problems, info, text };
+  return { audioErrors, sample: health.sample, problems, seam, info, text };
 }
 /**
  * 参数分组统计。返回按「票数降序、首次出现顺序升序」排好的组。
@@ -673,9 +715,39 @@ async function mergeEpisodes(episodeFiles, outputPath, workDir, report) {
   const lines = ['ffconcat version 1.0'];
   for (const f of prepared) lines.push(`file '${String(f).replace(/'/g, "'\\''")}'`);
   fs.writeFileSync(listFile, lines.join('\n') + '\n');
+  /* 音频整轨重编码。
+   *
+   * 逐集编码再 concat，每集都会带一段 AAC 编码器延迟（priming，约 1 帧 = 23ms）。
+   * concat 时这些 priming 不会互相抵消，而是在每个集边界留下：
+   *   · 1~3 个 PTS 间隔不足 1ms 的重叠包（实测全季 800+ 处，seek 到集边界就咔哒/爆音）
+   *   · 前一段尾帧被后一段首帧顶掉，视频每处丢 1~2 帧（46~53ms 空洞）
+   * 把音频改成「整轨解码一次、编码一次」，全程只有一个 priming，边界从 2N 处降到 0，
+   * 代价是整季音频重编一遍（4.8 小时约 3~5 分钟），视频仍然 copy，画质零损失。
+   *
+   * 全季参数完全一致（没有任何集需要处理）时保持原样直拼 —— 那种情况下源本来就是
+   * 一路编下来的，没有 priming 叠加，反而比重新编码更干净。
+   */
+  const anyAudioWork = plan.steps.some(s => s.audio || s.silence || s.trim || s.sync);
+  const totalDur = infos.every(x => (Number(x.duration) || 0) > 0)
+    ? infos.reduce((a, x) => a + (Number(x.duration) || 0), 0) : 0;
+  const wholeAudio = !!aT.present && anyAudioWork && totalDur > 0;
   const concatArgs = ['-copyts', '-protocol_whitelist', 'file,pipe', '-f', 'concat', '-safe', '0', '-i', listFile,
-    '-map', '0:v:0', '-map', '0:a:0?', '-sn', '-dn', '-c', 'copy',
-    '-video_track_timescale', String(plan.timescale), '-movflags', '+faststart'];
+    '-map', '0:v:0', '-sn', '-dn'];
+  if (wholeAudio) {
+    console.log(`[merge] 音频整轨重编码：消除 ${infos.length - 1} 处集边界接缝，`
+      + `视频保持 copy（音频 ${(totalDur / 60).toFixed(1)} 分钟）`);
+    report(66, `音频整轨重编码（${(totalDur / 60).toFixed(0)} 分钟音频，消除拼接点）`);
+    concatArgs.push('-map', '0:a:0?', '-c:v', 'copy',
+      '-c:a', 'aac', '-profile:a', 'aac_low', '-b:a', '128k',
+      '-ar', String(aT.sampleRate), '-ac', String(aT.channels),
+      '-af', `aresample=${aT.sampleRate}:async=1:first_pts=0`,
+      /* 显式裁到视频总时长：整轨编码的 priming 会让音轨比画面长几十毫秒，
+       * -shortest 只按包边界截、实测还差 14ms，必须给准确时长。 */
+      '-t', totalDur.toFixed(3));
+  } else {
+    concatArgs.push('-map', '0:a:0?', '-c', 'copy');
+  }
+  concatArgs.push('-video_track_timescale', String(plan.timescale), '-movflags', '+faststart');
   // h264/hevc 产物一律 avc3/hev1（in-band SPS/PPS）：concat 后播放器 seek 到任何段都按帧内参数解码，杜绝快进花屏/乱码
   if (vT.codec === 'h264') concatArgs.push('-tag:v', 'avc3');
   else if (vT.codec === 'hevc') concatArgs.push('-tag:v', 'hev1');
@@ -692,7 +764,9 @@ async function mergeEpisodes(episodeFiles, outputPath, workDir, report) {
     const retryArgs = ['-copyts', '-protocol_whitelist', 'file,pipe', '-f', 'concat', '-safe', '0', '-i', listFile,
       '-map', '0:v:0', '-map', '0:a:0?', '-sn', '-dn', '-c:v', 'copy',
       '-c:a', 'aac', '-profile:a', 'aac_low', '-b:a', '128k', '-ar', String(aT.sampleRate), '-ac', String(aT.channels),
-      '-video_track_timescale', String(plan.timescale), '-movflags', '+faststart'];
+      '-af', `aresample=${aT.sampleRate}:async=1:first_pts=0`];
+    if (totalDur > 0) retryArgs.push('-t', totalDur.toFixed(3));
+    retryArgs.push('-video_track_timescale', String(plan.timescale), '-movflags', '+faststart');
     if (vT.codec === 'h264') retryArgs.push('-tag:v', 'avc3');
     else if (vT.codec === 'hevc') retryArgs.push('-tag:v', 'hev1');
     retryArgs.push('-y', outputPath);
@@ -705,8 +779,17 @@ async function mergeEpisodes(episodeFiles, outputPath, workDir, report) {
       + '，请删掉对应集重新下载后再合并');
   }
   if (audit.problems.length) console.warn(`[merge] 产物音频参数偏差（不影响播放）：${audit.problems.join('，')}`);
+  /* dup 恒有 1 处（末包或首包的零长边界），是 ffmpeg 封装产物自带的，不作为异常；
+   * 真正的接缝看 seams —— 整轨重编码后应当归零。 */
+  if (audit.seam && (audit.seam.seams > 0 || audit.seam.dup > 1)) {
+    console.warn(`[merge] 产物接缝 ${audit.seam.seams} 处 / 重复时间戳 ${audit.seam.dup} 处`
+      + `（帧长 ${audit.seam.frameDur}s，共 ${audit.seam.total} 包）：集边界 seek 可能轻微咔哒，解码无误则不阻断出片`);
+  } else if (audit.seam && audit.seam.total > 0) {
+    console.log(`[merge] 产物接缝 0 处（${audit.seam.total} 包全连续）`);
+  }
   report(100, '合并完成');
-  return { text: audit.text, corrupt: corrupt.length, aligned: work, drift: drift.length, total: infos.length, target: targetText };
+  return { text: audit.text, corrupt: corrupt.length, aligned: work, drift: drift.length,
+    total: infos.length, target: targetText, seams: audit.seam ? audit.seam.seams : 0, wholeAudio };
 }
 
 // ---- 任务执行 ----
