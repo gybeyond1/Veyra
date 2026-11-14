@@ -36,8 +36,11 @@ DATA_DIR = resolveWritableDir(DATA_DIR, [path.join(process.cwd(), 'data'), path.
 /* 默认 10 集并发（手机端 DL_CONCURRENCY 同为 10，两端行为一致）。
  * 环境变量 DOWNLOAD_CONCURRENCY 仍可覆盖，便于临时压测或降速；上限 16 由 setConcurrency 兜住。 */
 let CONCURRENCY = Math.max(1, Math.min(16, parseInt(process.env.DOWNLOAD_CONCURRENCY || '10', 10) || 10));
-/** 合并后是否保留分集文件（桌面端在设置里可关，后端保持原来的「合并即清理」） */
-let KEEP_EPISODES = false;
+/** 合并后是否保留分集文件。
+ *  默认 true：用户是分批下的（今天 1/3/5/7，明天 2/4/6/8 再点合并），
+ *  合并即清理会把上一批的分集删掉，第二天就没法追加成一整季。
+ *  想省空间可设 VEYRA_KEEP_EPISODES=0，或在桌面端设置里关掉。 */
+let KEEP_EPISODES = process.env.VEYRA_KEEP_EPISODES === '0' ? false : true;
 const RETRIES = 2;
 /** 合并前后是否做音频解码体检（坏音轨宁可报错也不静默出片）。VEYRA_AUDIT_AUDIO=0 可关。 */
 const AUDIT_AUDIO = process.env.VEYRA_AUDIT_AUDIO !== '0';
@@ -81,13 +84,13 @@ function rescanTaskFiles(t) {
     for (const ep of t.episodes) { ep._ok = false; ep.failed = false; }
     return;
   }
-  t.episodes.forEach((ep, i) => {
-    const f = safeJoin(dir, epName(i + 1));
+  t.episodes.forEach(ep => {
+    const f = safeJoin(dir, epName(ep.index));
     let ok = false;
     try { ok = fs.existsSync(f) && fs.statSync(f).size > 0; } catch { ok = false; }
     ep._ok = ok;
     ep.failed = !ok;
-    if (!ok) t.failedEpisodes.push({ index: i + 1, error: '分集缺失，待重试补下' });
+    if (!ok) t.failedEpisodes.push({ index: ep.index, error: '分集缺失，待重试补下' });
   });
 }
 function flushStore(force) {
@@ -1114,34 +1117,38 @@ async function runTask(task) {
   if (task.source === 'hongguo' && !task._appVids) {
     if (!task._webId) task._webId = task.seriesId; // 保留手机推来的原始 ID（网页源保底用）
     let vids = null;
+    /* 判断够不够用要看「最大集号」而不是集数：选 3/5/7 时 episodes.length=3，
+     * 但需要的是第 7 个 vid，用长度 3 判断会误判充足、越界取到第 1~3 集的 vid。 */
+    const maxIndex = task.episodes.reduce((m, e) => Math.max(m, Number(e.index) || 0), 0);
     // 手机端直推的 vids（APK 用无签名 video_detail 解析官方 vid）：直接注入，绕开 NAS 端签名风控
-    if (Array.isArray(task.vids) && task.vids.length >= task.episodes.length) {
+    if (Array.isArray(task.vids) && task.vids.length >= maxIndex) {
       vids = task.vids.map(v => String(v));
       console.log(`[hongguo-app] ${task.title} 手机端注入 ${vids.length} 个 vid`);
     } else if (task.seriesId) {
       try {
         const det = await hgApp.videoDetail(task.seriesId);
-        if (det.vids && det.vids.length >= task.episodes.length) vids = det.vids;
-        else console.log(`[hongguo-app] ${task.title} seriesId=${task.seriesId} 集数不足(${det.vids ? det.vids.length : 0}/${task.episodes.length})`);
+        if (det.vids && det.vids.length >= maxIndex) vids = det.vids;
+        else console.log(`[hongguo-app] ${task.title} seriesId=${task.seriesId} 集数不足(${det.vids ? det.vids.length : 0}/${maxIndex})`);
       } catch (e) {
         console.log(`[hongguo-app] ${task.title} videoDetail(${task.seriesId}) 失败: ${e.message}`);
       }
     }
     if (!vids) {
       try {
-        const sid = await hgApp.searchSeries(task.title, task.episodes.length);
+        const sid = await hgApp.searchSeries(task.title, maxIndex);
         if (sid) {
           console.log(`[hongguo-app] ${task.title} 标题搜索命中 series_id=${sid}`);
           task.seriesId = sid;
           const det = await hgApp.videoDetail(sid);
-          if (det.vids && det.vids.length >= task.episodes.length) vids = det.vids;
+          if (det.vids && det.vids.length >= maxIndex) vids = det.vids;
         }
       } catch (e) {
         console.log(`[hongguo-app] ${task.title} 标题搜索匹配失败: ${e.message}`);
       }
     }
     if (vids) {
-      task.episodes.forEach((ep, i) => { ep.vid = vids[i]; });
+      /* 按真实集号取 vid：第 3 集用 vids[2]，不是 vids[0] */
+      task.episodes.forEach(ep => { ep.vid = vids[Number(ep.index) - 1]; });
       task._appVids = true;
       console.log(`[hongguo-app] ${task.title} 注入 ${vids.length} 个 vid，走 App 最高清晰度取流`);
     } else {
@@ -1183,9 +1190,10 @@ async function runTask(task) {
           const item = queue[next++];
           if (!item) break;
           const { ep, idx } = item;
-          const plainFile = safeJoin(dir, epName(idx + 1)); // 明文分集
-          task.progress.episode = idx + 1;
-          task.progress.detail = `下载第 ${idx + 1}/${queue.length} 集`;
+          /* 文件名用真实集号：第 3 集就存成「第03集.mp4」，跨批次下载才能靠集号凑成完整一季 */
+          const plainFile = safeJoin(dir, epName(ep.index)); // 明文分集
+          task.progress.episode = ep.index;
+          task.progress.detail = `下载第 ${ep.index} 集（${idx + 1}/${queue.length}）`;
           touch(task);
           let attempt = 0;
           while (attempt <= RETRIES && !signal.aborted) {
@@ -1202,41 +1210,41 @@ async function runTask(task) {
                     ep._appSource = true;
                     // App 源 CDN 防盗链校验：下载带取流 URL 同域 Referer（源站要求 Referer 时避免 403）
                     try { ep._appReferer = 'https://' + new URL(s.url).host + '/'; } catch { ep._appReferer = ''; }
-                    task.progress.detail = `第 ${idx + 1} 集取流 ${s.quality || ''}`;
+                    task.progress.detail = `第 ${ep.index} 集取流 ${s.quality || ''}`;
                   }
                 } catch (e) {
-                  console.log(`[hongguo-app] 第 ${idx + 1} 集取流失败，降级网页源: ${e.message}`);
+                  console.log(`[hongguo-app] 第 ${ep.index} 集取流失败，降级网页源: ${e.message}`);
                 }
               }
               // 仍无播放地址（手机端未推 URL 且 App 源不可用）：NAS 自抓镜像站网页源保底
               if (!ep.url && attempt === 0) {
                 try {
-                  const web = await hgApp.fetchWebUrl(task._webId || task.seriesId, idx + 1);
+                  const web = await hgApp.fetchWebUrl(task._webId || task.seriesId, ep.index);
                   ep.url = web.url;
                   ep.key = '';
                   ep._webReferer = web.referer || ''; // 镜像站直链防盗链：下载时带 Referer，否则 403
-                  console.log(`[hongguo-app] 第 ${idx + 1} 集网页源保底获取成功`);
+                  console.log(`[hongguo-app] 第 ${ep.index} 集网页源保底获取成功`);
                 } catch (e) {
-                  throw new Error(`第 ${idx + 1} 集网页源解析失败: ${e.message}`);
+                  throw new Error(`第 ${ep.index} 集网页源解析失败: ${e.message}`);
                 }
               }
               if (task.source === 'huangguo') {
                 // 黄果（私密）源：每集页面解析 videoSrc(m3u8) → 分片下载 → ffmpeg 封装（一次完成）
-                task.progress.detail = `第 ${idx + 1} 集处理中`;
+                task.progress.detail = `第 ${ep.index} 集处理中`;
                 touch(task);
-                await huangguoDownloadEpisode(task.seriesId, idx + 1, dir, plainFile);
+                await huangguoDownloadEpisode(task.seriesId, ep.index, dir, plainFile);
               } else if (ep.key) {
                 // 红果 CENC-AES-CTR：完整下载密文后由 ffmpeg -decryption_key 本地解密（与 juku-backend 一致，
                 // ffmpeg mov demuxer 原生支持 CENC，产物为标准明文 MP4；避免对不支持 Range 的服务器直连拉流）
-                const rawFile = safeJoin(dir, epEncName(idx + 1));
-                task.progress.detail = `下载第 ${idx + 1} 集`;
+                const rawFile = safeJoin(dir, epEncName(ep.index));
+                task.progress.detail = `下载第 ${ep.index} 集（${idx + 1}/${queue.length}）`;
                 touch(task);
                 await downloadWithFallback([ep.url, ...(ep.altUrls || [])], rawFile, headersFor(ep), received => {
                   if (signal.aborted) return;
                   task.progress.percent = Math.min(98, Math.round((downloaded + Math.min(1, received / 1e8)) / task.episodes.length * 100));
                   touch(task);
                 }, signal);
-                task.progress.detail = `解密第 ${idx + 1} 集`;
+                task.progress.detail = `解密第 ${ep.index} 集`;
                 touch(task);
                 try {
                   await runFFmpeg(['-decryption_key', ep.key, '-i', rawFile, '-c', 'copy', '-f', 'mp4', '-y', plainFile]);
@@ -1244,7 +1252,7 @@ async function runTask(task) {
                   fs.rmSync(rawFile, { force: true });
                 }
               } else {
-                const rawFile = safeJoin(dir, epEncName(idx + 1));
+                const rawFile = safeJoin(dir, epEncName(ep.index));
                 await downloadWithFallback([ep.url, ...(ep.altUrls || [])], rawFile, headersFor(ep), received => {
                   if (signal.aborted) return;
                   task.progress.percent = Math.min(98, Math.round((downloaded + Math.min(1, received / 1e8)) / task.episodes.length * 100));
@@ -1261,17 +1269,17 @@ async function runTask(task) {
               if (Date.now() - started > REDOWNLOAD_TIMEOUT_MS) throw new Error('播放地址超时失效，请重新提交');
               break;
             } catch (err) {
-              fs.rmSync(safeJoin(dir, epEncName(idx + 1)), { force: true });
+              fs.rmSync(safeJoin(dir, epEncName(ep.index)), { force: true });
               fs.rmSync(plainFile, { force: true });
               attempt++;
               if (attempt > RETRIES) {
                 // 单集失败不中断整剧：标记失败集进入下一轮自动重试，其余分集继续
                 ep.failed = true;
                 ep.error = err.message;
-                console.log(`[download] ${task.title} 第 ${idx + 1} 集失败(已重试 ${RETRIES} 次): ${err.message}`);
+                console.log(`[download] ${task.title} 第 ${ep.index} 集失败(已重试 ${RETRIES} 次): ${err.message}`);
                 if (!task.failedEpisodes) task.failedEpisodes = [];
-                if (!task.failedEpisodes.some(f => f.index === idx + 1)) task.failedEpisodes.push({ index: idx + 1, error: err.message });
-                task.progress.detail = `第 ${idx + 1} 集失败（将自动重试）`;
+                if (!task.failedEpisodes.some(f => f.index === ep.index)) task.failedEpisodes.push({ index: ep.index, error: err.message });
+                task.progress.detail = `第 ${ep.index} 集失败（将自动重试）`;
                 touch(task);
                 break;
               }
@@ -1303,11 +1311,40 @@ async function runTask(task) {
   flushStore(true);
 }
 
-/** 合并阶段（runTask 拆分）：合并分集 -> 单文件，成功后清理分集目录 */
+/** 扫描目录里已下载的全部分集（第NN集.mp4），按真实集号升序返回。
+ *  为什么要扫目录而不是用 task.episodes：用户是分批下的（今天 1/3/5/7，明天 2/4/6/8），
+ *  第二次点合并时必须把上一次下的集一起合进去，只认本次任务的 episodes 会丢集。 */
+function collectEpisodeFiles(dir) {
+  const out = [];
+  let names = [];
+  try { names = fs.readdirSync(dir); } catch { return out; }
+  for (const name of names) {
+    const m = /^第(\d+)集\.mp4$/.exec(name);
+    if (!m) continue;
+    const index = Number(m[1]);
+    if (!Number.isInteger(index) || index <= 0) continue;
+    const file = safeJoin(dir, name);
+    let size = 0;
+    try { size = fs.statSync(file).size; } catch { continue; }
+    if (size <= 0) continue;
+    out.push({ index, file, size });
+  }
+  out.sort((a, b) => a.index - b.index);
+  return out;
+}
+
+/** 合并阶段（runTask 拆分）：合并分集 -> 单文件，成功后清理中间文件（分集按 KEEP_EPISODES 决定保留） */
 async function mergeStage(task, dir, workDir) {
-  // 失败的分集跳过，只合并已成功下载的分集；产物名用成功数
-  const okEpisodes = task.episodes.filter(ep => !ep.failed);
-  if (okEpisodes.length === 0) throw new Error('没有可合并的成功分集');
+  // 以目录里实际存在的分集为准（含以前批次下载的），缺集不阻断，只提示
+  const found = collectEpisodeFiles(dir);
+  if (found.length === 0) throw new Error('没有可合并的分集');
+  const maxIdx = found[found.length - 1].index;
+  const haveSet = new Set(found.map(x => x.index));
+  const missing = [];
+  for (let i = 1; i <= maxIdx; i++) if (!haveSet.has(i)) missing.push(i);
+  const missingText = missing.length
+    ? `，缺第 ${missing.slice(0, 6).join('、')}${missing.length > 6 ? ` 等 ${missing.length}` : ''} 集`
+    : '';
   const outName = mergedName(task);
   const outputPath = safeJoin(dir, outName);
   /* 重新合并同一部剧：先删旧成片，避免 ffmpeg 在已有文件上续写/残留旧 moov */
@@ -1317,10 +1354,10 @@ async function mergeStage(task, dir, workDir) {
   /* 合并从 0 开始算：以前预置 98，紧接着 mergeEpisodes 又 report(0) 把进度条打回 0，
      前端看起来就是"进度条先满再倒退"。 */
   task.progress.percent = 0;
-  task.progress.detail = `开始合并（成功 ${okEpisodes.length} 集${(task.failedEpisodes || []).length ? `，跳过失败 ${task.failedEpisodes.length} 集` : ''}）`;
+  task.progress.detail = `开始合并（目录内 ${found.length} 集，第 1~${maxIdx} 集${missingText}）`;
+  if (missing.length) console.log(`[merge] ${task.title} 缺集不合并：${missing.join(',')}（共 ${found.length} 集）`);
   touch(task);
-  const files = task.episodes.map((_, i) => safeJoin(dir, epName(i + 1)))
-    .filter((f, i) => !task.episodes[i].failed);
+  const files = found.map(x => x.file);
   const summary = await mergeEpisodes(files, outputPath, workDir, (percent, detail) => {
     task.progress.percent = percent;
     task.progress.detail = detail;
@@ -1346,11 +1383,11 @@ async function mergeStage(task, dir, workDir) {
   task.output = outputPath;
   task.progress = {
     phase: 'done',
-    episode: okEpisodes.length,
-    total: task.episodes.length,
+    episode: found.length,
+    total: Math.max(task.episodes.length, found.length),
     percent: 100,
     detail: summary && summary.text
-      ? `完成（${summary.text}；${summary.aligned
+      ? `完成（${found.length} 集${missingText}；${summary.text}；${summary.aligned
         ? `${summary.aligned}/${summary.total} 集已按目标参数统一后合并`
         : '全部剧集参数一致，无损合并'}）`
       : '完成',
@@ -1411,14 +1448,23 @@ function createTask({ source, title, seriesId, episodes, owner, cover, upload })
   const norm = [];
   for (let i = 0; i < episodes.length; i++) {
     const raw = episodes[i];
-    if (typeof raw === 'number') { norm.push({ index: i + 1, url: '', key: '' }); continue; }
+    /* 数字 = 真实集号（前端传的是用户勾选的集号：[3,5,7]），不是数组下标。
+     * 老代码写 i + 1，于是选 3/5/7 实际下成了 1/2/3 —— 就是「选哪集却下了前几集」的根因。 */
+    if (typeof raw === 'number') { norm.push({ index: Number(raw), url: '', key: '' }); continue; }
     if (typeof raw === 'object' && raw !== null && raw.index != null) { norm.push({ index: Number(raw.index), url: String(raw.url || ''), key: raw.key ? String(raw.key) : '' }); continue; }
     throw new Error('分集参数无效');
   }
   for (const ep of norm) {
+    if (!Number.isInteger(ep.index) || ep.index <= 0) throw new Error(`分集集号无效: ${ep.index}`);
     if (ep.url && !/^https?:\/\//.test(ep.url)) throw new Error('分集播放地址无效');
     if (ep.key && !/^[0-9a-f]{32}$/i.test(ep.key)) throw new Error('分集内容密钥无效');
   }
+  /* 按真实集号去重排序：合并顺序必须跟集号一致，且同一集重复提交只下一次 */
+  const dedup = new Map();
+  for (const ep of norm) if (!dedup.has(ep.index)) dedup.set(ep.index, ep);
+  const sorted = [...dedup.values()].sort((a, b) => a.index - b.index);
+  norm.length = 0;
+  norm.push(...sorted);
   const id = crypto.randomBytes(8).toString('hex');
   const task = {
     id, source: source === 'huangguo' ? 'huangguo' : 'hongguo',
@@ -1551,4 +1597,4 @@ function status() {
 loadTasks();
 ensureDirs();
 
-module.exports = { createTask, listTasks, getTask, getRawTask, taskDirOf, patchTask, deleteTask, mergeTask, retryFailedEpisodes, status, setDownloadDir, setConcurrency, setMergeOptions, mergeEpisodes, epName, safeJoin };
+module.exports = { createTask, listTasks, getTask, getRawTask, taskDirOf, patchTask, deleteTask, mergeTask, retryFailedEpisodes, status, setDownloadDir, setConcurrency, setMergeOptions, mergeEpisodes, epName, safeJoin, collectEpisodeFiles };

@@ -358,6 +358,9 @@ typedef struct {
     AVFrame* ifr;            /* 解码帧 */
     AVFrame* ofr;            /* 编码输入帧 */
     int64_t next_pts;        /* 已送编码器样本数：重排 PTS 的唯一依据 */
+    int64_t last_src;        /* 上一帧在源时间轴上的位置（换算成目标采样率的样本数） */
+    int64_t last_len;        /* 上一帧输出样本数，用于预测本帧应有的起点 */
+    int have_src;            /* last_src 是否有效 */
     int64_t frames, bad;
 } AudioFix;
 
@@ -435,8 +438,26 @@ static int afix_packet(AudioFix* af, AVPacket* pkt, AVStream* ain, AVFormatConte
                               (const uint8_t**)af->ifr->extended_data, af->ifr->nb_samples);
         if (got <= 0) { av_frame_unref(af->ifr); continue; }
         af->ofr->nb_samples = got;
+        /* 源时间轴对齐。整轨连续编码消除了集内接缝，但「每集音频长度 ≠ 视频长度」的差值
+         * 会逐集累积（288 集能差出几秒，表现为越往后音画越不同步，源里每集音轨比画面长
+         * 几十毫秒的季尤其明显）。所以拿解码帧的原始 PTS 当锚点：
+         *   偏差 ≤ 1 帧 → 继续按样本数累计，顺手把源里 1 采样级的重叠吃掉（接缝归零）；
+         *   偏差 > 1 帧 → 说明换集了，直接对齐到源 PTS，阻止漂移累积。 */
+        if (af->ifr->pts != AV_NOPTS_VALUE && af->dec->pkt_timebase.den > 0) {
+            int64_t srcPts = av_rescale_q(af->ifr->pts, af->dec->pkt_timebase,
+                                          (AVRational){1, af->sample_rate});
+            if (!af->have_src) {
+                if (srcPts > 0) af->next_pts = srcPts;   /* 首帧从源起点开始，不只是 0 */
+                af->have_src = 1;
+            } else {
+                int64_t diff = srcPts - (af->last_src + af->last_len);
+                if (diff > 1024 || diff < -1024) af->next_pts = srcPts;
+            }
+            af->last_src = srcPts;
+        }
         af->ofr->pts = af->next_pts;
         af->next_pts += got;
+        af->last_len = got;
         if (afix_encode(af, oc, written) < 0) {
             logErrBoth(logBuf, "异常: 音轨编码写出失败（第 %lld 帧）\n", (long long)af->frames);
             av_frame_unref(af->ifr);
@@ -1324,6 +1345,11 @@ Java_com_veyra_gybeyond_FFmpegConcat_nativeConcat(JNIEnv* env, jclass cls,
         }
         majority_audio(aInfos, n, &aTarget, &aMixed);
         aMixed = aMixed && (allowRebuild == JNI_TRUE);
+#ifdef VEYRA_TEST_FORCE_REBUILD
+        /* 仅测试构建（-DVEYRA_TEST_FORCE_REBUILD）：强制走整轨重建，用同一批素材验证管线。
+           生产 so 不定义该宏，行为完全由 AAC 帧长是否混装决定。 */
+        aMixed = (allowRebuild == JNI_TRUE) ? 1 : 0;
+#endif
         char wl[224];
         snprintf(wl, sizeof(wl), "[nativeConcat] 音频多数派目标: codec=%d prof=%d sr=%d ch=%d；帧长混装=%s",
                  aTarget.codec, aTarget.profile, aTarget.sample_rate, aTarget.channels,
