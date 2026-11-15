@@ -206,6 +206,11 @@ body[data-backdrop="poster"] #tv-bg .veil{opacity:1}
   position:absolute;left:0;right:0;top:0;height:11.4rem;z-index:4;
   padding:6rem 5.2rem 0 4.6rem;
   display:flex;align-items:flex-start;
+  /* 整条铺一层不透明的页面底色：只给胶囊加底还不够 —— 海报滚上来时，
+     剧名会从胶囊之间的空隙里穿过去（#stage 的 mask 对带 transform 的卡片不生效），
+     屏幕上就是一行字在顶栏里乱飘。铺上这层就彻底挡住，后面什么都透不过来。
+     颜色就用 --bg，跟页面底色一致，不会多出一条异色的栏。 */
+  background:var(--bg);
 }/* 胶囊左对齐排开。这里不能 overflow:hidden —— 选中胶囊的焦点环是往外扩的
    box-shadow，裁掉就成了「上下两条边被切平」，又回到那个硬框手感。
    分类多到放不下时宁可压到工具条下面，工具条自己在更上层，不会被盖住。 */
