@@ -198,16 +198,15 @@ body[data-backdrop="poster"] #tv-bg img{opacity:1}
 body[data-backdrop="poster"] #tv-bg .veil{opacity:1}
 
 /* ---------------- 顶栏：分类胶囊 + 三个入口（常驻吸顶） ----------------
-   左侧抽屉撤掉了，搜索 / 最近 / 设置三颗按钮在右边，跟短剧/漫剧/热播榜那排
-   胶囊同一条水平线、上下沿齐平（都是 5rem 高）。
-   跟上一版的区别：这一版是「常驻」的 —— 顶栏放在 #stage 外面，遥控器往下按
-   时不动；海报往上滚到它下面一点点就开始渐隐（渐隐由 #stage 的 mask 做，
-   见下面的主区域）。 */
+   搜索 / 最近 / 设置三颗按钮在右边，跟短剧/漫剧/热播榜那排胶囊同一条水平线、
+   上下沿齐平（都是 5rem 高）。顶栏放在 #stage 外面，遥控器往下按时它不动；
+   海报往上滚到它下面一点点就开始渐隐（#stage 的 mask 负责）。
+   这一层自己不铺底色 —— 底色由胶囊和按钮各自带（见下）。 */
 #topbar{
-  position:absolute;left:4.6rem;right:5.2rem;top:6rem;height:5rem;z-index:4;
-  display:flex;align-items:center;
-}
-/* 胶囊左对齐排开。这里不能 overflow:hidden —— 选中胶囊的焦点环是往外扩的
+  position:absolute;left:0;right:0;top:0;height:11.4rem;z-index:4;
+  padding:6rem 5.2rem 0 4.6rem;
+  display:flex;align-items:flex-start;
+}/* 胶囊左对齐排开。这里不能 overflow:hidden —— 选中胶囊的焦点环是往外扩的
    box-shadow，裁掉就成了「上下两条边被切平」，又回到那个硬框手感。
    分类多到放不下时宁可压到工具条下面，工具条自己在更上层，不会被盖住。 */
 #topbar .chips,
@@ -216,7 +215,14 @@ body[data-backdrop="poster"] #tv-bg .veil{opacity:1}
   flex:1 1 auto;min-width:0;
   margin:0;
 }
-#topbar .chip{margin:0 1.2rem 0 0;flex:0 0 auto}
+/* 胶囊用不透明的底：--chip-bg 只有 10% 白，压在渐变背景上字发虚。
+   --bg-2 是各主题的不透明纯色，比底色亮/暗一档，气泡轮廓清楚，后面也透不过来。 */
+#topbar .chip{
+  margin:0 1.2rem 0 0;flex:0 0 auto;
+  background:var(--bg-2);
+}
+/* #topbar .chip 的优先级高于 .chip.is-active，选中态要单独补回来（否则选中项也变成灰底） */
+#topbar .chip.is-active{background:var(--accent);color:var(--accent-ink)}
 #topbar .chip:last-child{margin-right:0}
 /* margin-left:auto 把它顶到最右：搜索页那行只有它一个，也靠右 */
 #tools{
@@ -228,7 +234,7 @@ body[data-backdrop="poster"] #tv-bg .veil{opacity:1}
   position:relative;display:flex;align-items:center;justify-content:center;
   width:6rem;height:5rem;border:0;padding:0;
   border-radius:1.4rem;
-  background:var(--chip-bg);color:var(--text);
+  background:var(--bg-2);color:var(--text);
   transition:background .12s linear,color .12s linear;
 }
 .tool + .tool{margin-left:1rem}

@@ -861,6 +861,8 @@ function stepToRow(el, direction) {
   return true;
 }
 
+function inTopbar(el) { return !!(el && el.closest && el.closest('#topbar')); }
+
 function pickNearest(current, all, direction, banded) {
   var from = current.getBoundingClientRect();
   var cx = (from.left + from.right) / 2;
@@ -868,11 +870,18 @@ function pickNearest(current, all, direction, banded) {
   var best = null;
   var bestScore = Infinity;
   var onRail = inRail(current);
+  var onBar = inTopbar(current);
   for (var i = 0; i < all.length; i++) {
     var el = all[i];
     if (el === current) continue;
     /* 侧栏与内容区互不参与距离比较，只有显式的左/右才能跨过去 */
     if (inRail(el) !== onRail) continue;
+    /* 顶栏（胶囊 + 三颗按钮）是固定的一行，跟下面滚动的海报墙不是同一层。
+       内容往上滚过之后，第一排卡片的屏幕坐标会正好压在顶栏这一行上（顶栏盖住了它），
+       按几何距离算，它反而比旁边那个胶囊更近 —— 按右键就会突然从胶囊跳到海报。
+       所以左右移动时把「顶栏内」和「顶栏外」彻底隔开：
+       在顶栏里左右只走顶栏这一行，到头就停；按下才回内容区。 */
+    if ((direction === 'left' || direction === 'right') && inTopbar(el) !== onBar) continue;
     var box = el.getBoundingClientRect();
     if (banded) {
       if ((direction === 'left' || direction === 'right') && !sameBand(from, box)) continue;
