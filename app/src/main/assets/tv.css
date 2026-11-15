@@ -219,23 +219,37 @@ body[data-backdrop="poster"] #tv-bg .veil{opacity:1}
 /* ---------------- 左上角头像（侧栏入口） ----------------
    收起态左上角只有这一个圆，点它 / 按 OK 把左侧导航拉出来。
    侧栏打开后由栏内的账号头像接管，这里隐去，免得两个头像叠在一起。
-   top 压到 6rem：手机上横屏时这条是系统状态栏（时间/日期），
-   原来 1.2rem 会跟状态栏文字直接叠在一起。7.8rem = 原来 5.2rem 的 1.5 倍。 */
+   top 5.5rem：手机上横屏时最上面那条是系统状态栏（时间/日期，字底大约
+   4rem），原来 1.2rem 整个圆压在字上。再往上就要碰状态栏了，5.5rem 是极限。
+   7.8rem = 原来 5.2rem 的 1.5 倍，横向靠回左上角（left 2.6rem）。
+   焦点环画在内层 .avatar 上：按钮本身 overflow:hidden 会把外扩的阴影裁成
+   方角，看起来就是个矩形框；内层圆自带 50% 圆角，阴影跟着圆走，才是圆环。 */
 #rail-toggle{
-  position:absolute;left:4.6rem;top:6rem;width:7.8rem;height:7.8rem;z-index:4;
-  border:0;padding:0;border-radius:50%;overflow:hidden;cursor:pointer;
+  position:absolute;left:2.6rem;top:5.5rem;width:7.8rem;height:7.8rem;z-index:4;
+  border:0;padding:0;border-radius:50%;overflow:visible;cursor:pointer;
   display:flex;align-items:center;justify-content:center;
-  background:var(--rail-bg);color:var(--text);
-  box-shadow:0 .4rem 1.6rem rgba(0,0,0,.32);
+  background:transparent;color:var(--text);
   transition:box-shadow .12s linear,transform .12s ease-out;
 }
 #rail-toggle .avatar{
   display:block;width:100%;height:100%;line-height:7.8rem;text-align:center;
   font-size:3.2rem;font-weight:700;color:var(--text);
   white-space:nowrap;overflow:hidden;
+  border-radius:50%;background:var(--rail-bg);
+  box-shadow:0 .4rem 1.6rem rgba(0,0,0,.32);
+  transition:box-shadow .12s linear;
 }
-#rail-toggle .avatar img{display:block;width:100%;height:100%;object-fit:cover}
-#rail-toggle.is-focused{box-shadow:0 0 0 .3rem var(--focus);transform:scale(1.06)}
+#rail-toggle .avatar img{display:block;width:100%;height:100%;object-fit:cover;border-radius:50%}
+/* 焦点环用一个真圆环（border + 50% 圆角）叠在头像外面：
+   box-shadow 在部分老 WebView 上不跟着圆角走，画出来是方框，border 永远不会。 */
+#rail-toggle::after{
+  content:"";position:absolute;inset:-.42rem;border-radius:50%;
+  border:.26rem solid var(--focus);pointer-events:none;
+  box-shadow:0 0 0 .12rem var(--halo);
+  opacity:0;transition:opacity .12s linear;
+}
+#rail-toggle.is-focused{transform:scale(1.06)}
+#rail-toggle.is-focused::after{opacity:1}
 body.rail-open #rail-toggle{display:none}
 
 /* ---------------- 左侧图标导航（默认收起） ----------------
@@ -243,9 +257,9 @@ body.rail-open #rail-toggle{display:none}
    才把它拉出来。拉出来时焦点直接落到当前页的图标上，按右/返回收回。 */
 #rail{
   position:absolute;left:0;top:0;bottom:0;width:9.4rem;z-index:5;
-  /* 与左上角头像同一个起手高度：头像在上面 6rem 处，侧栏第一格也从 6rem 开始，
+  /* 与左上角头像同一个起手高度：头像在上面 5.5rem 处，侧栏第一格也从这里开始，
      展开时图标不会往上蹿一截，手机上也不会压到系统状态栏 */
-  padding:6rem 0 2.6rem;
+  padding:5.5rem 0 2.6rem;
   display:flex;flex-direction:column;align-items:center;
   background:transparent;
   transform:translateX(-140%);opacity:0;pointer-events:none;
@@ -272,20 +286,31 @@ body.rail-open #rail{
 
 /* 左下角账号：只放头像，点开账号面板 */
 .rail-account{
+  position:relative;
   margin-top:auto;width:5.2rem;height:5.2rem;border-radius:50%;
   display:flex;align-items:center;justify-content:center;
-  background:var(--rail-bg);
-  overflow:hidden;
+  background:transparent;
+  overflow:visible;
 }
 .rail-account .avatar{
   display:block;width:100%;height:100%;line-height:5.2rem;
   text-align:center;font-size:2.2rem;font-weight:700;color:var(--text);
   white-space:nowrap;overflow:hidden;
+  border-radius:50%;background:var(--rail-bg);
+  transition:box-shadow .12s linear;
 }
 /* 手机端设置的头像：铺满整个圆 */
 .rail-account .avatar img{width:100%;height:100%;object-fit:cover;border-radius:50%}
-.rail-account.is-focused{background:var(--accent);outline:none;box-shadow:0 0 0 .3rem var(--focus)}
-.rail-account.is-focused .avatar{color:var(--accent-ink)}
+/* 侧栏里这颗焦点环同理：画在内层圆上，才是贴着头像的圆环而不是方框 */
+.rail-account::after{
+  content:"";position:absolute;inset:-.34rem;border-radius:50%;
+  border:.24rem solid var(--focus);pointer-events:none;
+  box-shadow:0 0 0 .12rem var(--halo);
+  opacity:0;transition:opacity .12s linear;
+}
+.rail-account.is-focused{outline:none;box-shadow:none}
+.rail-account.is-focused::after{opacity:1}
+.rail-account.is-focused .avatar{background:var(--accent);color:var(--accent-ink)}
 
 /* ---------------- 主区域 ----------------
    侧栏收起后内容铺满整屏，只留 4.6rem 的左边距给标题呼吸。 */
@@ -293,8 +318,8 @@ body.rail-open #rail{
   position:absolute;left:0;right:0;top:0;bottom:0;z-index:2;
   overflow-y:auto;overflow-x:hidden;
   /* 顶部留白只给左上角头像让位（标题行已经整行删掉）：
-     头像 top 6rem + 高 7.8rem = 13.8rem，再多给 1.4rem 才轮到分类条 */
-  padding:15.2rem 5.2rem 8rem 4.6rem;
+     头像 top 5.5rem + 高 7.8rem = 13.3rem，再多给 1.4rem 才轮到分类条 */
+  padding:14.7rem 5.2rem 8rem 4.6rem;
   scrollbar-width:none;
 }
 #stage::-webkit-scrollbar{display:none}
