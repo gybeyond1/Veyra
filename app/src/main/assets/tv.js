@@ -75,7 +75,6 @@ var toastEl = document.getElementById('toast');
 var railAccount = document.getElementById('rail-account');
 var railAvatar = document.getElementById('rail-avatar');
 var railToggle = document.getElementById('rail-toggle');
-var railToggleAvatar = document.getElementById('rail-toggle-avatar');
 var themePanel = document.getElementById('theme');
 var themeGrid = document.getElementById('theme-grid');
 var themeSub = document.getElementById('theme-sub');
@@ -1754,14 +1753,23 @@ window.veyraTvKey = function (code) {
 };
 
 window.hgBack = function () {
-  if (otpPanel && !otpPanel.hidden) { closeOtp(); state.focusKey = 'acct:mode'; restoreFocus(); return true; }
+  if (otpPanel && !otpPanel.hidden) {
+    closeOtp();
+    if (accountPanel) { accountPanel.hidden = false; showAccountPage('privacy'); }
+    state.focusKey = 'acct:mode'; restoreFocus(); return true;
+  }
   if (sourcePanel && !sourcePanel.hidden) { closeSourcePanel(); return true; }
   if (proxyPanel && !proxyPanel.hidden) { closeProxy(); return true; }
   if (themePanel && !themePanel.hidden) { closeTheme(); return true; }
   if (updateLayer && !updateLayer.hidden) { closeUpdatePanel(); return true; }
   /* 没登录就停在登录页：返回直接交给原生弹退出确认，不能靠返回键绕过去 */
   if (!loginLayer.hidden) return false;
-  if (accountPanel && !accountPanel.hidden) { accountPanel.hidden = true; state.focusKey = 'nav:account'; restoreFocus(); return true; }
+  if (accountPanel && !accountPanel.hidden) {
+    var privacyBox = document.getElementById('privacy-box');
+    if (privacyBox && !privacyBox.hidden) { closePrivacy(); return true; }
+    closeAccount();
+    return true;
+  }
   var active = document.activeElement;
   if (active && active.tagName === 'INPUT') {
     active.blur();
@@ -1786,11 +1794,22 @@ document.addEventListener('click', function (event) {
   var target = event.target;
   if (!target || !target.closest) return;
 
-  /* 侧栏入口：左上角头像。侧栏里的图标导航、账号面板逻辑都不变。 */
+  /* 平板上没有返回键：点弹窗外的空白就收起来，不用再去找「关闭」。
+     只认遮罩本身（点面板内的空白不算），避免刚打开就被关掉。 */
+  if (accountPanel && !accountPanel.hidden && target.id === 'account') { closeAccount(); return; }
+  if (themePanel && !themePanel.hidden && target.id === 'theme') { closeTheme(); return; }
+  if (sourcePanel && !sourcePanel.hidden && target.id === 'source') { closeSourcePanel(); return; }
+  if (proxyPanel && !proxyPanel.hidden && target.id === 'proxy') { closeProxy(); return; }
+
+  /* 侧栏入口：左上角菜单。侧栏里的图标导航、账号面板逻辑都不变。 */
   if (target.closest('#rail-toggle')) { enterRail(); return; }
 
-  /* 侧栏开着时点侧栏以外的任何地方 → 收回侧栏，这一下不再触发背后的卡片/按钮 */
-  if (railOpen() && !target.closest('#rail')) { leaveRail(); return; }
+  /* 侧栏开着时点侧栏以外的任何地方 → 收回侧栏，这一下不再触发背后的卡片/按钮。
+     但浮层（账号面板、主题、内容源、网络通道）是叠在侧栏上面的，
+     点它们里面的按钮不能被这条规则吞掉，否则「私密模式」点了没反应。 */
+  var inOverlayPanel = target.closest('#account') || target.closest('#theme') ||
+    target.closest('#source') || target.closest('#proxy');
+  if (railOpen() && !inOverlayPanel && !target.closest('#rail')) { leaveRail(); return; }
 
   var nav = target.closest('[data-nav]');
   if (nav) { go(nav.dataset.nav); return; }
@@ -1867,7 +1886,8 @@ document.addEventListener('click', function (event) {
     }
     return;
   }
-  if (target.closest('#account-close')) { closeAccount(); return; }
+  if (target.closest('#account-privacy')) { openPrivacy(); return; }
+  if (target.closest('#account-privacy-back')) { closePrivacy(); return; }
   if (target.closest('#account-mode')) { switchMode(); return; }
   if (target.closest('#account-source')) { openSourcePanel(); return; }
   if (target.closest('#account-proxy')) { openProxy(); return; }
@@ -1903,10 +1923,10 @@ function setAccount(profile) {
   state.account = profile || { loggedIn: false };
   var name = state.account.loggedIn ? (state.account.username || '已登录') : '';
   /* 手机端设置过头像的话，账号资料里带 avatar（jpeg 的 data URL），
-     直接铺满那个圆；没有头像才退回首字母。侧栏里的账号头像和左上角入口共用一份。 */
+     直接铺满那个圆；没有头像才退回首字母。
+     左上角入口已经改成「三条横线」的菜单图标，不再跟着账号头像走。 */
   var avatar = state.account.loggedIn ? String(state.account.avatar || '') : '';
   paintAvatar(railAvatar, avatar, name);
-  paintAvatar(railToggleAvatar, avatar, name);
 }
 
 function paintAvatar(el, avatar, name) {
@@ -2114,6 +2134,7 @@ function openSourcePanel() {
 function closeSourcePanel() {
   if (sourcePanel) sourcePanel.hidden = true;
   if (accountPanel) accountPanel.hidden = false;
+  showAccountPage('privacy');
   state.focusKey = 'acct:source';
   restoreFocus();
 }
@@ -2161,17 +2182,28 @@ function openProxy() {
 function closeProxy() {
   if (proxyPanel) proxyPanel.hidden = true;
   if (accountPanel) accountPanel.hidden = false;
+  showAccountPage('privacy');
   state.focusKey = 'acct:proxy';
   restoreFocus();
 }
 
-/* ---------------- 账号面板：退出登录 / 切换私密模式 ---------------- */
+/* ---------------- 账号面板 ----------------
+   主页只留四项：主题设置 / 私密模式 / 检查更新 / 退出登录。
+   私密相关三项收进「私密模式」二级页，进入逻辑（动态码、内容源、网络通道）一字未改。
+   没有「关闭」按钮：遥控器按返回、平板上点面板外的空白都能收起来。 */
+function showAccountPage(page) {
+  var main = document.getElementById('account-box');
+  var privacy = document.getElementById('privacy-box');
+  var wantPrivacy = page === 'privacy';
+  if (main) main.hidden = wantPrivacy;
+  if (privacy) privacy.hidden = !wantPrivacy;
+}
+
 function openAccount() {
   var logged = !!(state.account && state.account.loggedIn);
   var nameEl = document.getElementById('account-name');
   var subEl = document.getElementById('account-sub');
   var logoutBtn = document.getElementById('account-logout');
-  var modeBtn = document.getElementById('account-mode');
 
   if (nameEl) nameEl.textContent = logged ? (state.account.username || '已登录') : '未登录';
   if (subEl) {
@@ -2182,19 +2214,42 @@ function openAccount() {
   if (logoutBtn) logoutBtn.hidden = !logged;
   var versionEl = document.getElementById('account-version');
   if (versionEl) versionEl.textContent = state.version ? ('版本 v' + state.version) : '版本 —';
-  if (modeBtn) {
-    modeBtn.hidden = !logged;
-    if (state.source === 'huangguo') modeBtn.textContent = '返回公开内容';
-    else modeBtn.textContent = '进入私密模式（需动态码）';
-  }
+  showAccountPage('main');
   accountPanel.hidden = false;
-  state.focusKey = logged ? 'acct:logout' : 'acct:close';
+  state.focusKey = 'acct:theme';
   restoreFocus();
 }
 
 function closeAccount() {
   accountPanel.hidden = true;
+  showAccountPage('main');
   state.focusKey = 'nav:account';
+  restoreFocus();
+}
+
+/* 私密模式二级页：动态码/内容源/网络通道都在这里，返回键或「返回」按钮回主面板 */
+function openPrivacy() {
+  var logged = !!(state.account && state.account.loggedIn);
+  var modeBtn = document.getElementById('account-mode');
+  var subEl = document.getElementById('privacy-sub');
+  if (modeBtn) {
+    modeBtn.hidden = !logged;
+    if (state.source === 'huangguo') modeBtn.textContent = '返回公开内容';
+    else modeBtn.textContent = '进入私密模式（需动态码）';
+  }
+  if (subEl) {
+    subEl.textContent = logged
+      ? '进入需要动态码；内容源与网络通道只影响私密内容，随时可以切回公开。'
+      : '没登录也能配置内容源与网络通道；进入私密内容需要先登录。';
+  }
+  showAccountPage('privacy');
+  state.focusKey = logged ? 'acct:mode' : 'acct:source';
+  restoreFocus();
+}
+
+function closePrivacy() {
+  showAccountPage('main');
+  state.focusKey = 'acct:privacy';
   restoreFocus();
 }
 

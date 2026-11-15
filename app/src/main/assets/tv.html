@@ -49,9 +49,11 @@
     </button>
   </nav>
   <main id="stage"><div id="view"></div></main>
-  <!-- 左上角常驻头像：侧栏收起时它就是这个「菜单」入口，按 OK / 点一下把左侧导航拉出来 -->
+  <!-- 左上角菜单：侧栏收起时它就是这个入口，按 OK / 点一下把左侧导航拉出来。
+       不放头像 —— 头像属于「账号」，而这里是「菜单」，用三条横线更直观，
+       也不用担心换账号/没设头像时这里空一块。 -->
   <button id="rail-toggle" type="button" data-focusable data-key="nav:toggle" aria-label="菜单" title="菜单">
-    <span class="avatar" id="rail-toggle-avatar">?</span>
+    <span class="menu-glyph" aria-hidden="true"><i></i><i></i><i></i></span>
   </button>
   <div id="toast" role="status" aria-live="polite"></div>
 
@@ -65,18 +67,28 @@
   </div>
 
   <div id="account" hidden>
-    <section class="account-box">
+    <section class="account-box" id="account-box">
       <h1 id="account-name">未登录</h1>
       <p id="account-sub">登录后可同步收藏与观看记录</p>
       <p class="account-version" id="account-version">版本 —</p>
       <div class="account-actions">
+        <button id="account-theme" class="btn" type="button" data-focusable data-key="acct:theme">主题设置</button>
+        <button id="account-privacy" class="btn" type="button" data-focusable data-key="acct:privacy">私密模式</button>
+        <button id="account-update" class="btn" type="button" data-focusable data-key="acct:update">检查更新</button>
+        <button id="account-logout" class="btn" type="button" data-focusable data-key="acct:logout">退出登录</button>
+      </div>
+    </section>
+
+    <!-- 私密模式二级页：原来摊在主面板上的三项收进来，逻辑一字未改。
+         进入私密模式要动态码；内容源与网络通道只影响私密内容。 -->
+    <section class="account-box privacy-box" id="privacy-box" hidden>
+      <h1>私密模式</h1>
+      <p id="privacy-sub">进入需要动态码；内容源与网络通道只影响私密内容，随时可以切回公开。</p>
+      <div class="account-actions">
         <button id="account-mode" class="btn" type="button" data-focusable data-key="acct:mode">进入私密模式</button>
         <button id="account-source" class="btn" type="button" data-focusable data-key="acct:source">私密内容源</button>
         <button id="account-proxy" class="btn" type="button" data-focusable data-key="acct:proxy">黄果网络通道</button>
-        <button id="account-theme" class="btn" type="button" data-focusable data-key="acct:theme">主题设置</button>
-        <button id="account-logout" class="btn" type="button" data-focusable data-key="acct:logout">退出登录</button>
-        <button id="account-update" class="btn ghost" type="button" data-focusable data-key="acct:update">检查更新</button>
-        <button id="account-close" class="btn ghost" type="button" data-focusable data-key="acct:close">关闭</button>
+        <button id="account-privacy-back" class="btn ghost" type="button" data-focusable data-key="acct:privacy-back">返回</button>
       </div>
     </section>
   </div>

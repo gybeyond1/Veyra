@@ -223,48 +223,38 @@ body[data-backdrop="poster"] #tv-bg .veil{opacity:1}
 /* 不做整屏遮罩：主界面颜色保持不变，只靠侧栏自己亮一档区分层次 */
 #rail-veil{display:none}
 
-/* ---------------- 左上角头像（侧栏入口） ----------------
-   收起态左上角只有这一个圆，点它 / 按 OK 把左侧导航拉出来。
-   侧栏打开后由栏内的账号头像接管，这里隐去，免得两个头像叠在一起。
-   top 5rem：平板上横屏时最上面那条是系统状态栏（时间/日期，字底大约 4rem），
-   原来 1.2rem 整个圆压在字上。5rem 时焦点环上沿离状态栏只剩一条缝，
-   再往上就要碰字了。
-   7.8rem = 原来 5.2rem 的 1.5 倍，横向贴回左上角（left 1.4rem）。
-   圆形一律用 border-radius + clip-path 双保险：盒子的背景/阴影在某些 WebView
-   上只认矩形，圆角失效就露出一个方框；clip-path 切出来的一定是圆。 */
+/* ---------------- 左上角菜单（侧栏入口） ----------------
+   收起态左上角只有这三条横线，点它 / 按 OK 把左侧导航拉出来。
+   这里不再放头像：头像代表「账号」，而这一格是「菜单」，两者混在一起
+   换账号时还会闪一下名字首字母。三条线在任何账号状态下都稳定。
+   top 5.2rem：平板上横屏最上面是系统状态栏（时间/日期，字底约 4rem），
+   按钮上沿正好停在状态栏下面，焦点框不会压到字。
+   按钮本身透明、比图标大一圈，留出手指/遥控器的可点区域；
+   视觉只有 4.6rem 宽的图标，所以焦点态用淡底 + 内描边贴着图标，不套大方框。 */
 #rail-toggle{
-  position:absolute;left:1.4rem;top:5rem;width:7.8rem;height:7.8rem;z-index:4;
-  border:0;padding:0;border-radius:50%;overflow:visible;cursor:pointer;
+  position:absolute;left:1.2rem;top:5.2rem;width:7.4rem;height:6.6rem;z-index:4;
+  border:0;padding:0;border-radius:1.7rem;overflow:visible;cursor:pointer;
   display:flex;align-items:center;justify-content:center;
   background:transparent;color:var(--text);
-  transition:transform .12s ease-out;
+  transition:background .12s linear;
 }
-#rail-toggle .avatar{
-  position:relative;z-index:1;
-  display:block;width:100%;height:100%;line-height:7.8rem;text-align:center;
-  font-size:3.2rem;font-weight:700;color:var(--text);
-  white-space:nowrap;overflow:hidden;
-  border-radius:50%;clip-path:circle(50% at 50% 50%);
-  background:var(--rail-bg);
+#rail-toggle .menu-glyph{
+  display:block;position:relative;width:4.6rem;height:3.4rem;
 }
-#rail-toggle .avatar img{
-  display:block;width:100%;height:100%;object-fit:cover;
-  border-radius:50%;clip-path:circle(50% at 50% 50%);
+#rail-toggle .menu-glyph i{
+  position:absolute;left:0;height:.34rem;border-radius:.17rem;
+  background:currentColor;
+  transition:width .14s ease-out;
 }
-/* 焦点环 = 一块用径向渐变画出来的圆环（外圈白、里面全透明），再 clip-path 切成圆。
-   不用 border / box-shadow：这台机器上盒子的圆角在某些情况下会被当成矩形画，
-   环就变成方框；渐变 + clip-path 跟圆角无关，画出来的一定是贴着头像的圆环。 */
-#rail-toggle::before{
-  content:"";position:absolute;inset:-.5rem;border-radius:50%;
-  clip-path:circle(50% at 50% 50%);
-  background:radial-gradient(circle closest-side,transparent 92%,var(--focus) 92%);
-  pointer-events:none;
-  opacity:0;transition:opacity .12s linear;
-}
-#rail-toggle.is-focused{transform:scale(1.06)}
-#rail-toggle.is-focused::before{opacity:1}
+#rail-toggle .menu-glyph i:nth-child(1){top:0;width:100%}
+/* 中间一根短一截：三条完全等长会像复选框，短一点才是常见的菜单图标 */
+#rail-toggle .menu-glyph i:nth-child(2){top:1.53rem;width:72%}
+#rail-toggle .menu-glyph i:nth-child(3){top:3.06rem;width:100%}
+#rail-toggle.is-focused{background:rgba(255,255,255,.10);
+  box-shadow:inset 0 0 0 .24rem var(--focus)}
+#rail-toggle.is-focused .menu-glyph i:nth-child(2){width:100%}
 body.rail-open #rail-toggle{display:none}
-/* 详情页不显示左上角头像（会压在海报上），顶部留白也一并收回去 */
+/* 详情页不显示左上角菜单（会压在海报上），顶部留白也一并收回去 */
 body.route-detail #rail-toggle{display:none}
 body.route-detail #stage{padding-top:7.2rem}
 
@@ -347,9 +337,11 @@ body.rail-open #rail{
 #stage{
   position:absolute;left:0;right:0;top:0;bottom:0;z-index:2;
   overflow-y:auto;overflow-x:hidden;
-  /* 顶部留白只给左上角头像让位（标题行已经整行删掉）：
-     头像 top 5rem + 高 7.8rem = 12.8rem，再多给 1.2rem 才轮到分类条 */
-  padding:14rem 5.2rem 8rem 4.6rem;
+  /* 顶部留白只给左上角菜单让位（标题行已经整行删掉）：
+     按钮 top 5.2rem + 高 6.6rem = 11.8rem，图标本身到 10.6rem 就结束了；
+     分类条从 13.2rem 起，焦点框离它还有一段缝，
+     视觉上图标与分类条之间留一指多，不会挤成一团 */
+  padding:13.2rem 5.2rem 8rem 4.6rem;
   scrollbar-width:none;
 }
 #stage::-webkit-scrollbar{display:none}
