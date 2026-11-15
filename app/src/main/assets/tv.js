@@ -620,8 +620,6 @@ function contentTopInset() {
   return box.bottom + unit * 3;
 }
 
-var scrollRaf = 0;      /* 校正滚动位置用的那一帧 */
-
 /* 海报墙一行有多高。墙内所有翻行动作都按它算，不按卡片的像素位置算。 */
 function wallRowHeight(el) {
   var grid = el && el.closest ? el.closest('.grid') : null;
@@ -637,55 +635,117 @@ function wallRowHeight(el) {
    顶栏里的胶囊 / 三颗按钮本来就固定在那儿，拿它们比上边界会一直判成「被压住」，
    所以只判下边界。
 
-   这里只补「差的那一点」，不按整行翻。整行翻是错的：一屏两排一旦差十几个像素
-   装不下，整行翻就会把第二排直接送到第一排的位置、焦点框看着一动没动。
-   补差值时第二排只是被吸进屏幕里十几像素，框仍然落在第二排上。 */
-function focusScrollTop(el) {
+   海报墙里上下换行按「槽位」算，不按像素差值补：
+   屏幕上就两个槽位（第一排、第二排），一行 = 一个槽位。
+   ↓ 之后焦点落在第二槽，↑ 之后焦点落在第一槽 —— 滚出来的量永远是整数行。
+   按差值补的两种错法都试过了：
+   * 往下取整 —— 两排差十几像素装不下，一取整整排直接跳到第一排，框看着没动；
+   * 往下一律补差值 —— 每翻一行少滚这几像素，滚到第三、四排时累积的偏差
+     会让框先跟着上一排升上去、再掉下来。
+   按槽位算没有这两种毛病：差的那几像素不会累积，因为每一下都是重新对槽。 */
+function focusScrollTop(el, dir, prev) {
   if (!el || !el.getBoundingClientRect) return null;
-  var box = el.getBoundingClientRect();
   var stageBox = stage.getBoundingClientRect();
   var cur = stage.scrollTop;
   var safeBottom = stageBox.bottom - 2;
+  var box = el.getBoundingClientRect();
   if (inTopbar(el)) return box.bottom > safeBottom ? cur + (box.bottom - safeBottom) : null;
   var safeTop = stageBox.top + (contentTopInset() || 8);
-  var delta = 0;
-  if (box.top < safeTop) delta = box.top - safeTop;              /* 负数：内容下移 */
-  else if (box.bottom > safeBottom) delta = box.bottom - safeBottom;  /* 正数：内容上移 */
-  if (!delta) return null;
-  /* 往上翻一定翻整行：上一排这时候基本整排都在屏幕外，只补差值会把它停在
-     顶栏边上露出半截，焦点框跟着往上蹭一下 —— 看到的就是「框跳了」。
-     往下不取整：第二排差十几个像素露不全时只补那十几个像素，
-     框仍然落在第二排上；取整的话第二排会被整排送到第一排，框看着一动不动。 */
+
+  var grid = el.closest ? el.closest('.grid') : null;
   var rowH = wallRowHeight(el);
-  if (rowH && delta < 0 && -delta <= rowH * 1.6) {
-    delta = -rowH * Math.max(1, Math.round(-delta / rowH));
+  var sameWall = !!(grid && rowH && prev && prev.closest && prev.closest('.grid') === grid);
+  if (sameWall && (dir === 'up' || dir === 'down')) {
+    /* 用「本区第一排的自然坐标」当零点（= 它现在的视口位置 + 已滚过的量），
+       不看 contentTopInset。那个值量的是顶栏 + 渐隐带，跟 #stage 的 padding-top
+       差着二十来像素；拿它当零点，每翻一行都会多滚或少滚这二十来像素，
+       攒两行就是「框先跟着上一排升上去、再掉回来」。 */
+    var cards0 = grid.querySelectorAll('.card');
+    var natural = box.top - cards0[0].getBoundingClientRect().top;
+    var rowIdx = natural / rowH;
+    if (Math.abs(rowIdx - Math.round(rowIdx)) <= 0.2) {
+      var slot = (dir === 'down') ? 1 : 0;
+      var target = Math.round(natural) - slot * rowH;
+      /* 两排装不下的机器（不是 16:9、或底部压着系统条）：对槽之后第二排会被切掉
+         一截，就把切掉的那点补回来。这个补量是设备固定的，不会一轮轮累积。 */
+      var bottomThen = box.bottom - (target - cur);
+      if (bottomThen > safeBottom) target += (bottomThen - safeBottom);
+      var maxTop = stage.scrollHeight - stage.clientHeight;
+      if (target < 0) target = 0;
+      if (maxTop > 0 && target > maxTop) target = maxTop;
+      return (Math.abs(target - cur) > 1) ? target : null;
+    }
   }
-  return cur + delta;
+
+  var delta = 0;
+  if (box.top < safeTop) delta = box.top - safeTop;                    /* 负数：内容下移 */
+  else if (box.bottom > safeBottom) delta = box.bottom - safeBottom;   /* 正数：内容上移 */
+  return delta ? cur + delta : null;
 }
 
-function focusElement(el, remember) {
+/* 第一排再往上：出海报墙，回顶上那一行（分类胶囊 / 右侧三颗按钮）。
+   只有「全屏最上面那一排」才走这里 —— 上面还有别的区块就返回 null，
+   让常规几何逻辑接着往上一排走。 */
+function exitToTopbar(current) {
+  var card = current && current.closest ? current.closest('.card') : null;
+  if (!card) return null;
+  var grid = card.closest('.grid');
+  if (!grid) return null;
+  var cards = grid.querySelectorAll('.card');
+  var rowH = wallRowHeight(card);
+  if (!rowH) return null;
+  if (Math.round((card.offsetTop - cards[0].offsetTop) / rowH) !== 0) return null;   /* 不是本区第一排 */
+  var cardBox = card.getBoundingClientRect();
+  var all = focusables();
+  for (var i = 0; i < all.length; i++) {
+    if (all[i] === current || inTopbar(all[i])) continue;
+    var b = all[i].getBoundingClientRect();
+    if (b.height > 2 && b.bottom <= cardBox.top + 6) return null;    /* 上面还有内容 */
+  }
+  if (!topbar) return null;
+  var chips = topbar.querySelectorAll('.chip');
+  var tools = topbar.querySelectorAll('.tool');
+  /* 第几列：同一排里比它靠左的有几张 */
+  var col = 0;
+  for (var j = 0; j < cards.length; j++) {
+    var c = cards[j];
+    if (Math.abs(c.offsetTop - card.offsetTop) > 4) continue;
+    if (c.getBoundingClientRect().left < cardBox.left - 4) col++;
+  }
+  var pool;
+  if (col <= 1 && chips.length) pool = chips;                       /* 左边两列 → 分类胶囊 */
+  else if (col >= 5 && tools.length) pool = tools;                  /* 最右一列 → 搜索/最近/设置 */
+  else { pool = []; for (var k = 0; k < chips.length; k++) pool.push(chips[k]);
+         for (var k2 = 0; k2 < tools.length; k2++) pool.push(tools[k2]); }
+  if (!pool.length) return null;
+  var cx = (cardBox.left + cardBox.right) / 2;
+  var best = null, bestD = Infinity;
+  for (var m = 0; m < pool.length; m++) {
+    var pb = pool[m].getBoundingClientRect();
+    if (pb.width < 2) continue;
+    var d = Math.abs((pb.left + pb.right) / 2 - cx);
+    if (d < bestD) { bestD = d; best = pool[m]; }
+  }
+  return best;
+}
+
+function focusElement(el, remember, dir) {
   if (!el) return;
   var current = document.querySelector('.is-focused');
   if (current && current !== el) current.classList.remove('is-focused');
   el.classList.add('is-focused');
   updateMarquee(current, el);
-  /* 先把目标滚动值算好，再 focus，最后把滚动值写死。
-     老内核不认 focus({preventScroll:true})，focus 会用自己的对齐策略先滚一次，
-     我们再补滚一次 —— 两次叠起来就是「框先落下去、又被顶回来」。
-     一次写死之后，无论 focus 滚没滚，最终位置都只有这一个。 */
   alignGridScroll(el);
-  var scrollTo = focusScrollTop(el);
-  var keepTop = stage.scrollTop;
-  try { el.focus({ preventScroll: true }); } catch (error) { try { el.focus(); } catch (e2) { } }
-  stage.scrollTop = (scrollTo === null) ? keepTop : scrollTo;
-  /* 老内核 focus() 里那次滚动有可能是排到下一帧才落地的，同帧写死会被它盖掉。
-     下一帧绘制前再校对一次：值不对就掰回去，这一帧还没画，用户看不到。 */
-  var want = stage.scrollTop;
-  if (scrollRaf) cancelAnimationFrame(scrollRaf);
-  scrollRaf = requestAnimationFrame(function () {
-    scrollRaf = 0;
-    if (Math.abs(stage.scrollTop - want) > 1) stage.scrollTop = want;
-  });
+  var scrollTo = focusScrollTop(el, dir, current);
+  /* 只写这一次 scrollTop，不调 el.focus()。
+     el.focus() 会带上内核自己的「把元素滚进视野」，老内核还不认 preventScroll；
+     它那一次滚动跟这里写死的值错开一帧落地，屏幕上就是「框先跟着上一排升上去、
+     再掉回来」。按键是原生转进来的（window.veyraTvKey），焦点环是纯 CSS 画的，
+     整条链路都不需要 DOM 焦点。 */
+  if (scrollTo !== null) stage.scrollTop = scrollTo;
+  if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+    try { el.focus({ preventScroll: true }); } catch (error) { try { el.focus(); } catch (e2) { } }
+  }
   if (remember !== false && el.dataset) {
     state.focusKey = el.dataset.key || '';
     if (inRail(el)) state.lastRailKey = state.focusKey;
@@ -974,6 +1034,12 @@ function move(direction) {
   if (direction === 'up' || direction === 'down') {
     if (stepToRow(current, direction)) return;
   }
+  /* 本区第一排再往上、且上面已经没有别的排了：出海报墙，回顶上那一行
+     （左边两列去分类胶囊，最右一列去搜索/最近/设置）。 */
+  if (direction === 'up') {
+    var upTo = exitToTopbar(current);
+    if (upTo) { focusElement(upTo, true, 'up'); return; }
+  }
   /* 海报墙内上下只在墙里走：往上滚过之后，上面那一排的屏幕坐标可能在顶栏附近，
      几何上离得更近的是分类胶囊 —— 一按上就跳到顶栏，「上一排」反而被跳过。
      所以上下先把范围收在本区域里，本区域确实没有上一排/下一排了才允许去顶栏。 */
@@ -990,7 +1056,7 @@ function move(direction) {
   /* 上下允许放宽：不同区块宽度不一致时（分类条、按钮、剧集格），
      严格对齐会把人卡死，所以放宽再找一次。左右不放宽 —— 放宽就会斜着跳。 */
   if (!best && (direction === 'up' || direction === 'down')) best = pickNearest(current, all, direction, false);
-  if (best) { focusElement(best); return; }
+  if (best) { focusElement(best, true, direction); return; }
   if (onRail) return;
   /* 浮层开着时到边就停，别让按键穿透到背后的内容 */
   if (activeOverlay()) return;
