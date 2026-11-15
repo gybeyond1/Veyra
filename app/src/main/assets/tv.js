@@ -863,6 +863,45 @@ function stepToRow(el, direction) {
 
 function inTopbar(el) { return !!(el && el.closest && el.closest('#topbar')); }
 
+/* 上下换行时，让「新那一行」落到「原来那一行」的屏幕位置上 ——
+   焦点框在屏幕上原地不动，只有海报墙在往上/往下翻一行。
+   以前是靠 focusElement 里那句「只补差的那几十像素」：
+   框先落到下一行（屏幕下方），紧接着整页又被补滚几十像素，框跟着往上蹭一下 ——
+   看起来就是「框先被内容带着走，再回来」，一按一顿。
+   现在按整行高度一次滚到 位，滚完框的位置跟滚之前一模一样。 */
+function rowAlignedReveal(current, target, direction) {
+  if (direction !== 'up' && direction !== 'down') return;
+  /* 只在首页 / 我的这两页做：这两页 #stage 里第一块就是海报墙，
+     「第 0 行贴顶」跟「内容起点」是同一个位置，算式才成立。
+     搜索页上面还有搜索框、详情页是剧集格，走原来的最小补滚就行。 */
+  if (state.route !== 'home' && state.route !== 'library') return;
+  if (!current || !current.closest || !target || !target.closest) return;
+  var grid = target.closest('.grid');
+  if (!grid || current.closest('.grid') !== grid) return;
+  var cards = grid.querySelectorAll('.card');
+  if (cards.length <= 6) return;
+  var c1 = current.closest('.card');
+  var c2 = target.closest('.card');
+  if (!c1 || !c2) return;
+  var i1 = Array.prototype.indexOf.call(cards, c1);
+  var i2 = Array.prototype.indexOf.call(cards, c2);
+  if (i1 < 0 || i2 < 0) return;
+  var rowH = cards[6].offsetTop - cards[0].offsetTop;
+  if (rowH < 40) return;
+  var r1 = Math.floor(i1 / 6);
+  var r2 = Math.floor(i2 / 6);
+  if (r1 === r2) return;
+  /* 目标那一行本来就已经整行露在屏幕里：不用动，直接换焦点，页面纹丝不动 */
+  var stageBox = stage.getBoundingClientRect();
+  var box = c2.getBoundingClientRect();
+  var visibleTop = stageBox.top + contentTopInset();
+  if (box.top >= visibleTop - 1 && box.bottom <= stageBox.bottom - 1) return;
+  /* 直接算出「第 r2 行贴到第 0 行原位」需要的 scrollTop，而不是在当前值上加减。
+     加减那套一旦被 clamp（滚到底）就会错位：继续按上时减掉一整行，
+     结果停在半截 —— 也就是「按上，框没回到原来那一行」。 */
+  stage.scrollTop = r2 * rowH;
+}
+
 function pickNearest(current, all, direction, banded) {
   var from = current.getBoundingClientRect();
   var cx = (from.left + from.right) / 2;
@@ -931,7 +970,7 @@ function move(direction) {
   /* 上下允许放宽：不同区块宽度不一致时（分类条、按钮、剧集格），
      严格对齐会把人卡死，所以放宽再找一次。左右不放宽 —— 放宽就会斜着跳。 */
   if (!best && (direction === 'up' || direction === 'down')) best = pickNearest(current, all, direction, false);
-  if (best) { focusElement(best); return; }
+  if (best) { rowAlignedReveal(current, best, direction); focusElement(best); return; }
   if (onRail) return;
   /* 浮层开着时到边就停，别让按键穿透到背后的内容 */
   if (activeOverlay()) return;
