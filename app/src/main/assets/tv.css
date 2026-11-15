@@ -206,11 +206,9 @@ body[data-backdrop="poster"] #tv-bg .veil{opacity:1}
   position:absolute;left:0;right:0;top:0;height:11.4rem;z-index:4;
   padding:6rem 5.2rem 0 4.6rem;
   display:flex;align-items:flex-start;
-  /* 整条铺一层不透明的页面底色：只给胶囊加底还不够 —— 海报滚上来时，
-     剧名会从胶囊之间的空隙里穿过去（#stage 的 mask 对带 transform 的卡片不生效），
-     屏幕上就是一行字在顶栏里乱飘。铺上这层就彻底挡住，后面什么都透不过来。
-     颜色就用 --bg，跟页面底色一致，不会多出一条异色的栏。 */
-  background:var(--bg);
+  /* 顶栏不铺整条底色：底色一铺，屏幕上就是「黑突突一块」，跟内容割裂。
+     每个胶囊 / 每颗按钮各自带 --bg-2 实色底，字压在实色上，不会发虚；
+     中间那几条缝透出海报是故意的，那是它跟内容连着的地方。 */
 }/* 胶囊左对齐排开。这里不能 overflow:hidden —— 选中胶囊的焦点环是往外扩的
    box-shadow，裁掉就成了「上下两条边被切平」，又回到那个硬框手感。
    分类多到放不下时宁可压到工具条下面，工具条自己在更上层，不会被盖住。 */
@@ -274,13 +272,11 @@ body.route-detail #stage{
      吃 1.4rem 左右，留 5rem 之后它跟顶栏之间还有 3.5rem 的缝，不会齐平贴住。 */
   padding:16.5rem 5.2rem 8rem 4.6rem;
   /* 海报滚到顶栏下面一点开始渐隐：11.4rem（顶栏底 11rem 再往下 0.4rem）之前
-     完全透明，11.4 → 16.6rem 从透明渐变到实心，之后完全清晰。
-     渐变带宽 5.2rem，是一条雾带，不是拿刀切一下；带宽不能再窄 ——
-     上一排的剧名正好会停在 12~13rem 这一带，带子窄了它就原样浮在顶栏底下、
-     像一条撕不掉的残影。JS 那边的 contentTopInset() 也按 5rem 让位。
+     完全透明，11.4 → 14.5rem 从透明渐变到实心，之后完全清晰。
+     渐变带宽 3.1rem，是一条雾带，不是拿刀切一下。
      mask 跟着 #stage 这个盒子走、不跟内容走，所以滚多少都是同一条「消失线」。 */
-  -webkit-mask-image:linear-gradient(to bottom,transparent 0,transparent 11.4rem,#000 16.6rem,#000 100%);
-  mask-image:linear-gradient(to bottom,transparent 0,transparent 11.4rem,#000 16.6rem,#000 100%);
+  -webkit-mask-image:linear-gradient(to bottom,transparent 0,transparent 11.4rem,#000 14.5rem,#000 100%);
+  mask-image:linear-gradient(to bottom,transparent 0,transparent 11.4rem,#000 14.5rem,#000 100%);
   scrollbar-width:none;
 }
 #stage::-webkit-scrollbar{display:none}
@@ -323,7 +319,11 @@ body.page-windowed #stage{overflow:hidden}
   display:grid;
   grid-template-columns:repeat(6,minmax(0,1fr));
   grid-column-gap:1.6rem;
-  grid-row-gap:2.4rem;
+  /* 行距 1.6rem（原来 2.4rem）：一屏 1080 减去顶栏让位 16.5rem 之后，
+     两排卡（各 44.7rem）再加 2.4rem 的间距正好差 8px 装不下 ——
+     装不下的后果就是按一下下键整页要滚十几像素，第二排的槽位跟着漂。
+     收掉这 8px，两排完整落地，翻行才是干净的整行翻。 */
+  grid-row-gap:1.6rem;
   width:100%;max-width:100%;
 }
 /* min-width:0 必须写：grid 的 1fr 等于 minmax(auto,1fr)，长剧名会把

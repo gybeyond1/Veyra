@@ -616,29 +616,48 @@ function contentTopInset() {
   if (document.body.classList.contains('route-detail')) return 0;
   var box = topbar.getBoundingClientRect();
   var unit = parseFloat(getComputedStyle(document.documentElement).fontSize) || 10;
-  /* 3rem 是渐隐带的宽度，再让出 2rem：焦点框滚上来时不会贴着那条半透明的边 */
-  return box.bottom + unit * 5;
+  /* 顶栏下沿再让出渐隐带（3.1rem）的宽度：焦点元素滚到它下面就被压住了 */
+  return box.bottom + unit * 3;
 }
 
 var scrollRaf = 0;      /* 校正滚动位置用的那一帧 */
 
+/* 海报墙的一行有多高。墙里所有翻行动作都按它算，不按卡片的像素位置算。 */
+function wallRowHeight(el) {
+  var grid = el && el.closest ? el.closest('.grid') : null;
+  if (!grid) return 0;
+  var cards = grid.querySelectorAll('.card');
+  if (cards.length <= 6) return 0;
+  var h = cards[6].offsetTop - cards[0].offsetTop;
+  return h > 40 ? h : 0;
+}
+
 /* 焦点该滚到哪：算一次，返回目标 scrollTop；不用动就返回 null。
    顶栏是常驻的，压在内容上面：可见上沿不是屏幕顶，而是顶栏下沿再让出渐隐带；
    顶栏里的胶囊 / 三颗按钮本来就固定在那儿，拿它们比上边界会一直判成「被压住」，
-   所以只判下边界。 */
+   所以只判下边界。
+
+   海报墙里要滚就滚「整行」：一屏正好两排，滚半行的话第二排会卡在中间，
+   下一次按键的槽位就全乱了 —— 用户看到的就是「框一会儿上一会儿下」。 */
 function focusScrollTop(el) {
   if (!el || !el.getBoundingClientRect) return null;
   var box = el.getBoundingClientRect();
   var stageBox = stage.getBoundingClientRect();
   var cur = stage.scrollTop;
-  /* 底部只留一点点缝：第二行卡刚好多出几像素时，滚 15px 就够，
-     而不是被 40px 的安全边距把第一排顶进顶栏的渐隐带里。 */
-  var safeBottom = stageBox.bottom - 12;
+  var safeBottom = stageBox.bottom - 2;
   if (inTopbar(el)) return box.bottom > safeBottom ? cur + (box.bottom - safeBottom) : null;
   var safeTop = stageBox.top + (contentTopInset() || 8);
-  if (box.top < safeTop) return cur - (safeTop - box.top);
-  if (box.bottom > safeBottom) return cur + (box.bottom - safeBottom);
-  return null;
+  var delta = 0;
+  if (box.top < safeTop) delta = box.top - safeTop;              /* 负数：内容下移 */
+  else if (box.bottom > safeBottom) delta = box.bottom - safeBottom;  /* 正数：内容上移 */
+  if (!delta) return null;
+  /* 墙内按整行取整：差多少就翻几行（至少一行），翻完槽位和翻之前一模一样 */
+  var rowH = wallRowHeight(el);
+  if (rowH) {
+    var rows = Math.max(1, Math.round(Math.abs(delta) / rowH));
+    delta = (delta < 0 ? -1 : 1) * rows * rowH;
+  }
+  return cur + delta;
 }
 
 function focusElement(el, remember) {
