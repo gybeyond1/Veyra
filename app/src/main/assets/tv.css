@@ -264,6 +264,9 @@ body[data-backdrop="poster"] #tv-bg .veil{opacity:1}
 #rail-toggle.is-focused{transform:scale(1.06)}
 #rail-toggle.is-focused::before{opacity:1}
 body.rail-open #rail-toggle{display:none}
+/* 详情页不显示左上角头像（会压在海报上），顶部留白也一并收回去 */
+body.route-detail #rail-toggle{display:none}
+body.route-detail #stage{padding-top:7.2rem}
 
 /* ---------------- 左侧图标导航（默认收起） ----------------
    内容页占满整屏；侧栏平时整个滑出屏幕外，只有遥控器在最左一列继续按左

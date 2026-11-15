@@ -1480,6 +1480,9 @@ function resumePlan() {
 
 function renderDetail() {
   resetFirstScreen();
+  /* 详情页不放左上角头像：那儿的视觉主体是海报，头像会压在封面上。
+     body 上打个标记，CSS 把 #rail-toggle 收起来，顺便把 #stage 顶部留白还回去。 */
+  document.body.classList.add('route-detail');
   if (!state.detail) {
     view.innerHTML = '<p class="empty">正在打开…</p>';
     return;
@@ -1686,6 +1689,7 @@ function setActiveNav(tab) {
 function go(tab, restore) {
   if (tab === 'adult' || tab === 'category') tab = 'home';   /* 剧场已并进首页 */
   closeRail();
+  document.body.classList.remove('route-detail');   /* 离开详情：头像重新出现 */
   resetFirstScreen();   /* 首页/我的才需要顶部留白，切页先复位 */
   var mem = (restore && state.memory[tab]) ? state.memory[tab] : null;
   state.pendingRestore = mem ? { scrollTop: mem.scrollTop || 0, focusKey: mem.focusKey || '' } : null;
