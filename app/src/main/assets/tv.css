@@ -156,9 +156,14 @@ body[data-backdrop="poster"]{
 }
 
 [hidden]{display:none !important}
-/* 浏览器默认的 :focus 环会套在整张卡上（连剧名一起框住），
-   焦点样式统一由 .is-focused 负责，这里把默认环关掉 */
-[data-focusable]:focus{outline:none}
+/* 浏览器/WebView 自带的 :focus 环会套在整张卡上（连剧名一起框住），而且它是
+   按盒子的矩形边画的 —— 圆的头像、圆角的图标外面都会多出一个硬矩形。
+   焦点样式统一由 .is-focused 负责，这里把系统环在所有元素上一律关掉。 */
+*:focus{outline:none !important}
+[data-focusable]:focus{outline:none !important}
+/* 分开写：老 WebView 不认 :focus-visible，写在同一个选择器组里会把整条规则作废 */
+*:focus-visible{outline:none !important}
+*:focus-within{outline:none !important}
 *{box-sizing:border-box}
 
 html{font-size:10px;height:100%}
@@ -221,35 +226,40 @@ body[data-backdrop="poster"] #tv-bg .veil{opacity:1}
    侧栏打开后由栏内的账号头像接管，这里隐去，免得两个头像叠在一起。
    top 5.5rem：手机上横屏时最上面那条是系统状态栏（时间/日期，字底大约
    4rem），原来 1.2rem 整个圆压在字上。再往上就要碰状态栏了，5.5rem 是极限。
-   7.8rem = 原来 5.2rem 的 1.5 倍，横向靠回左上角（left 2.6rem）。
-   焦点环画在内层 .avatar 上：按钮本身 overflow:hidden 会把外扩的阴影裁成
-   方角，看起来就是个矩形框；内层圆自带 50% 圆角，阴影跟着圆走，才是圆环。 */
+   7.8rem = 原来 5.2rem 的 1.5 倍，横向贴回左上角（left 1.4rem）。
+   圆形一律用 border-radius + clip-path 双保险：盒子的背景/阴影在某些 WebView
+   上只认矩形，圆角失效就露出一个方框；clip-path 切出来的一定是圆。 */
 #rail-toggle{
-  position:absolute;left:2.6rem;top:5.5rem;width:7.8rem;height:7.8rem;z-index:4;
+  position:absolute;left:1.4rem;top:5.5rem;width:7.8rem;height:7.8rem;z-index:4;
   border:0;padding:0;border-radius:50%;overflow:visible;cursor:pointer;
   display:flex;align-items:center;justify-content:center;
   background:transparent;color:var(--text);
-  transition:box-shadow .12s linear,transform .12s ease-out;
+  transition:transform .12s ease-out;
 }
 #rail-toggle .avatar{
+  position:relative;z-index:1;
   display:block;width:100%;height:100%;line-height:7.8rem;text-align:center;
   font-size:3.2rem;font-weight:700;color:var(--text);
   white-space:nowrap;overflow:hidden;
-  border-radius:50%;background:var(--rail-bg);
-  box-shadow:0 .4rem 1.6rem rgba(0,0,0,.32);
-  transition:box-shadow .12s linear;
+  border-radius:50%;clip-path:circle(50% at 50% 50%);
+  background:var(--rail-bg);
 }
-#rail-toggle .avatar img{display:block;width:100%;height:100%;object-fit:cover;border-radius:50%}
-/* 焦点环用一个真圆环（border + 50% 圆角）叠在头像外面：
-   box-shadow 在部分老 WebView 上不跟着圆角走，画出来是方框，border 永远不会。 */
-#rail-toggle::after{
-  content:"";position:absolute;inset:-.42rem;border-radius:50%;
-  border:.26rem solid var(--focus);pointer-events:none;
-  box-shadow:0 0 0 .12rem var(--halo);
+#rail-toggle .avatar img{
+  display:block;width:100%;height:100%;object-fit:cover;
+  border-radius:50%;clip-path:circle(50% at 50% 50%);
+}
+/* 焦点环 = 一块用径向渐变画出来的圆环（外圈白、里面全透明），再 clip-path 切成圆。
+   不用 border / box-shadow：这台机器上盒子的圆角在某些情况下会被当成矩形画，
+   环就变成方框；渐变 + clip-path 跟圆角无关，画出来的一定是贴着头像的圆环。 */
+#rail-toggle::before{
+  content:"";position:absolute;inset:-.5rem;border-radius:50%;
+  clip-path:circle(50% at 50% 50%);
+  background:radial-gradient(circle closest-side,transparent 92%,var(--focus) 92%);
+  pointer-events:none;
   opacity:0;transition:opacity .12s linear;
 }
 #rail-toggle.is-focused{transform:scale(1.06)}
-#rail-toggle.is-focused::after{opacity:1}
+#rail-toggle.is-focused::before{opacity:1}
 body.rail-open #rail-toggle{display:none}
 
 /* ---------------- 左侧图标导航（默认收起） ----------------
@@ -274,6 +284,7 @@ body.rail-open #rail{
   box-shadow:0 0 3rem 0 rgba(0,0,0,.26);
 }
 .rail-item{
+  position:relative;
   width:5.2rem;height:5.2rem;border-radius:1.5rem;
   margin-bottom:1.2rem;
   display:flex;align-items:center;justify-content:center;
@@ -283,6 +294,14 @@ body.rail-open #rail{
 .rail-item svg{width:2.8rem;height:2.8rem;fill:currentColor}
 .rail-item.is-active{color:var(--text);background:var(--chip-bg)}
 .rail-item.is-focused{color:var(--accent-ink);background:var(--accent)}
+/* 焦点框贴着圆角图标本身走（图标 1.5rem 圆角，环也是 1.5rem、只往外让 .3rem），
+   不再是套在图标外面那个方方正正的框 */
+.rail-item::after{
+  content:"";position:absolute;inset:-.3rem;border-radius:1.5rem;
+  border:.26rem solid var(--focus);pointer-events:none;
+  opacity:0;transition:opacity .12s linear;
+}
+.rail-item.is-focused::after{opacity:1}
 
 /* 左下角账号：只放头像，点开账号面板 */
 .rail-account{
@@ -293,23 +312,28 @@ body.rail-open #rail{
   overflow:visible;
 }
 .rail-account .avatar{
+  position:relative;z-index:1;
   display:block;width:100%;height:100%;line-height:5.2rem;
   text-align:center;font-size:2.2rem;font-weight:700;color:var(--text);
   white-space:nowrap;overflow:hidden;
-  border-radius:50%;background:var(--rail-bg);
-  transition:box-shadow .12s linear;
+  border-radius:50%;clip-path:circle(50% at 50% 50%);
+  background:var(--rail-bg);
 }
 /* 手机端设置的头像：铺满整个圆 */
-.rail-account .avatar img{width:100%;height:100%;object-fit:cover;border-radius:50%}
-/* 侧栏里这颗焦点环同理：画在内层圆上，才是贴着头像的圆环而不是方框 */
-.rail-account::after{
+.rail-account .avatar img{
+  width:100%;height:100%;object-fit:cover;border-radius:50%;
+  clip-path:circle(50% at 50% 50%);
+}
+/* 侧栏里这颗焦点环同理：径向渐变的圆环 + clip-path，永远是个圆 */
+.rail-account::before{
   content:"";position:absolute;inset:-.34rem;border-radius:50%;
-  border:.24rem solid var(--focus);pointer-events:none;
-  box-shadow:0 0 0 .12rem var(--halo);
+  clip-path:circle(50% at 50% 50%);
+  background:radial-gradient(circle closest-side,transparent 90%,var(--focus) 90%);
+  pointer-events:none;
   opacity:0;transition:opacity .12s linear;
 }
 .rail-account.is-focused{outline:none;box-shadow:none}
-.rail-account.is-focused::after{opacity:1}
+.rail-account.is-focused::before{opacity:1}
 .rail-account.is-focused .avatar{background:var(--accent);color:var(--accent-ink)}
 
 /* ---------------- 主区域 ----------------
