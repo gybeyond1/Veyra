@@ -102,8 +102,8 @@ function list(value) { return Object.prototype.toString.call(value) === '[object
    原来左侧抽屉（首页/搜索/我的 + 左下角头像）整个撤掉，功能搬到这三个按钮上：
    搜索、最近带 data-nav，直接复用 go('search') / go('library')；
    设置就是原来点头像弹出的账号面板。
-   注意它们是「内容」不是「悬浮栏」—— 这段 HTML 由各页 render 拼进 .topline，
-   跟分类胶囊同一行、同一条水平线，遥控器往下按时跟着内容一起被顶上去。 */
+   这一段 HTML 由各页 render 塞进 #topbar（不在 #stage 里），所以顶栏常驻，
+   内容往上滚时它不动；内容滚到它下沿就渐隐（#stage 的 mask 负责）。 */
 var TOOLS_HTML = '<div id="tools" role="toolbar" aria-label="快捷入口">'
   + '<button id="tool-search" class="tool" type="button" data-nav="search" data-focusable data-key="tool:search" aria-label="搜索" title="搜索">'
   + '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7.4"/><path d="M16.3 16.3 20.8 20.8"/></svg></button>'
@@ -113,9 +113,18 @@ var TOOLS_HTML = '<div id="tools" role="toolbar" aria-label="快捷入口">'
   + '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12.2 2h-.4a2 2 0 0 0-2 2v.2a2 2 0 0 1-1 1.7l-.4.3a2 2 0 0 1-2 0l-.2-.1a2 2 0 0 0-2.7.7l-.2.4a2 2 0 0 0 .7 2.7l.2.1a2 2 0 0 1 1 1.7v.5a2 2 0 0 1-1 1.8l-.2.1a2 2 0 0 0-.7 2.7l.2.4a2 2 0 0 0 2.7.7l.2-.1a2 2 0 0 1 2 0l.4.3a2 2 0 0 1 1 1.7v.2a2 2 0 0 0 2 2h.4a2 2 0 0 0 2-2v-.2a2 2 0 0 1 1-1.7l.4-.3a2 2 0 0 1 2 0l.2.1a2 2 0 0 0 2.7-.7l.2-.4a2 2 0 0 0-.7-2.7l-.2-.1a2 2 0 0 1-1-1.8v-.5a2 2 0 0 1 1-1.7l.2-.1a2 2 0 0 0 .7-2.7l-.2-.4a2 2 0 0 0-2.7-.7l-.2.1a2 2 0 0 1-2 0l-.4-.3a2 2 0 0 1-1-1.7V4a2 2 0 0 0-2-2z"/></svg></button>'
   + '</div>';
 
-/* 首页/我的：分类胶囊（或页签）在左，三个入口在右，同一行 */
+var topbar = document.getElementById('topbar');
+
+/* 首页/我的：分类胶囊（或页签）在左，三个入口在右，同一行。
+   每次切页 / 刷新都整块重写 —— 里面都是 data-key 驱动的按钮，焦点靠
+   restoreFocus() 按 key 找回来，重建不会掉焦点。 */
 function toplineMarkup(left) {
-  return '<div class="topline">' + left + TOOLS_HTML + '</div>';
+  if (topbar) topbar.innerHTML = (left || '') + TOOLS_HTML;
+  return '';
+}
+/* 详情页 / 投屏中转页：顶栏整块收掉（CSS 里 route-detail 也兜了一层） */
+function clearTopline() {
+  if (topbar) topbar.innerHTML = '';
 }
 
 var toastTimer = 0;
@@ -600,6 +609,16 @@ function focusables() {
   return out;
 }
 
+/* 内容区的「可见上沿」：顶栏常驻后，屏幕上边这一条（顶栏本身 + 它下面那条渐隐带）
+   是被压住 / 会淡掉的区域。返回它一共占多少像素，详情页没有顶栏就返回 0。 */
+function contentTopInset() {
+  if (!topbar || !topbar.firstChild) return 0;
+  if (document.body.classList.contains('route-detail')) return 0;
+  var box = topbar.getBoundingClientRect();
+  var unit = parseFloat(getComputedStyle(document.documentElement).fontSize) || 10;
+  return box.bottom + unit * 3;
+}
+
 function focusElement(el, remember) {
   if (!el) return;
   var current = document.querySelector('.is-focused');
@@ -617,7 +636,16 @@ function focusElement(el, remember) {
   alignGridScroll(el);
   var box = el.getBoundingClientRect();
   var stageBox = stage.getBoundingClientRect();
-  if (box.top < stageBox.top + 8) stage.scrollTop -= (stageBox.top + 8 - box.top);
+  /* 顶栏是常驻的，压在内容上面：焦点元素滚到它底下就看不见了（还会落在渐隐带里
+     被淡掉一半）。所以「可见上边界」不是屏幕顶，是顶栏下沿再往下让出渐隐带的宽度。 */
+  var topInset = contentTopInset();
+  var safeTop = stageBox.top + (topInset || 8);
+  /* 顶栏里的胶囊 / 三颗按钮本来就是固定的，拿它们跟「可见上沿」比会一直判成
+     「被压住了」，每按一下都白滚一截 —— 直接跳过。 */
+  var inTopbar = !!(el.closest && el.closest('#topbar'));
+  if (inTopbar) {
+    if (box.bottom > stageBox.bottom - 40) stage.scrollTop += (box.bottom - (stageBox.bottom - 40));
+  } else if (box.top < safeTop) stage.scrollTop -= (safeTop - box.top);
   else if (box.bottom > stageBox.bottom - 40) stage.scrollTop += (box.bottom - (stageBox.bottom - 40));
   if (!inRail(el)) revealSectionHead(el);
   syncBackdrop(el);
@@ -783,7 +811,7 @@ function revealSectionHead(el) {
   if (!head) return;
   var stageBox = stage.getBoundingClientRect();
   var headBox = head.getBoundingClientRect();
-  var pad = 10;
+  var pad = contentTopInset() + 10;
   if (headBox.top < stageBox.top + pad) stage.scrollTop -= (stageBox.top + pad - headBox.top);
 }
 
@@ -878,9 +906,10 @@ function move(direction) {
     if (direction === 'right' || direction === 'left') { leaveRail(); return; }
   }
 
-  /* 右上角那排按钮就在屏幕最上沿：在上面再按上，不能退化成「滚一屏」——
-     焦点没地方去、页面却被推走一截，手感上就是「按上没反应」。直接停住。 */
-  if (direction === 'up' && current.closest && current.closest('#tools')) return;
+  /* 顶栏就是屏幕最上头那一行（胶囊 + 三颗按钮）：在上面再按上，不能退化成
+     「滚一屏」或「跳到第一排海报」—— 焦点没地方去、页面却被推走一截，
+     手感上就是「按上没反应」。直接停住。 */
+  if (direction === 'up' && current.closest && current.closest('#topbar')) return;
 
   var from = current.getBoundingClientRect();
   /* 海报窗口模式：上下按「整行」跳，不用几何最近。
@@ -1069,7 +1098,8 @@ function renderHome() {
 
   /* 分类名 + 「N 部」那行整行删了：切短剧/漫剧/热播榜时它就是同一位置上的一串字，
      用户不要。现在这一块只剩分类胶囊 + 海报墙，顶部那条空白留给右上角三个入口。 */
-  view.innerHTML = '<section class="section" data-feed="1">' + toplineMarkup(chips) + body + '</section>';
+  toplineMarkup(chips);
+  view.innerHTML = '<section class="section" data-feed="1">' + body + '</section>';
   paintCovers(view);
   layoutFirstScreen();
   restoreFocus();
@@ -1256,8 +1286,9 @@ function renderSearch() {
   var loading = state.search.items === null;
   var hasResults = !!(state.search.items && state.search.items.length);
 
+  /* 搜索页顶栏只放三颗按钮（靠右），搜索框和二维码在下面 */
+  toplineMarkup('');
   var html = ''
-    + '<div class="topline">' + TOOLS_HTML + '</div>'
     + '<div class="search-head">'
     + '<div class="search-main">'
     + '<div class="search-box" data-focusable data-key="search-box" tabindex="0">'
@@ -1408,15 +1439,13 @@ function renderLibrary() {
   var history = list(data.progress);
   var bookmarks = list(data.bookmarks);
   var tab = state.libraryTab;
-  var html = ''
-    + '<div class="topline">'
+  toplineMarkup(''
     + '<div class="tabs chips">'
     + '<button type="button" class="chip' + (tab === 'history' ? ' is-active' : '') + '" data-focusable data-key="tab:history" data-tab="history">观看记录</button>'
     + '<button type="button" class="chip' + (tab === 'bookmarks' ? ' is-active' : '') + '" data-focusable data-key="tab:bookmarks" data-tab="bookmarks">收藏</button>'
     + '<button type="button" class="chip' + (tab === 'nas' ? ' is-active' : '') + '" data-focusable data-key="tab:nas" data-tab="nas">下载</button>'
-    + '</div>'
-    + TOOLS_HTML
-    + '</div>';
+    + '</div>');
+  var html = '';
   if (tab === 'nas') {
     html += '<div class="nas-panel">';
     if (state.nasError) html += '<p class="empty">' + esc(state.nasError) + '</p>';
@@ -1508,9 +1537,10 @@ function resumePlan() {
 
 function renderDetail() {
   resetFirstScreen();
-  /* 详情页右上角不放那三个入口：那儿的视觉主体是海报，按钮会压在封面上。
-     body 上打个标记，CSS 把 #tools 收起来，顺便把 #stage 顶部留白还回去。 */
+  /* 详情页不放顶栏：那儿的视觉主体是海报，胶囊和按钮会压在封面上。
+     body 上打个标记，CSS 把 #topbar 收起来，顺手把 #stage 的顶部留白和渐隐一起撤掉。 */
   document.body.classList.add('route-detail');
+  clearTopline();
   if (!state.detail) {
     view.innerHTML = '<p class="empty">正在打开…</p>';
     return;
@@ -1679,6 +1709,7 @@ window.hgTvCast = function (cmd) {
   state.epGroup = Math.floor((episode - 1) / EP_PAGE);
   state.focusKey = 'play';
   stage.scrollTop = 0;
+  clearTopline();
   applyBackdropMode();
   view.innerHTML = '<p class="empty">正在接收手机投屏…</p>';
   api('detail', { id: id }).then(function (data) {

@@ -1,7 +1,6 @@
 package com.veyra.gybeyond;
 
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.animation.ValueAnimator;
 import android.os.Build;
 import android.content.pm.ActivityInfo;
@@ -169,6 +168,9 @@ public final class PlayerActivity extends Activity {
     private int controlTransitionToken;
     private LinearLayout episodePanel;
     private View episodeScrim;
+    /* 投屏设备面板：跟选集同一套皮（深色圆角、贴右下角、点空白收起） */
+    private LinearLayout castPanel;
+    private View castScrim;
     private TextView episodeTrigger;
     private TextView speedTrigger;
     /* ---- 电视端：暂停后的控件条 / 分组选集面板（遥控器专用，手机端不创建） ---- */
@@ -1867,6 +1869,7 @@ public final class PlayerActivity extends Activity {
     @Override public void onConfigurationChanged(Configuration configuration) {
         super.onConfigurationChanged(configuration);
         closeSpeedPanel();
+        closeCastPanel();
         if (seeking) stopSeekPreview();
         updateControlLayout();
         root.requestApplyInsets();
@@ -1891,18 +1894,16 @@ public final class PlayerActivity extends Activity {
         worker.execute(() -> {
             JSONArray devices = new JSONArray();
             String error = null;
-            // 在线、但不是电视/电脑的设备数：用来把「一台都没有」和「有设备却没识别成电视」分开提示
-            int otherOnline = 0;
             try {
                 JSONObject data = cloud.getJson("api/devices");
                 JSONArray all = data.optJSONArray("devices");
                 for (int i = 0; all != null && i < all.length(); i++) {
                     JSONObject device = all.optJSONObject(i);
                     if (device == null) continue;
-                    if (!device.optBoolean("online")) continue;
                     // 电视和电脑都是「同一账号下可接投屏的设备」；手机自己不在列表里
                     String platform = device.optString("platform");
-                    if (!"tv".equals(platform) && !"desktop".equals(platform)) { otherOnline++; continue; }
+                    if (!"tv".equals(platform) && !"desktop".equals(platform)) continue;
+                    if (!device.optBoolean("online")) continue;
                     devices.put(device);
                 }
             } catch (Exception failure) {
@@ -1910,35 +1911,119 @@ public final class PlayerActivity extends Activity {
             }
             final JSONArray found = devices;
             final String failure = error;
-            final int others = otherOnline;
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed()) return;
                 if (failure != null) { toast("读取设备失败：" + failure); return; }
                 if (found.length() == 0) {
-                    // 平板上装 TV 包时，旧版本会把自己上报成 android（没有 Leanback），
-                    // 投屏列表只挑 tv/desktop，于是「明明在线却搜不到」。0.28.46 起按
-                    // 安装包身份上报 tv，这里把话说清楚，免得用户一直以为是网络问题。
-                    toast(others > 0
-                            ? "同账号有 " + others + " 台设备在线，但没有一台以电视身份上报：电视/平板上的 Veyra TV 请更新到 0.28.46 以上"
-                            : "没有在线的电视/电脑：确认设备已打开并登录同一账号");
+                    toast("没有在线的电视/电脑：确认设备已打开并登录同一账号");
                     return;
                 }
-                String[] labels = new String[found.length()];
-                for (int i = 0; i < found.length(); i++) {
-                    JSONObject device = found.optJSONObject(i);
-                    boolean pc = "desktop".equals(device.optString("platform"));
-                    labels[i] = device.optString("name", pc ? "电脑" : "电视") + (pc ? " · 电脑" : " · 电视") + " · 在线";
-                }
-                new AlertDialog.Builder(this)
-                        .setTitle("投屏到设备")
-                        .setItems(labels, (dialog, which) -> {
-                            JSONObject device = found.optJSONObject(which);
-                            if (device != null) castTo(device, cloud);
-                        })
-                        .setNegativeButton("取消", null)
-                        .show();
+                showCastPanel(found, cloud);
             });
         });
+    }
+
+    /**
+     * 投屏设备面板。
+     *
+     * <p>原来这里是 {@code AlertDialog.Builder#setItems}：白底、黑字、右下角一颗
+     * 「取消」——在纯黑的播放画面里顶出一块直角白卡片，跟播放器其它面板完全两个世界。
+     * 现在跟「选集」用同一套皮：深棕黑圆角面板 + 金色描边，贴在右下角同一个位置，
+     * 每台设备一行 48dp 的圆角块，点空白处收起。</p>
+     */
+    private void showCastPanel(JSONArray devices, AccountService cloud) {
+        closeCastPanel();
+        closeEpisodes();
+        closeSpeedPanel();
+        revealControls();
+        handler.removeCallbacks(hideControls);
+
+        final int count = devices.length();
+
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(18), dp(18), dp(18), dp(16));
+        GradientDrawable shell = background(0xF7242320, 12);
+        shell.setStroke(dp(1), 0xFF796D53);
+        panel.setBackground(shell);
+        panel.setElevation(dp(18));
+        panel.setClickable(true);
+
+        TextView heading = label("投屏到设备", 20, Color.WHITE);
+        heading.setTypeface(null, Typeface.BOLD);
+        panel.addView(heading, new LinearLayout.LayoutParams(-1, dp(36)));
+
+        TextView sub = label("同一账号下 " + count + " 台在线，选一台开始播", 12, 0xFFC9C4B8);
+        panel.addView(sub, new LinearLayout.LayoutParams(-1, dp(30)));
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setVerticalScrollBarEnabled(false);
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        for (int i = 0; i < count; i++) {
+            final JSONObject device = devices.optJSONObject(i);
+            if (device == null) continue;
+            boolean pc = "desktop".equals(device.optString("platform"));
+            String name = device.optString("name", pc ? "电脑" : "电视");
+
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(12), 0, dp(12), 0);
+            row.setBackground(background(0xFF373D40, 10));
+
+            TextView title = label(name, 14, Color.WHITE);
+            title.setSingleLine(true);
+            title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            row.addView(title, new LinearLayout.LayoutParams(0, -1, 1f));
+
+            TextView tag = label(pc ? "电脑 · 在线" : "电视 · 在线", 11, 0xFF9AA3AC);
+            LinearLayout.LayoutParams tagParams = new LinearLayout.LayoutParams(-2, -2);
+            tagParams.leftMargin = dp(8);
+            row.addView(tag, tagParams);
+
+            row.setOnClickListener(v -> {
+                closeCastPanel();
+                castTo(device, cloud);
+            });
+            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, dp(48));
+            rowParams.bottomMargin = dp(8);
+            list.addView(row, rowParams);
+        }
+        scroll.addView(list);
+        /* 设备多的时候面板不能长到屏幕上沿：最多露 4 行，剩下的在里面滚 */
+        panel.addView(scroll, new LinearLayout.LayoutParams(-1, Math.min(count, 4) * dp(56) + dp(2)));
+
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(dp(286), -2, Gravity.BOTTOM | Gravity.RIGHT);
+        params.bottomMargin = navigationInsetBottom + dp(88);
+        params.rightMargin = dp(13);
+
+        castScrim = new View(this);
+        castScrim.setOnClickListener(v -> closeCastPanel());
+        root.addView(castScrim, new FrameLayout.LayoutParams(-1, -1));
+        root.addView(panel, params);
+        castPanel = panel;
+
+        panel.setPivotX(dp(286));
+        panel.setPivotY(dp(320));
+        panel.setAlpha(0);
+        panel.setScaleX(.72f);
+        panel.setScaleY(.12f);
+        panel.setTranslationY(dp(10));
+        panel.animate().alpha(1).scaleX(1).scaleY(1).translationY(0).setDuration(300)
+                .setInterpolator(new android.view.animation.PathInterpolator(.2f, .8f, .2f, 1f)).start();
+    }
+
+    private void closeCastPanel() {
+        LinearLayout closing = castPanel;
+        if (closing == null) return;
+        castPanel = null;
+        if (castScrim != null) {
+            root.removeView(castScrim);
+            castScrim = null;
+        }
+        closing.animate().alpha(0).scaleX(.72f).scaleY(.12f).translationY(dp(10)).setDuration(220)
+                .withEndAction(() -> root.removeView(closing)).start();
     }
 
     private void castTo(JSONObject device, AccountService cloud) {
@@ -2173,6 +2258,7 @@ public final class PlayerActivity extends Activity {
         if (speedHoldActive && !speedLocked) applyPlaybackSpeed(manualSpeed);
         speedHoldActive = false;
         closeSpeedPanel();
+        closeCastPanel();
         stopSeekPreview();
         if (player != null) { saveProgress(false); player.pause(); }
         super.onPause();
@@ -2194,10 +2280,12 @@ public final class PlayerActivity extends Activity {
             return;
         }
         if (fullscreenMode) {
+            if (castPanel != null) closeCastPanel();
             if (speedPanel != null) closeSpeedPanel();
             if (episodesOpen) closeEpisodes();
             setFullscreenMode(false);
-        } else if (speedPanel != null) closeSpeedPanel();
+        } else if (castPanel != null) closeCastPanel();
+        else if (speedPanel != null) closeSpeedPanel();
         else if (episodesOpen) closeEpisodes();
         else finish();
     }

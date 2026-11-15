@@ -32,6 +32,10 @@
 <div id="app">
   <!-- 背景层：当前选中作品的海报做模糊底，替代原来那片纯黑 -->
   <div id="tv-bg" aria-hidden="true"><img id="tv-bg-img" alt=""><span class="veil"></span></div>
+  <!-- 顶栏：分类胶囊 + 搜索/最近/设置，常驻吸顶，不跟内容一起滚。
+       从 #stage 里搬出来的原因：海报往上滚时要在「那一行下面一点」渐隐消失，
+       而渐隐靠的是 #stage 上的 mask —— mask 会作用到子树，顶栏留在里面就会被一起淡掉。 -->
+  <div id="topbar"></div>
   <main id="stage"><div id="view"></div></main>
 
   <div id="toast" role="status" aria-live="polite"></div>

@@ -197,22 +197,30 @@ body[data-backdrop="poster"] #tv-bg img{opacity:1}
 }
 body[data-backdrop="poster"] #tv-bg .veil{opacity:1}
 
-/* ---------------- 顶栏：分类胶囊 + 三个入口 ----------------
-   左侧抽屉整个撤掉了，搜索 / 最近 / 设置三颗按钮搬到右上角 —— 但它们不是
-   悬浮常驻的一层，而是「顶栏」的一部分：跟短剧/漫剧/热播榜那排胶囊同一条水平线，
-   胶囊在左、按钮在右，整行随内容一起滚。遥控器往下按，它就跟着被顶上去。
-   按钮高度 5rem 跟胶囊完全一致（上沿下沿都齐），圆角 1.4rem，三颗之间留 1rem；
-   图标统一 2.6rem、1.8 描边、圆头圆角，并排不会有粗细或风格差。 */
-.topline{
+/* ---------------- 顶栏：分类胶囊 + 三个入口（常驻吸顶） ----------------
+   左侧抽屉撤掉了，搜索 / 最近 / 设置三颗按钮在右边，跟短剧/漫剧/热播榜那排
+   胶囊同一条水平线、上下沿齐平（都是 5rem 高）。
+   跟上一版的区别：这一版是「常驻」的 —— 顶栏放在 #stage 外面，遥控器往下按
+   时不动；海报往上滚到它下面一点点就开始渐隐（渐隐由 #stage 的 mask 做，
+   见下面的主区域）。 */
+#topbar{
+  position:absolute;left:4.6rem;right:5.2rem;top:6rem;height:5rem;z-index:4;
   display:flex;align-items:center;
-  margin-bottom:2.4rem;
 }
-/* 胶囊本身带 1.2rem 下边距，放进顶栏里要去掉，否则顶栏会被撑高一截 */
-.topline .chips,
-.topline .tabs{margin-bottom:0}
-.topline .chip{margin-bottom:0}
+/* 胶囊左对齐排开。这里不能 overflow:hidden —— 选中胶囊的焦点环是往外扩的
+   box-shadow，裁掉就成了「上下两条边被切平」，又回到那个硬框手感。
+   分类多到放不下时宁可压到工具条下面，工具条自己在更上层，不会被盖住。 */
+#topbar .chips,
+#topbar .tabs{
+  display:flex;align-items:center;
+  flex:1 1 auto;min-width:0;
+  margin:0;
+}
+#topbar .chip{margin:0 1.2rem 0 0;flex:0 0 auto}
+#topbar .chip:last-child{margin-right:0}
 /* margin-left:auto 把它顶到最右：搜索页那行只有它一个，也靠右 */
 #tools{
+  position:relative;z-index:1;
   display:flex;align-items:center;flex:0 0 auto;
   margin-left:auto;
 }
@@ -237,18 +245,29 @@ body[data-backdrop="poster"] #tv-bg .veil{opacity:1}
   opacity:0;transition:opacity .12s linear;
 }
 .tool.is-focused::after{opacity:1}
-/* 详情页整页是海报，不放顶栏；顶部留白也跟着收回去 */
-body.route-detail #stage{padding-top:7.2rem}
+/* 详情页整页是海报，不放顶栏；顶部留白和渐隐一起收掉 */
+body.route-detail #topbar{display:none}
+body.route-detail #stage{
+  padding-top:7.2rem;
+  -webkit-mask-image:none;mask-image:none;
+}
 
 /* ---------------- 主区域 ----------------
    没有侧栏了，内容铺满整屏，只留 4.6rem 的左边距给标题呼吸。 */
 #stage{
   position:absolute;left:0;right:0;top:0;bottom:0;z-index:2;
   overflow-y:auto;overflow-x:hidden;
-  /* 顶部只留一条缝给系统状态栏（横屏约 5.2rem 高）：
-     顶栏从 6rem 起，整行 5rem + 下边距 2.4rem，海报墙从 13.4rem 开始。
-     原来这里留 13.2rem 是给悬浮按钮让位的，按钮进了内容流就不用再空一截。 */
-  padding:6rem 5.2rem 8rem 4.6rem;
+  /* 顶栏是常驻图层（#topbar，top 6rem + 高 5rem），不占内容流，所以这里要
+     把它的高度让出来：6 + 5 之后再多留 4rem，第一排海报从 15rem 起。
+     多出来的这一截是给「选中放大」用的 —— 第一行卡片放大 1.08 倍后上沿会往上
+     吃 1.4rem 左右，留 5rem 之后它跟顶栏之间还有 3.5rem 的缝，不会齐平贴住。 */
+  padding:16.5rem 5.2rem 8rem 4.6rem;
+  /* 海报滚到顶栏下面一点开始渐隐：11.4rem（顶栏底 11rem 再往下 0.4rem）之前
+     完全透明，11.4 → 14.5rem 从透明渐变到实心，之后完全清晰。
+     渐变带宽 3.1rem，是一条雾带，不是拿刀切一下。
+     mask 跟着 #stage 这个盒子走、不跟内容走，所以滚多少都是同一条「消失线」。 */
+  -webkit-mask-image:linear-gradient(to bottom,transparent 0,transparent 11.4rem,#000 14.5rem,#000 100%);
+  mask-image:linear-gradient(to bottom,transparent 0,transparent 11.4rem,#000 14.5rem,#000 100%);
   scrollbar-width:none;
 }
 #stage::-webkit-scrollbar{display:none}
