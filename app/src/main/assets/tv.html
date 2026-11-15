@@ -32,29 +32,25 @@
 <div id="app">
   <!-- 背景层：当前选中作品的海报做模糊底，替代原来那片纯黑 -->
   <div id="tv-bg" aria-hidden="true"><img id="tv-bg-img" alt=""><span class="veil"></span></div>
-  <div id="rail-veil" aria-hidden="true"></div>
-
-  <nav id="rail">
-    <button class="rail-item is-active" type="button" data-nav="home" data-key="nav:home" data-focusable aria-label="首页" title="首页">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2 2.8 11h2.6v9.8h5.1v-6h3v6h5.1V11h2.6L12 3.2z"/></svg>
-    </button>
-    <button class="rail-item" type="button" data-nav="search" data-key="nav:search" data-focusable aria-label="搜索" title="搜索">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.6 3a7.6 7.6 0 1 0 4.7 13.6l4.1 4.1 1.7-1.7-4.1-4.1A7.6 7.6 0 0 0 10.6 3zm0 2.4a5.2 5.2 0 1 1 0 10.4 5.2 5.2 0 0 1 0-10.4z"/></svg>
-    </button>
-    <button class="rail-item" type="button" data-nav="library" data-key="nav:library" data-focusable aria-label="我的" title="我的">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12.2a4.6 4.6 0 1 0 0-9.2 4.6 4.6 0 0 0 0 9.2zm0 2.1c-4.5 0-8 2.4-8 5.4V21h16v-1.3c0-3-3.5-5.4-8-5.4z"/></svg>
-    </button>
-    <button class="rail-account" id="rail-account" type="button" data-account="1" data-key="nav:account" data-focusable aria-label="账号">
-      <span class="avatar" id="rail-avatar"></span>
-    </button>
-  </nav>
   <main id="stage"><div id="view"></div></main>
-  <!-- 左上角菜单：侧栏收起时它就是这个入口，按 OK / 点一下把左侧导航拉出来。
-       不放头像 —— 头像属于「账号」，而这里是「菜单」，用三条横线更直观，
-       也不用担心换账号/没设头像时这里空一块。 -->
-  <button id="rail-toggle" type="button" data-focusable data-key="nav:toggle" aria-label="菜单" title="菜单">
-    <span class="menu-glyph" aria-hidden="true"><i></i><i></i><i></i></span>
-  </button>
+
+  <!-- 右上角快捷入口：搜索 / 最近 / 设置。
+       原来的左侧抽屉（首页/搜索/我的 + 左下角头像）整个撤掉，三个入口改常驻右上角。
+       搜索、最近直接复用 [data-nav] 的老路由（go('search') / go('library')），
+       设置就是原来点头像弹出的那个账号面板。
+       三个图标同一套线条（1.8 描边、圆头圆角），遥控器左右一格格走，
+       上键从内容区第一排就能上来，在按钮上再按上不会把页面滚走。 -->
+  <div id="tools" role="toolbar" aria-label="快捷入口">
+    <button id="tool-search" class="tool" type="button" data-nav="search" data-focusable data-key="tool:search" aria-label="搜索" title="搜索">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7.4"/><path d="M16.3 16.3 20.8 20.8"/></svg>
+    </button>
+    <button id="tool-recent" class="tool" type="button" data-nav="library" data-focusable data-key="tool:recent" aria-label="最近" title="最近">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.7 9.7 0 0 0-6.7 2.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7.2v5.2l3.8 1.9"/></svg>
+    </button>
+    <button id="tool-settings" class="tool" type="button" data-focusable data-key="tool:settings" aria-label="设置" title="设置">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12.2 2h-.4a2 2 0 0 0-2 2v.2a2 2 0 0 1-1 1.7l-.4.3a2 2 0 0 1-2 0l-.2-.1a2 2 0 0 0-2.7.7l-.2.4a2 2 0 0 0 .7 2.7l.2.1a2 2 0 0 1 1 1.7v.5a2 2 0 0 1-1 1.8l-.2.1a2 2 0 0 0-.7 2.7l.2.4a2 2 0 0 0 2.7.7l.2-.1a2 2 0 0 1 2 0l.4.3a2 2 0 0 1 1 1.7v.2a2 2 0 0 0 2 2h.4a2 2 0 0 0 2-2v-.2a2 2 0 0 1 1-1.7l.4-.3a2 2 0 0 1 2 0l.2.1a2 2 0 0 0 2.7-.7l.2-.4a2 2 0 0 0-.7-2.7l-.2-.1a2 2 0 0 1-1-1.8v-.5a2 2 0 0 1 1-1.7l.2-.1a2 2 0 0 0 .7-2.7l-.2-.4a2 2 0 0 0-2.7-.7l-.2.1a2 2 0 0 1-2 0l-.4-.3a2 2 0 0 1-1-1.7V4a2 2 0 0 0-2-2z"/></svg>
+    </button>
+  </div>
   <div id="toast" role="status" aria-live="polite"></div>
 
   <div id="login" hidden>

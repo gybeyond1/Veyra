@@ -26,13 +26,10 @@
   --halo:rgba(8,10,13,.92);
   --glow:rgba(200,155,60,.22);
   --pill:rgba(255,255,255,.12);
-  --rail-bg:rgba(255,255,255,.07);
-  --rail-ink:#E7E9EB;
   --chip-bg:rgba(255,255,255,.10);
   --chip-ink:#E7E9EB;
   --scrim:rgba(8,10,13,.62);
   --drawer:rgba(6,8,11,.60);
-  --rail-panel:#17181A;
 }
 
 /* ---------------- 主题 ----------------
@@ -46,10 +43,8 @@ body[data-tv-theme="pink"]{
   --accent:#8E0B3F;--accent-ink:#FFFFFF;--accent-bright:#FFD1E1;
   --focus:#FFFFFF;--halo:rgba(0,0,0,.55);
   --glow:rgba(255,255,255,.40);--pill:rgba(0,0,0,.14);
-  --rail-bg:rgba(0,0,0,.14);--rail-ink:#FFFFFF;
   --chip-bg:rgba(0,0,0,.15);--chip-ink:#FFFFFF;
   --scrim:rgba(255,250,252,.80);--drawer:rgba(255,238,245,.70);
-  --rail-panel:#FF5C93;
 }
 body[data-tv-theme="red"]{
   --bg:#F44336;--bg-2:#F55B4F;--panel:rgba(0,0,0,.12);--panel-2:rgba(0,0,0,.22);
@@ -57,10 +52,8 @@ body[data-tv-theme="red"]{
   --accent:#6E0C06;--accent-ink:#FFFFFF;--accent-bright:#FFC9C4;
   --focus:#FFFFFF;--halo:rgba(0,0,0,.55);
   --glow:rgba(255,255,255,.34);--pill:rgba(0,0,0,.14);
-  --rail-bg:rgba(0,0,0,.14);--rail-ink:#FFFFFF;
   --chip-bg:rgba(0,0,0,.15);--chip-ink:#FFFFFF;
   --scrim:rgba(255,249,248,.80);--drawer:rgba(255,233,231,.70);
-  --rail-panel:#EC3B2E;
 }
 body[data-tv-theme="yellow"]{
   --bg:#FFC107;--bg-2:#FFCB2B;--panel:rgba(0,0,0,.10);--panel-2:rgba(0,0,0,.20);
@@ -68,10 +61,8 @@ body[data-tv-theme="yellow"]{
   --accent:#7A4E00;--accent-ink:#FFFFFF;--accent-bright:#FFEBA8;
   --focus:#FFFFFF;--halo:rgba(0,0,0,.55);
   --glow:rgba(255,255,255,.40);--pill:rgba(0,0,0,.14);
-  --rail-bg:rgba(0,0,0,.12);--rail-ink:#FFFFFF;
   --chip-bg:rgba(0,0,0,.13);--chip-ink:#FFFFFF;
   --scrim:rgba(255,252,241,.82);--drawer:rgba(255,247,220,.72);
-  --rail-panel:#F5B800;
 }
 body[data-tv-theme="green"]{
   --bg:#8BC34A;--bg-2:#97C95C;--panel:rgba(0,0,0,.10);--panel-2:rgba(0,0,0,.20);
@@ -79,10 +70,8 @@ body[data-tv-theme="green"]{
   --accent:#255A10;--accent-ink:#FFFFFF;--accent-bright:#DDF5C9;
   --focus:#FFFFFF;--halo:rgba(0,0,0,.55);
   --glow:rgba(255,255,255,.36);--pill:rgba(0,0,0,.14);
-  --rail-bg:rgba(0,0,0,.12);--rail-ink:#FFFFFF;
   --chip-bg:rgba(0,0,0,.13);--chip-ink:#FFFFFF;
   --scrim:rgba(251,255,247,.80);--drawer:rgba(240,250,230,.72);
-  --rail-panel:#7FBA3C;
 }
 body[data-tv-theme="blue"]{
   --bg:#2196F3;--bg-2:#389FF4;--panel:rgba(0,0,0,.12);--panel-2:rgba(0,0,0,.22);
@@ -90,10 +79,8 @@ body[data-tv-theme="blue"]{
   --accent:#08335F;--accent-ink:#FFFFFF;--accent-bright:#CFE4FF;
   --focus:#FFFFFF;--halo:rgba(0,0,0,.55);
   --glow:rgba(255,255,255,.34);--pill:rgba(0,0,0,.14);
-  --rail-bg:rgba(0,0,0,.13);--rail-ink:#FFFFFF;
   --chip-bg:rgba(0,0,0,.14);--chip-ink:#FFFFFF;
   --scrim:rgba(248,252,255,.80);--drawer:rgba(232,244,255,.72);
-  --rail-panel:#1C8CE8;
 }
 body[data-tv-theme="purple"]{
   --bg:#9C27B0;--bg-2:#A836BA;--panel:rgba(0,0,0,.14);--panel-2:rgba(255,255,255,.24);
@@ -101,10 +88,8 @@ body[data-tv-theme="purple"]{
   --accent:#FFD9F2;--accent-ink:#3A0B44;--accent-bright:#F0C7FF;
   --focus:#FFFFFF;--halo:rgba(0,0,0,.55);
   --glow:rgba(255,255,255,.26);--pill:rgba(0,0,0,.16);
-  --rail-bg:rgba(0,0,0,.16);--rail-ink:#FFFFFF;
   --chip-bg:rgba(0,0,0,.16);--chip-ink:#FFFFFF;
   --scrim:rgba(60,14,70,.68);--drawer:rgba(30,6,36,.60);
-  --rail-panel:#96249F;
 }
 /* 高性能模式：底色压到近黑，让海报透出来；其余变量跟主题黑一致。
    背景图由 body[data-backdrop="poster"] 打开，低模糊，看得清海报内容。 */
@@ -114,10 +99,8 @@ body[data-tv-theme="cinema"]{
   --accent:#c89b3c;--accent-ink:#231a06;--accent-bright:#ffd277;
   --focus:#FFFFFF;--halo:rgba(8,10,13,.92);
   --glow:rgba(200,155,60,.16);--pill:rgba(255,255,255,.12);
-  --rail-bg:rgba(255,255,255,.07);--rail-ink:#FFFFFF;
   --chip-bg:rgba(255,255,255,.10);--chip-ink:#FFFFFF;
   --scrim:rgba(8,10,13,.62);--drawer:rgba(6,8,11,.60);
-  --rail-panel:#12161B;
 }
 /* 简洁白：唯一一套白底深字 */
 body[data-tv-theme="clean"]{
@@ -126,10 +109,8 @@ body[data-tv-theme="clean"]{
   --accent:#1F6FEB;--accent-ink:#FFFFFF;--accent-bright:#7FB0FF;
   --focus:#1F6FEB;--halo:rgba(255,255,255,.92);
   --glow:rgba(31,111,235,.10);--pill:rgba(20,24,29,.08);
-  --rail-bg:rgba(20,24,29,.06);--rail-ink:#3C4653;
   --chip-bg:rgba(20,24,29,.07);--chip-ink:#3C4653;
   --scrim:rgba(255,255,255,.82);--drawer:rgba(248,250,252,.78);
-  --rail-panel:#FFFFFF;
 }
 
 /* 彩色底 + 白字：加一层极淡的暗投影，远看不会糊进底色里。
@@ -150,9 +131,7 @@ body[data-backdrop="poster"]{
   --accent:var(--accent-bright,#ffd277);--accent-ink:#14181d;
   --focus:#FFFFFF;--halo:rgba(8,10,13,.92);
   --glow:rgba(255,210,119,.18);--pill:rgba(255,255,255,.14);
-  --rail-bg:rgba(255,255,255,.10);--rail-ink:#F2F3F5;
   --scrim:rgba(8,10,13,.62);--drawer:rgba(4,6,9,.56);
-  --rail-panel:#0b0e13;
 }
 
 [hidden]{display:none !important}
@@ -218,129 +197,51 @@ body[data-backdrop="poster"] #tv-bg img{opacity:1}
 }
 body[data-backdrop="poster"] #tv-bg .veil{opacity:1}
 
-/* 侧栏呼出 = 抽屉打开：整页压暗，焦点只在左边那一列图标上。
-   只压左边一条的话，图标会直接叠在标题和分类条上，看起来像没对齐。 */
-/* 不做整屏遮罩：主界面颜色保持不变，只靠侧栏自己亮一档区分层次 */
-#rail-veil{display:none}
-
-/* ---------------- 左上角菜单（侧栏入口） ----------------
-   收起态左上角只有这三条横线，点它 / 按 OK 把左侧导航拉出来。
-   这里不再放头像：头像代表「账号」，而这一格是「菜单」，两者混在一起
-   换账号时还会闪一下名字首字母。三条线在任何账号状态下都稳定。
-   top 5.2rem：平板上横屏最上面是系统状态栏（时间/日期，字底约 4rem），
-   按钮上沿正好停在状态栏下面，焦点框不会压到字。
-   按钮本身透明、比图标大一圈，留出手指/遥控器的可点区域；
-   视觉只有 4.6rem 宽的图标，所以焦点态用淡底 + 内描边贴着图标，不套大方框。 */
-#rail-toggle{
-  position:absolute;left:1.2rem;top:5.2rem;width:7.4rem;height:6.6rem;z-index:4;
-  border:0;padding:0;border-radius:1.7rem;overflow:visible;cursor:pointer;
-  display:flex;align-items:center;justify-content:center;
-  background:transparent;color:var(--text);
-  transition:background .12s linear;
+/* ---------------- 右上角快捷入口（搜索 / 最近 / 设置） ----------------
+   左侧抽屉整个撤掉了：原来那三颗图标 + 左下角头像全部下线，入口搬到右上角常驻。
+   top 5.8rem：平板上横屏最上面是系统状态栏（时间/日期，约 5.2rem 高），
+   按钮上沿留 0.6rem 缝，焦点环再往外 .32rem 也不会压到状态栏的字。
+   6rem 见方、圆角 1.8rem，三颗之间留 1rem，整条 20rem 宽，右边贴 4.6rem。
+   图标统一 3rem、1.8 描边、圆头圆角 —— 三颗并排不会有粗细或风格差。 */
+#tools{
+  position:absolute;right:4.6rem;top:5.8rem;z-index:6;
+  display:flex;flex-direction:row;align-items:center;
 }
-#rail-toggle .menu-glyph{
-  display:block;position:relative;width:4.6rem;height:3.4rem;
-}
-#rail-toggle .menu-glyph i{
-  position:absolute;left:0;height:.34rem;border-radius:.17rem;
-  background:currentColor;
-  transition:width .14s ease-out;
-}
-#rail-toggle .menu-glyph i:nth-child(1){top:0;width:100%}
-/* 中间一根短一截：三条完全等长会像复选框，短一点才是常见的菜单图标 */
-#rail-toggle .menu-glyph i:nth-child(2){top:1.53rem;width:72%}
-#rail-toggle .menu-glyph i:nth-child(3){top:3.06rem;width:100%}
-#rail-toggle.is-focused{background:rgba(255,255,255,.10);
-  box-shadow:inset 0 0 0 .24rem var(--focus)}
-#rail-toggle.is-focused .menu-glyph i:nth-child(2){width:100%}
-body.rail-open #rail-toggle{display:none}
-/* 详情页不显示左上角菜单（会压在海报上），顶部留白也一并收回去 */
-body.route-detail #rail-toggle{display:none}
-body.route-detail #stage{padding-top:7.2rem}
-
-/* ---------------- 左侧图标导航（默认收起） ----------------
-   内容页占满整屏；侧栏平时整个滑出屏幕外，只有遥控器在最左一列继续按左
-   才把它拉出来。拉出来时焦点直接落到当前页的图标上，按右/返回收回。 */
-#rail{
-  position:absolute;left:0;top:0;bottom:0;width:9.4rem;z-index:5;
-  /* 与左上角头像同一个起手高度：头像在上面 5rem 处，侧栏第一格也从这里开始，
-     展开时图标不会往上蹿一截，手机上也不会压到系统状态栏 */
-  padding:5rem 0 2.6rem;
-  display:flex;flex-direction:column;align-items:center;
-  background:transparent;
-  transform:translateX(-140%);opacity:0;pointer-events:none;
-  transition:transform .18s ease-out,opacity .18s linear;
-}
-/* 呼出时是一块不透明的竖栏：图标不会再压在标题/海报上重影 */
-body.rail-open #rail{
-  transform:translateX(0);opacity:1;pointer-events:auto;
-  background:var(--rail-panel);
-  /* 叠一层 10% 白把侧栏提亮，比主界面亮一点点就够，不再压暗整页 */
-  background-image:linear-gradient(rgba(255,255,255,.10),rgba(255,255,255,.10));
-  box-shadow:0 0 3rem 0 rgba(0,0,0,.26);
-}
-.rail-item{
-  position:relative;
-  width:5.2rem;height:5.2rem;border-radius:1.5rem;
-  margin-bottom:1.2rem;
-  display:flex;align-items:center;justify-content:center;
-  color:var(--rail-ink);background:var(--rail-bg);
+.tool{
+  position:relative;display:flex;align-items:center;justify-content:center;
+  width:6rem;height:6rem;border:0;padding:0;
+  border-radius:1.8rem;
+  background:var(--chip-bg);color:var(--text);
   transition:background .12s linear,color .12s linear;
 }
-.rail-item svg{width:2.8rem;height:2.8rem;fill:currentColor}
-.rail-item.is-active{color:var(--text);background:var(--chip-bg)}
-.rail-item.is-focused{color:var(--accent-ink);background:var(--accent)}
-/* 焦点框贴着圆角图标本身走（图标 1.5rem 圆角，环也是 1.5rem、只往外让 .3rem），
-   不再是套在图标外面那个方方正正的框 */
-.rail-item::after{
-  content:"";position:absolute;inset:-.3rem;border-radius:1.5rem;
+.tool + .tool{margin-left:1rem}
+.tool svg{
+  width:3rem;height:3rem;
+  fill:none;stroke:currentColor;stroke-width:1.8;
+  stroke-linecap:round;stroke-linejoin:round;
+}
+.tool.is-focused{background:var(--accent);color:var(--accent-ink)}
+/* 焦点环贴着按钮自己的圆角走；外面再套一层硬矩形的话，手指按上去特别明显 */
+.tool::after{
+  content:"";position:absolute;inset:-.3rem;border-radius:2.1rem;
   border:.26rem solid var(--focus);pointer-events:none;
   opacity:0;transition:opacity .12s linear;
 }
-.rail-item.is-focused::after{opacity:1}
-
-/* 左下角账号：只放头像，点开账号面板 */
-.rail-account{
-  position:relative;
-  margin-top:auto;width:5.2rem;height:5.2rem;border-radius:50%;
-  display:flex;align-items:center;justify-content:center;
-  background:transparent;
-  overflow:visible;
-}
-.rail-account .avatar{
-  position:relative;z-index:1;
-  display:block;width:100%;height:100%;line-height:5.2rem;
-  text-align:center;font-size:2.2rem;font-weight:700;color:var(--text);
-  white-space:nowrap;overflow:hidden;
-  border-radius:50%;clip-path:circle(50% at 50% 50%);
-  background:var(--rail-bg);
-}
-/* 手机端设置的头像：铺满整个圆 */
-.rail-account .avatar img{
-  width:100%;height:100%;object-fit:cover;border-radius:50%;
-  clip-path:circle(50% at 50% 50%);
-}
-/* 侧栏里这颗焦点环同理：径向渐变的圆环 + clip-path，永远是个圆 */
-.rail-account::before{
-  content:"";position:absolute;inset:-.34rem;border-radius:50%;
-  clip-path:circle(50% at 50% 50%);
-  background:radial-gradient(circle closest-side,transparent 90%,var(--focus) 90%);
-  pointer-events:none;
-  opacity:0;transition:opacity .12s linear;
-}
-.rail-account.is-focused{outline:none;box-shadow:none}
-.rail-account.is-focused::before{opacity:1}
-.rail-account.is-focused .avatar{background:var(--accent);color:var(--accent-ink)}
+.tool.is-focused::after{opacity:1}
+/* 详情页顶部整片是海报，工具条会压上去 —— 跟原来的左上角入口一样收起来 */
+body.route-detail #tools{display:none}
+/* 搜索页顶部就是搜索框 + 二维码，二维码正好在工具条正下方（只差一指缝）。
+   多留 1.8rem，让二维码上沿跟按钮底拉开半个按钮的高度，看着不挤也不会误触。 */
+body.route-search #stage{padding-top:15rem}
 
 /* ---------------- 主区域 ----------------
-   侧栏收起后内容铺满整屏，只留 4.6rem 的左边距给标题呼吸。 */
+   没有侧栏了，内容铺满整屏，只留 4.6rem 的左边距给标题呼吸。 */
 #stage{
   position:absolute;left:0;right:0;top:0;bottom:0;z-index:2;
   overflow-y:auto;overflow-x:hidden;
-  /* 顶部留白只给左上角菜单让位（标题行已经整行删掉）：
-     按钮 top 5.2rem + 高 6.6rem = 11.8rem，图标本身到 10.6rem 就结束了；
-     分类条从 13.2rem 起，焦点框离它还有一段缝，
-     视觉上图标与分类条之间留一指多，不会挤成一团 */
+  /* 顶部留白给右上角那排按钮让位：
+     按钮 top 5.2rem + 高 6.2rem = 11.4rem，分类条从 13.2rem 起，
+     中间还留一指多的缝，不会挤成一团；搜索页的搜索框也在这条线下面 */
   padding:13.2rem 5.2rem 8rem 4.6rem;
   scrollbar-width:none;
 }

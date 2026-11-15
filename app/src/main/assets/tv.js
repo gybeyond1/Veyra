@@ -72,9 +72,11 @@ var loginLayer = document.getElementById('login');
 var accountPanel = document.getElementById('account');
 var updateLayer = document.getElementById('tv-update');
 var toastEl = document.getElementById('toast');
-var railAccount = document.getElementById('rail-account');
-var railAvatar = document.getElementById('rail-avatar');
-var railToggle = document.getElementById('rail-toggle');
+/* 左侧抽屉（#rail / #rail-veil）和左上角入口（#rail-toggle）的 DOM 已经整块删掉，
+   入口搬到右上角 #tools。下面 enterRail / leaveRail / openRail / closeRail /
+   inRail / railKeyForRoute 这套函数原样留着：里面的 querySelector 拿不到元素时
+   都直接 return，调用点又只有老代码那几处，删了反而容易漏改。
+   换句话说：抽屉的「逻辑」还在，只是没有入口、没有样式，点不出来。 */
 var themePanel = document.getElementById('theme');
 var themeGrid = document.getElementById('theme-grid');
 var themeSub = document.getElementById('theme-sub');
@@ -82,7 +84,6 @@ var heroTune = document.getElementById('hero-tune');
 var heroRowsEl = document.getElementById('hero-rows');
 var heroPreviewImg = document.getElementById('hero-preview-img');
 var heroPreviewVeil = document.getElementById('hero-preview-veil');
-var railVeil = document.getElementById('rail-veil');
 var otpPanel = document.getElementById('otp');
 var otpCells = document.getElementById('otp-cells');
 var otpKeys = document.getElementById('otp-keys');
@@ -591,7 +592,7 @@ function focusElement(el, remember) {
     if (inRail(el)) state.lastRailKey = state.focusKey;
     /* 头像只是「菜单入口」，不算内容位置：记成 lastContentKey 的话，
        关掉侧栏会回到头像上，还得再按一下才能回到刚才那张卡。 */
-    else if (state.focusKey && el !== railToggle) state.lastContentKey = state.focusKey;
+    else if (state.focusKey) state.lastContentKey = state.focusKey;
   }
   alignGridScroll(el);
   var box = el.getBoundingClientRect();
@@ -733,7 +734,7 @@ function leaveRail() {
   if (!target) {
     var all = focusables();
     for (var i = 0; i < all.length; i++) {
-      if (inRail(all[i]) || all[i] === railToggle) continue;
+      if (inRail(all[i])) continue;
       target = all[i]; break;
     }
   }
@@ -856,6 +857,10 @@ function move(direction) {
     /* 侧栏是临时呼出来的：按右回内容区，再按左也收回 */
     if (direction === 'right' || direction === 'left') { leaveRail(); return; }
   }
+
+  /* 右上角那排按钮就在屏幕最上沿：在上面再按上，不能退化成「滚一屏」——
+     焦点没地方去、页面却被推走一截，手感上就是「按上没反应」。直接停住。 */
+  if (direction === 'up' && current.closest && current.closest('#tools')) return;
 
   var from = current.getBoundingClientRect();
   /* 海报窗口模式：上下按「整行」跳，不用几何最近。
@@ -1043,7 +1048,7 @@ function renderHome() {
   else body = gridMarkup(feed.items, '这个分类下暂时没有内容');
 
   /* 分类名 + 「N 部」那行整行删了：切短剧/漫剧/热播榜时它就是同一位置上的一串字，
-     用户不要。现在这一块只剩分类胶囊 + 海报墙，顶部空间让给左上角头像。 */
+     用户不要。现在这一块只剩分类胶囊 + 海报墙，顶部那条空白留给右上角三个入口。 */
   view.innerHTML = '<section class="section" data-feed="1">' + chips + body + '</section>';
   paintCovers(view);
   layoutFirstScreen();
@@ -1077,7 +1082,7 @@ function feedSignature(items) {
   return list(items).map(function (item) { return String(item && item.id); }).join(',');
 }
 
-/* focusChip=false：这是开机/切页触发的加载，焦点留在原处（侧栏图标）——
+/* focusChip=false：这是开机/切页触发的加载，焦点留在原处（右上角入口/当前卡）——
    以前不管谁调用都把焦点塞给分类条，分类条在首屏下方，浏览器为了露出它
    会把页面往下滚 100 多像素，「首页」标题头一进去就被顶没了。 */
 function loadFeed(id, reset, focusChip) {
@@ -1479,8 +1484,8 @@ function resumePlan() {
 
 function renderDetail() {
   resetFirstScreen();
-  /* 详情页不放左上角头像：那儿的视觉主体是海报，头像会压在封面上。
-     body 上打个标记，CSS 把 #rail-toggle 收起来，顺便把 #stage 顶部留白还回去。 */
+  /* 详情页右上角不放那三个入口：那儿的视觉主体是海报，按钮会压在封面上。
+     body 上打个标记，CSS 把 #tools 收起来，顺便把 #stage 顶部留白还回去。 */
   document.body.classList.add('route-detail');
   if (!state.detail) {
     view.innerHTML = '<p class="empty">正在打开…</p>';
@@ -1676,6 +1681,8 @@ function toggleBookmark() {
 
 /* ---------------- 路由 ---------------- */
 function setActiveNav(tab) {
+  /* 侧栏已下线，这里选不到任何 .rail-item；函数留着是因为 go() 每页都调一次，
+     将来抽屉若要回来，只要把标记补上就还能亮 */
   var items = document.querySelectorAll('.rail-item');
   for (var i = 0; i < items.length; i++) {
     items[i].classList.toggle('is-active', items[i].dataset.nav === tab);
@@ -1688,7 +1695,8 @@ function setActiveNav(tab) {
 function go(tab, restore) {
   if (tab === 'adult' || tab === 'category') tab = 'home';   /* 剧场已并进首页 */
   closeRail();
-  document.body.classList.remove('route-detail');   /* 离开详情：头像重新出现 */
+  document.body.classList.remove('route-detail');   /* 离开详情：右上角工具条重新出现 */
+  document.body.classList.remove('route-search');   /* 搜索页顶部多留一点的内边距 */
   resetFirstScreen();   /* 首页/我的才需要顶部留白，切页先复位 */
   var mem = (restore && state.memory[tab]) ? state.memory[tab] : null;
   state.pendingRestore = mem ? { scrollTop: mem.scrollTop || 0, focusKey: mem.focusKey || '' } : null;
@@ -1699,6 +1707,8 @@ function go(tab, restore) {
     setActiveNav('home'); renderHome();
     if (!state.feed) loadFeed(state.feedId || categoryList()[0][0], true, false);
   } else if (tab === 'search') {
+    /* 搜索框和二维码就在页顶，工具条在右上角：给这一页多留 1.8rem 顶部内边距 */
+    document.body.classList.add('route-search');
     state.route = 'search';
     state.focusKey = mem ? mem.focusKey : 'search-box';
     setActiveNav('search'); renderSearch();
@@ -1801,15 +1811,10 @@ document.addEventListener('click', function (event) {
   if (sourcePanel && !sourcePanel.hidden && target.id === 'source') { closeSourcePanel(); return; }
   if (proxyPanel && !proxyPanel.hidden && target.id === 'proxy') { closeProxy(); return; }
 
-  /* 侧栏入口：左上角菜单。侧栏里的图标导航、账号面板逻辑都不变。 */
-  if (target.closest('#rail-toggle')) { enterRail(); return; }
-
-  /* 侧栏开着时点侧栏以外的任何地方 → 收回侧栏，这一下不再触发背后的卡片/按钮。
-     但浮层（账号面板、主题、内容源、网络通道）是叠在侧栏上面的，
-     点它们里面的按钮不能被这条规则吞掉，否则「私密模式」点了没反应。 */
-  var inOverlayPanel = target.closest('#account') || target.closest('#theme') ||
-    target.closest('#source') || target.closest('#proxy');
-  if (railOpen() && !inOverlayPanel && !target.closest('#rail')) { leaveRail(); return; }
+  /* 右上角「设置」：原来点左下角头像开的那个账号面板（主题 / 私密 / 更新 / 退出）。
+     搜索、最近两颗按钮带 data-nav，走下面的 go() 路由，跟原来侧栏里
+     那两颗图标是同一套，页面逻辑一行没改。 */
+  if (target.closest('#tool-settings')) { openAccount(); return; }
 
   var nav = target.closest('[data-nav]');
   if (nav) { go(nav.dataset.nav); return; }
@@ -1921,27 +1926,9 @@ document.addEventListener('click', function (event) {
 /* ---------------- 登录 ---------------- */
 function setAccount(profile) {
   state.account = profile || { loggedIn: false };
-  var name = state.account.loggedIn ? (state.account.username || '已登录') : '';
-  /* 手机端设置过头像的话，账号资料里带 avatar（jpeg 的 data URL），
-     直接铺满那个圆；没有头像才退回首字母。
-     左上角入口已经改成「三条横线」的菜单图标，不再跟着账号头像走。 */
-  var avatar = state.account.loggedIn ? String(state.account.avatar || '') : '';
-  paintAvatar(railAvatar, avatar, name);
-}
-
-function paintAvatar(el, avatar, name) {
-  if (!el) return;
-  if (avatar) {
-    el.innerHTML = '<img alt="">';
-    var img = el.querySelector('img');
-    img.onerror = function () {
-      el.textContent = name ? name.slice(0, 1).toUpperCase() : '?';
-    };
-    img.src = avatar;
-  } else {
-    el.innerHTML = '';
-    el.textContent = name ? name.slice(0, 1).toUpperCase() : '?';
-  }
+  /* 侧栏那个头像已经下线，界面上不再有需要画头像的位置：
+     账号资料照旧存进 state.account（用户名、登录态、私密开关都靠它），
+     只是不再往哪个圆里画首字母了。 */
 }
 
 function showLoginQr() {
@@ -1984,7 +1971,7 @@ window.hgTvLogin = function (ok) {
       toast('已登录');
       if (!state.feed) loadFeed(state.feedId || categoryList()[0][0], true, false);
       loadLibrary();
-      state.focusKey = 'nav:home';
+      state.focusKey = '';
       restoreFocus();
     }
   }).catch(function () { });
@@ -2223,7 +2210,8 @@ function openAccount() {
 function closeAccount() {
   accountPanel.hidden = true;
   showAccountPage('main');
-  state.focusKey = 'nav:account';
+  /* 入口已经搬到右上角齿轮：关掉面板焦点落回那颗齿轮，不是原来侧栏的头像 */
+  state.focusKey = 'tool:settings';
   restoreFocus();
 }
 
@@ -2377,7 +2365,7 @@ function applyMode(status, fallback) {
   if (accountPanel) accountPanel.hidden = true;
   toast(state.source === 'huangguo' ? '已进入私密内容' : '已返回公开内容');
   state.route = 'home';
-  state.focusKey = 'nav:home';
+  state.focusKey = '';
   setActiveNav('home');
   renderHome();
   loadFeed(state.feedId || categoryList()[0][0], true, false);
@@ -2485,7 +2473,7 @@ function logout() {
     state.detail = null;
     toast('已退出登录');
     state.route = 'home';
-    state.focusKey = 'nav:home';
+    state.focusKey = '';
     setActiveNav('home');
     renderHome();
     loadFeed(state.feedId || categoryList()[0][0], true, false);
