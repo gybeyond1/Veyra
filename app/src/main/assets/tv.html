@@ -34,23 +34,6 @@
   <div id="tv-bg" aria-hidden="true"><img id="tv-bg-img" alt=""><span class="veil"></span></div>
   <main id="stage"><div id="view"></div></main>
 
-  <!-- 右上角快捷入口：搜索 / 最近 / 设置。
-       原来的左侧抽屉（首页/搜索/我的 + 左下角头像）整个撤掉，三个入口改常驻右上角。
-       搜索、最近直接复用 [data-nav] 的老路由（go('search') / go('library')），
-       设置就是原来点头像弹出的那个账号面板。
-       三个图标同一套线条（1.8 描边、圆头圆角），遥控器左右一格格走，
-       上键从内容区第一排就能上来，在按钮上再按上不会把页面滚走。 -->
-  <div id="tools" role="toolbar" aria-label="快捷入口">
-    <button id="tool-search" class="tool" type="button" data-nav="search" data-focusable data-key="tool:search" aria-label="搜索" title="搜索">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7.4"/><path d="M16.3 16.3 20.8 20.8"/></svg>
-    </button>
-    <button id="tool-recent" class="tool" type="button" data-nav="library" data-focusable data-key="tool:recent" aria-label="最近" title="最近">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.7 9.7 0 0 0-6.7 2.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7.2v5.2l3.8 1.9"/></svg>
-    </button>
-    <button id="tool-settings" class="tool" type="button" data-focusable data-key="tool:settings" aria-label="设置" title="设置">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12.2 2h-.4a2 2 0 0 0-2 2v.2a2 2 0 0 1-1 1.7l-.4.3a2 2 0 0 1-2 0l-.2-.1a2 2 0 0 0-2.7.7l-.2.4a2 2 0 0 0 .7 2.7l.2.1a2 2 0 0 1 1 1.7v.5a2 2 0 0 1-1 1.8l-.2.1a2 2 0 0 0-.7 2.7l.2.4a2 2 0 0 0 2.7.7l.2-.1a2 2 0 0 1 2 0l.4.3a2 2 0 0 1 1 1.7v.2a2 2 0 0 0 2 2h.4a2 2 0 0 0 2-2v-.2a2 2 0 0 1 1-1.7l.4-.3a2 2 0 0 1 2 0l.2.1a2 2 0 0 0 2.7-.7l.2-.4a2 2 0 0 0-.7-2.7l-.2-.1a2 2 0 0 1-1-1.8v-.5a2 2 0 0 1 1-1.7l.2-.1a2 2 0 0 0 .7-2.7l-.2-.4a2 2 0 0 0-2.7-.7l-.2.1a2 2 0 0 1-2 0l-.4-.3a2 2 0 0 1-1-1.7V4a2 2 0 0 0-2-2z"/></svg>
-    </button>
-  </div>
   <div id="toast" role="status" aria-live="polite"></div>
 
   <div id="login" hidden>

@@ -98,6 +98,26 @@ function esc(value) {
 }
 function list(value) { return Object.prototype.toString.call(value) === '[object Array]' ? value : []; }
 
+/* 右上角三个入口：搜索 / 最近 / 设置。
+   原来左侧抽屉（首页/搜索/我的 + 左下角头像）整个撤掉，功能搬到这三个按钮上：
+   搜索、最近带 data-nav，直接复用 go('search') / go('library')；
+   设置就是原来点头像弹出的账号面板。
+   注意它们是「内容」不是「悬浮栏」—— 这段 HTML 由各页 render 拼进 .topline，
+   跟分类胶囊同一行、同一条水平线，遥控器往下按时跟着内容一起被顶上去。 */
+var TOOLS_HTML = '<div id="tools" role="toolbar" aria-label="快捷入口">'
+  + '<button id="tool-search" class="tool" type="button" data-nav="search" data-focusable data-key="tool:search" aria-label="搜索" title="搜索">'
+  + '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7.4"/><path d="M16.3 16.3 20.8 20.8"/></svg></button>'
+  + '<button id="tool-recent" class="tool" type="button" data-nav="library" data-focusable data-key="tool:recent" aria-label="最近" title="最近">'
+  + '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.7 9.7 0 0 0-6.7 2.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7.2v5.2l3.8 1.9"/></svg></button>'
+  + '<button id="tool-settings" class="tool" type="button" data-focusable data-key="tool:settings" aria-label="设置" title="设置">'
+  + '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12.2 2h-.4a2 2 0 0 0-2 2v.2a2 2 0 0 1-1 1.7l-.4.3a2 2 0 0 1-2 0l-.2-.1a2 2 0 0 0-2.7.7l-.2.4a2 2 0 0 0 .7 2.7l.2.1a2 2 0 0 1 1 1.7v.5a2 2 0 0 1-1 1.8l-.2.1a2 2 0 0 0-.7 2.7l.2.4a2 2 0 0 0 2.7.7l.2-.1a2 2 0 0 1 2 0l.4.3a2 2 0 0 1 1 1.7v.2a2 2 0 0 0 2 2h.4a2 2 0 0 0 2-2v-.2a2 2 0 0 1 1-1.7l.4-.3a2 2 0 0 1 2 0l.2.1a2 2 0 0 0 2.7-.7l.2-.4a2 2 0 0 0-.7-2.7l-.2-.1a2 2 0 0 1-1-1.8v-.5a2 2 0 0 1 1-1.7l.2-.1a2 2 0 0 0 .7-2.7l-.2-.4a2 2 0 0 0-2.7-.7l-.2.1a2 2 0 0 1-2 0l-.4-.3a2 2 0 0 1-1-1.7V4a2 2 0 0 0-2-2z"/></svg></button>'
+  + '</div>';
+
+/* 首页/我的：分类胶囊（或页签）在左，三个入口在右，同一行 */
+function toplineMarkup(left) {
+  return '<div class="topline">' + left + TOOLS_HTML + '</div>';
+}
+
 var toastTimer = 0;
 function toast(message, isError) {
   if (!toastEl) return;
@@ -1049,7 +1069,7 @@ function renderHome() {
 
   /* 分类名 + 「N 部」那行整行删了：切短剧/漫剧/热播榜时它就是同一位置上的一串字，
      用户不要。现在这一块只剩分类胶囊 + 海报墙，顶部那条空白留给右上角三个入口。 */
-  view.innerHTML = '<section class="section" data-feed="1">' + chips + body + '</section>';
+  view.innerHTML = '<section class="section" data-feed="1">' + toplineMarkup(chips) + body + '</section>';
   paintCovers(view);
   layoutFirstScreen();
   restoreFocus();
@@ -1237,6 +1257,7 @@ function renderSearch() {
   var hasResults = !!(state.search.items && state.search.items.length);
 
   var html = ''
+    + '<div class="topline">' + TOOLS_HTML + '</div>'
     + '<div class="search-head">'
     + '<div class="search-main">'
     + '<div class="search-box" data-focusable data-key="search-box" tabindex="0">'
@@ -1388,10 +1409,13 @@ function renderLibrary() {
   var bookmarks = list(data.bookmarks);
   var tab = state.libraryTab;
   var html = ''
+    + '<div class="topline">'
     + '<div class="tabs chips">'
     + '<button type="button" class="chip' + (tab === 'history' ? ' is-active' : '') + '" data-focusable data-key="tab:history" data-tab="history">观看记录</button>'
     + '<button type="button" class="chip' + (tab === 'bookmarks' ? ' is-active' : '') + '" data-focusable data-key="tab:bookmarks" data-tab="bookmarks">收藏</button>'
     + '<button type="button" class="chip' + (tab === 'nas' ? ' is-active' : '') + '" data-focusable data-key="tab:nas" data-tab="nas">下载</button>'
+    + '</div>'
+    + TOOLS_HTML
     + '</div>';
   if (tab === 'nas') {
     html += '<div class="nas-panel">';
@@ -1695,8 +1719,7 @@ function setActiveNav(tab) {
 function go(tab, restore) {
   if (tab === 'adult' || tab === 'category') tab = 'home';   /* 剧场已并进首页 */
   closeRail();
-  document.body.classList.remove('route-detail');   /* 离开详情：右上角工具条重新出现 */
-  document.body.classList.remove('route-search');   /* 搜索页顶部多留一点的内边距 */
+  document.body.classList.remove('route-detail');   /* 离开详情：顶栏重新出现 */
   resetFirstScreen();   /* 首页/我的才需要顶部留白，切页先复位 */
   var mem = (restore && state.memory[tab]) ? state.memory[tab] : null;
   state.pendingRestore = mem ? { scrollTop: mem.scrollTop || 0, focusKey: mem.focusKey || '' } : null;
@@ -1707,8 +1730,6 @@ function go(tab, restore) {
     setActiveNav('home'); renderHome();
     if (!state.feed) loadFeed(state.feedId || categoryList()[0][0], true, false);
   } else if (tab === 'search') {
-    /* 搜索框和二维码就在页顶，工具条在右上角：给这一页多留 1.8rem 顶部内边距 */
-    document.body.classList.add('route-search');
     state.route = 'search';
     state.focusKey = mem ? mem.focusKey : 'search-box';
     setActiveNav('search'); renderSearch();

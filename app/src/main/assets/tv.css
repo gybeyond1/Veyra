@@ -197,44 +197,47 @@ body[data-backdrop="poster"] #tv-bg img{opacity:1}
 }
 body[data-backdrop="poster"] #tv-bg .veil{opacity:1}
 
-/* ---------------- 右上角快捷入口（搜索 / 最近 / 设置） ----------------
-   左侧抽屉整个撤掉了：原来那三颗图标 + 左下角头像全部下线，入口搬到右上角常驻。
-   top 5.8rem：平板上横屏最上面是系统状态栏（时间/日期，约 5.2rem 高），
-   按钮上沿留 0.6rem 缝，焦点环再往外 .32rem 也不会压到状态栏的字。
-   6rem 见方、圆角 1.8rem，三颗之间留 1rem，整条 20rem 宽，右边贴 4.6rem。
-   图标统一 3rem、1.8 描边、圆头圆角 —— 三颗并排不会有粗细或风格差。 */
+/* ---------------- 顶栏：分类胶囊 + 三个入口 ----------------
+   左侧抽屉整个撤掉了，搜索 / 最近 / 设置三颗按钮搬到右上角 —— 但它们不是
+   悬浮常驻的一层，而是「顶栏」的一部分：跟短剧/漫剧/热播榜那排胶囊同一条水平线，
+   胶囊在左、按钮在右，整行随内容一起滚。遥控器往下按，它就跟着被顶上去。
+   按钮高度 5rem 跟胶囊完全一致（上沿下沿都齐），圆角 1.4rem，三颗之间留 1rem；
+   图标统一 2.6rem、1.8 描边、圆头圆角，并排不会有粗细或风格差。 */
+.topline{
+  display:flex;align-items:center;
+  margin-bottom:2.4rem;
+}
+/* 胶囊本身带 1.2rem 下边距，放进顶栏里要去掉，否则顶栏会被撑高一截 */
+.topline .chips,
+.topline .tabs{margin-bottom:0}
+.topline .chip{margin-bottom:0}
+/* margin-left:auto 把它顶到最右：搜索页那行只有它一个，也靠右 */
 #tools{
-  position:absolute;right:4.6rem;top:5.8rem;z-index:6;
-  display:flex;flex-direction:row;align-items:center;
+  display:flex;align-items:center;flex:0 0 auto;
+  margin-left:auto;
 }
 .tool{
   position:relative;display:flex;align-items:center;justify-content:center;
-  width:6rem;height:6rem;border:0;padding:0;
-  border-radius:1.8rem;
+  width:6rem;height:5rem;border:0;padding:0;
+  border-radius:1.4rem;
   background:var(--chip-bg);color:var(--text);
   transition:background .12s linear,color .12s linear;
 }
 .tool + .tool{margin-left:1rem}
 .tool svg{
-  width:3rem;height:3rem;
+  width:2.6rem;height:2.6rem;
   fill:none;stroke:currentColor;stroke-width:1.8;
   stroke-linecap:round;stroke-linejoin:round;
 }
 .tool.is-focused{background:var(--accent);color:var(--accent-ink)}
 /* 焦点环贴着按钮自己的圆角走；外面再套一层硬矩形的话，手指按上去特别明显 */
 .tool::after{
-  content:"";position:absolute;inset:-.3rem;border-radius:2.1rem;
-  border:.26rem solid var(--focus);pointer-events:none;
+  content:"";position:absolute;inset:-.26rem;border-radius:1.66rem;
+  border:.24rem solid var(--focus);pointer-events:none;
   opacity:0;transition:opacity .12s linear;
 }
 .tool.is-focused::after{opacity:1}
-/* 详情页顶部整片是海报，工具条会压上去 —— 跟原来的左上角入口一样收起来 */
-body.route-detail #tools{display:none}
-/* 搜索页顶部就是搜索框 + 二维码，二维码正好在工具条正下方（只差一指缝）。
-   多留 1.8rem，让二维码上沿跟按钮底拉开半个按钮的高度，看着不挤也不会误触。 */
-body.route-search #stage{padding-top:15rem}
-/* 详情页没有工具条，顶部留白收回去，海报可以更靠上。
-   写在 route-search 后面：从搜索页点进详情时 body 上两个标记都在，详情页优先。 */
+/* 详情页整页是海报，不放顶栏；顶部留白也跟着收回去 */
 body.route-detail #stage{padding-top:7.2rem}
 
 /* ---------------- 主区域 ----------------
@@ -242,10 +245,10 @@ body.route-detail #stage{padding-top:7.2rem}
 #stage{
   position:absolute;left:0;right:0;top:0;bottom:0;z-index:2;
   overflow-y:auto;overflow-x:hidden;
-  /* 顶部留白给右上角那排按钮让位：
-     按钮 top 5.2rem + 高 6.2rem = 11.4rem，分类条从 13.2rem 起，
-     中间还留一指多的缝，不会挤成一团；搜索页的搜索框也在这条线下面 */
-  padding:13.2rem 5.2rem 8rem 4.6rem;
+  /* 顶部只留一条缝给系统状态栏（横屏约 5.2rem 高）：
+     顶栏从 6rem 起，整行 5rem + 下边距 2.4rem，海报墙从 13.4rem 开始。
+     原来这里留 13.2rem 是给悬浮按钮让位的，按钮进了内容流就不用再空一截。 */
+  padding:6rem 5.2rem 8rem 4.6rem;
   scrollbar-width:none;
 }
 #stage::-webkit-scrollbar{display:none}
