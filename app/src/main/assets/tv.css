@@ -156,9 +156,11 @@ body[data-backdrop="poster"]{
 }
 
 [hidden]{display:none !important}
-/* 浏览器/WebView 自带的 :focus 环会套在整张卡上（连剧名一起框住），而且它是
-   按盒子的矩形边画的 —— 圆的头像、圆角的图标外面都会多出一个硬矩形。
-   焦点样式统一由 .is-focused 负责，这里把系统环在所有元素上一律关掉。 */
+/* 手指点按钮时 Android WebView 会画一块“触摸高亮”（-webkit-tap-highlight-color），
+   它是按盒子的矩形填的，不认 border-radius —— 圆头像、圆角胶囊外面就会多出
+   一圈硬邦邦的方框/方块，遥控器走 .is-focused 反而不受影响。这里直接关掉，
+   平板上点哪儿都不会再冒出矩形。 */
+*{-webkit-tap-highlight-color:transparent}
 *:focus{outline:none !important}
 [data-focusable]:focus{outline:none !important}
 /* 分开写：老 WebView 不认 :focus-visible，写在同一个选择器组里会把整条规则作废 */
@@ -224,13 +226,14 @@ body[data-backdrop="poster"] #tv-bg .veil{opacity:1}
 /* ---------------- 左上角头像（侧栏入口） ----------------
    收起态左上角只有这一个圆，点它 / 按 OK 把左侧导航拉出来。
    侧栏打开后由栏内的账号头像接管，这里隐去，免得两个头像叠在一起。
-   top 5.5rem：手机上横屏时最上面那条是系统状态栏（时间/日期，字底大约
-   4rem），原来 1.2rem 整个圆压在字上。再往上就要碰状态栏了，5.5rem 是极限。
+   top 5rem：平板上横屏时最上面那条是系统状态栏（时间/日期，字底大约 4rem），
+   原来 1.2rem 整个圆压在字上。5rem 时焦点环上沿离状态栏只剩一条缝，
+   再往上就要碰字了。
    7.8rem = 原来 5.2rem 的 1.5 倍，横向贴回左上角（left 1.4rem）。
    圆形一律用 border-radius + clip-path 双保险：盒子的背景/阴影在某些 WebView
    上只认矩形，圆角失效就露出一个方框；clip-path 切出来的一定是圆。 */
 #rail-toggle{
-  position:absolute;left:1.4rem;top:5.5rem;width:7.8rem;height:7.8rem;z-index:4;
+  position:absolute;left:1.4rem;top:5rem;width:7.8rem;height:7.8rem;z-index:4;
   border:0;padding:0;border-radius:50%;overflow:visible;cursor:pointer;
   display:flex;align-items:center;justify-content:center;
   background:transparent;color:var(--text);
@@ -267,9 +270,9 @@ body.rail-open #rail-toggle{display:none}
    才把它拉出来。拉出来时焦点直接落到当前页的图标上，按右/返回收回。 */
 #rail{
   position:absolute;left:0;top:0;bottom:0;width:9.4rem;z-index:5;
-  /* 与左上角头像同一个起手高度：头像在上面 5.5rem 处，侧栏第一格也从这里开始，
+  /* 与左上角头像同一个起手高度：头像在上面 5rem 处，侧栏第一格也从这里开始，
      展开时图标不会往上蹿一截，手机上也不会压到系统状态栏 */
-  padding:5.5rem 0 2.6rem;
+  padding:5rem 0 2.6rem;
   display:flex;flex-direction:column;align-items:center;
   background:transparent;
   transform:translateX(-140%);opacity:0;pointer-events:none;
@@ -342,8 +345,8 @@ body.rail-open #rail{
   position:absolute;left:0;right:0;top:0;bottom:0;z-index:2;
   overflow-y:auto;overflow-x:hidden;
   /* 顶部留白只给左上角头像让位（标题行已经整行删掉）：
-     头像 top 5.5rem + 高 7.8rem = 13.3rem，再多给 1.4rem 才轮到分类条 */
-  padding:14.7rem 5.2rem 8rem 4.6rem;
+     头像 top 5rem + 高 7.8rem = 12.8rem，再多给 1.2rem 才轮到分类条 */
+  padding:14rem 5.2rem 8rem 4.6rem;
   scrollbar-width:none;
 }
 #stage::-webkit-scrollbar{display:none}
