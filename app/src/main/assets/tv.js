@@ -622,7 +622,7 @@ function contentTopInset() {
 
 var scrollRaf = 0;      /* 校正滚动位置用的那一帧 */
 
-/* 海报墙的一行有多高。墙里所有翻行动作都按它算，不按卡片的像素位置算。 */
+/* 海报墙一行有多高。墙内所有翻行动作都按它算，不按卡片的像素位置算。 */
 function wallRowHeight(el) {
   var grid = el && el.closest ? el.closest('.grid') : null;
   if (!grid) return 0;
@@ -637,8 +637,9 @@ function wallRowHeight(el) {
    顶栏里的胶囊 / 三颗按钮本来就固定在那儿，拿它们比上边界会一直判成「被压住」，
    所以只判下边界。
 
-   海报墙里要滚就滚「整行」：一屏正好两排，滚半行的话第二排会卡在中间，
-   下一次按键的槽位就全乱了 —— 用户看到的就是「框一会儿上一会儿下」。 */
+   这里只补「差的那一点」，不按整行翻。整行翻是错的：一屏两排一旦差十几个像素
+   装不下，整行翻就会把第二排直接送到第一排的位置、焦点框看着一动没动。
+   补差值时第二排只是被吸进屏幕里十几像素，框仍然落在第二排上。 */
 function focusScrollTop(el) {
   if (!el || !el.getBoundingClientRect) return null;
   var box = el.getBoundingClientRect();
@@ -651,11 +652,13 @@ function focusScrollTop(el) {
   if (box.top < safeTop) delta = box.top - safeTop;              /* 负数：内容下移 */
   else if (box.bottom > safeBottom) delta = box.bottom - safeBottom;  /* 正数：内容上移 */
   if (!delta) return null;
-  /* 墙内按整行取整：差多少就翻几行（至少一行），翻完槽位和翻之前一模一样 */
+  /* 往上翻一定翻整行：上一排这时候基本整排都在屏幕外，只补差值会把它停在
+     顶栏边上露出半截，焦点框跟着往上蹭一下 —— 看到的就是「框跳了」。
+     往下不取整：第二排差十几个像素露不全时只补那十几个像素，
+     框仍然落在第二排上；取整的话第二排会被整排送到第一排，框看着一动不动。 */
   var rowH = wallRowHeight(el);
-  if (rowH) {
-    var rows = Math.max(1, Math.round(Math.abs(delta) / rowH));
-    delta = (delta < 0 ? -1 : 1) * rows * rowH;
+  if (rowH && delta < 0 && -delta <= rowH * 1.6) {
+    delta = -rowH * Math.max(1, Math.round(-delta / rowH));
   }
   return cur + delta;
 }
