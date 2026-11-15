@@ -74,6 +74,8 @@ var updateLayer = document.getElementById('tv-update');
 var toastEl = document.getElementById('toast');
 var railAccount = document.getElementById('rail-account');
 var railAvatar = document.getElementById('rail-avatar');
+var railToggle = document.getElementById('rail-toggle');
+var railToggleAvatar = document.getElementById('rail-toggle-avatar');
 var themePanel = document.getElementById('theme');
 var themeGrid = document.getElementById('theme-grid');
 var themeSub = document.getElementById('theme-sub');
@@ -588,7 +590,9 @@ function focusElement(el, remember) {
   if (remember !== false && el.dataset) {
     state.focusKey = el.dataset.key || '';
     if (inRail(el)) state.lastRailKey = state.focusKey;
-    else if (state.focusKey) state.lastContentKey = state.focusKey;
+    /* 头像只是「菜单入口」，不算内容位置：记成 lastContentKey 的话，
+       关掉侧栏会回到头像上，还得再按一下才能回到刚才那张卡。 */
+    else if (state.focusKey && el !== railToggle) state.lastContentKey = state.focusKey;
   }
   alignGridScroll(el);
   var box = el.getBoundingClientRect();
@@ -729,7 +733,10 @@ function leaveRail() {
   if (state.lastContentKey) target = document.querySelector('[data-key="' + state.lastContentKey + '"]');
   if (!target) {
     var all = focusables();
-    for (var i = 0; i < all.length; i++) if (!inRail(all[i])) { target = all[i]; break; }
+    for (var i = 0; i < all.length; i++) {
+      if (inRail(all[i]) || all[i] === railToggle) continue;
+      target = all[i]; break;
+    }
   }
   closeRail();
   if (target) focusElement(target);
@@ -864,13 +871,12 @@ function move(direction) {
   if (!best && (direction === 'up' || direction === 'down')) best = pickNearest(current, all, direction, false);
   if (best) { focusElement(best); return; }
   if (onRail) return;
-  /* 浮层开着时到边就停：再按左会把侧栏呼出来，那也是在浮层背后 */
+  /* 浮层开着时到边就停，别让按键穿透到背后的内容 */
   if (activeOverlay()) return;
 
-  if (direction === 'left') { enterRail(current); return; }
   if (direction === 'up') {
-    /* 上面还有没露出来的内容（标题头、上一排）就先往上滚一屏；
-       到顶就停住 —— 侧栏只由「最左边再按左」呼出，上键不再跳到侧栏 */
+    /* 上面还有没露出来的内容（标题头、上一排）就先往上滚一屏；到顶就停住。
+       侧栏只由左上角头像唤出，这里不再跳到侧栏。 */
     if (stage.scrollTop > 1) {
       var step = Math.max(120, from.height + 60);
       stage.scrollTop = Math.max(0, stage.scrollTop - step);
@@ -1043,7 +1049,8 @@ function renderHome() {
   else if (feed.error) body = '<p class="empty">加载失败，按 OK 重试</p>';
   else body = gridMarkup(feed.items, '这个分类下暂时没有内容');
 
-  var html = '<h1 class="page-title">首页</h1>';
+  /* 左上角不再放大标题：那个位置留给头像（点它唤出侧栏） */
+  var html = '';
   html += '<section class="section" data-feed="1"><div class="section-head"><h2>'
     + esc(categoryName(active)) + (isRankId(active) ? ' · 每日更新' : '') + '</h2><span data-feed-count="1">'
     + (feed ? feed.items.length : 0) + ' 部</span></div>' + chips + body + '</section>';
@@ -1236,7 +1243,7 @@ function renderSearch() {
   var loading = state.search.items === null;
   var hasResults = !!(state.search.items && state.search.items.length);
 
-  var html = '<h1 class="page-title">搜索</h1>'
+  var html = ''
     + '<div class="search-head">'
     + '<div class="search-main">'
     + '<div class="search-box" data-focusable data-key="search-box" tabindex="0">'
@@ -1387,7 +1394,7 @@ function renderLibrary() {
   var history = list(data.progress);
   var bookmarks = list(data.bookmarks);
   var tab = state.libraryTab;
-  var html = '<h1 class="page-title">我的</h1>'
+  var html = ''
     + '<div class="tabs chips">'
     + '<button type="button" class="chip' + (tab === 'history' ? ' is-active' : '') + '" data-focusable data-key="tab:history" data-tab="history">观看记录</button>'
     + '<button type="button" class="chip' + (tab === 'bookmarks' ? ' is-active' : '') + '" data-focusable data-key="tab:bookmarks" data-tab="bookmarks">收藏</button>'
@@ -1786,6 +1793,12 @@ document.addEventListener('click', function (event) {
   var target = event.target;
   if (!target || !target.closest) return;
 
+  /* 侧栏入口：左上角头像。侧栏里的图标导航、账号面板逻辑都不变。 */
+  if (target.closest('#rail-toggle')) { enterRail(); return; }
+
+  /* 侧栏开着时点侧栏以外的任何地方 → 收回侧栏，这一下不再触发背后的卡片/按钮 */
+  if (railOpen() && !target.closest('#rail')) { leaveRail(); return; }
+
   var nav = target.closest('[data-nav]');
   if (nav) { go(nav.dataset.nav); return; }
 
@@ -1896,20 +1909,25 @@ document.addEventListener('click', function (event) {
 function setAccount(profile) {
   state.account = profile || { loggedIn: false };
   var name = state.account.loggedIn ? (state.account.username || '已登录') : '';
-  if (!railAvatar) return;
   /* 手机端设置过头像的话，账号资料里带 avatar（jpeg 的 data URL），
-     直接铺满左下角那个圆；没有头像才退回首字母。 */
+     直接铺满那个圆；没有头像才退回首字母。侧栏里的账号头像和左上角入口共用一份。 */
   var avatar = state.account.loggedIn ? String(state.account.avatar || '') : '';
+  paintAvatar(railAvatar, avatar, name);
+  paintAvatar(railToggleAvatar, avatar, name);
+}
+
+function paintAvatar(el, avatar, name) {
+  if (!el) return;
   if (avatar) {
-    railAvatar.innerHTML = '<img alt="">';
-    var img = railAvatar.querySelector('img');
+    el.innerHTML = '<img alt="">';
+    var img = el.querySelector('img');
     img.onerror = function () {
-      railAvatar.textContent = name ? name.slice(0, 1).toUpperCase() : '?';
+      el.textContent = name ? name.slice(0, 1).toUpperCase() : '?';
     };
     img.src = avatar;
   } else {
-    railAvatar.innerHTML = '';
-    railAvatar.textContent = name ? name.slice(0, 1).toUpperCase() : '?';
+    el.innerHTML = '';
+    el.textContent = name ? name.slice(0, 1).toUpperCase() : '?';
   }
 }
 

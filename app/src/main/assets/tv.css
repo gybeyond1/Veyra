@@ -216,6 +216,25 @@ body[data-backdrop="poster"] #tv-bg .veil{opacity:1}
 /* 不做整屏遮罩：主界面颜色保持不变，只靠侧栏自己亮一档区分层次 */
 #rail-veil{display:none}
 
+/* ---------------- 左上角头像（侧栏入口） ----------------
+   收起态左上角只有这一个圆，点它 / 按 OK 把左侧导航拉出来。
+   侧栏打开后由栏内的账号头像接管，这里隐去，免得两个头像叠在一起。 */
+#rail-toggle{
+  position:absolute;left:1.6rem;top:1.2rem;width:5.2rem;height:5.2rem;z-index:4;
+  border:0;padding:0;border-radius:50%;overflow:hidden;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  background:var(--rail-bg);color:var(--text);
+  transition:box-shadow .12s linear,transform .12s ease-out;
+}
+#rail-toggle .avatar{
+  display:block;width:100%;height:100%;line-height:5.2rem;text-align:center;
+  font-size:2.2rem;font-weight:700;color:var(--text);
+  white-space:nowrap;overflow:hidden;
+}
+#rail-toggle .avatar img{display:block;width:100%;height:100%;object-fit:cover}
+#rail-toggle.is-focused{box-shadow:0 0 0 .3rem var(--focus);transform:scale(1.06)}
+body.rail-open #rail-toggle{display:none}
+
 /* ---------------- 左侧图标导航（默认收起） ----------------
    内容页占满整屏；侧栏平时整个滑出屏幕外，只有遥控器在最左一列继续按左
    才把它拉出来。拉出来时焦点直接落到当前页的图标上，按右/返回收回。 */
@@ -268,7 +287,8 @@ body.rail-open #rail{
 #stage{
   position:absolute;left:0;right:0;top:0;bottom:0;z-index:2;
   overflow-y:auto;overflow-x:hidden;
-  padding:4.2rem 5.2rem 8rem 4.6rem;
+  /* 顶部多留一点给左上角头像：原来这块是「首页 / 搜索 / 我的」大标题占的 */
+  padding:7.2rem 5.2rem 8rem 4.6rem;
   scrollbar-width:none;
 }
 #stage::-webkit-scrollbar{display:none}
