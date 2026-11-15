@@ -934,12 +934,6 @@ function categoryList() {
   return [['short', '短剧'], ['comic', '漫剧'],
     ['hot-drama', '热播榜'], ['hot-real-drama', '真人榜'], ['hot-comic-drama', '漫剧榜'], ['hot-ai-drama', 'AI榜']];
 }
-function isRankId(id) { return /^hot-(drama|real-drama|comic-drama|ai-drama)$/.test(String(id || '')); }
-function categoryName(id) {
-  var cats = categoryList();
-  for (var i = 0; i < cats.length; i++) if (cats[i][0] === id) return cats[i][1];
-  return '全部作品';
-}
 function filterList() {
   if (state.source === 'huangguo') {
     return [['all', '全部'], ['ai-duanju', '成人短剧'], ['ai-manju', '成人漫剧'], ['ai-huanlian', 'AI换脸'], ['ai-mogai', 'AI魔改']];
@@ -1049,12 +1043,9 @@ function renderHome() {
   else if (feed.error) body = '<p class="empty">加载失败，按 OK 重试</p>';
   else body = gridMarkup(feed.items, '这个分类下暂时没有内容');
 
-  /* 左上角不再放大标题：那个位置留给头像（点它唤出侧栏） */
-  var html = '';
-  html += '<section class="section" data-feed="1"><div class="section-head"><h2>'
-    + esc(categoryName(active)) + (isRankId(active) ? ' · 每日更新' : '') + '</h2><span data-feed-count="1">'
-    + (feed ? feed.items.length : 0) + ' 部</span></div>' + chips + body + '</section>';
-  view.innerHTML = html;
+  /* 分类名 + 「N 部」那行整行删了：切短剧/漫剧/热播榜时它就是同一位置上的一串字，
+     用户不要。现在这一块只剩分类胶囊 + 海报墙，顶部空间让给左上角头像。 */
+  view.innerHTML = '<section class="section" data-feed="1">' + chips + body + '</section>';
   paintCovers(view);
   layoutFirstScreen();
   restoreFocus();
@@ -1144,8 +1135,6 @@ function appendFeed(items) {
   for (var i = 0; i < items.length; i++) html += cardMarkup(items[i], state.feed.items.length - items.length + i);
   grid.insertAdjacentHTML('beforeend', html);
   paintCovers(grid);
-  var count = view.querySelector('[data-feed-count]');
-  if (count) count.textContent = state.feed.items.length + ' 部';
   /* 第一页可能刚好 6 张，追加出第二排之后才需要重排顶部留白 */
   layoutFirstScreen();
   /* 在最后一行按「下」等来的这一页：接到新那一行的第一张，
