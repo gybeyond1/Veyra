@@ -660,7 +660,7 @@ public final class MainActivity extends Activity {
             pollDeviceCommands();
             // 投屏要求「按下去几秒内电视就有反应」，40 秒一轮回显然不行；
             // 电视常年插电、只在前台轮询，5 秒一次可以接受。手机维持 40 秒（只领下载指令）。
-            if (deviceLoopRunning) deviceHandler.postDelayed(this, DeviceProfile.isTv(MainActivity.this) ? 5_000 : 40_000);
+            if (deviceLoopRunning) deviceHandler.postDelayed(this, DeviceProfile.isTvRole(MainActivity.this) ? 5_000 : 40_000);
         }
     };
 
@@ -710,7 +710,8 @@ public final class MainActivity extends Activity {
      */
     private void handleCastCommand(String commandId, JSONObject payload, DeviceLink link) {
         if (payload == null) { link.ack(commandId, false, "投屏内容为空"); return; }
-        if (!DeviceProfile.isTv(this)) { link.ack(commandId, false, "这台设备不是电视"); return; }
+        // 这里同样用 isTvRole：TV 包装在平板上也要能接投屏
+        if (!DeviceProfile.isTvRole(this)) { link.ack(commandId, false, "这台设备不是电视"); return; }
         String seriesId = payload.optString("seriesId").trim();
         int episode = payload.optInt("episode", 0);
         if (seriesId.isEmpty() || episode < 1) { link.ack(commandId, false, "投屏内容不完整"); return; }

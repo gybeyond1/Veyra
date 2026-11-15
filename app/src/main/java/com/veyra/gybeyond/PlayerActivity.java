@@ -1891,16 +1891,18 @@ public final class PlayerActivity extends Activity {
         worker.execute(() -> {
             JSONArray devices = new JSONArray();
             String error = null;
+            // 在线、但不是电视/电脑的设备数：用来把「一台都没有」和「有设备却没识别成电视」分开提示
+            int otherOnline = 0;
             try {
                 JSONObject data = cloud.getJson("api/devices");
                 JSONArray all = data.optJSONArray("devices");
                 for (int i = 0; all != null && i < all.length(); i++) {
                     JSONObject device = all.optJSONObject(i);
                     if (device == null) continue;
+                    if (!device.optBoolean("online")) continue;
                     // 电视和电脑都是「同一账号下可接投屏的设备」；手机自己不在列表里
                     String platform = device.optString("platform");
-                    if (!"tv".equals(platform) && !"desktop".equals(platform)) continue;
-                    if (!device.optBoolean("online")) continue;
+                    if (!"tv".equals(platform) && !"desktop".equals(platform)) { otherOnline++; continue; }
                     devices.put(device);
                 }
             } catch (Exception failure) {
@@ -1908,11 +1910,17 @@ public final class PlayerActivity extends Activity {
             }
             final JSONArray found = devices;
             final String failure = error;
+            final int others = otherOnline;
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed()) return;
                 if (failure != null) { toast("读取设备失败：" + failure); return; }
                 if (found.length() == 0) {
-                    toast("没有在线的电视/电脑：确认设备已打开并登录同一账号");
+                    // 平板上装 TV 包时，旧版本会把自己上报成 android（没有 Leanback），
+                    // 投屏列表只挑 tv/desktop，于是「明明在线却搜不到」。0.28.46 起按
+                    // 安装包身份上报 tv，这里把话说清楚，免得用户一直以为是网络问题。
+                    toast(others > 0
+                            ? "同账号有 " + others + " 台设备在线，但没有一台以电视身份上报：电视/平板上的 Veyra TV 请更新到 0.28.46 以上"
+                            : "没有在线的电视/电脑：确认设备已打开并登录同一账号");
                     return;
                 }
                 String[] labels = new String[found.length()];

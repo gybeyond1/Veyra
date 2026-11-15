@@ -101,8 +101,10 @@ final class DeviceLink {
                 .put("name", displayName())
                 .put("model", Build.MODEL == null ? "" : Build.MODEL)
                 .put("brand", Build.MANUFACTURER == null ? "" : Build.MANUFACTURER)
-                // 电视端单独标出来：手机投屏时只列 tv，不会把自己也列进去
-                .put("platform", DeviceProfile.isTv(context) ? "tv" : "android")
+                // 电视端单独标出来：手机投屏时只列 tv，不会把自己也列进去。
+                // 用 isTvRole 而不是 isTv：TV 包装在平板上时没有 Leanback，
+                // 按 isTv 会报成 android，手机端就永远搜不到这台「电视」。
+                .put("platform", DeviceProfile.isTvRole(context) ? "tv" : "android")
                 .put("android", Build.VERSION.RELEASE == null ? "" : Build.VERSION.RELEASE)
                 .put("appVersion", appVersion())
                 // 局域网媒体服务：电脑/电视/其它手机据此直连这台机器播成品
