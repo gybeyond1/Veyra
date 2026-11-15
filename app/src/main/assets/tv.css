@@ -274,11 +274,13 @@ body.route-detail #stage{
      吃 1.4rem 左右，留 5rem 之后它跟顶栏之间还有 3.5rem 的缝，不会齐平贴住。 */
   padding:16.5rem 5.2rem 8rem 4.6rem;
   /* 海报滚到顶栏下面一点开始渐隐：11.4rem（顶栏底 11rem 再往下 0.4rem）之前
-     完全透明，11.4 → 14.5rem 从透明渐变到实心，之后完全清晰。
-     渐变带宽 3.1rem，是一条雾带，不是拿刀切一下。
+     完全透明，11.4 → 16.6rem 从透明渐变到实心，之后完全清晰。
+     渐变带宽 5.2rem，是一条雾带，不是拿刀切一下；带宽不能再窄 ——
+     上一排的剧名正好会停在 12~13rem 这一带，带子窄了它就原样浮在顶栏底下、
+     像一条撕不掉的残影。JS 那边的 contentTopInset() 也按 5rem 让位。
      mask 跟着 #stage 这个盒子走、不跟内容走，所以滚多少都是同一条「消失线」。 */
-  -webkit-mask-image:linear-gradient(to bottom,transparent 0,transparent 11.4rem,#000 14.5rem,#000 100%);
-  mask-image:linear-gradient(to bottom,transparent 0,transparent 11.4rem,#000 14.5rem,#000 100%);
+  -webkit-mask-image:linear-gradient(to bottom,transparent 0,transparent 11.4rem,#000 16.6rem,#000 100%);
+  mask-image:linear-gradient(to bottom,transparent 0,transparent 11.4rem,#000 16.6rem,#000 100%);
   scrollbar-width:none;
 }
 #stage::-webkit-scrollbar{display:none}

@@ -616,7 +616,29 @@ function contentTopInset() {
   if (document.body.classList.contains('route-detail')) return 0;
   var box = topbar.getBoundingClientRect();
   var unit = parseFloat(getComputedStyle(document.documentElement).fontSize) || 10;
-  return box.bottom + unit * 3;
+  /* 3rem 是渐隐带的宽度，再让出 2rem：焦点框滚上来时不会贴着那条半透明的边 */
+  return box.bottom + unit * 5;
+}
+
+var scrollRaf = 0;      /* 校正滚动位置用的那一帧 */
+
+/* 焦点该滚到哪：算一次，返回目标 scrollTop；不用动就返回 null。
+   顶栏是常驻的，压在内容上面：可见上沿不是屏幕顶，而是顶栏下沿再让出渐隐带；
+   顶栏里的胶囊 / 三颗按钮本来就固定在那儿，拿它们比上边界会一直判成「被压住」，
+   所以只判下边界。 */
+function focusScrollTop(el) {
+  if (!el || !el.getBoundingClientRect) return null;
+  var box = el.getBoundingClientRect();
+  var stageBox = stage.getBoundingClientRect();
+  var cur = stage.scrollTop;
+  /* 底部只留一点点缝：第二行卡刚好多出几像素时，滚 15px 就够，
+     而不是被 40px 的安全边距把第一排顶进顶栏的渐隐带里。 */
+  var safeBottom = stageBox.bottom - 12;
+  if (inTopbar(el)) return box.bottom > safeBottom ? cur + (box.bottom - safeBottom) : null;
+  var safeTop = stageBox.top + (contentTopInset() || 8);
+  if (box.top < safeTop) return cur - (safeTop - box.top);
+  if (box.bottom > safeBottom) return cur + (box.bottom - safeBottom);
+  return null;
 }
 
 function focusElement(el, remember) {
@@ -625,7 +647,23 @@ function focusElement(el, remember) {
   if (current && current !== el) current.classList.remove('is-focused');
   el.classList.add('is-focused');
   updateMarquee(current, el);
+  /* 先把目标滚动值算好，再 focus，最后把滚动值写死。
+     老内核不认 focus({preventScroll:true})，focus 会用自己的对齐策略先滚一次，
+     我们再补滚一次 —— 两次叠起来就是「框先落下去、又被顶回来」。
+     一次写死之后，无论 focus 滚没滚，最终位置都只有这一个。 */
+  alignGridScroll(el);
+  var scrollTo = focusScrollTop(el);
+  var keepTop = stage.scrollTop;
   try { el.focus({ preventScroll: true }); } catch (error) { try { el.focus(); } catch (e2) { } }
+  stage.scrollTop = (scrollTo === null) ? keepTop : scrollTo;
+  /* 老内核 focus() 里那次滚动有可能是排到下一帧才落地的，同帧写死会被它盖掉。
+     下一帧绘制前再校对一次：值不对就掰回去，这一帧还没画，用户看不到。 */
+  var want = stage.scrollTop;
+  if (scrollRaf) cancelAnimationFrame(scrollRaf);
+  scrollRaf = requestAnimationFrame(function () {
+    scrollRaf = 0;
+    if (Math.abs(stage.scrollTop - want) > 1) stage.scrollTop = want;
+  });
   if (remember !== false && el.dataset) {
     state.focusKey = el.dataset.key || '';
     if (inRail(el)) state.lastRailKey = state.focusKey;
@@ -633,20 +671,6 @@ function focusElement(el, remember) {
        关掉侧栏会回到头像上，还得再按一下才能回到刚才那张卡。 */
     else if (state.focusKey) state.lastContentKey = state.focusKey;
   }
-  alignGridScroll(el);
-  var box = el.getBoundingClientRect();
-  var stageBox = stage.getBoundingClientRect();
-  /* 顶栏是常驻的，压在内容上面：焦点元素滚到它底下就看不见了（还会落在渐隐带里
-     被淡掉一半）。所以「可见上边界」不是屏幕顶，是顶栏下沿再往下让出渐隐带的宽度。 */
-  var topInset = contentTopInset();
-  var safeTop = stageBox.top + (topInset || 8);
-  /* 顶栏里的胶囊 / 三颗按钮本来就是固定的，拿它们跟「可见上沿」比会一直判成
-     「被压住了」，每按一下都白滚一截 —— 直接跳过。 */
-  var inTopbar = !!(el.closest && el.closest('#topbar'));
-  if (inTopbar) {
-    if (box.bottom > stageBox.bottom - 40) stage.scrollTop += (box.bottom - (stageBox.bottom - 40));
-  } else if (box.top < safeTop) stage.scrollTop -= (safeTop - box.top);
-  else if (box.bottom > stageBox.bottom - 40) stage.scrollTop += (box.bottom - (stageBox.bottom - 40));
   if (!inRail(el)) revealSectionHead(el);
   syncBackdrop(el);
 }
@@ -863,44 +887,6 @@ function stepToRow(el, direction) {
 
 function inTopbar(el) { return !!(el && el.closest && el.closest('#topbar')); }
 
-/* 上下换行时，让「新那一行」落到「原来那一行」的屏幕位置上 ——
-   焦点框在屏幕上原地不动，只有海报墙在往上/往下翻一行。
-   以前是靠 focusElement 里那句「只补差的那几十像素」：
-   框先落到下一行（屏幕下方），紧接着整页又被补滚几十像素，框跟着往上蹭一下 ——
-   看起来就是「框先被内容带着走，再回来」，一按一顿。
-   现在按整行高度一次滚到 位，滚完框的位置跟滚之前一模一样。 */
-function rowAlignedReveal(current, target, direction) {
-  if (direction !== 'up' && direction !== 'down') return;
-  /* 只在首页 / 我的这两页做：这两页 #stage 里第一块就是海报墙，
-     「第 0 行贴顶」跟「内容起点」是同一个位置，算式才成立。
-     搜索页上面还有搜索框、详情页是剧集格，走原来的最小补滚就行。 */
-  if (state.route !== 'home' && state.route !== 'library') return;
-  if (!current || !current.closest || !target || !target.closest) return;
-  var grid = target.closest('.grid');
-  if (!grid || current.closest('.grid') !== grid) return;
-  var cards = grid.querySelectorAll('.card');
-  if (cards.length <= 6) return;
-  var c1 = current.closest('.card');
-  var c2 = target.closest('.card');
-  if (!c1 || !c2) return;
-  var i1 = Array.prototype.indexOf.call(cards, c1);
-  var i2 = Array.prototype.indexOf.call(cards, c2);
-  if (i1 < 0 || i2 < 0) return;
-  var rowH = cards[6].offsetTop - cards[0].offsetTop;
-  if (rowH < 40) return;
-  var r1 = Math.floor(i1 / 6);
-  var r2 = Math.floor(i2 / 6);
-  if (r1 === r2) return;
-  /* 目标那一行本来就已经整行露在屏幕里：不用动，直接换焦点，页面纹丝不动 */
-  var stageBox = stage.getBoundingClientRect();
-  var box = c2.getBoundingClientRect();
-  var visibleTop = stageBox.top + contentTopInset();
-  if (box.top >= visibleTop - 1 && box.bottom <= stageBox.bottom - 1) return;
-  /* 直接算出「第 r2 行贴到第 0 行原位」需要的 scrollTop，而不是在当前值上加减。
-     加减那套一旦被 clamp（滚到底）就会错位：继续按上时减掉一整行，
-     结果停在半截 —— 也就是「按上，框没回到原来那一行」。 */
-  stage.scrollTop = r2 * rowH;
-}
 
 function pickNearest(current, all, direction, banded) {
   var from = current.getBoundingClientRect();
@@ -966,11 +952,23 @@ function move(direction) {
   if (direction === 'up' || direction === 'down') {
     if (stepToRow(current, direction)) return;
   }
-  var best = pickNearest(current, all, direction, true);
+  /* 海报墙内上下只在墙里走：往上滚过之后，上面那一排的屏幕坐标可能在顶栏附近，
+     几何上离得更近的是分类胶囊 —— 一按上就跳到顶栏，「上一排」反而被跳过。
+     所以上下先把范围收在本区域里，本区域确实没有上一排/下一排了才允许去顶栏。 */
+  var scope = all;
+  if ((direction === 'up' || direction === 'down') && current.closest) {
+    var wall = current.closest('.grid');
+    if (wall) {
+      scope = [];
+      for (var k = 0; k < all.length; k++) if (wall.contains(all[k])) scope.push(all[k]);
+      if (!scope.length) scope = all;
+    }
+  }
+  var best = pickNearest(current, scope, direction, true);
   /* 上下允许放宽：不同区块宽度不一致时（分类条、按钮、剧集格），
      严格对齐会把人卡死，所以放宽再找一次。左右不放宽 —— 放宽就会斜着跳。 */
   if (!best && (direction === 'up' || direction === 'down')) best = pickNearest(current, all, direction, false);
-  if (best) { rowAlignedReveal(current, best, direction); focusElement(best); return; }
+  if (best) { focusElement(best); return; }
   if (onRail) return;
   /* 浮层开着时到边就停，别让按键穿透到背后的内容 */
   if (activeOverlay()) return;
