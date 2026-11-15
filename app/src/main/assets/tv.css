@@ -233,6 +233,9 @@ body.route-detail #tools{display:none}
 /* 搜索页顶部就是搜索框 + 二维码，二维码正好在工具条正下方（只差一指缝）。
    多留 1.8rem，让二维码上沿跟按钮底拉开半个按钮的高度，看着不挤也不会误触。 */
 body.route-search #stage{padding-top:15rem}
+/* 详情页没有工具条，顶部留白收回去，海报可以更靠上。
+   写在 route-search 后面：从搜索页点进详情时 body 上两个标记都在，详情页优先。 */
+body.route-detail #stage{padding-top:7.2rem}
 
 /* ---------------- 主区域 ----------------
    没有侧栏了，内容铺满整屏，只留 4.6rem 的左边距给标题呼吸。 */
