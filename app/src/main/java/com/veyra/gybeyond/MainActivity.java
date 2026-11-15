@@ -1487,9 +1487,8 @@ public final class MainActivity extends Activity {
                 intent.putExtra("merged", true);
                 intent.putExtra("nasMode", true);
                 intent.putExtra("auth", "");
-                JSONArray eps = new JSONArray();
-                eps.put(new JSONObject().put("index", 1).put("url", url));
-                intent.putExtra("episodes", eps.toString());
+                // 电脑端只有这一个成品文件，选集没有意义：传空让面板不出现
+                intent.putExtra("episodes", "[]");
                 intent.putExtra("path", url);
                 runOnUiThread(() -> startActivity(intent));
                 return true;
@@ -1509,32 +1508,49 @@ public final class MainActivity extends Activity {
                  * 「第16集.mp4」，以前按 1..count 拼 files/{id}/1、/2、/3，全部 404，
                  * 用户看到的就是「服务器上找不到这个文件」。 */
                 // 地址必须走 endpoint()：baseUrl 末尾自带 "/"，手写 "/api" 会拼出 "//api"，后端 404。
+                boolean hasMerged = "done".equals(task.optString("status"));
                 JSONArray eps = new JSONArray();
-                // 新后端直接在任务里给真实集号；老后端再单独问 /episodes；都没有才退回 1..N
-                JSONArray known = task.optJSONArray("episodes");
-                if (known != null && known.length() > 0) {
-                    for (int i = 0; i < known.length(); i++) {
-                        int no = known.optInt(i, 0);
-                        if (no <= 0) continue;
-                        eps.put(new JSONObject().put("index", no)
-                                .put("url", endpoint(account.baseUrl(), "/api/download/files/" + nasId + "/" + no)));
-                    }
-                } else {
-                    try {
-                        JSONArray list = account.getJson("api/download/tasks/" + nasId + "/episodes").optJSONArray("episodes");
-                        if (list != null) {
-                            for (int i = 0; i < list.length(); i++) {
-                                JSONObject e = list.optJSONObject(i);
-                                if (e == null) continue;
-                                int no = e.optInt("index", 0);
-                                if (no <= 0) continue;
-                                eps.put(new JSONObject().put("index", no)
-                                        .put("url", endpoint(account.baseUrl(), "/api/download/files/" + nasId + "/" + no)));
-                            }
+                /* 关键：以「服务器上文件到底在不在」为准。
+                 * 合并完成后后端会清理分集，任务里却仍留着集号列表；以前直接照列表造 eps，
+                 * 面板就列出 1~25，点一集 404（用户实测：合并版选集点开说文件不存在）。
+                 * 所以先问 /episodes 拿每集的 exists，只保留真实存在的。 */
+                boolean fromServer = false;
+                try {
+                    JSONArray list = account.getJson("api/download/tasks/" + nasId + "/episodes")
+                            .optJSONArray("episodes");
+                    if (list != null && list.length() > 0) {
+                        int present = 0;
+                        JSONArray tmp = new JSONArray();
+                        for (int i = 0; i < list.length(); i++) {
+                            JSONObject e = list.optJSONObject(i);
+                            if (e == null) continue;
+                            int no = e.optInt("index", 0);
+                            if (no <= 0) continue;
+                            if (!e.optBoolean("exists", false)) continue;
+                            present++;
+                            tmp.put(new JSONObject().put("index", no)
+                                    .put("url", endpoint(account.baseUrl(), "/api/download/files/" + nasId + "/" + no)));
                         }
-                    } catch (Exception ignore) { /* 老后端没有这个接口：退回 1..N */ }
+                        /* 一集都不在：已合并说明分集确实被清了（认这个结论）；
+                         * 未合并还这样，多半是旧后端把集号写成了 1..N，退回任务里的真实集号。 */
+                        if (present > 0 || hasMerged) {
+                            eps = tmp;
+                            fromServer = true;
+                        }
+                    }
+                } catch (Exception ignore) { /* 老后端没有这个接口：走下面的兜底 */ }
+                if (!fromServer) {
+                    JSONArray known = task.optJSONArray("episodes");
+                    if (known != null && known.length() > 0) {
+                        for (int i = 0; i < known.length(); i++) {
+                            int no = known.optInt(i, 0);
+                            if (no <= 0) continue;
+                            eps.put(new JSONObject().put("index", no)
+                                    .put("url", endpoint(account.baseUrl(), "/api/download/files/" + nasId + "/" + no)));
+                        }
+                    }
                 }
-                if (eps.length() == 0) {
+                if (eps.length() == 0 && !hasMerged) {
                     for (int i = 1; i <= count; i++) {
                         eps.put(new JSONObject().put("index", i)
                                 .put("url", endpoint(account.baseUrl(), "/api/download/files/" + nasId + "/" + i)));
@@ -1544,7 +1560,6 @@ public final class MainActivity extends Activity {
                 String firstEpUrl = eps.length() > 0 ? eps.optJSONObject(0).optString("url", mergedUrl) : mergedUrl;
                 // status=done 才是「已合并」，这时才有 files/{id}/0；ready 只是下载完，直接播第 1 集，
                 // 省掉一次注定 404 的请求（以前固定先探合并产物，未合并时白闪一下再回退）。
-                boolean hasMerged = "done".equals(task.optString("status"));
                 String token = account.authToken();
                 Intent intent = new Intent(this, LocalPlayerActivity.class);
                 intent.putExtra("title", title);

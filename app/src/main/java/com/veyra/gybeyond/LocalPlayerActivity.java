@@ -289,8 +289,8 @@ public final class LocalPlayerActivity extends Activity {
         episodesBtn.setOnClickListener(v -> toggleEpisodes());
         // 比图标按钮宽一点：38dp 放两个 13sp 汉字会折行成竖排「选 / 集」
         bar.addView(episodesBtn, new LinearLayout.LayoutParams(dp(48), dp(38)));
-        // 没有分集文件（合并产物且分集已清理）时不必占位
-        episodesBtn.setVisibility(episodes.length() > 0 ? View.VISIBLE : View.GONE);
+        // 没有可播分集（合并产物且分集已清理）时不占位
+        episodesBtn.setVisibility(playableEpisodeCount() > 0 ? View.VISIBLE : View.GONE);
 
         zone.addView(bar, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -329,9 +329,12 @@ public final class LocalPlayerActivity extends Activity {
     }
 
     private void toggleEpisodes() {
-        /* 合并版只要目录里还留着分集（合并默认保留分集），也允许选集：
-         * 点某一集就切回分集播放。只有分集已被清理时才提示。 */
-        if (episodes.length() == 0) {
+        /* 合并版只要分集还在，也允许选集：点某一集就切回分集播放。
+         * 判定必须看「文件是否真的还在」而不是 episodes 数组长度 —— 合并后
+         * 后端/本地会清掉分集，但任务里的集号列表还留着。 */
+        java.util.List<Integer> usable = new java.util.ArrayList<>();
+        for (int i = 0; i < episodes.length(); i++) if (episodePlayable(i)) usable.add(i);
+        if (usable.isEmpty()) {
             toast(merged ? "整集合并版没有分集文件" : "本剧没有选集");
             return;
         }
@@ -352,11 +355,11 @@ public final class LocalPlayerActivity extends Activity {
         ScrollView scroll = new ScrollView(this);
         android.widget.GridLayout grid = new android.widget.GridLayout(this);
         grid.setColumnCount(5);
-        for (int i = 0; i < episodes.length(); i++) {
-            final int n = i;
-            TextView btn = label(String.valueOf(episodeNo(i)), 13f, i == index ? Color.BLACK : Color.WHITE);
+        for (int k = 0; k < usable.size(); k++) {
+            final int n = usable.get(k);
+            TextView btn = label(String.valueOf(episodeNo(n)), 13f, n == index ? Color.BLACK : Color.WHITE);
             btn.setGravity(Gravity.CENTER);
-            btn.setBackground(background(i == index ? 0xFFE8C268 : 0xFF373D40, 9));
+            btn.setBackground(background(n == index ? 0xFFE8C268 : 0xFF373D40, 9));
             android.widget.GridLayout.LayoutParams p = new android.widget.GridLayout.LayoutParams();
             p.width = dp(46); p.height = dp(40);
             p.setMargins(dp(3), dp(3), dp(3), dp(3));
@@ -378,8 +381,9 @@ public final class LocalPlayerActivity extends Activity {
         panel.addView(scroll, new LinearLayout.LayoutParams(-1, dp(236)));
         /* 打开面板就滚到当前这一集：一季几十集时，用户滑到第 80 集再打开还得从头翻。 */
         final android.widget.GridLayout gridRef = grid;
+        final int scrollPos = Math.max(0, usable.indexOf(index));
         scroll.post(() -> {
-            View cur = gridRef.getChildAt(index);
+            View cur = gridRef.getChildAt(scrollPos);
             if (cur != null) scroll.smoothScrollTo(0, Math.max(0, cur.getTop() - dp(6)));
         });
 
@@ -490,6 +494,23 @@ public final class LocalPlayerActivity extends Activity {
         JSONObject ep = episodes.optJSONObject(i);
         int n = ep == null ? 0 : ep.optInt("index", 0);
         return n > 0 ? n : i + 1;
+    }
+
+    /** 该集是否真的能播：本地要求文件还能读，NAS 要求地址有效。
+     *  合并版在服务端/本地把分集清掉后，任务里的集号列表仍会留着，
+     *  以前面板照列表全列出来，点一集就是「文件不存在」。 */
+    private boolean episodePlayable(int i) {
+        JSONObject ep = episodes.optJSONObject(i);
+        if (ep == null) return false;
+        if (nasMode) return !ep.optString("url", "").isEmpty();
+        String p = ep.optString("path", "");
+        return !p.isEmpty() && new File(p).canRead();
+    }
+
+    private int playableEpisodeCount() {
+        int n = 0;
+        for (int i = 0; i < episodes.length(); i++) if (episodePlayable(i)) n++;
+        return n;
     }
 
     private String epSource(int i) {
