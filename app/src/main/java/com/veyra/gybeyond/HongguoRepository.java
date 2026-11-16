@@ -203,6 +203,30 @@ final class HongguoRepository {
         return text.length() > 160 ? text.substring(0, 160) : text;
     }
 
+    /*
+     * 详情页的四块附加内容：相关作品（其他季）、制作方、分集评论、时间轴弹幕。
+     * 全部只读，签名在 HongguoApi 里，失败由前端降级成「暂无」，不影响播放。
+     */
+    JSONObject related(String id) throws Exception {
+        return new JSONObject().put("id", id).put("items", HongguoApi.related(id));
+    }
+
+    JSONObject producer(String id) throws Exception {
+        return HongguoApi.producer(id);
+    }
+
+    JSONObject producerWorks(String name, String mediaId, int page) throws Exception {
+        return HongguoApi.producerWorks(name, mediaId, page);
+    }
+
+    JSONObject comments(String id, String episodeId, String cursor) throws Exception {
+        return HongguoApi.comments(id, episodeId, cursor);
+    }
+
+    JSONObject danmaku(String id, String episodeId, long start, long duration) throws Exception {
+        return HongguoApi.danmaku(id, episodeId, start, duration);
+    }
+
     String coverData(String url) throws Exception {
         if (!url.startsWith("https://")) throw new IllegalArgumentException("无效封面地址");
         Request request = new Request.Builder().url(url).header("User-Agent", "Mozilla/5.0").build();
