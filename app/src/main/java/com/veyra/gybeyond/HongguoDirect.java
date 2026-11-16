@@ -32,27 +32,29 @@ import okhttp3.Response;
 /**
  * 红果 App 播放取址（2026-11 之后的链路）。
  *
- * 老链路（video_model/v1 + 8402 签名）在 2026-10-27 被站方关掉了：不管签名算得
- * 对不对，一律 HTTP 200 + 空正文。现在的规则是：
- *   1) 先到 log5-applog-lf.fqnovel.com 注册一台匿名设备（ttEncrypt 加密的报文体），
+ * 站方换过两次协议，现在只认这一条：
+ *   1) 到 log5-applog-lf.fqnovel.com 注册一台匿名设备（ttEncrypt 加密的报文体），
  *      拿到 device_id / install_id / cdid；
- *   2) 用这台设备的身份 + 551 Argus/Ladon 签名取址：
- *      首选 /reading/bookapi/video_tab/multi_video_model/v1/（GET，参数在 query），
- *      空响应再退回 /novel/player/multi_video_model/v1/（POST，gzip 正文）。
+ *   2) 用这台设备的身份 + Android v5 签名（{@link HongguoV5}）请求
+ *      /novel/player/multi_video_model/player/v1（POST，gzip 正文）。
  *
- * 身份是一次性的：同一台设备短时间内连续取流会被判重返回空正文，所以每次取址
- * 都重新注册（注册一次约 200~400ms）。
+ * 2026-10-27 之前那套（video_model/v1 + 551 Argus/Ladon）现在一律回
+ * HTTP 200 + 空正文；再往前的 8402 签名连 query 都不认。也就是说「能翻能点、
+ * 就是播不出来」不是网络问题，是签名版本不对。
+ *
+ * 身份是一次性的：同一台设备短时间内连续取流会被判重返回空正文，所以失败后
+ * 换一台身份再试一次（注册一次约 200~400ms）。
  */
 final class HongguoDirect {
-    private static final String HOST = "https://api5-normal-sinfonlineb.fqnovel.com";
-    private static final String VIDEO_TAB = HOST + "/reading/bookapi/video_tab/multi_video_model/v1/";
-    private static final String MULTI_MODEL = HOST + "/novel/player/multi_video_model/v1/";
+    private static final String HOST = "https://api5-normal-sinfonlinea.fqnovel.com";
+    private static final String PLAYER_MODEL = HOST + "/novel/player/multi_video_model/player/v1";
     private static final String REGISTER = "https://log5-applog-lf.fqnovel.com/service/2/device_register/"
             + "?tt_data=a&cronet_version=8d40f833_2026-03-03&ttnet_version=4.2.243.31-douyin&use_store_region_cookie=1";
     private static final String REGISTER_UA = "com.phoenix.read/72232 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3)";
-    private static final String PLAYBACK_UA = "com.phoenix.read/74332 (Linux; U; Android 16; zh_CN; 25053RT47C;"
-            + " Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)";
-    private static final String VERSION_NAME = "7.1.3.32";
+    /** 官方播放器的头形态：Android 12 / PGT-AN10，与 v5 签名里的设备描述一致。 */
+    private static final String PLAYBACK_UA = "com.phoenix.read/73932 (Linux; U; Android 12; zh_CN_#Hans;"
+            + " PGT-AN10; Build/V417IR;tt-ok/3.12.13.20)";
+    private static final String VERSION_NAME = "7.4.3.32";
     private static final MediaType JSON = MediaType.get("application/json; charset=UTF-8");
     private static final MediaType OCTET = MediaType.get("application/octet-stream;tt-data=a");
     /** 与 ttEncrypt 同一个盐（客户端协议常量）。 */
@@ -92,24 +94,23 @@ final class HongguoDirect {
         if (vid == null || !vid.matches("[0-9]{1,30}")) throw new IOException("分集编号无效");
         List<String> errors = new ArrayList<>();
         Device device = register();
-        // 第一跳：video_tab 签名 GET（现在的主路径）
         try {
-            StreamInfo info = fetchTab(vid, device);
+            StreamInfo info = fetchModel(vid, device);
             if (info != null) return info;
-            errors.add("video_tab 空响应");
+            errors.add("首台设备返回空正文");
         } catch (Exception error) {
-            errors.add("video_tab: " + error.getMessage());
+            errors.add(String.valueOf(error.getMessage()));
         }
-        // 第二跳：换一台设备再走旧 POST（同一身份已经被判重了，换身份才有意义）
+        /* 空正文多半是这台匿名身份被判重/风控，换一台再试一次。 */
         try {
             Device fresh = register();
-            StreamInfo info = fetchPost(vid, fresh);
+            StreamInfo info = fetchModel(vid, fresh);
             if (info != null) return info;
-            errors.add("multi_video_model 空响应");
+            errors.add("换设备后仍为空正文");
         } catch (Exception error) {
-            errors.add("multi_video_model: " + error.getMessage());
+            errors.add(String.valueOf(error.getMessage()));
         }
-        throw new IOException("红果接口未返回片源（" + join(errors) + "）");
+        throw new IOException("播放接口未返回片源（" + join(errors) + "）");
     }
 
     private static String join(List<String> parts) {
@@ -272,137 +273,42 @@ final class HongguoDirect {
 
     // ---------------- 取址请求 ----------------
 
-    /** 设备基础参数：顺序固定，签名对 query 原文逐字节敏感。 */
-    private static LinkedHashMap<String, String> deviceBase(String versionCode, String versionName) {
-        LinkedHashMap<String, String> map = new LinkedHashMap<>();
-        map.put("ac", "wifi");
-        map.put("channel", "update_64");
-        map.put("aid", "8662");
-        map.put("app_name", "novelread");
-        map.put("version_code", versionCode);
-        map.put("version_name", versionName);
-        map.put("device_platform", "android");
-        map.put("os", "android");
-        map.put("ssmix", "a");
-        map.put("device_type", "25053RT47C");
-        map.put("device_brand", "Redmi");
-        map.put("language", "zh");
-        map.put("os_api", "36");
-        map.put("os_version", "16");
-        map.put("manifest_version_code", versionCode);
-        map.put("resolution", "1280*2772");
-        map.put("dpi", "520");
-        map.put("update_version_code", versionCode);
-        map.put("host_abi", "arm64-v8a");
-        map.put("dragon_device_type", "phone");
-        map.put("pv_player", versionCode);
-        map.put("compliance_status", "0");
-        map.put("need_personal_recommend", "1");
-        map.put("player_so_load", "1");
-        map.put("is_android_pad_screen", "0");
-        return map;
-    }
+    /** v5 取址：注册身份 + v5 签名 + gzip 正文，单次请求。 */
+    private static StreamInfo fetchModel(String vid, Device device) throws Exception {
+        long now = System.currentTimeMillis();
+        LinkedHashMap<String, String> values = new LinkedHashMap<>();
+        values.put("aid", "8662");
+        values.put("app_name", "novelread");
+        values.put("version_code", "74332");
+        values.put("version_name", VERSION_NAME);
+        values.put("channel", "vivo_8662_64");
+        values.put("device_platform", "android");
+        values.put("device_type", "PGT-AN10");
+        values.put("os_version", "12");
+        values.put("update_version_code", "74332");
+        values.put("iid", device.iid);
+        values.put("cdid", device.cdid);
+        values.put("device_id", device.deviceId);
+        values.put("_rticket", String.valueOf(now));
 
-    /** 与客户端一致：字母数字与 -_.~* 原样，其余 %XX 大写。 */
-    private static String encode(String value) {
-        StringBuilder sb = new StringBuilder();
-        for (byte b : value.getBytes(StandardCharsets.UTF_8)) {
-            int c = b & 0xFF;
-            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
-                    || c == '-' || c == '_' || c == '.' || c == '~' || c == '*') {
-                sb.append((char) c);
-            } else {
-                sb.append('%').append(String.format("%02X", c));
-            }
-        }
-        return sb.toString();
-    }
+        String payload = "{\"biz_param\":{\"detail_page_version\":0,\"device_level\":3,"
+                + "\"disable_digg_stat\":false,\"disable_video_relate_book\":false,"
+                + "\"need_all_video_definition\":true,\"need_mp4_align\":false,"
+                + "\"use_os_player\":false,\"use_server_dns\":false,\"video_platform\":1024},"
+                + "\"mixed_video_id_map\":{\"1004\":[\"" + vid + "\"]},\"dr_scene\":\"player\"}";
+        byte[] body = gzip(payload.getBytes(StandardCharsets.UTF_8));
 
-    private static String query(LinkedHashMap<String, String> params) {
-        StringBuilder sb = new StringBuilder();
-        for (Map.Entry<String, String> entry : params.entrySet()) {
-            if (sb.length() > 0) sb.append('&');
-            sb.append(encode(entry.getKey())).append('=').append(encode(entry.getValue()));
-        }
-        return sb.toString();
-    }
-
-    private static StreamInfo fetchTab(String vid, Device device) throws Exception {
-        long ts = System.currentTimeMillis() / 1000;
-        long ticket = System.currentTimeMillis();
-        LinkedHashMap<String, String> params = deviceBase("73932", "7.3.9.32");
-        params.put("device_id", device.deviceId);
-        params.put("iid", device.iid);
-        params.put("cdid", device.cdid);
-        params.put("video_id", vid);
-        params.put("video_id_type", "0");
-        params.put("device_level", "1");
-        params.put("need_all_video_definition", "1");
-        params.put("need_mp4_align", "0");
-        params.put("use_os_player", "0");
-        params.put("video_platform", "1024");
-        params.put("source", "0");
-        params.put("from_video_id", "");
-        params.put("ts", String.valueOf(ts));
-        params.put("_rticket", String.valueOf(ticket));
-        String qs = query(params);
-        Request request = signedGet(VIDEO_TAB + "?" + qs, qs, null, ts, device, "50561")
-                .header("x-tt-request-tag", "t=0;n=0")
-                .build();
-        return parse(execute(request), vid);
-    }
-
-    private static StreamInfo fetchPost(String vid, Device device) throws Exception {
-        long ts = System.currentTimeMillis() / 1000;
-        long ticket = System.currentTimeMillis();
-        LinkedHashMap<String, String> params = deviceBase("74332", "7.4.3.32");
-        params.put("device_id", device.deviceId);
-        params.put("iid", device.iid);
-        params.put("cdid", device.cdid);
-        params.put("ts", String.valueOf(ts));
-        params.put("_rticket", String.valueOf(ticket));
-        String qs = query(params);
-
-        JSONObject biz = new JSONObject();
-        biz.put("detail_page_version", 0);
-        biz.put("device_level", 3);
-        biz.put("disable_digg_stat", false);
-        biz.put("need_all_video_definition", true);
-        biz.put("need_mp4_align", false);
-        biz.put("use_os_player", false);
-        biz.put("use_server_dns", false);
-        biz.put("video_platform", 1024);
-        JSONObject mixed = new JSONObject();
-        mixed.put("1004", new JSONArray().put(vid));
-        JSONObject payload = new JSONObject();
-        payload.put("biz_param", biz);
-        payload.put("mixed_video_id_map", mixed);
-        byte[] body = gzip(payload.toString().getBytes(StandardCharsets.UTF_8));
-
-        Request request = signedGet(MULTI_MODEL + "?" + qs, qs, body, ts, device, "5051452")
-                .post(RequestBody.create(body, JSON))
-                .header("Content-Encoding", "gzip")
-                .build();
-        return parse(execute(request), vid);
-    }
-
-    private static Request.Builder signedGet(String url, String queryText, byte[] body, long ts,
-                                             Device device, String passportVersion) {
-        Map<String, String> sign = HongguoSign551.signPlayer(queryText, body, ts,
-                device.deviceId, device.iid);
+        HongguoV5.Signed signed = HongguoV5.signPlayback(PLAYER_MODEL, values, body, now);
         Request.Builder builder = new Request.Builder()
-                .url(url)
+                .url(signed.url)
                 .header("User-Agent", PLAYBACK_UA)
-                .header("Accept", "application/json; charset=utf-8,application/x-protobuf")
-                .header("sdk-version", "2")
-                .header("x-xs-from-web", "0")
-                .header("passport-sdk-version", passportVersion)
-                .header("x-ss-dp", "8662")
-                .header("x-tt-dt", "")
-                .header("x-tt-store-region", "cn")
-                .header("x-tt-store-region-src", "did");
-        for (Map.Entry<String, String> entry : sign.entrySet()) builder.header(entry.getKey(), entry.getValue());
-        return builder;
+                .header("Accept", "application/json")
+                .header("Content-Encoding", "gzip")
+                .header("x-ss-stub", HongguoV5.hexText(HongguoV5.md5(body)).toUpperCase());
+        for (Map.Entry<String, String> entry : signed.headers.entrySet()) {
+            builder.header(entry.getKey(), entry.getValue());
+        }
+        return parse(execute(builder.post(RequestBody.create(body, JSON)).build()), vid);
     }
 
     /** 执行请求并返回正文；空正文原样返回空串，由调用方判断。 */
@@ -433,8 +339,10 @@ final class HongguoDirect {
         if (code != 0) throw new IOException("接口拒绝 code=" + code);
         JSONObject data = json.optJSONObject("data");
         if (data == null) return null;
-        JSONObject tab = data.optJSONObject("video_model_data");
-        JSONObject entries = tab != null ? tab : data;
+        /* v5 把分集挂在 data["1004"][vid] 下；旧响应是 data[video_model_data][vid] 或直接 data[vid]。 */
+        JSONObject entries = data.optJSONObject("1004");
+        if (entries == null) entries = data.optJSONObject("video_model_data");
+        if (entries == null) entries = data;
         JSONObject entry = entries.optJSONObject(vid);
         if (entry == null) return null;
         JSONObject model = asObject(entry.opt("video_model"));

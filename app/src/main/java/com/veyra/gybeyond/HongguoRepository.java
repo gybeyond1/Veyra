@@ -157,15 +157,12 @@ final class HongguoRepository {
     }
 
     /*
-     * 取流顺序：本机签名直连优先。
+     * 取流只走一条路：匿名注册 + Android v5 签名（HongguoDirect）。
      *
-     * 直连（HongguoSigner）拿到的是 CENC 加密的原始 mp4，播放器边读边解密，Range 流式，
-     * 地址到手就能出画 —— guoapp 就是这一条路，点开即播。
-     * 后端 /api/web/hongguo/stream 走的是「ffmpeg 把整集转封装成明文 mp4 再 sendFile」，
-     * 第一遍必须等整集下完转完才给响应，一集几十秒；同名文件存在时才快。
-     * 之前把后端排在前面，等于每次新集都先等转封装，这才是「点开要等」的主因。
-     *
-     * 直连连续失败（红果空响应风控）就冷却 5 分钟，期间直接走后端，避免每次白等 8 秒。
+     * 2026-10-27 站方关掉了 551 Argus/Ladon（固定 HTTP 200 + 空正文），
+     * 2026-11 又要求 v5 Medusa/Helios；中转后端是永久 HTTP 502。
+     * 之前把三条串起来等，最坏要十几秒才报「没找到地址」，而且网页兜底只给
+     * 前几集的 360p 试看片 —— 既慢又不对。现在单路 9 秒硬预算，失败立刻报原因。
      */
     private static final java.util.concurrent.ExecutorService RESOLVE_POOL =
             java.util.concurrent.Executors.newFixedThreadPool(3, runnable -> {
@@ -173,55 +170,39 @@ final class HongguoRepository {
                 thread.setDaemon(true);
                 return thread;
             });
-    private static final java.util.concurrent.atomic.AtomicInteger DIRECT_MISSES =
-            new java.util.concurrent.atomic.AtomicInteger();
-    private static volatile long directHoldUntil = 0L;
-    private static final long DIRECT_COOLDOWN_MS = 5 * 60 * 1000L;
-    private static final long DIRECT_TIMEOUT_MS = 4000L;
-    /* 新链路（匿名注册 + 551 签名）单次预算：注册 ~0.3s、取址 ~0.5s，
-       两条退路加起来也不会超过这个数，超了就是网络有问题，直接降级。 */
     private static final long FRESH_TIMEOUT_MS = 9000L;
 
     private StreamInfo resolveStream(String id, String vid) throws Exception {
-        /*
-         * 第一道：匿名注册 + 551 Argus/Ladon 签名（HongguoDirect）。
-         * 红果在 2026-10-27 之后把播放取址改成「注册过的设备身份 + 551 签名」，
-         * 老的 8402 签名和现编的 device_id 一律回 HTTP 200 + 空正文 ——
-         * 这就是「点开一直转、最后报没找到地址」的直接原因。
-         */
-        java.util.concurrent.Future<StreamInfo> fresh =
+        java.util.concurrent.Future<StreamInfo> task =
                 RESOLVE_POOL.submit(() -> HongguoDirect.fetch(vid));
+        StreamInfo info;
         try {
-            StreamInfo freshInfo = fresh.get(FRESH_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
-            if (freshInfo != null && freshInfo.getUrl() != null && freshInfo.getUrl().startsWith("http")) {
-                DIRECT_MISSES.set(0);
-                return freshInfo;
-            }
-        } catch (Exception error) {
-            fresh.cancel(true);
-            android.util.Log.w("Veyra", "新链路取址失败: " + error.getMessage());
+            info = task.get(FRESH_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.TimeoutException error) {
+            task.cancel(true);
+            throw new java.io.IOException("红果取址超时（"
+                    + (FRESH_TIMEOUT_MS / 1000) + " 秒），可能是网络或风控");
+        } catch (java.util.concurrent.ExecutionException error) {
+            Throwable cause = error.getCause() == null ? error : error.getCause();
+            android.util.Log.w("Veyra", "红果 v5 取址失败: " + cause);
+            throw new java.io.IOException(shortMessage(cause));
+        } catch (InterruptedException error) {
+            task.cancel(true);
+            Thread.currentThread().interrupt();
+            throw new java.io.IOException("取址被取消");
         }
-        if (System.currentTimeMillis() >= directHoldUntil) {
-            java.util.concurrent.Callable<StreamInfo> call =
-                    () -> com.hongguotv.core.HongguoSigner.INSTANCE.resolve(vid);
-            java.util.concurrent.Future<StreamInfo> task = RESOLVE_POOL.submit(call);
-            try {
-                StreamInfo direct = task.get(DIRECT_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
-                if (direct != null && direct.getUrl() != null && direct.getUrl().startsWith("http")) {
-                    DIRECT_MISSES.set(0);
-                    return direct;
-                }
-            } catch (Exception error) {
-                task.cancel(true);
-                // 第一次失败不立刻判死：偶发空响应重试一次还是很快的
-                if (DIRECT_MISSES.incrementAndGet() >= 2) {
-                    directHoldUntil = System.currentTimeMillis() + DIRECT_COOLDOWN_MS;
-                    DIRECT_MISSES.set(0);
-                }
-            }
+        if (info == null || info.getUrl() == null || !info.getUrl().startsWith("http")) {
+            throw new java.io.IOException("红果没有返回可播放的地址");
         }
-        return upstream.stream(id, vid, 1080);
+        return info;
     }
+
+    private static String shortMessage(Throwable error) {
+        String text = error.getMessage();
+        if (text == null || text.isEmpty()) text = error.getClass().getSimpleName();
+        return text.length() > 160 ? text.substring(0, 160) : text;
+    }
+
     String coverData(String url) throws Exception {
         if (!url.startsWith("https://")) throw new IllegalArgumentException("无效封面地址");
         Request request = new Request.Builder().url(url).header("User-Agent", "Mozilla/5.0").build();
