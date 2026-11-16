@@ -3,6 +3,7 @@ package com.veyra.gybeyond;
 import android.app.Activity;
 import android.animation.ValueAnimator;
 import android.os.Build;
+import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
 import android.graphics.Bitmap;
@@ -159,6 +160,31 @@ public final class PlayerActivity extends Activity {
     private ImageButton fullscreenButton;
     private ImageButton bookmarkButton;
     private ImageButton castButton;
+    /* ---- 弹幕 / 分集评论 ---- */
+    private ImageButton danmakuButton;
+    private ImageButton commentButton;
+    private DanmakuView danmakuView;
+    private LinearLayout danmakuPanel;
+    private View danmakuScrim;
+    private FrameLayout commentHost;
+    private CommentPanel commentPanel;
+    private final ExecutorService danmakuWorker = Executors.newSingleThreadExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "danmaku");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private SharedPreferences danmakuPrefs;
+    private boolean danmakuOn = true;
+    private int danmakuSize = 22;
+    private int danmakuLanes = 6;
+    private String danmakuArea = "top";
+    private int danmakuAlpha = 85;
+    private boolean danmakuMerge = true;
+    private long danmakuCursor;
+    private int danmakuToken;
+    private boolean danmakuBusy;
+    private boolean danmakuExhausted;
+    private boolean danmakuHinted;
     private LinearLayout titleBar;
     private LinearLayout controls;
     private FrameLayout miniProgress;
@@ -294,6 +320,10 @@ public final class PlayerActivity extends Activity {
                 if (!seeking && landscapeSeek != null) landscapeSeek.setProgress((int) Math.min(1000, position * 1000 / duration));
                 updateMiniProgress(position, duration);
                 timeText.setText(clock(position) + " / " + clock(duration));
+                if (danmakuView != null) {
+                    danmakuView.setPosition(position);
+                    maybeFetchDanmaku(position);
+                }
                 if (tvClock != null && tvClock.getVisibility() == View.VISIBLE) {
                     tvClock.setText(clock(position) + " / " + clock(duration));
                 }
@@ -384,6 +414,7 @@ public final class PlayerActivity extends Activity {
             episodeText.setText(isAiQueue() ? "AI 作品" : "第 " + currentEpisode + " 集");
             updateBookmarkButton();
             lastMedia = kept.media;
+            resetDanmaku();
             engineListener = buildEngineListener(player);
             player.addListener(engineListener);
             activeView.setPlayer(player);
@@ -468,6 +499,7 @@ public final class PlayerActivity extends Activity {
             @Override public void onIsPlayingChanged(boolean playing) {
                 if (engine != player || destroyed) return;
                 if (playing) disarmReuseGuard();
+                if (danmakuView != null) danmakuView.setAnimating(playing && foreground);
                 playButton.setImageResource(playing ? R.drawable.player_pause : R.drawable.player_play);
                 centerToggle.setImageResource(playing ? R.drawable.player_pause : R.drawable.player_play);
                 if (tvMode) {
@@ -650,6 +682,14 @@ public final class PlayerActivity extends Activity {
         incoming.setVisibility(View.GONE);
         root.addView(incoming, new FrameLayout.LayoutParams(-1, -1));
 
+        /* 弹幕层压在画面之上、手势层之下：不接触摸、不抢焦点。 */
+        danmakuView = new DanmakuView(this);
+        danmakuView.setClickable(false);
+        danmakuView.setFocusable(false);
+        danmakuView.setSoundEffectsEnabled(false);
+        root.addView(danmakuView, new FrameLayout.LayoutParams(-1, -1));
+        loadDanmakuSettings();
+
         View gesture = new View(this);
         root.addView(gesture, new FrameLayout.LayoutParams(-1, -1));
         gesture.setOnTouchListener((target, event) -> handleGesture(event));
@@ -671,6 +711,19 @@ public final class PlayerActivity extends Activity {
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, dp(42), 1);
         titleParams.leftMargin = dp(12);
         top.addView(title, titleParams);
+        if (!tvMode) {
+            /* 手机端点标题栏右角；电视端靠遥控器，走控件条那两颗「弹幕 / 评论」。 */
+            danmakuButton = icon(R.drawable.player_danmaku, "弹幕设置");
+            danmakuButton.setBackgroundColor(Color.TRANSPARENT);
+            danmakuButton.setOnClickListener(v -> { showDanmakuPanel(); revealControls(); });
+            top.addView(danmakuButton, new LinearLayout.LayoutParams(dp(38), dp(38)));
+            commentButton = icon(R.drawable.player_comment, "本集评论");
+            commentButton.setBackgroundColor(Color.TRANSPARENT);
+            commentButton.setOnClickListener(v -> toggleComments());
+            LinearLayout.LayoutParams commentParams = new LinearLayout.LayoutParams(dp(38), dp(38));
+            commentParams.leftMargin = dp(2);
+            top.addView(commentButton, commentParams);
+        }
         if (tvMode) {
             /* 标题靠左占满，时间贴右边。只在控件条唤出期间可见 */
             tvClock = label("", 14, 0xFFD5D0CD);
@@ -846,6 +899,7 @@ public final class PlayerActivity extends Activity {
         miniParams.rightMargin = dp(tvMode ? 0 : 5);
         miniParams.bottomMargin = collapsedProgressBottomMargin(0);
         root.addView(miniProgress, miniParams);
+        buildCommentHost();
         root.setOnApplyWindowInsetsListener((viewRoot, insets) -> {
             int topInset = Build.VERSION.SDK_INT >= 30
                     ? insets.getInsets(WindowInsets.Type.statusBars()).top : insets.getSystemWindowInsetTop();
@@ -944,6 +998,308 @@ public final class PlayerActivity extends Activity {
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
         params.bottomMargin = navigationInsetBottom + dp(90);
         root.addView(speedPanel, params);
+    }
+
+    /* ================= 弹幕与分集评论 =================
+     *
+     * 两块都走匿名只读接口：弹幕按 30 秒一段向后取（comment_type=20，每条带 offset_time 毫秒），
+     * 评论按服务端 cursor 翻页（comment_source=4/18）。只有红果源有，私密模式返回空结构。
+     */
+
+    private void loadDanmakuSettings() {
+        if (danmakuPrefs == null) danmakuPrefs = getSharedPreferences("player-danmaku", MODE_PRIVATE);
+        danmakuOn = danmakuPrefs.getBoolean("on", true);
+        danmakuSize = danmakuPrefs.getInt("size", 22);
+        danmakuLanes = danmakuPrefs.getInt("lanes", 6);
+        danmakuArea = danmakuPrefs.getString("area", "top");
+        danmakuAlpha = danmakuPrefs.getInt("alpha", 85);
+        danmakuMerge = danmakuPrefs.getBoolean("merge", true);
+        applyDanmakuSettings();
+    }
+
+    private void saveDanmakuSettings() {
+        if (danmakuPrefs == null) danmakuPrefs = getSharedPreferences("player-danmaku", MODE_PRIVATE);
+        danmakuPrefs.edit().putBoolean("on", danmakuOn).putInt("size", danmakuSize)
+                .putInt("lanes", danmakuLanes).putString("area", danmakuArea)
+                .putInt("alpha", danmakuAlpha).putBoolean("merge", danmakuMerge).apply();
+    }
+
+    private void applyDanmakuSettings() {
+        if (danmakuView == null) return;
+        danmakuView.setFontSize(danmakuSize);
+        danmakuView.setLanes(danmakuLanes);
+        danmakuView.setArea(danmakuArea);
+        danmakuView.setAlphaPercent(danmakuAlpha);
+        danmakuView.setMerge(danmakuMerge);
+        danmakuView.setDanmakuEnabled(danmakuOn);
+        updateDanmakuButton();
+        if (tvBar != null) paintTvBar();
+    }
+
+    private void updateDanmakuButton() {
+        if (danmakuButton == null) return;
+        danmakuButton.setColorFilter(danmakuOn ? Color.WHITE : 0xFF7C8087);
+        danmakuButton.setContentDescription(danmakuOn ? "弹幕设置（已开启）" : "弹幕设置（已关闭）");
+    }
+
+    /** 当前这一集的剧集 id：评论和弹幕的 group_id 都靠它。 */
+    private String currentEpisodeId() {
+        JSONArray rows = episodes;
+        if ((rows == null || rows.length() == 0) && currentItem != null) rows = currentItem.optJSONArray("episodes");
+        for (int i = 0; rows != null && i < rows.length(); i++) {
+            JSONObject row = rows.optJSONObject(i);
+            if (row == null || row.optInt("number", -1) != currentEpisode) continue;
+            String id = row.optString("videoId", "");
+            if (id.isEmpty()) id = row.optString("itemId", "");
+            if (id.isEmpty()) id = row.optString("id", "");
+            return id;
+        }
+        return "";
+    }
+
+    /** 换集：清画布、作废在途请求、从 0 重新取。 */
+    private void resetDanmaku() {
+        danmakuToken += 1;
+        danmakuCursor = 0;
+        danmakuBusy = false;
+        danmakuExhausted = false;
+        danmakuHinted = false;
+        if (danmakuView != null) {
+            danmakuView.clear();
+            danmakuView.setPosition(0);
+        }
+        if (commentPanel != null) closeComments();
+        /* 第一段固定按 3 分钟估：这时候新一集的时长还没探到，用 player.getDuration() 会拿到上一集的 */
+        if (danmakuOn) fetchDanmaku(0, 180_000L);
+    }
+
+    /**
+     * 播放位置逼近「已取到的末尾」时补下一段。
+     * 一段 30 秒，提前 12 秒取，正常播放看不到断档。
+     */
+    private void maybeFetchDanmaku(long position) {
+        if (!danmakuOn || danmakuBusy || danmakuExhausted || destroyed) return;
+        if (danmakuView == null || currentItem == null) return;
+        long duration = player == null ? 0 : player.getDuration();
+        /* 时长还没探到（刚切集）时按 3 分钟估一段，别拿上一集的时长把整集判成「到头了」 */
+        if (duration > 0 && danmakuCursor >= duration - 1_500L) { danmakuExhausted = true; return; }
+        if (duration <= 0) duration = Math.max(180_000L, position + 180_000L);
+        if (danmakuCursor > 0 && position + 12_000L < danmakuCursor) return;
+        fetchDanmaku(danmakuCursor, duration);
+    }
+
+    private void fetchDanmaku(long start, long duration) {
+        final String episodeId = currentEpisodeId();
+        if (episodeId.isEmpty()) { danmakuExhausted = true; return; }
+        final String seriesId = currentId;
+        final int token = danmakuToken;
+        danmakuBusy = true;
+        danmakuWorker.execute(() -> {
+            JSONObject data = null;
+            String failure = null;
+            try {
+                data = repository.danmaku(seriesId, episodeId, start, duration);
+            } catch (Exception error) {
+                failure = error.getMessage();
+            }
+            final JSONObject result = data;
+            final String error = failure;
+            runOnUiThread(() -> {
+                if (destroyed || isFinishing() || token != danmakuToken) return;
+                danmakuBusy = false;
+                if (result == null) {
+                    danmakuExhausted = true;
+                    Log.w("HongGuo", "弹幕未取到：" + error);
+                    return;
+                }
+                JSONArray rows = result.optJSONArray("items");
+                java.util.List<DanmakuView.Item> batch = new java.util.ArrayList<>();
+                for (int i = 0; rows != null && i < rows.length(); i++) {
+                    JSONObject row = rows.optJSONObject(i);
+                    if (row == null) continue;
+                    String text = row.optString("text", "");
+                    if (text.isEmpty()) continue;
+                    batch.add(new DanmakuView.Item(text, row.optLong("timeMS", 0)));
+                }
+                long next = result.optLong("nextMS", start);
+                if (next <= start) {
+                    /* 服务端不再往后给，就是这一集到底了 */
+                    danmakuExhausted = true;
+                    next = start;
+                }
+                danmakuCursor = next;
+                if (danmakuView != null) danmakuView.appendItems(batch);
+                if (start == 0 && batch.isEmpty() && !danmakuHinted) {
+                    danmakuHinted = true;
+                    Log.d("HongGuo", "第 " + currentEpisode + " 集没有时间轴弹幕");
+                }
+            });
+        });
+    }
+
+    private LinearLayout danmakuRow(String name) {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, dp(3), 0, dp(3));
+        TextView heading = label(name, 11, 0xFFB9BCC4);
+        row.addView(heading, new LinearLayout.LayoutParams(dp(44), dp(32)));
+        return row;
+    }
+
+    private void danmakuChip(LinearLayout row, String text, boolean active, Runnable action) {
+        TextView chip = label(text, 12, active ? Color.BLACK : Color.WHITE);
+        chip.setGravity(Gravity.CENTER);
+        chip.setPadding(dp(10), 0, dp(10), 0);
+        chip.setBackground(background(active ? YELLOW : 0xFF3B4042, 8));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-2, dp(30));
+        params.rightMargin = dp(6);
+        row.addView(chip, params);
+        chip.setClickable(true);
+        chip.setOnClickListener(v -> {
+            action.run();
+            saveDanmakuSettings();
+            applyDanmakuSettings();
+            renderDanmakuPanel();
+        });
+    }
+
+    private void closeDanmakuPanel() {
+        if (danmakuPanel != null) root.removeView(danmakuPanel);
+        if (danmakuScrim != null) root.removeView(danmakuScrim);
+        danmakuPanel = null;
+        danmakuScrim = null;
+    }
+
+    private void showDanmakuPanel() {
+        if (danmakuPanel != null) { closeDanmakuPanel(); return; }
+        renderDanmakuPanel();
+    }
+
+    private void renderDanmakuPanel() {
+        if (danmakuPanel == null) {
+            danmakuScrim = new View(this);
+            danmakuScrim.setOnClickListener(v -> { closeDanmakuPanel(); revealControls(); });
+            root.addView(danmakuScrim, new FrameLayout.LayoutParams(-1, -1));
+        } else {
+            root.removeView(danmakuPanel);
+            danmakuPanel = null;
+        }
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(12), dp(10), dp(12), dp(10));
+        GradientDrawable shell = background(0xF326292A, 13);
+        shell.setStroke(dp(1), 0xFF796D53);
+        panel.setBackground(shell);
+        panel.setElevation(dp(18));
+
+        LinearLayout head = danmakuRow("弹幕");
+        TextView badge = label(danmakuOn ? "开" : "关", 12, danmakuOn ? Color.BLACK : Color.WHITE);
+        badge.setGravity(Gravity.CENTER);
+        badge.setPadding(dp(14), 0, dp(14), 0);
+        badge.setBackground(background(danmakuOn ? YELLOW : 0xFF3B4042, 8));
+        badge.setClickable(true);
+        badge.setOnClickListener(v -> {
+            danmakuOn = !danmakuOn;
+            saveDanmakuSettings();
+            applyDanmakuSettings();
+            if (danmakuOn) maybeFetchDanmaku(player == null ? 0 : player.getCurrentPosition());
+            renderDanmakuPanel();
+        });
+        head.addView(badge, new LinearLayout.LayoutParams(-2, dp(30)));
+        panel.addView(head, new LinearLayout.LayoutParams(-1, -2));
+
+        LinearLayout sizeRow = danmakuRow("字号");
+        int[] sizes = {16, 22, 28, 34};
+        String[] sizeLabels = {"小", "标准", "大", "特大"};
+        for (int i = 0; i < sizes.length; i++) {
+            final int value = sizes[i];
+            danmakuChip(sizeRow, sizeLabels[i], danmakuSize == value, () -> danmakuSize = value);
+        }
+        panel.addView(sizeRow, new LinearLayout.LayoutParams(-1, -2));
+
+        LinearLayout laneRow = danmakuRow("密度");
+        int[] lanes = {3, 6, 9};
+        String[] laneLabels = {"稀", "标准", "密"};
+        for (int i = 0; i < lanes.length; i++) {
+            final int value = lanes[i];
+            danmakuChip(laneRow, laneLabels[i], danmakuLanes == value, () -> danmakuLanes = value);
+        }
+        panel.addView(laneRow, new LinearLayout.LayoutParams(-1, -2));
+
+        LinearLayout areaRow = danmakuRow("区域");
+        String[][] areas = {{"top", "顶部"}, {"middle", "中部"}, {"bottom", "底部"}, {"full", "全屏"}};
+        for (String[] option : areas) {
+            danmakuChip(areaRow, option[1], danmakuArea.equals(option[0]), () -> danmakuArea = option[0]);
+        }
+        panel.addView(areaRow, new LinearLayout.LayoutParams(-1, -2));
+
+        LinearLayout alphaRow = danmakuRow("透明");
+        int[] alphas = {40, 70, 85, 100};
+        for (int i = 0; i < alphas.length; i++) {
+            final int value = alphas[i];
+            danmakuChip(alphaRow, value + "%", danmakuAlpha == value, () -> danmakuAlpha = value);
+        }
+        panel.addView(alphaRow, new LinearLayout.LayoutParams(-1, -2));
+
+        LinearLayout mergeRow = danmakuRow("合并");
+        danmakuChip(mergeRow, "相同合并", danmakuMerge, () -> danmakuMerge = true);
+        danmakuChip(mergeRow, "不合并", !danmakuMerge, () -> danmakuMerge = false);
+        panel.addView(mergeRow, new LinearLayout.LayoutParams(-1, -2));
+
+        danmakuPanel = panel;
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        params.bottomMargin = navigationInsetBottom + dp(96);
+        root.addView(panel, params);
+    }
+
+    private void buildCommentHost() {
+        commentHost = new FrameLayout(this);
+        commentHost.setVisibility(View.GONE);
+        View scrim = new View(this);
+        scrim.setBackgroundColor(0x66000000);
+        scrim.setOnClickListener(v -> closeComments());
+        commentHost.addView(scrim, new FrameLayout.LayoutParams(-1, -1));
+        root.addView(commentHost, new FrameLayout.LayoutParams(-1, -1));
+    }
+
+    private void toggleComments() {
+        if (commentPanel != null) closeComments();
+        else openComments();
+        revealControls();
+    }
+
+    private void openComments() {
+        if (commentHost == null || commentPanel != null) return;
+        String episodeId = currentEpisodeId();
+        if (episodeId.isEmpty()) { toast("这一集没有评论"); return; }
+        handler.removeCallbacks(hideControls);
+        CommentPanel panel = new CommentPanel(this, repository, currentId, episodeId, currentEpisode, this::closeComments);
+        int screen = getResources().getDisplayMetrics().widthPixels;
+        int width = Math.min(dp(340), Math.round(screen * 0.86f));
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(width, -1, Gravity.RIGHT);
+        params.topMargin = dp(72);
+        params.bottomMargin = dp(84) + navigationInsetBottom;
+        commentHost.addView(panel, params);
+        commentHost.setVisibility(View.VISIBLE);
+        commentHost.setClickable(true);
+        commentPanel = panel;
+        panel.setTranslationX(width);
+        panel.animate().translationX(0).setDuration(200).start();
+    }
+
+    private void closeComments() {
+        CommentPanel panel = commentPanel;
+        commentPanel = null;
+        if (panel == null) {
+            if (commentHost != null) commentHost.setVisibility(View.GONE);
+            return;
+        }
+        int width = Math.max(dp(200), panel.getWidth());
+        panel.animate().translationX(width).setDuration(160).withEndAction(() -> {
+            panel.destroy();
+            if (commentHost != null) commentHost.removeView(panel);
+            if (commentPanel == null && commentHost != null) commentHost.setVisibility(View.GONE);
+        }).start();
     }
 
     private void buildSeekPreview() {
@@ -1340,6 +1696,7 @@ public final class PlayerActivity extends Activity {
         updateBookmarkButton();
         title.setText(currentItem.optString("title") + " · 第 " + episode + " 集");
         episodeText.setText(isAiQueue() ? "AI 作品" : "第 " + episode + " 集");
+        resetDanmaku();
         sourceRetryCount = 0;
         if (reuse) {
             ExoPlayer old = player;
@@ -2259,7 +2616,9 @@ public final class PlayerActivity extends Activity {
         speedHoldActive = false;
         closeSpeedPanel();
         closeCastPanel();
+        closeDanmakuPanel();
         stopSeekPreview();
+        if (danmakuView != null) danmakuView.setAnimating(false);
         if (player != null) { saveProgress(false); player.pause(); }
         super.onPause();
     }
@@ -2268,10 +2627,13 @@ public final class PlayerActivity extends Activity {
         super.onResume();
         foreground = true;
         updateSystemBars();
+        if (danmakuView != null && player != null) danmakuView.setAnimating(player.isPlaying());
         maybePrepareNext();
     }
 
     private void handlePlayerBack() {
+        if (commentPanel != null) { closeComments(); return; }
+        if (danmakuPanel != null) { closeDanmakuPanel(); return; }
         if (tvMode) {
             /* 面板 / 控件条先收，再退播放器 */
             if (tvEpPanel != null) { closeTvEpisodes(); showTvBar(); return; }
@@ -2303,7 +2665,7 @@ public final class PlayerActivity extends Activity {
        一旦暂停，方向键改为在控件条里走，确定键执行。 */
 
     private static final String[] TV_BAR_LABELS = {
-            "播放/暂停", "上一集", "下一集", "选集", "倍速", "收藏"
+            "播放/暂停", "上一集", "下一集", "选集", "倍速", "收藏", "弹幕", "评论"
     };
 
     private void buildTvBar() {
@@ -2345,6 +2707,7 @@ public final class PlayerActivity extends Activity {
             item.setScaleY(on ? 1.05f : 1f);
         }
         if (tvBarItems.size() > 4) tvBarItems.get(4).setText("倍速 " + speedLabel(manualSpeed));
+        if (tvBarItems.size() > 6) tvBarItems.get(6).setText(danmakuOn ? "弹幕" : "弹幕 关");
     }
 
     private void showTvBar() {
@@ -2415,6 +2778,12 @@ public final class PlayerActivity extends Activity {
             case 5:
                 if (bookmarkButton != null) bookmarkButton.performClick();
                 paintTvBar();
+                break;
+            case 6:
+                showDanmakuPanel();
+                break;
+            case 7:
+                toggleComments();
                 break;
             default:
                 break;
@@ -2756,6 +3125,8 @@ public final class PlayerActivity extends Activity {
         cancelPrefetch();
         stopSeekPreview();
         prefetchWorker.shutdownNow();
+        danmakuWorker.shutdownNow();
+        if (commentPanel != null) { commentPanel.destroy(); commentPanel = null; }
         if (Build.VERSION.SDK_INT >= 33 && backCallback != null)
             getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(backCallback);
         handler.removeCallbacksAndMessages(null);
