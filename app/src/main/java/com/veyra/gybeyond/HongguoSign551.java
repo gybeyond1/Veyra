@@ -86,13 +86,17 @@ final class HongguoSign551 {
         return out;
     }
 
+    /** AES-CBC/NoPadding，data 必须已按 16 字节对齐（调用方用 pad16 补齐）。 */
     static byte[] aesCbc(byte[] data, byte[] key, byte[] iv) {
+        if (data.length % 16 != 0) {
+            throw new IllegalStateException("AES 加密失败（正文 " + data.length + " 字节未按 16 对齐）");
+        }
         try {
             Cipher cipher = Cipher.getInstance("AES/CBC/NoPadding");
             cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(key, "AES"), new IvParameterSpec(iv));
             return cipher.doFinal(data);
         } catch (Exception error) {
-            throw new IllegalStateException("AES 加密失败", error);
+            throw new IllegalStateException("AES 加密失败：" + error, error);
         }
     }
 

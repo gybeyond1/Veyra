@@ -93,13 +93,19 @@ final class HongguoDirect {
     static StreamInfo fetch(String vid) throws Exception {
         if (vid == null || !vid.matches("[0-9]{1,30}")) throw new IOException("分集编号无效");
         List<String> errors = new ArrayList<>();
-        Device device = register();
+        /* 注册失败单独成句，不要和「返回空正文」混在一起，否则实机只看到一个笼统的错。 */
+        Device device;
+        try {
+            device = register();
+        } catch (Exception error) {
+            throw new IOException("匿名设备注册失败：" + describe(error));
+        }
         try {
             StreamInfo info = fetchModel(vid, device);
             if (info != null) return info;
             errors.add("首台设备返回空正文");
         } catch (Exception error) {
-            errors.add(String.valueOf(error.getMessage()));
+            errors.add(describe(error));
         }
         /* 空正文多半是这台匿名身份被判重/风控，换一台再试一次。 */
         try {
@@ -108,9 +114,15 @@ final class HongguoDirect {
             if (info != null) return info;
             errors.add("换设备后仍为空正文");
         } catch (Exception error) {
-            errors.add(String.valueOf(error.getMessage()));
+            errors.add(describe(error));
         }
         throw new IOException("播放接口未返回片源（" + join(errors) + "）");
+    }
+
+    private static String describe(Exception error) {
+        String text = error.getMessage();
+        if (text == null || text.isEmpty()) text = error.getClass().getSimpleName();
+        return text;
     }
 
     private static String join(List<String> parts) {
@@ -242,7 +254,9 @@ final class HongguoDirect {
         System.arraycopy(derived, 16, iv, 0, 16);
         byte[] plain = HongguoSign551.concat(HongguoSign551.sha512(compressed), compressed);
         byte[] head = HongguoSign551.hex("746305100000");
-        return HongguoSign551.concat(HongguoSign551.concat(head, random), HongguoSign551.aesCbc(plain, key, iv));
+        /* ttEncrypt 的正文是 PKCS#7 补齐后再 AES-CBC；漏了这步会直接抛块对齐异常。 */
+        byte[] sealed = HongguoSign551.aesCbc(HongguoSign551.pad16(plain), key, iv);
+        return HongguoSign551.concat(HongguoSign551.concat(head, random), sealed);
     }
 
     private static byte[] randomBytes(int size) {
