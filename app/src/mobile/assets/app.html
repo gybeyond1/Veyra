@@ -9,22 +9,8 @@
        app.css 只消费，不定义。顺序反了材质和配色就不生效。 -->
   <link rel="stylesheet" href="sunny-theme.css">
   <link rel="stylesheet" href="app.css">
-  <!-- 先定 lite 标志：device-mode.js 要靠它判断「电视包装在没有 Leanback 的电视上」这种情况。
-       电视构建走 ?lite=1，轻量样式表（关玻璃/模糊/阴影/动画 + 老 WebView 属性兜底）随之加载。 -->
-  <script>
-  (function () {
-    var lite = false;
-    try { lite = /[?&]lite=1/.test(location.search); } catch (e) { }
-    window.__VEYRA_LITE = lite;
-  })();
-  </script>
-  <!-- 设备形态必须在样式生效前确定：data-device=phone/tablet/tv，大屏规则只认这个属性，
-       手机（phone）不命中 device-layout.css 里的任何一条。 -->
-  <script src="device-mode.js"></script>
+  <!-- 平板版式走视口断点（≥600px 四列 / ≥960px 铺满），不依赖任何设备判定。 -->
   <link rel="stylesheet" href="device-layout.css">
-  <!-- 轻量样式表里的每条规则都带 html[data-device="tv"] 前缀，手机会全部落空，
-       所以无条件加载：真正由 data-device 决定生不生效，不依赖 ?lite=1 有没有带上。 -->
-  <link rel="stylesheet" href="tv-lite.css">
   <link rel="stylesheet" href="relay-input.css">
   <!-- 冷启动记忆：上次退出时停在刷剧页 → 在 app.js 还没跑起来之前就把首页内容藏掉、
        垫上上次那部剧的海报。否则第一帧是传统首页（骨架 → 内容），等首页数据回来
@@ -171,23 +157,10 @@
       <button id="age-exit" type="button">退出应用</button>
     </div>
   </div>
-  <!-- 脚本分流：
-       普通构建（手机/平板）—— 与原来完全一致，逐条加载。
-       电视构建（?lite=1）  —— 只加载跑得动、用得上的：先补 ES5 兜底，再跑降级后的 app.es5.js。
-                              卡片转场、玻璃透镜、外观主题这四套特效脚本整体不进电视端。 -->
+  <!-- 脚本站：手机 / 平板一份，按顺序加载。电视包走自己的 tv.html，与这里无关。 -->
   <script>
   (function () {
     function load(src) { document.write('<script src="' + src + '"><\/script>'); }
-    if (window.__VEYRA_LITE) {
-      load('runtime.js');
-      load('intro.js');
-      load('tv-polyfill.js');
-      load('app.es5.js');
-      load('vendor/qrcode.js');
-      load('relay-input.js');
-      load('tv-focus.js');
-      return;
-    }
     load('vendor/rematrix-0.2.2.js');
     load('vendor/flip-toolkit-7.2.6.js');
     load('card-transition.js');
@@ -198,7 +171,6 @@
     load('app.js');
     load('vendor/qrcode.js');
     load('relay-input.js');
-    load('tv-focus.js');
     load('dock-glass.js');
     load('dock-refract.js');
     load('seg-glass.js');

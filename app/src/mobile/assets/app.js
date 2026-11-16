@@ -1540,16 +1540,13 @@ window.__veyraProxyOpen = () => !!(proxyPop && !proxyPop.hidden);
  * 用户截一张图就能定位，不用靠猜。 */
 function deviceLine() {
   var parts = [];
-  var device = window.VEYRA_DEVICE || '未知';
-  var names = { tv: '电视', tablet: '平板', phone: '手机' };
-  parts.push('界面形态 ' + (names[device] || device));
-  if (window.VEYRA_MODEL) parts.push(window.VEYRA_MODEL);
+  var touch = (navigator.maxTouchPoints || 0) > 0;
+  var wide = Math.min(window.innerWidth, window.innerHeight) >= 600;
+  parts.push(touch && wide ? '平板版式' : '手机版式');
   var chrome = '';
   try { chrome = ((navigator.userAgent || '').match(/Chrome\/(\d+)/) || [])[1] || ''; } catch (error) { }
   if (chrome) parts.push('WebView ' + chrome);
-  parts.push('触摸点 ' + (navigator.maxTouchPoints || 0));
   parts.push(window.innerWidth + '×' + window.innerHeight);
-  if (window.VEYRA_LITE) parts.push('电视包');
   try {
     if (window.HotRuntime && window.HotRuntime.version) parts.push('界面 ' + window.HotRuntime.version);
   } catch (error) { }

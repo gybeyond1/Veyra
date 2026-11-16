@@ -299,8 +299,10 @@ public final class PlayerActivity extends Activity {
     private int navigationInsetBottom;
     private OnBackInvokedCallback backCallback;
 
-    /* ---- 电视端：没有触摸、没有焦点导航，只有遥控器按键和一个常显的进度条 ---- */
-    private boolean tvMode;
+    /* ---- 电视端：没有触摸、没有焦点导航，只有遥控器按键和一个常显的进度条 ----
+       编译期常量而不是运行时探测：tvMode 一旦是常量，javac 会把 if (tvMode) 折叠掉，
+       手机包里不会留下电视那半边代码，电视包里也不会留下手机那半边。 */
+    private static final boolean tvMode = BuildConfig.TV;
     private boolean tvInfoShown;
     /* 控件条唤出时右上角常驻的「当前 / 总长」，控件条收起就一起消失。
        以前是用 toast 在顶部弹一下，左右快进每按一次弹一次，很吵。 */
@@ -346,7 +348,6 @@ public final class PlayerActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        tvMode = DeviceProfile.isTv(this);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
                 WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);

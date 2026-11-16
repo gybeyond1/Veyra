@@ -4,7 +4,7 @@
  *   Element.replaceChildren (86)、String.replaceAll (85)、Object.fromEntries (73)、
  *   Array.flatMap (69)、Element.toggleAttribute (69)、Promise.finally (63)。
  * app.js 里 replaceChildren 用了 4 次、replaceAll 2 次，缺任一个都会在启动时直接抛 TypeError，
- * 页面停在空骨架 —— 表现和白屏几乎一样，很难查。所以这里先补齐，再让 app.es5.js 跑。
+ * 页面停在空骨架 —— 表现和白屏几乎一样，很难查。所以这里先补齐，再让 tv.js 跑。
  *
  * 只补「缺了就会崩」的，不追求完全等价；签名和行为按 MDN 的定义来。
  */

@@ -1,0 +1,217 @@
+/* 大屏适配：平板。
+ *
+ * 全部按**视口尺寸**断点，不依赖任何设备判定 —— 判定一旦失准（smallestScreenWidthDp
+ * 恰好落在 600 以下、系统改了显示密度），整套规则就静默失效，页面看起来和手机一模一样。
+ *
+ *   竖屏 / 中等宽度  ≥600px            → 4 列栅格，底栏定宽居中
+ *   横屏平板        ≥960px 且 ≥560 高   → 完全铺满：内容通栏、卡片自动填满整行、详情页左右双栏
+ *
+ * 手机竖屏 412px、手机横屏 ~915×412 都不命中（高度不足 560），行为与改动前完全一致。
+ * 电视有自己的一套页面（tv.html + tv.css），不加载这份样式表。
+ */
+
+/* ---------------- 详情页铺满（所有设备） ----------------
+ *
+ * #content 平时有 110px 底部内边距给底栏让位，详情路由下底栏是隐藏的，这段留白会把
+ * 详情页压成「上半截有内容、下半截空着」，从刷剧页进来尤其明显（那一屏背后是原生视频）。
+ * .detail-page 的 min-height:100% 又因为 #content 高度是 auto 而解析失败，所以这里直接用视口高度。
+ */
+#app.route-detail > #scroll > #content { padding-bottom: 0; }
+#app.route-detail .detail-page { min-height: 100vh; }
+
+/* ---------------- 平板 / 宽屏：竖屏与中等宽度 ---------------- */
+@media (min-width: 600px) and (orientation: portrait) {
+  .app-top {
+    height: calc(64px + var(--status-bar-height));
+    padding: calc(8px + var(--status-bar-height)) 28px 9px;
+    gap: 14px;
+  }
+  .search-form { max-width: 620px; }
+
+  /* 横向滑动的长条换成多列网格，一屏能看到更多海报 */
+  .home-page .film-row,
+  .category-page .film-row,
+  .search-page .film-row,
+  .library-page .film-row {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-auto-flow: row;
+    column-gap: 16px;
+    row-gap: 24px;
+    padding: 0 28px 20px;
+    overflow: visible;
+  }
+  .film-card { width: 100%; min-width: 0; }
+  .home-page .poster,
+  .category-page .poster,
+  .search-page .poster,
+  .library-page .poster {
+    height: auto;
+    aspect-ratio: 114 / 153;
+  }
+  .film-title { font-size: 14px; }
+  .section-heading { padding: 0 28px; }
+
+  .search-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .tags-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .episode-grid { grid-template-columns: repeat(8, 1fr); }
+  .download-sheet-grid { grid-template-columns: repeat(8, 1fr); max-height: 52vh; max-height: 52dvh; }
+  .detail-episode-grid { grid-template-columns: repeat(8, 1fr); }
+
+  /* 底栏定宽居中，避免在 800dp 宽度上被拉成四根柱 */
+  #dock {
+    left: 0;
+    right: 0;
+    margin: 0 auto;
+    width: min(560px, calc(100% - 64px));
+    height: 72px;
+    bottom: 16px;
+  }
+
+  #app { --detail-art-height: calc(460px + var(--status-bar-height)); }
+  .detail-copy h1 { font-size: 30px; }
+  .category-head h1,
+  .library-page h1,
+  .search-page h1 { font-size: 30px; }
+}
+
+@media (min-width: 900px) and (orientation: portrait) {
+  .home-page .film-row,
+  .category-page .film-row,
+  .search-page .film-row,
+  .library-page .film-row { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
+
+/* ---------------- 平板横屏：完全铺满 ----------------
+ *
+ * 断点取 960×560：1280×800、1200×1920 转横、1024×600 全部命中；手机转横只有 ~915×412，
+ * 高度不够，命中不了，手机行为不变。
+ */
+@media (min-width: 960px) and (min-height: 560px) and (orientation: landscape) {
+
+  /* --- 顶栏：左右留白固定，搜索框吃掉全部剩余宽度 --- */
+  .app-top {
+    height: calc(70px + var(--status-bar-height));
+    padding: calc(12px + var(--status-bar-height)) 44px 11px;
+    gap: 18px;
+  }
+  .search-form { max-width: none; height: 46px; }
+  .search-input { font-size: 15px; }
+  #scroll { padding-top: calc(70px + var(--status-bar-height)); }
+  .home-tag-scroll { padding-top: 14px; }
+
+  /* --- 首页 hero：横向拉满，文字区不再挤在左下角一小块 --- */
+  .hero {
+    height: 212px;
+    margin: 0 44px;
+    border-radius: calc(20px * var(--corner-scale, 1));
+  }
+  .hero-copy { left: 34px; bottom: 30px; }
+  .hero-copy h2 { font-size: 38px; max-width: 420px; margin: 10px 0 10px; }
+  .hero-copy p { font-size: 14px; max-width: 420px; margin-bottom: 20px; -webkit-line-clamp: 2; }
+  .hero-action { padding: 11px 18px; font-size: 14px; }
+  .hero-index { right: 30px; bottom: 28px; }
+  .hero-dots { height: 30px; }
+  .home-tag-scroll { padding-top: 4px; padding-bottom: 4px; }
+  #content { padding: 0 0 142px; }
+
+  /* --- 卡片：auto-fill 让列数跟着宽度长，两端顶到边距，不留白 --- */
+  .home-page .film-row,
+  .category-page .film-row,
+  .search-page .film-row,
+  .library-page .film-row {
+    grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+    column-gap: 20px;
+    row-gap: 30px;
+    padding: 0 44px 24px;
+  }
+  .film-card { width: 100%; min-width: 0; }
+  .home-page .poster,
+  .category-page .poster,
+  .search-page .poster,
+  .library-page .poster {
+    height: auto;
+    aspect-ratio: 114 / 153;
+  }
+  .film-title { font-size: 15px; margin-top: 9px; }
+  .film-info { font-size: 12px; }
+  .section-heading { padding: 0 44px; margin-bottom: 12px; }
+  .section-heading h2 { font-size: 26px; }
+  .film-section { margin: 24px 0 34px; }
+
+  .search-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+  .tags-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
+  .category-head h1,
+  .library-page h1,
+  .search-page h1 { font-size: 34px; }
+  .category-head,
+  .library-page > h1,
+  .search-page > h1 { padding-left: 44px; padding-right: 44px; }
+
+  /* --- 底栏：跟着内容一起变宽，不再是一条 560 的窄条飘在 1280 中间 --- */
+  #dock {
+    left: 0;
+    right: 0;
+    margin: 0 auto;
+    width: min(880px, calc(100% - 88px));
+    height: 76px;
+    bottom: 18px;
+  }
+  #dock button { font-size: 13px; }
+
+  /* --- 详情页：左海报 + 右信息，横向空间全部用起来 --- */
+  .detail-page {
+    display: grid;
+    grid-template-columns: clamp(300px, 32%, 420px) minmax(0, 1fr);
+    gap: 0 44px;
+    align-content: start;
+    min-height: 100vh;
+    padding: calc(58px + var(--status-bar-height)) 44px 56px;
+  }
+  .detail-back {
+    top: calc(14px + var(--status-bar-height));
+    left: 44px;
+  }
+  .detail-art {
+    grid-column: 1;
+    grid-row: 1;
+    height: auto;
+    aspect-ratio: 114 / 153;
+    max-height: calc(100vh - 160px);
+    border-radius: calc(20px * var(--corner-scale, 1));
+  }
+  /* 底部渐变是给全屏头图做文字压暗的，左栏海报不需要 */
+  .detail-art::after { display: none; }
+  .detail-copy {
+    grid-column: 2;
+    grid-row: 1;
+    margin: 0;
+    min-width: 0;
+  }
+  .detail-copy h1 { font-size: 40px; line-height: 1.14; margin-bottom: 10px; }
+  .detail-copy p { font-size: 14px; margin-bottom: 18px; }
+  .detail-description { font-size: 14px; line-height: 1.85; max-width: 940px; }
+  .detail-buttons { max-width: 520px; margin: 20px 0 30px; }
+  .detail-play { height: 52px; font-size: 16px; }
+  .bookmark-button { height: 52px; }
+  .detail-download { height: 52px; }
+  .detail-copy h2 { font-size: 22px; margin: 0 0 16px; }
+  .episode-grid {
+    grid-template-columns: repeat(auto-fill, minmax(58px, 1fr));
+    gap: 11px;
+    padding-bottom: 24px;
+  }
+  .episode-grid button { height: 46px; font-size: 14px; }
+}
+
+/* ---------------- 平板不要轮播图 ----------------
+ *
+ * 只按「够宽」判定，不区分横竖屏：上一版只写在竖屏媒体查询里，横屏仍旧在轮播。
+ * 电视不在此列 —— 它保留自己的首屏大图，遥控在那一层也还有用。
+ */
+@media (min-width: 600px) {
+  .hero,
+  .hero-dots { display: none !important; }
+  .home-tag-scroll { padding-top: 14px; }
+}
+

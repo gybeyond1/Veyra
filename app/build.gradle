@@ -10,19 +10,24 @@ android {
         applicationId 'com.veyra.gybeyond'
         minSdk 26
         targetSdk 36
-        versionCode 468
-        versionName "0.28.70"
+        versionCode 469
+        versionName "0.29.0"
         testInstrumentationRunner 'com.veyra.gybeyond.PlaybackTestRunner'
     }
 
-    // 两个形状：mobile（手机 + 平板）与 tv（电视轻量大屏）。
-    // 共用同一份 Java 代码和 assets，只在打包产物和 R.bool.veyra_lite 上分开 ——
-    // 电视端不加载玻璃/转场/主题那几套脚本，页面用 ?lite=1 打开。
+    // 两个形状：mobile（手机 + 平板）与 tv（电视大屏）。
+    //
+    // 形态是**构建期常量**（BuildConfig.TV），不是运行时探测：
+    // 以前靠 Leanback 特性、uiMode、触摸屏、视口宽度一层层猜，海信/创维/ TCL 那批机器
+    // 什么都不声明，猜错就是「电视上跑手机界面」。包都是分开打的，形态在编译时就已经确定，
+    // 没有任何理由留一条运行时的判定链，也没有理由让编译期常量以外的分支进包
+    // （javac 会把 if (BuildConfig.TV) 的常量条件折叠掉，另一侧不生成字节码）。
     flavorDimensions 'form'
     productFlavors {
         mobile {
             dimension 'form'
             resValue "string", "app_name", "Veyra"
+            buildConfigField "boolean", "TV", "false"
         }
         tv {
             dimension 'form'
@@ -30,6 +35,7 @@ android {
             applicationIdSuffix '.tv'
             // 桌面/应用列表里叫 Veyra TV，跟手机版分得开
             resValue "string", "app_name", "Veyra TV"
+            buildConfigField "boolean", "TV", "true"
         }
     }
 
@@ -56,9 +62,10 @@ android {
         }
     }
 
-    // resValue 在 AGP 8 里默认关闭，需要在 buildFeatures 打开（电视包靠它改应用名）
+    // resValue / buildConfigField 在 AGP 8 里默认关闭，需要在 buildFeatures 打开
     buildFeatures {
         resValues true
+        buildConfig true
     }
 
     buildTypes {
