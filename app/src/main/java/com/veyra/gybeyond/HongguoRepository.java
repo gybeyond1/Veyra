@@ -207,8 +207,8 @@ final class HongguoRepository {
      * 详情页的四块附加内容：相关作品（其他季）、制作方、分集评论、时间轴弹幕。
      * 全部只读，签名在 HongguoApi 里，失败由前端降级成「暂无」，不影响播放。
      */
-    JSONObject related(String id) throws Exception {
-        return new JSONObject().put("id", id).put("items", HongguoApi.related(id));
+    JSONObject related(String id, String title) throws Exception {
+        return new JSONObject().put("id", id).put("items", HongguoApi.related(id, title));
     }
 
     JSONObject producer(String id) throws Exception {
@@ -229,13 +229,30 @@ final class HongguoRepository {
 
     String coverData(String url) throws Exception {
         if (!url.startsWith("https://")) throw new IllegalArgumentException("无效封面地址");
-        Request request = new Request.Builder().url(url).header("User-Agent", "Mozilla/5.0").build();
+        /* 红果图床（*.byteimg.com）对纯 UA 的裸请求偶尔回 403，带上站点 Referer 更稳；
+           其它域名的图带 Referer 也不敏感。 */
+        Request request = new Request.Builder().url(url)
+                .header("User-Agent", "Mozilla/5.0")
+                .header("Referer", "https://hongguoduanju.com/")
+                .build();
         try (Response response = upstream.getHttp().newCall(request).execute()) {
             if (!response.isSuccessful() || response.body() == null) throw new IllegalStateException("封面加载失败");
             byte[] bytes = response.body().bytes();
             if (bytes.length > 5 * 1024 * 1024) throw new IllegalStateException("封面过大");
-            String mime = response.header("Content-Type", "image/jpeg").split(";")[0];
+            String type = response.header("Content-Type", "");
+            String mime = type.isEmpty() ? sniffImage(bytes) : type.split(";")[0];
+            if (!mime.startsWith("image/")) throw new IllegalStateException("封面不是图片");
             return "data:" + mime + ";base64," + Base64.encodeToString(bytes, Base64.NO_WRAP);
         }
+    }
+
+    /** 有些图床把 Content-Type 写成 application/octet-stream，按文件头兜一层。 */
+    private static String sniffImage(byte[] bytes) {
+        if (bytes == null || bytes.length < 4) return "image/jpeg";
+        if ((bytes[0] & 0xff) == 0xff) return "image/jpeg";
+        if ((bytes[0] & 0xff) == 0x89 && bytes[1] == 'P') return "image/png";
+        if (bytes[0] == 'G' && bytes[1] == 'I') return "image/gif";
+        if (bytes[0] == 'R' && bytes[1] == 'I') return "image/webp";
+        return "image/jpeg";
     }
 }

@@ -740,7 +740,13 @@ final class SiteRepository {
         URL url = new URL(value);
         String path = url.getPath();
         String extension = path.substring(path.lastIndexOf('.') + 1).toLowerCase(java.util.Locale.ROOT);
-        if (profile.object("cover").optBoolean("checkExtension", true) && !Arrays.asList("jpg", "jpeg", "png", "webp", "gif").contains(extension)) throw new IllegalArgumentException("不支持的封面格式");
+        /* 红果 CDN 的图走的是「…~tplv-shrink:640:0.image」这种模板后缀，路径里没有真实扩展名。
+           以前这里直接判「不支持的封面格式」，红果来源的封面（搜索 / 制作方作品）就全成了灰块。
+           现在扩展名只作为快速通道，不认识就照常取，取回来用 validImage 按字节校验。 */
+        boolean knownExtension = Arrays.asList("jpg", "jpeg", "png", "webp", "gif").contains(extension);
+        if (profile.object("cover").optBoolean("checkExtension", true) && !knownExtension && !path.contains("~tplv-")) {
+            throw new IllegalArgumentException("不支持的封面格式");
+        }
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         byte[] hash = digest.digest((profile.fingerprint + ":" + url.getHost() + path).getBytes(StandardCharsets.UTF_8));
         StringBuilder key = new StringBuilder();

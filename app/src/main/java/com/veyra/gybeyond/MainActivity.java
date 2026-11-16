@@ -1662,7 +1662,7 @@ public final class MainActivity extends Activity {
                 return result;
             }
             // 详情页/播放页的四块附加内容（只读，失败由前端降级成「暂无」）
-            case "related": return repository.related(args.optString("id"));
+            case "related": return repository.related(args.optString("id"), args.optString("title"));
             case "producer": return repository.producer(args.optString("id"));
             case "producer-works": return repository.producerWorks(args.optString("name"),
                     args.optString("mediaId"), Math.max(1, args.optInt("page", 1)));

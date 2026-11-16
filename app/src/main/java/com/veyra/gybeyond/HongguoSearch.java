@@ -130,7 +130,7 @@ final class HongguoSearch {
                                     }
                                 }
                                 seen.putIfAbsent(id, new JSONObject().put("id", id).put("title", title)
-                                        .put("cover", video == null ? "" : video.optString("series_cover"))
+                                        .put("cover", HongguoApi.coverOf(video))
                                         .put("description", video == null ? "" : video.optString("series_intro"))
                                         .put("episodeLabel", video == null ? "" : video.optString("episode_right_text"))
                                         .put("category", "").put("score", "").put("tags", tags));
@@ -193,7 +193,7 @@ final class HongguoSearch {
                 JSONObject category = categories.optJSONObject(j);
                 if (category != null && !category.optString("name").isEmpty()) tags.put(category.optString("name"));
             }
-            items.put(new JSONObject().put("id", id).put("title", title).put("cover", video.optString("series_cover"))
+            items.put(new JSONObject().put("id", id).put("title", title).put("cover", HongguoApi.coverOf(video))
                     .put("description", video.optString("series_intro")).put("episodeLabel", video.optString("episode_right_text"))
                     .put("category", type).put("score", "").put("tags", tags));
         }

@@ -409,28 +409,38 @@ body.page-windowed #stage{overflow:hidden}
 .chip.is-active.is-focused{color:var(--accent-ink)}
 
 /* ---------------- 详情 ---------------- */
-.detail{
-  display:grid;grid-template-columns:36rem 1fr;
+/* 上下两段：hero（海报 + 信息，等高）→ 相关作品通栏。
+   海报不再 sticky：相关作品现在从海报下沿开始铺，钉住会把它们盖在下面。 */
+.detail{display:block}
+.detail-hero{
+  display:grid;grid-template-columns:36rem minmax(0,1fr);
   grid-column-gap:4.8rem;
-  align-items:start;
+  align-items:stretch;
 }
-/* 海报钉在屏幕上：遥控器往下翻集数时，海报不跟着走 */
 .detail-art{
-  position:-webkit-sticky;position:sticky;top:1.6rem;
   align-self:start;
   width:36rem;height:50.4rem;border-radius:1rem;
   overflow:hidden;background:var(--panel);
 }
 .detail-art img{width:100%;height:100%;object-fit:cover}
-.detail-info{min-width:0}
-.detail h1{font-size:4.2rem;line-height:1.2;margin:0 0 1.2rem}
-.detail .meta{font-size:2rem;color:var(--muted);margin:0 0 2rem}
-.detail .desc{
-  font-size:1.9rem;line-height:1.75;color:var(--chip-ink);
-  margin:0 0 2.8rem;max-width:96rem;
-  display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;
+/* 信息列跟海报等高：集数块用 margin-top:auto 顶到最底下，
+   底边因此和海报底边齐平；标题太长时先由简介让位（flex 收缩），不会顶穿出去。 */
+.detail-info{
+  min-width:0;display:flex;flex-direction:column;
+  height:50.4rem;
 }
-.actions{display:block;margin-bottom:4rem}
+.detail-eps{margin-top:auto;padding-top:1.2rem}
+.detail .desc{flex:0 1 auto;min-height:0}
+/* 信息列改成 flex 了：续播行是 inline-block，被 stretch 会拉成一整条色带 */
+.detail .resume-line{align-self:flex-start}
+.detail h1{font-size:3.8rem;line-height:1.15;margin:0 0 .9rem}
+.detail .meta{font-size:2rem;color:var(--muted);margin:0 0 1.6rem}
+.detail .desc{
+  font-size:1.8rem;line-height:1.6;color:var(--chip-ink);
+  margin:0 0 2.2rem;max-width:96rem;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;
+}
+.actions{display:block;margin-bottom:2.4rem}
 .btn{
   display:inline-block;
   height:6rem;line-height:6rem;
@@ -452,19 +462,19 @@ body.page-windowed #stage{overflow:hidden}
 .btn.icon-only svg{width:3rem;height:3rem;fill:currentColor}
 .detail-actions{display:flex;align-items:center;flex-wrap:wrap}
 
-.eps-title{font-size:2.4rem;margin:0 0 1.6rem;font-weight:700}
+.eps-title{font-size:2.2rem;margin:0 0 1.2rem;font-weight:700}
 .eps-title span{font-size:1.8rem;color:var(--muted);margin-left:1.4rem;font-weight:400}
 /* 分组条：1-20 / 21-40 … 几百集不用一条道拉到黑 */
 .ep-groups{margin-bottom:2rem}
 .ep-groups .chips{margin-bottom:0}
 .ep-groups .chip{height:4.6rem;line-height:4.6rem;padding:0 1.8rem;font-size:1.9rem}
 .eps{
-  display:grid;grid-template-columns:repeat(8,1fr);
+  display:grid;grid-template-columns:repeat(10,minmax(0,1fr));
   grid-column-gap:1.2rem;grid-row-gap:1.2rem;
-  max-width:112rem;
 }
+/* 信息列比原来窄（右边要让出 10 列），字号和高度跟着收一档，20 集刚好两排 */
 .eps button{
-  height:5.6rem;line-height:5.6rem;
+  height:5rem;line-height:5rem;
   border-radius:.8rem;background:var(--chip-bg);color:var(--text);
   font-size:2rem;text-align:center;white-space:nowrap;
   transition:transform .14s cubic-bezier(.22,.61,.36,1),box-shadow .14s linear;
@@ -865,10 +875,26 @@ body[data-backdrop="custom"] #tv-bg{background:#0d1013}
 /* 制作方紧跟在「评分 共N集」后面，做成一颗可聚焦胶囊 */
 .detail .meta{display:flex;align-items:center;gap:1.4rem;flex-wrap:wrap}
 .detail .producer-chip{height:4.2rem;line-height:4.2rem;padding:0 1.8rem;font-size:1.8rem}
-/* 分组胶囊和收藏同一行：选集标题下面不再单独占一行 */
-.ep-chips{display:flex;align-items:center;flex-wrap:wrap;gap:1rem;margin-left:1.2rem}
-.ep-chips .chip{height:5rem;line-height:5rem;padding:0 1.6rem;font-size:1.8rem}
-.detail-related{margin-top:4.2rem}
+/* 分组不再排成一整行胶囊：收藏右边一颗选择器，点开才是分组列表 */
+.ep-select{display:inline-flex;align-items:center;gap:1.1rem;padding:0 2.2rem;margin-left:1.2rem}
+.ep-select .ep-caret{
+  width:0;height:0;border-left:.8rem solid transparent;border-right:.8rem solid transparent;
+  border-top:.9rem solid currentColor;opacity:.75;
+}
+.ep-layer{position:fixed;inset:0;z-index:60}
+.ep-pop{
+  position:absolute;display:flex;flex-direction:column;gap:.8rem;
+  padding:1.2rem;border-radius:1.4rem;background:var(--panel-strong,#15171a);
+  box-shadow:0 2.4rem 6rem rgba(0,0,0,.55);
+  max-height:52vh;overflow:auto;
+}
+.ep-option{
+  height:5rem;line-height:5rem;padding:0 2rem;border-radius:.9rem;text-align:left;
+  background:var(--chip-bg);color:var(--text);font-size:1.9rem;white-space:nowrap;
+}
+.ep-option.is-active{background:var(--accent);color:var(--accent-ink);font-weight:700}
+.ep-option.is-focused{box-shadow:0 0 0 .3rem var(--halo),0 0 0 .7rem var(--focus)}
+.detail-related{margin-top:4.8rem}
 .detail-related .grid{grid-template-columns:repeat(6,minmax(0,1fr))}
 
 /* 制作方作品浮层：遥控器在网格里走，返回键收起 */

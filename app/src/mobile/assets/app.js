@@ -498,6 +498,17 @@ async function loadCoverInto(image) {
   } finally { delete image.dataset.loading; }
 }
 
+/* 挂在 body 上的浮层（制作方作品面板）不在 #scroll 里：
+   hydrateImages 的 observer 以 #scroll 为 root，里面的图永远等不到 intersection，
+   封面就一直停在灰块。这类容器直接补 src，不做懒加载。 */
+function paintCoversIn(root) {
+  if (!root) return;
+  root.querySelectorAll('img[data-cover]').forEach(image => {
+    if (image.getAttribute('src') || image.dataset.loading === '1') return;
+    loadCoverInto(image);
+  });
+}
+
 function retryFailedImages(force = false) {
   const viewport = scroll.getBoundingClientRect();
   content.querySelectorAll('img[data-cover]').forEach(image => {
@@ -1796,7 +1807,7 @@ function scheduleDetailExtras(data) {
       paintProducerInline(data.id);
     }
   };
-  api('related', { id: data.id }).then(res => { result.related = asArray(res.items); settle(); }).catch(settle);
+  api('related', { id: data.id, title: data.title || '' }).then(res => { result.related = asArray(res.items); settle(); }).catch(settle);
   api('producer', { id: data.id }).then(res => { if (res && res.name) result.producer = res; settle(); }).catch(settle);
 }
 
@@ -1872,7 +1883,7 @@ function openProducerPanel(name, mediaId, currentId) {
       const data = await api('producer-works', { name, mediaId, page });
       const items = asArray(data.items).filter(item => item.id && item.id !== currentId);
       list.insertAdjacentHTML('beforeend', items.map(producerItemHtml).join(''));
-      hydrateImages();
+      paintCoversIn(list);
       hasMore = Boolean(data.hasMore);
       page += 1;
       const count = list.childElementCount;
@@ -1887,7 +1898,7 @@ function openProducerPanel(name, mediaId, currentId) {
         list.insertAdjacentHTML('beforeend', seasons.map(item => producerItemHtml({
           id: item.id, title: item.title, cover: item.cover, episodeLabel: item.season || item.episodeLabel
         })).join(''));
-        hydrateImages();
+        paintCoversIn(list);
         status.textContent = seasons.length
           ? '平台检索不到该制作方的其他作品，先看同系列'
           : '平台没有收录这位制作方的其他作品';

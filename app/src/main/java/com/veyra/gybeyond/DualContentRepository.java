@@ -40,9 +40,9 @@ final class DualContentRepository {
      * 相关作品 / 制作方 / 评论 / 弹幕只有红果源有。
      * 私密（黄果）模式返回空结构而不是抛错：前端照常渲染详情页，这几块显示「暂无」。
      */
-    JSONObject related(String id) throws Exception {
+    JSONObject related(String id, String title) throws Exception {
         if (privateMode()) return new JSONObject().put("id", id).put("items", new org.json.JSONArray());
-        return hongguo.related(id);
+        return hongguo.related(id, title);
     }
     JSONObject producer(String id) throws Exception {
         if (privateMode()) return new JSONObject().put("name", "").put("mediaId", "");

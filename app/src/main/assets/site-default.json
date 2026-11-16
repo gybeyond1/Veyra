@@ -128,7 +128,14 @@
  },
  "cover": {
   "allowedHosts": [
-   "pic.drleao.cn"
+   "pic.drleao.cn",
+   "p3-novel.byteimg.com",
+   "p6-novel.byteimg.com",
+   "p9-novel.byteimg.com",
+   "p11-novel.byteimg.com",
+   "p3-novel-sign.byteimg.com",
+   "p6-novel-sign.byteimg.com",
+   "p9-novel-sign.byteimg.com"
   ],
   "hostRewrites": {},
   "mode": "aes-cbc",

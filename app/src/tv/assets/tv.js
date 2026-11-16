@@ -68,6 +68,8 @@ var state = {
 };
 
 var EP_PAGE = 20;
+/* 集数分组选择器（下拉）：引用一下放在这儿，方便和详情页其它状态一起看 */
+var epMenu = null;
 
 var view = document.getElementById('view');
 var stage = document.getElementById('stage');
@@ -586,6 +588,7 @@ function closeRail() {
 function activeOverlay() {
   /* 动态码浮窗优先级最高：它开着的时候背后就是整页海报，
      不锁住的话上下左右会直接选到浮窗后面的剧集封面上。 */
+  if (epMenu) return epMenu;
   if (producerPanel) return producerPanel;
   if (otpPanel && !otpPanel.hidden) return otpPanel;
   if (sourcePanel && !sourcePanel.hidden) return sourcePanel;
@@ -1713,47 +1716,18 @@ function renderDetail() {
   /* 详情页不放顶栏：那儿的视觉主体是海报，胶囊和按钮会压在封面上。
      body 上打个标记，CSS 把 #topbar 收起来，顺手把 #stage 的顶部留白和渐隐一起撤掉。 */
   document.body.classList.add('route-detail');
+  /* 整页重画会把触发按钮一起换掉：浮层留着就成了孤儿，先摘掉，
+     焦点也从「某一组」退回选择器本身（否则找不到节点会掉到下面第一张海报上） */
+  var hadEpMenu = !!epMenu;
+  if (epMenu && epMenu.parentNode) { epMenu.parentNode.removeChild(epMenu); epMenu = null; }
+  if (hadEpMenu) state.focusKey = 'ep-select';
   clearTopline();
   if (!state.detail) {
     view.innerHTML = '<p class="empty">正在打开…</p>';
     return;
   }
   var data = state.detail;
-  loadDetailExtras(String(data.id || ''));
-  var episodes = list(data.episodes);
-  var total = episodes.length;
-
-  var groups = total ? Math.ceil(total / EP_PAGE) : 0;
-  var gi = state.epGroup || 0;
-  if (gi > groups - 1) gi = groups - 1;
-  if (gi < 0) gi = 0;
-  state.epGroup = gi;
-  var start = gi * EP_PAGE;
-  var end = Math.min(total, start + EP_PAGE);
-
-  /* 分组胶囊搬到「收藏」右边：选集标题下面不再单独占一行，
-     集数网格因此整体上移一行，一屏能多看一排集数。 */
-  var groupChips = '';
-  if (groups > 1) {
-    groupChips = '<div class="ep-chips">';
-    for (var g = 0; g < groups; g++) {
-      var from = g * EP_PAGE + 1;
-      var to = Math.min(total, (g + 1) * EP_PAGE);
-      groupChips += '<button type="button" class="chip' + (g === gi ? ' is-active' : '')
-        + '" data-focusable data-key="epg:' + g + '" data-epgroup="' + g + '">' + from + '-' + to + '</button>';
-    }
-    groupChips += '</div>';
-  }
-
-  var eps = '';
-  if (total) {
-    eps = '<h2 class="eps-title">选集<span>' + (start + 1) + '-' + end + ' / 共 ' + total + ' 集</span></h2><div class="eps">';
-    for (var i = start; i < end; i++) {
-      var number = episodes[i].number || (i + 1);
-      eps += '<button type="button" data-focusable data-key="ep:' + number + '" data-episode="' + number + '">' + number + '</button>';
-    }
-    eps += '</div>';
-  }
+  loadDetailExtras(String(data.id || ''), data.title || '');
 
   var producer = state.detailProducer;
   var producerChip = producer && producer.name
@@ -1769,7 +1743,11 @@ function renderDetail() {
   var resume = resumePlan();
   var playText = state.detailLoading ? '正在加载…' : (resume ? ('继续播放 · 第' + resume.episode + '集') : '立即播放');
 
+  /* 结构：上半区 = 海报 + 信息（两列，等高），下半区 = 相关作品通栏。
+     集数网格放进信息列里用 margin-top:auto 顶到底，底边和海报底边齐平；
+     相关作品从海报下沿、最左列开始往下铺，不再挤在右栏里。 */
   view.innerHTML = '<div class="detail">'
+    + '<div class="detail-hero">'
     + '<div class="detail-art"><img data-cover="' + esc(data.cover || '') + '" alt=""></div>'
     + '<div class="detail-info">'
     + '<h1>' + esc(data.title || '') + '</h1>'
@@ -1782,15 +1760,103 @@ function renderDetail() {
     + (resume ? '<button type="button" class="btn icon-only" data-focusable data-key="restart" data-restart="1" aria-label="从头播放" title="从头播放">'
       + '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V1L7 6l5 5V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z"/></svg></button>' : '')
     + '<button type="button" class="btn" data-focusable data-key="bookmark" data-bookmark="1">' + (data.bookmarked ? '已收藏' : '收藏') + '</button>'
-    + groupChips
-    + '</div>' + eps + relatedHtml + '</div></div>';
+    + epTriggerHtml()
+    + '</div>'
+    + '<div class="detail-eps" data-eps-block>' + epsBlockHtml() + '</div>'
+    + '</div></div>'
+    + relatedHtml
+    + '</div>';
   paintCovers(view);
   restoreFocus();
   syncBackdropFromFocus();
 }
 
+/* ---------------- 选集分组（选择器） ---------------- */
+/* 集数分组的当前区间。几个渲染函数都要用，统一在这儿算，顺便把 state.epGroup 收进合法范围。 */
+function epRange() {
+  var episodes = list(state.detail && state.detail.episodes);
+  var total = episodes.length;
+  var groups = total ? Math.ceil(total / EP_PAGE) : 0;
+  var gi = Number(state.epGroup) || 0;
+  if (groups && gi > groups - 1) gi = groups - 1;
+  if (gi < 0) gi = 0;
+  state.epGroup = gi;
+  var start = gi * EP_PAGE;
+  return { episodes: episodes, total: total, groups: groups, group: gi, start: start, end: Math.min(total, start + EP_PAGE) };
+}
+
+function epsBlockHtml() {
+  var r = epRange();
+  if (!r.total) return '';
+  var html = '<h2 class="eps-title">选集<span>' + (r.start + 1) + '-' + r.end + ' / 共 ' + r.total + ' 集</span></h2><div class="eps">';
+  for (var i = r.start; i < r.end; i++) {
+    var number = r.episodes[i].number || (i + 1);
+    html += '<button type="button" data-focusable data-key="ep:' + number + '" data-episode="' + number + '">' + number + '</button>';
+  }
+  return html + '</div>';
+}
+
+/* 收藏右边那颗：只显示当前区间，点开才是分组列表（几百集也不会排成一整行胶囊）。 */
+function epTriggerHtml() {
+  var r = epRange();
+  if (r.groups <= 1) return '';
+  return '<button type="button" class="btn ep-select" data-focusable data-key="ep-select" data-ep-menu="1" aria-haspopup="true" aria-expanded="false">'
+    + '<span data-ep-label>' + (r.start + 1) + '-' + r.end + ' 集</span>'
+    + '<span class="ep-caret" aria-hidden="true"></span></button>';
+}
+
+function openEpMenu() {
+  var r = epRange();
+  if (r.groups <= 1) return;
+  closeEpMenu();
+  var trigger = view.querySelector('[data-ep-menu]');
+  var rect = trigger ? trigger.getBoundingClientRect() : { left: 60, bottom: 260, width: 200 };
+  var width = Math.max(Math.round(rect.width), 210);
+  var items = '';
+  for (var g = 0; g < r.groups; g++) {
+    var from = g * EP_PAGE + 1;
+    var to = Math.min(r.total, (g + 1) * EP_PAGE);
+    items += '<button type="button" class="ep-option' + (g === r.group ? ' is-active' : '')
+      + '" data-focusable data-key="epg:' + g + '" data-epgroup="' + g + '" role="menuitem">' + from + '-' + to + ' 集</button>';
+  }
+  var layer = document.createElement('div');
+  layer.id = 'ep-menu';
+  layer.className = 'ep-layer';
+  layer.innerHTML = '<div class="ep-pop" role="menu">' + items + '</div>';
+  document.body.appendChild(layer);
+  epMenu = layer;
+  var pop = layer.querySelector('.ep-pop');
+  pop.style.minWidth = width + 'px';
+  pop.style.left = Math.max(16, Math.min(Math.round(rect.left), window.innerWidth - width - 24)) + 'px';
+  pop.style.top = Math.round(rect.bottom + 12) + 'px';
+  if (trigger) trigger.setAttribute('aria-expanded', 'true');
+  var active = pop.querySelector('.is-active') || pop.querySelector('[data-focusable]');
+  if (active) { state.focusKey = active.dataset.key; focusElement(active, false); }
+}
+
+function closeEpMenu(keepFocus) {
+  if (epMenu && epMenu.parentNode) epMenu.parentNode.removeChild(epMenu);
+  epMenu = null;
+  var trigger = view.querySelector('[data-ep-menu]');
+  if (trigger) {
+    trigger.setAttribute('aria-expanded', 'false');
+    if (!keepFocus) { state.focusKey = 'ep-select'; focusElement(trigger, false); }
+  }
+}
+
+/* 换了分组只重画集数块，不整页重排 —— 整页重画会让海报和背景闪一下。 */
+function paintEpisodeBlock(focusFirst) {
+  var r = epRange();
+  var block = view.querySelector('[data-eps-block]');
+  if (block) block.innerHTML = epsBlockHtml();
+  var label = view.querySelector('[data-ep-label]');
+  if (label) label.textContent = (r.start + 1) + '-' + r.end + ' 集';
+  var first = block && block.querySelector('[data-focusable]');
+  if (first && focusFirst) { state.focusKey = first.dataset.key; focusElement(first, true); }
+}
+
 /* 详情页附加信息（制作方 / 相关作品）：接口慢，回来再补画一次，不挡主详情 */
-function loadDetailExtras(id) {
+function loadDetailExtras(id, title) {
   if (!id || state.detailExtrasId === id) return;
   state.detailExtrasId = id;
   state.detailProducer = null;
@@ -1800,7 +1866,7 @@ function loadDetailExtras(id) {
     state.detailProducer = res && res.name ? res : null;
     if (state.route === 'detail') renderDetail();
   }).catch(function () { });
-  api('related', { id: id }).then(function (res) {
+  api('related', { id: id, title: title || '' }).then(function (res) {
     if (String((state.detail && state.detail.id) || '') !== id) return;
     state.detailRelated = list(res && res.items);
     if (state.route === 'detail') renderDetail();
@@ -2081,6 +2147,7 @@ window.veyraTvKey = function (code) {
 };
 
 window.hgBack = function () {
+  if (epMenu) { closeEpMenu(); return true; }
   if (producerPanel) { closeProducerPanel(); state.focusKey = 'producer'; restoreFocus(); return true; }
   if (otpPanel && !otpPanel.hidden) {
     closeOtp();
@@ -2125,6 +2192,9 @@ document.addEventListener('click', function (event) {
 
   /* 平板上没有返回键：点弹窗外的空白就收起来，不用再去找「关闭」。
      只认遮罩本身（点面板内的空白不算），避免刚打开就被关掉。 */
+  if (epMenu && target.id === 'ep-menu') { closeEpMenu(); return; }
+  var epToggle = target.closest('[data-ep-menu]');
+  if (epToggle) { epMenu ? closeEpMenu() : openEpMenu(); return; }
   if (producerPanel && target.id === 'producer') { closeProducerPanel(); return; }
   var producerBtn = target.closest('[data-producer]');
   if (producerBtn) { openProducerPanel(); return; }
@@ -2146,12 +2216,9 @@ document.addEventListener('click', function (event) {
 
   var epGroup = target.closest('[data-epgroup]');
   if (epGroup) {
-    var gi = Number(epGroup.dataset.epgroup) || 0;
-    state.epGroup = gi;
-    var eps = list(state.detail && state.detail.episodes);
-    var first = eps[gi * EP_PAGE];
-    state.focusKey = first ? 'ep:' + (first.number || (gi * EP_PAGE + 1)) : 'epg:' + gi;
-    renderDetail();
+    state.epGroup = Number(epGroup.dataset.epgroup) || 0;
+    closeEpMenu(true);
+    paintEpisodeBlock(true);
     return;
   }
 

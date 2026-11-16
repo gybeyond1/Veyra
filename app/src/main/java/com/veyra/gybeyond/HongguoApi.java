@@ -163,7 +163,7 @@ final class HongguoApi {
                     items.put(new JSONObject()
                             .put("id", id)
                             .put("title", title)
-                            .put("cover", first(video, "cover", "cover_url", "series_cover"))
+                            .put("cover", coverOf(video))
                             .put("description", first(video, "video_desc", "series_intro"))
                             .put("episodeLabel", count > 0 ? "全 " + count + " 集" : video.optString("rec_text", ""))
                             .put("category", "short")
@@ -182,7 +182,7 @@ final class HongguoApi {
      * 详情页「相关作品」：接口返回一格 show_type=547 的 cell，里面是同一部剧的其他季
      * 加上平台推荐。待上线的 content_type 是 1007，可点但标记「待上线」。
      */
-    static JSONArray related(String seriesId) throws Exception {
+    static JSONArray related(String seriesId, String seriesTitle) throws Exception {
         String[] who = identity();
         LinkedHashMap<String, String> values = versioned("72232", "7.2.2.32");
         values.put("iid", who[1]);
@@ -204,6 +204,34 @@ final class HongguoApi {
         values.put("is_horizontal_screen", "false");
         values.put("reader_single_col_from_ip_strategy", "false");
 
+        JSONArray items = new JSONArray();
+        LinkedHashSet<String> seen = new LinkedHashSet<>();
+        boolean hasTitle = seriesTitle != null && !seriesTitle.trim().isEmpty();
+        Exception failure = null;
+        try {
+            JSONArray cells = relatedCells(values);
+            try { collectRelated(cells, seriesId, items, seen, true); } catch (Exception ignored) { }
+            /* 真人短剧的相关作品格 show_type / 命名都不稳定（漫剧是 547，真人剧常常没有），
+               严格那一遍捞不到就把整个响应里成条的作品都收进来 —— 这个接口本身就是
+               「detail_page_more_related」，粒度比空着强。 */
+            if (items.length() == 0) {
+                try { collectRelated(cells, seriesId, items, seen, false); } catch (Exception ignored) { }
+            }
+        } catch (Exception error) {
+            failure = error;
+        }
+        /* 还是空（或者接口本身挂了）：按剧名检索同 IP / 其他季，至少别给用户一块空白。 */
+        if (items.length() == 0 && hasTitle) {
+            collectByTitle(seriesId, seriesTitle.trim(), items, seen);
+        }
+        if (items.length() == 0 && failure != null) {
+            throw new IOException(failure.getMessage() == null ? "相关作品接口暂不可用" : failure.getMessage());
+        }
+        return sortSeasons(items, seriesId);
+    }
+
+    /** 打「详情页更多相关」计划接口，多个域名轮流试。 */
+    private static JSONArray relatedCells(LinkedHashMap<String, String> values) throws Exception {
         String text = null;
         Exception failure = null;
         for (String host : RELATED_HOSTS) {
@@ -220,44 +248,107 @@ final class HongguoApi {
         }
         JSONObject root = parse(text, "相关作品");
         if (root.optInt("code", -1) != 0) throw new IOException("相关作品接口暂不可用");
+        return root.optJSONArray("data");
+    }
 
-        JSONArray cells = root.optJSONArray("data");
-        JSONArray items = new JSONArray();
-        LinkedHashSet<String> seen = new LinkedHashSet<>();
+    /**
+     * @param strict true = 只认「相关作品」那一格（show_type 547 / 名字带相关）；
+     *               false = 该响应里所有成条作品都算候选。
+     */
+    private static void collectRelated(JSONArray cells, String seriesId, JSONArray items,
+                                       LinkedHashSet<String> seen, boolean strict) throws Exception {
         for (int i = 0; cells != null && i < cells.length(); i++) {
             JSONObject cell = cells.optJSONObject(i);
             if (cell == null) continue;
-            boolean isRelated = cell.optInt("show_type") == 547
-                    || "相关作品".equals(cell.optString("cell_name"));
-            if (!isRelated) continue;
+            if (strict) {
+                String name = cell.optString("cell_name", "");
+                boolean isRelated = cell.optInt("show_type") == 547
+                        || name.contains("相关") || name.contains("更多推荐");
+                if (!isRelated) continue;
+            }
             JSONArray rows = cell.optJSONArray("video_data");
             for (int j = 0; rows != null && j < rows.length(); j++) {
                 JSONObject row = rows.optJSONObject(j);
                 if (row == null) continue;
-                String id = row.optString("series_id", "");
-                String title = row.optString("title", "");
-                int type = row.optInt("content_type", 0);
+                /* 真人剧这一格常见两种形态：短剧直接把作品字段平铺在行上，漫剧/推荐会再包一层
+                   video_data。以前只认平铺的 series_id + title，包了一层或换叫 book_id 的
+                   整条被丢掉 —— 这就是「只有漫剧有相关作品」的来源。 */
+                JSONObject video = row.optJSONObject("video_data");
+                if (video == null) video = row;
+                String id = first(video, "series_id", "book_id", "id");
+                String title = first(video, "title", "series_title", "book_name", "series_name");
                 if (id.equals(seriesId) || !id.matches("[0-9]{1,30}") || title.isEmpty()) continue;
-                if (type != 1004 && type != 1007) continue;
-                boolean upcoming = type == 1007;
-                if (!upcoming && (row.optBoolean("disable_play", false) || row.optInt("episode_cnt", 0) <= 0)) continue;
                 if (!seen.add(id)) continue;
-                JSONObject tag = row.optJSONObject("tag_info");
+                JSONObject tag = video.optJSONObject("tag_info");
+                if (tag == null) tag = row.optJSONObject("tag_info");
                 String season = tag == null ? "" : tag.optString("text", "");
-                int index = row.optInt("season_index", 0);
+                int index = video.optInt("season_index", row.optInt("season_index", 0));
                 if (season.isEmpty() && index > 0) season = "第" + index + "季";
-                int count = row.optInt("episode_cnt", 0);
+                int count = video.optInt("episode_cnt", row.optInt("episode_cnt", 0));
+                boolean upcoming = video.optInt("content_type", 0) == 1007
+                        || video.optBoolean("disable_play", false);
                 items.put(new JSONObject()
                         .put("id", id)
                         .put("title", title)
-                        .put("cover", cleanUrl(row.optString("cover", "")))
+                        .put("cover", coverOf(video).isEmpty() ? coverOf(row) : coverOf(video))
                         .put("season", season)
                         .put("seasonIndex", index)
                         .put("upcoming", upcoming)
                         .put("episodeLabel", upcoming ? "待上线" : (count > 0 ? "全 " + count + " 集" : "")));
             }
         }
-        return sortSeasons(items, seriesId);
+    }
+
+    /** 按剧名检索兜底：同 IP 的作品标题共享主体，季号从「第N季」里读。 */
+    private static void collectByTitle(String seriesId, String title, JSONArray items, LinkedHashSet<String> seen)
+            throws Exception {
+        try {
+            JSONObject result = search(title, 1);
+            JSONArray rows = result.optJSONArray("items");
+            String base = seasonBase(title);
+            for (int i = 0; rows != null && i < rows.length(); i++) {
+                JSONObject row = rows.optJSONObject(i);
+                if (row == null) continue;
+                String id = row.optString("id", "");
+                String name = row.optString("title", "");
+                if (id.isEmpty() || id.equals(seriesId) || name.isEmpty()) continue;
+                /* 只收同 IP：标题里得带着主体名，避免把整页搜索结果都搬过来 */
+                if (!base.isEmpty() && !normalize(name).contains(normalize(base))) continue;
+                if (!seen.add(id)) continue;
+                int index = seasonIndexOf(name);
+                items.put(new JSONObject()
+                        .put("id", id)
+                        .put("title", name)
+                        .put("cover", coverOf(row))
+                        .put("season", index > 0 ? "第" + index + "季" : "")
+                        .put("seasonIndex", index)
+                        .put("upcoming", false)
+                        .put("episodeLabel", row.optString("episodeLabel", "")));
+            }
+        } catch (Exception ignored) { }
+    }
+
+    /** 「某种…第二季」→ 2；没有季号返回 0。 */
+    private static int seasonIndexOf(String title) {
+        if (title == null) return 0;
+        java.util.regex.Matcher match = java.util.regex.Pattern
+                .compile("第\\s*([0-9]{1,2}|[一二三四五六七八九十]{1,3})\\s*季").matcher(title);
+        if (!match.find()) return 0;
+        String value = match.group(1);
+        if (value.matches("[0-9]{1,2}")) return Integer.parseInt(value);
+        String digits = "一二三四五六七八九十";
+        if (value.length() == 1) {
+            int at = digits.indexOf(value.charAt(0));
+            return at >= 0 ? at + 1 : 0;
+        }
+        if (value.startsWith("十")) return 10 + Math.max(0, digits.indexOf(value.charAt(1)) + 1);
+        if (value.endsWith("十")) return (digits.indexOf(value.charAt(0)) + 1) * 10;
+        return 0;
+    }
+
+    /** 去掉「第N季 / 第二季」这类后缀，拿来做同 IP 判定。 */
+    private static String seasonBase(String title) {
+        return title == null ? "" : title.replaceAll("[（(]?第\\s*[0-9一二三四五六七八九十]{1,3}\\s*季[)）]?", "").trim();
     }
 
     /** 同一部剧的各季按季号排前面，其余推荐按原顺序跟在后面。 */
@@ -337,10 +428,14 @@ final class HongguoApi {
             if (!same) continue;
             String title = credit.optString("title", row.optString("title"));
             if (title.isEmpty()) continue;
+            /* 多详情里 thumb_url 经常是空的：credit 的 cover 字段永远存在（可能是空串），
+               optString(key, 默认值) 因此永远拿不到默认值 —— 以前制作方作品全是灰块的根因。 */
+            String cover = coverOf(credit);
+            if (cover.isEmpty()) cover = coverOf(row);
             out.put(new JSONObject()
                     .put("id", row.optString("id"))
                     .put("title", title)
-                    .put("cover", credit.optString("cover", row.optString("cover")))
+                    .put("cover", cover)
                     .put("episodeLabel", credit.optString("episodeLabel", "")));
         }
         return new JSONObject().put("items", out).put("hasMore", search.optBoolean("hasMore", false));
@@ -383,7 +478,7 @@ final class HongguoApi {
                     .put("name", row.optString("author", "").trim())
                     .put("mediaId", row.optString("media_id", ""))
                     .put("title", row.optString("book_name", ""))
-                    .put("cover", cleanUrl(row.optString("thumb_url", "")))
+                    .put("cover", coverOf(row))
                     .put("episodeLabel", count > 0 ? "全 " + count + " 集" : ""));
         }
     }
@@ -583,7 +678,7 @@ final class HongguoApi {
             items.put(new JSONObject()
                     .put("id", id)
                     .put("title", title)
-                    .put("cover", video.optString("series_cover", "")));
+                    .put("cover", coverOf(video)));
         }
         boolean more = root.has("hasMore") ? root.optBoolean("hasMore")
                 : root.optInt("totalPages", 0) > 0 && page < root.optInt("totalPages");
@@ -631,6 +726,60 @@ final class HongguoApi {
         for (String name : names) {
             String value = object.optString(name, "");
             if (!value.isEmpty()) return value;
+        }
+        return "";
+    }
+
+    /**
+     * 封面字段各家接口叫法不一样：红果搜索/联想是 series_cover，多详情是 thumb_url，
+     * App 接口是 cover，官网 HTML 走 profile 里的 cover。以前每条链路只认自己那一种，
+     * 换条链路进来就是灰块 —— 统一按优先级取第一个能用的。
+     */
+    static String coverOf(JSONObject object) {
+        if (object == null) return "";
+        String[] names = {"cover", "series_cover", "cover_url", "series_cover_url",
+                "thumb_url", "horizontal_cover", "poster", "image", "cover_uri", "thumb_uri"};
+        for (String name : names) {
+            Object raw = object.opt(name);
+            String value = rawUrl(raw);
+            if (!value.isEmpty()) return value;
+        }
+        /* 有的接口把封面做成 {url_list:[...]} / ["..."]，再往里兜一层 */
+        for (String name : names) {
+            Object raw = object.opt(name);
+            if (raw instanceof JSONObject) {
+                String value = rawUrl(((JSONObject) raw).opt("url_list"));
+                if (value.isEmpty()) value = rawUrl(((JSONObject) raw).opt("uri"));
+                if (!value.isEmpty()) return value;
+            } else if (raw instanceof JSONArray) {
+                String value = rawUrl(((JSONArray) raw).opt(0));
+                if (!value.isEmpty()) return value;
+            }
+        }
+        return "";
+    }
+
+    /** 字段可能是字符串，也可能是 {uri/url/url_list} 或数组，统一取一个能用的 https 地址。 */
+    private static String rawUrl(Object raw) {
+        if (raw == null) return "";
+        if (raw instanceof String) return cleanUrl((String) raw);
+        if (raw instanceof JSONObject) {
+            JSONObject object = (JSONObject) raw;
+            String value = cleanUrl(object.optString("url", ""));
+            if (value.isEmpty()) value = cleanUrl(object.optString("src", ""));
+            if (value.isEmpty()) value = rawUrl(object.opt("url_list"));
+            if (value.isEmpty()) {
+                String uri = cleanUrl(object.optString("uri", ""));
+                if (!uri.isEmpty()) value = uri;
+            }
+            return value;
+        }
+        if (raw instanceof JSONArray) {
+            JSONArray array = (JSONArray) raw;
+            for (int i = 0; i < array.length(); i++) {
+                String value = rawUrl(array.opt(i));
+                if (!value.isEmpty()) return value;
+            }
         }
         return "";
     }
