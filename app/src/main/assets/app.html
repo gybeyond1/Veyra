@@ -9,21 +9,23 @@
        app.css 只消费，不定义。顺序反了材质和配色就不生效。 -->
   <link rel="stylesheet" href="sunny-theme.css">
   <link rel="stylesheet" href="app.css">
-  <!-- 设备形态必须在样式生效前确定：data-device=phone/tablet/tv，大屏规则只认这个属性，
-       手机（phone）不命中 device-layout.css 里的任何一条。 -->
-  <script src="device-mode.js"></script>
-  <link rel="stylesheet" href="device-layout.css">
-  <link rel="stylesheet" href="relay-input.css">
-  <!-- 电视构建走 ?lite=1：追加轻量样式表（关玻璃/模糊/阴影/动画 + 老 WebView 属性兜底）。
-       手机与平板不带这个参数，__VEYRA_LITE 为 false，下面这条 link 根本不会写进文档。 -->
+  <!-- 先定 lite 标志：device-mode.js 要靠它判断「电视包装在没有 Leanback 的电视上」这种情况。
+       电视构建走 ?lite=1，轻量样式表（关玻璃/模糊/阴影/动画 + 老 WebView 属性兜底）随之加载。 -->
   <script>
   (function () {
     var lite = false;
     try { lite = /[?&]lite=1/.test(location.search); } catch (e) { }
     window.__VEYRA_LITE = lite;
-    if (lite) document.write('<link rel="stylesheet" href="tv-lite.css">');
   })();
   </script>
+  <!-- 设备形态必须在样式生效前确定：data-device=phone/tablet/tv，大屏规则只认这个属性，
+       手机（phone）不命中 device-layout.css 里的任何一条。 -->
+  <script src="device-mode.js"></script>
+  <link rel="stylesheet" href="device-layout.css">
+  <!-- 轻量样式表里的每条规则都带 html[data-device="tv"] 前缀，手机会全部落空，
+       所以无条件加载：真正由 data-device 决定生不生效，不依赖 ?lite=1 有没有带上。 -->
+  <link rel="stylesheet" href="tv-lite.css">
+  <link rel="stylesheet" href="relay-input.css">
   <!-- 冷启动记忆：上次退出时停在刷剧页 → 在 app.js 还没跑起来之前就把首页内容藏掉、
        垫上上次那部剧的海报。否则第一帧是传统首页（骨架 → 内容），等首页数据回来
        再跳刷剧页 —— 看着就是「闪一下传统首页」。撤掉的时机在 app.js 里

@@ -28,6 +28,10 @@
     var forced = '';
     try { forced = (new URLSearchParams(location.search).get('device') || '').toLowerCase(); } catch (error) { }
     if (forced === 'tv' || forced === 'tablet' || forced === 'phone') type = forced;
+    /* 电视包（?lite=1）本身就是给大屏用的：装在没有 Leanback、也没有触摸屏的电视上时，
+       视口推断只会得出 tablet，整台电视就渲染成平板那套小字号界面。
+       所以电视包默认按 tv 走，只有手机/平板装上它时才靠触摸屏和视口退回 tablet。 */
+    else if (window.__VEYRA_LITE) type = 'tv';
     else if (Math.min(window.innerWidth, window.innerHeight) >= 600) type = 'tablet';
   }
 

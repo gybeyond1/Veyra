@@ -278,7 +278,7 @@ public final class MainActivity extends Activity {
                         } catch (Exception ignored) { }
                         migratingOrigin = false;
                         view.getSettings().setAllowFileAccess(false);
-                        view.loadUrl(HotUpdateManager.UI_URL);
+                        view.loadUrl(uiUrl());
                     });
                     return;
                 }
@@ -316,7 +316,7 @@ public final class MainActivity extends Activity {
             }
         });
         webView.addJavascriptInterface(new Bridge(), "AndroidHost");
-        webView.loadUrl(migratingOrigin ? "file:///android_asset/app.html" : HotUpdateManager.UI_URL);
+        webView.loadUrl(migratingOrigin ? "file:///android_asset/app.html" : uiUrl());
         checkHotUpdates();
         checkLastCrash();
     }
@@ -343,7 +343,7 @@ public final class MainActivity extends Activity {
             store.clearCache();
             getSharedPreferences("hot-updates", MODE_PRIVATE).edit()
                     .putString("siteFingerprint", hotSession.site.fingerprint).apply();
-            webView.loadUrl(HotUpdateManager.UI_URL);
+            webView.loadUrl(uiUrl());
             Log.w(TAG, "资源包启动异常，已回退至可用版本");
         } catch (Exception error) { Log.e(TAG, "资源回退失败", error); }
     }
@@ -915,7 +915,40 @@ public final class MainActivity extends Activity {
         }
     }
 
+    /**
+     * 页面入口地址。电视包追加 ?lite=1 —— app.html 靠它加载 tv-lite.css 与降级后的
+     * app.es5.js（老电视的 WebView 停在 Chrome 60 上下，完整版 app.js 的可选链会让整份
+     * 脚本语法报错、页面停在空壳）。手机包不加，跑完整版。
+     *
+     * 这一条以前只写在注释里，电视包实际一直加载的是不带参数的地址，
+     * 轻量样式表与降级脚本都没生效过。
+     */
+    private String uiUrl() {
+        try {
+            if (getResources().getBoolean(R.bool.veyra_lite)) return HotUpdateManager.UI_URL + "?lite=1";
+        } catch (Exception ignored) { }
+        return HotUpdateManager.UI_URL;
+    }
+
     private final class Bridge {
+        /**
+         * 页面启动时第一件事就问这个：手机 / 平板 / 电视。
+         *
+         * device-mode.js 全靠它决定 data-device，样式表和遥控焦点都挂在这个属性上。
+         * 这个桥以前只在注释里存在，页面拿不到就退回按视口推断 —— 1080p 电视推成 tablet，
+         * 于是电视包装在电视上渲染的是平板那套界面。
+         */
+        @JavascriptInterface public String deviceProfile() {
+            JSONObject info = new JSONObject();
+            try {
+                info.put("type", DeviceProfile.type(MainActivity.this));
+                info.put("model", Build.MODEL == null ? "" : Build.MODEL);
+                info.put("tv", DeviceProfile.isTv(MainActivity.this));
+                info.put("lite", getResources().getBoolean(R.bool.veyra_lite));
+            } catch (Exception ignored) { }
+            return info.toString();
+        }
+
         @JavascriptInterface public void setDetailMode(boolean enabled) {
             runOnUiThread(() -> {
                 if (detailSystemBars == enabled) return;
