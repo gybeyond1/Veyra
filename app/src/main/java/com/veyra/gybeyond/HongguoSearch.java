@@ -38,57 +38,25 @@ final class HongguoSearch {
     }
 
     JSONObject search(String keyword) throws Exception { return search(keyword, false); }
+
+    /**
+     * 搜索主路径：走 App 的 search/tab 接口，一次请求拿到全量结果（含第二三四季全集版）。
+     *
+     * 以前是「13 次联想 + 10 次第N季变体 + 每个结果补详情」，三轮串行等，慢在请求数上；
+     * App 接口本身就把这些工作做完了。官网接口留作兜底，只在 App 接口空结果时发一次。
+     */
     JSONObject search(String keyword, boolean sequelLookup) throws Exception {
         keyword = keyword.trim();
         if (keyword.isEmpty()) return new JSONObject().put("items", new JSONArray()).put("nextPage", JSONObject.NULL);
         if (keyword.length() > 80) throw new IllegalArgumentException("搜索词过长");
-        // 红果联想接口补全：剥离季后缀后穷举查询合并，覆盖单次返回不稳定的情况。
-        final String baseQuery = seasonBase(keyword);
-        final java.util.LinkedHashMap<String, JSONObject> seen = new java.util.LinkedHashMap<>();
         try {
-            JSONArray suggest = suggestionItems(baseQuery);
-            for (int i = 0; i < suggest.length(); i++) {
-                JSONObject it = suggest.optJSONObject(i);
-                if (it != null && normalize(it.optString("title")).contains(normalize(baseQuery)))
-                    seen.putIfAbsent(it.optString("id"), it);
-            }
-        } catch (Exception ignored) { }
-        // 按季穷举 base+第N季(N=1..10)：JSON 搜索接口确定性，实测"持械入宋第三季"必出 341 集版。
-        // 并行查询，把每季的全量版本并入（这是全集版出现的确定性通道）。
-        java.util.List<java.util.concurrent.Future<?>> futures = new java.util.ArrayList<>();
-        for (final String n : CN_NUM) {
-            if (baseQuery.length() + n.length() + 3 > 12) continue;
-            final String variant = baseQuery + "第" + n + "季";
-            futures.add(POOL.submit(new Runnable() {
-                @Override public void run() {
-                    try {
-                        JSONObject web = apiSearch(variant, sequelLookup);
-                        JSONArray items = web.optJSONArray("items");
-                        synchronized (seen) {
-                            for (int i = 0; items != null && i < items.length(); i++) {
-                                JSONObject it = items.optJSONObject(i);
-                                if (it != null && normalize(it.optString("title")).contains(normalize(baseQuery)))
-                                    seen.putIfAbsent(it.optString("id"), it);
-                            }
-                        }
-                    } catch (Exception ignored) { }
-                }
-            }));
+            JSONObject app = HongguoApi.search(keyword, 1);
+            JSONArray items = app.optJSONArray("items");
+            if (items != null && items.length() > 0) return app;
+        } catch (Exception error) {
+            android.util.Log.w("Veyra", "App 搜索失败，改用官网：" + error);
         }
-        JSONObject web = apiSearch(keyword, sequelLookup);
-        JSONArray webItems = web.optJSONArray("items");
-        int webCount = webItems == null ? 0 : webItems.length();
-        for (int i = 0; webItems != null && i < webItems.length(); i++) {
-            JSONObject it = webItems.optJSONObject(i);
-            if (it != null) seen.putIfAbsent(it.optString("id"), it);
-        }
-        for (java.util.concurrent.Future<?> f : futures) { try { f.get(); } catch (Exception ignored) { } }
-        if (seen.size() > webCount) {
-            JSONArray merged = new JSONArray();
-            for (JSONObject it : seen.values()) merged.put(it);
-            return decorate(new JSONObject().put("items", merged).put("nextPage", JSONObject.NULL));
-        }
-        return decorate(web);
+        return apiSearch(keyword, sequelLookup);
     }
 
     /** 红果搜索 JSON API（hongguoduanju.com/api/search/result，网站搜索页实际接口，无签名要求）。 */

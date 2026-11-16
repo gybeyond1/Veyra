@@ -72,7 +72,7 @@ final class HongguoDirect {
     private HongguoDirect() { }
 
     /** 注册到的匿名设备身份。 */
-    private static final class Device {
+    static final class Device {
         final String deviceId;
         final String iid;
         final String cdid;

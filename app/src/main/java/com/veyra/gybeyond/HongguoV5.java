@@ -704,6 +704,124 @@ final class HongguoV5 {
         return sb.toString();
     }
 
+    // ---------------- 通用接口签名（搜索 / 相关作品 / 详情 / 评论） ----------------
+
+    static final String APP_UA =
+            "com.phoenix.read/72232 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3)";
+
+    /** 官方客户端基线设备参数（7.1.3.32）；搜索等接口在此基础上改写版本号。 */
+    static final LinkedHashMap<String, String> DEVICE = new LinkedHashMap<>();
+    static {
+        DEVICE.put("iid", "1905892595382586");
+        DEVICE.put("device_id", "1905892595378490");
+        DEVICE.put("ac", "wifi");
+        DEVICE.put("channel", "update_64");
+        DEVICE.put("aid", "8662");
+        DEVICE.put("app_name", "novelread");
+        DEVICE.put("version_code", "71332");
+        DEVICE.put("version_name", "7.1.3.32");
+        DEVICE.put("device_platform", "android");
+        DEVICE.put("os", "android");
+        DEVICE.put("ssmix", "a");
+        DEVICE.put("device_type", "25053RT47C");
+        DEVICE.put("device_brand", "Redmi");
+        DEVICE.put("language", "zh");
+        DEVICE.put("os_api", "36");
+        DEVICE.put("os_version", "16");
+        DEVICE.put("manifest_version_code", "71332");
+        DEVICE.put("resolution", "1280*2772");
+        DEVICE.put("dpi", "520");
+        DEVICE.put("update_version_code", "71332");
+        DEVICE.put("host_abi", "arm64-v8a");
+        DEVICE.put("dragon_device_type", "phone");
+        DEVICE.put("pv_player", "71332");
+        DEVICE.put("compliance_status", "0");
+        DEVICE.put("need_personal_recommend", "1");
+        DEVICE.put("player_so_load", "1");
+        DEVICE.put("is_android_pad_screen", "0");
+    }
+
+    /** x-gorgon：RC4 变体，对 query 与 body 摘要做混淆（非播放接口校验这一项）。 */
+    static String gorgon(String query, byte[] body, int ts, int random) {
+        byte[] queryDigest = md5(query.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        byte[] bodyDigest = body == null ? new byte[16] : md5(body);
+        byte[] input = new byte[20];
+        System.arraycopy(queryDigest, 0, input, 0, 4);
+        System.arraycopy(bodyDigest, 0, input, 4, 4);
+        System.arraycopy(le32(67503104), 0, input, 12, 4);
+        System.arraycopy(be32(ts), 0, input, 16, 4);
+        int[] key = {0x4a, 0x40, 0x16, (random >> 8) & 255, 0x47, 0x6c, 1, random & 255};
+        int[] state = new int[256];
+        for (int i = 0; i < 256; i++) state[i] = i;
+        int j = 0;
+        for (int i = 0; i < 256; i++) {
+            j = (j + state[i] + key[i % 8]) & 255;
+            int swap = state[i];
+            state[i] = state[j];
+            state[j] = swap;
+        }
+        j = 0;
+        byte[] out = new byte[input.length];
+        for (int n = 0; n < input.length; n++) {
+            int i = n + 1;
+            j = (j + state[i]) & 255;
+            int y = state[j & 255];
+            state[i] = y;
+            out[n] = (byte) ((input[n] & 255) ^ state[(y + y) & 255]);
+        }
+        for (int i = 0; i < out.length; i++) {
+            int value = (((out[i] & 255) >> 4) | ((out[i] & 255) << 4)) & 255;
+            int next = out[i + 1 < out.length ? i + 1 : 0] & 255;
+            int reversed = Integer.reverse((next ^ value) & 255) >>> 24;
+            out[i] = (byte) (~(reversed ^ 20));
+        }
+        return "8404" + hexText(new byte[]{(byte) random, (byte) (random >> 8), 0x40, 1})
+                + hexText(out);
+    }
+
+    /**
+     * 非播放接口签名：query 里带 ts 与 _rticket，头带全套（argus / ladon / gorgon /
+     * medusa / helios）。搜索、相关作品、制作方资料、评论都走这一套。
+     */
+    static Signed sign(String base, LinkedHashMap<String, String> values, byte[] body, long now) {
+        int ts = (int) (now / 1000);
+        for (int offset = 0; offset <= 127; offset++) {
+            long ticket = now + offset;
+            LinkedHashMap<String, String> all = new LinkedHashMap<>(values);
+            all.put("ts", String.valueOf(ts));
+            all.put("_rticket", String.valueOf(ticket));
+            String query = encodeQuery(all);
+            if (branch(query, body, ts) != 0) continue;
+            String url = base + "?" + query;
+            LinkedHashMap<String, String> headers = new LinkedHashMap<>();
+            headers.put("User-Agent", APP_UA);
+            headers.put("Accept", "application/json; charset=utf-8,application/x-protobuf");
+            headers.put("x-ss-req-ticket", String.valueOf(ticket));
+            headers.put("x-tt-request-tag", "t=0;n=0");
+            headers.put("passport-sdk-version", "50561");
+            headers.put("sdk-version", "2");
+            headers.put("x-xs-from-web", "0");
+            headers.put("x-khronos", String.valueOf(ts));
+            headers.put("x-ladon", base64(be32(ts)));
+            headers.put("x-argus", base64(le32(ts)));
+            headers.put("x-gorgon", gorgon(query, body, ts, RANDOM.nextInt() & 0xFFFF));
+            headers.put("x-helios", helios(ts));
+            headers.put("x-medusa", medusa(url, body, ts, DEVICE));
+            headers.put("x-tt-dt", "");
+            if (body != null) {
+                headers.put("Content-Type", "application/json; charset=UTF-8");
+                headers.put("x-vc-bdturing-sdk-version", "3.7.2.cn");
+                headers.put("x-ss-stub", hexText(md5(body)).toUpperCase());
+            }
+            return new Signed(url, headers);
+        }
+        throw new IllegalStateException("无法生成接口签名");
+    }
+
+    static String base64(byte[] data) {
+        return java.util.Base64.getEncoder().encodeToString(data);
+    }
+
     /**
      * 生成播放请求：循环调 _rticket 直到 hash 分支命中 12，再签名。
      * 返回的 url 已是最终 query，headers 只含 x-khronos / x-helios / x-medusa。
