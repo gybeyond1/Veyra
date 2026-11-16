@@ -266,6 +266,9 @@ body.route-detail #stage{
 #stage{
   position:absolute;left:0;right:0;top:0;bottom:0;z-index:2;
   overflow-y:auto;overflow-x:hidden;
+  /* 关掉滚动锚定：换行时卡片重绘（封面、跑马灯）会让内核自己去调 scrollTop，
+     跟我们写死的整行值叠在一起，就是「框先跟着上一排升上去、再掉回来」。 */
+  overflow-anchor:none;
   /* 顶栏是常驻图层（#topbar，top 6rem + 高 5rem），不占内容流，所以这里要
      把它的高度让出来：6 + 5 之后再多留 4rem，第一排海报从 15rem 起。
      多出来的这一截是给「选中放大」用的 —— 第一行卡片放大 1.08 倍后上沿会往上

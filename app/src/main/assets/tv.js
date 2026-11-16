@@ -656,7 +656,7 @@ function focusScrollTop(el, dir, prev) {
   var rowH = wallRowHeight(el);
   var sameWall = !!(grid && rowH && prev && prev.closest && prev.closest('.grid') === grid);
   if (sameWall && (dir === 'up' || dir === 'down')) {
-    /* 用「本区第一排的自然坐标」当零点（= 它现在的视口位置 + 已滚过的量），
+    /* 用「本区第一排的自然坐标」当零点（第一排现在的位置去掉已滚过的量），
        不看 contentTopInset。那个值量的是顶栏 + 渐隐带，跟 #stage 的 padding-top
        差着二十来像素；拿它当零点，每翻一行都会多滚或少滚这二十来像素，
        攒两行就是「框先跟着上一排升上去、再掉回来」。 */
@@ -683,25 +683,24 @@ function focusScrollTop(el, dir, prev) {
   return delta ? cur + delta : null;
 }
 
-/* 第一排再往上：出海报墙，回顶上那一行（分类胶囊 / 右侧三颗按钮）。
-   只有「全屏最上面那一排」才走这里 —— 上面还有别的区块就返回 null，
-   让常规几何逻辑接着往上一排走。 */
+/* 屏幕上显示的第一排再往上：出海报墙，回顶上那一行（分类胶囊 / 右侧三颗按钮）。
+   按「显示出来的位置」判，不按它是墙里的第几排 —— 往下翻了十页，只要这一排正
+   显在屏幕上第一排，按上就是回顶栏，不用再一路翻回最开头。
+   只作用于主海报墙（第一个 .grid）：后面的分区块还是要能上下互达。 */
 function exitToTopbar(current) {
   var card = current && current.closest ? current.closest('.card') : null;
   if (!card) return null;
   var grid = card.closest('.grid');
   if (!grid) return null;
+  var first = view && view.querySelector('.grid');
+  if (first !== grid) return null;
   var cards = grid.querySelectorAll('.card');
   var rowH = wallRowHeight(card);
   if (!rowH) return null;
-  if (Math.round((card.offsetTop - cards[0].offsetTop) / rowH) !== 0) return null;   /* 不是本区第一排 */
   var cardBox = card.getBoundingClientRect();
-  var all = focusables();
-  for (var i = 0; i < all.length; i++) {
-    if (all[i] === current || inTopbar(all[i])) continue;
-    var b = all[i].getBoundingClientRect();
-    if (b.height > 2 && b.bottom <= cardBox.top + 6) return null;    /* 上面还有内容 */
-  }
+  /* 第几个「显示槽」：0 就是屏幕上第一排 */
+  var natural = cardBox.top - cards[0].getBoundingClientRect().top;
+  if (Math.round((natural - stage.scrollTop) / rowH) !== 0) return null;
   if (!topbar) return null;
   var chips = topbar.querySelectorAll('.chip');
   var tools = topbar.querySelectorAll('.tool');
@@ -1034,8 +1033,9 @@ function move(direction) {
   if (direction === 'up' || direction === 'down') {
     if (stepToRow(current, direction)) return;
   }
-  /* 本区第一排再往上、且上面已经没有别的排了：出海报墙，回顶上那一行
-     （左边两列去分类胶囊，最右一列去搜索/最近/设置）。 */
+  /* 屏幕上第一排再往上：出海报墙，回顶上那一行
+     （左边两列去分类胶囊，最右一列去搜索/最近/设置），
+     不用先一路翻回整面墙的最开头。 */
   if (direction === 'up') {
     var upTo = exitToTopbar(current);
     if (upTo) { focusElement(upTo, true, 'up'); return; }
@@ -1336,11 +1336,19 @@ function appendFeed(items) {
   }
 }
 
-/* 滚到底自动续页（电视上不用点“加载更多”） */
+/* 滚到底自动续页（电视上不用点“加载更多”）。
+   延后 260ms 再看：换行那一下 scrollTop 刚写下去就续页的话，续页会往末尾插卡片、
+   重绘封面，滚动位置和焦点正好在那一帧打架 —— 屏幕上就是「框先跟着上一排升上去、
+   再掉回来」。等这一下按完、画面稳住了再续。 */
+var endTimer = 0;
 function observeStageEnd() {
   stage.onscroll = function () {
     if (state.route !== 'home' || !state.feed || state.feed.loading || !state.feed.nextPage) return;
-    if (stage.scrollTop + stage.clientHeight >= stage.scrollHeight - 500) loadFeed(state.feedId, false);
+    clearTimeout(endTimer);
+    endTimer = setTimeout(function () {
+      if (state.route !== 'home' || !state.feed || state.feed.loading || !state.feed.nextPage) return;
+      if (stage.scrollTop + stage.clientHeight >= stage.scrollHeight - 500) loadFeed(state.feedId, false);
+    }, 260);
   };
 }
 
