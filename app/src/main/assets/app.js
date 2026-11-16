@@ -1706,6 +1706,7 @@ function scheduleDetailExtras(data) {
   api('producer', { id: data.id }).then(res => { if (res && res.name) result.producer = res; settle(); }).catch(settle);
   const first = asArray(data.episodes)[0];
   if (first && first.videoId) {
+    result.commentEpisode = Number(first.number) || 1;
     api('comments', { id: data.id, episodeId: first.videoId, cursor: '' })
       .then(res => { if (token === detailExtrasToken) { result.comments = asArray(res.items).slice(0, 3); } })
       .catch(() => {});
@@ -1724,7 +1725,7 @@ function renderDetailExtras(host, result, data) {
     ? `<section class="detail-section"><h2>相关作品</h2><div class="film-row detail-related">${related.map(relatedCard).join('')}</div></section>`
     : '';
   const commentBlock = comments.length
-    ? `<section class="detail-section"><h2>热评</h2><div class="detail-comments">${comments.map(commentRow).join('')}</div></section>`
+    ? `<section class="detail-section"><h2>热评 · 第 ${esc(String(result.commentEpisode || 1))} 集</h2><div class="detail-comments">${comments.map(commentRow).join('')}</div></section>`
     : '';
   if (!producerBlock && !relatedBlock && !commentBlock) { host.innerHTML = ''; return; }
   host.innerHTML = producerBlock + relatedBlock + commentBlock;

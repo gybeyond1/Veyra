@@ -166,6 +166,14 @@ final class CommentPanel extends LinearLayout {
         card.setColor(0xFF1D2027);
         card.setCornerRadius(dp(12));
         row.setBackground(card);
+        /* 电视端没有手指，只能靠遥控器上下走：每条评论自己可聚焦，ScrollView 才会自动滚。 */
+        row.setFocusable(true);
+        row.setFocusableInTouchMode(false);
+        GradientDrawable focused = new GradientDrawable();
+        focused.setColor(0xFF262B33);
+        focused.setCornerRadius(dp(12));
+        focused.setStroke(dp(2), 0xFFFFD45B);
+        row.setOnFocusChangeListener((view, hasFocus) -> view.setBackground(hasFocus ? focused : card));
 
         LinearLayout head = new LinearLayout(getContext());
         head.setGravity(Gravity.CENTER_VERTICAL);
