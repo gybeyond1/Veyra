@@ -303,11 +303,14 @@ final class HongguoApi {
     }
 
     /**
-     * 制作方作品：先用官网搜索拿候选（快、不用签名），再逐条核对 media_id 相同才认。
-     * 同名制作方很多，不校验就会把别人的剧算进来。
+     * 制作方作品：先用官网搜索拿候选，再逐条核对 media_id 相同才认。
+     *
+     * 注意候选不能按「标题含关键词」过滤 —— 制作方是署名，不是剧名，
+     * 之前复用搜剧那条路径把候选全滤掉了，所以点开永远是空的。
+     * 同名制作方很多，认领时必须核对署名（有 media_id 就比 id，没有才退回比名字）。
      */
     static JSONObject producerWorks(String name, String mediaId, int page) throws Exception {
-        JSONObject search = siteSearch(name, page);
+        JSONObject search = siteSearch(name, page, false);
         JSONArray rows = search.optJSONArray("items");
         JSONArray out = new JSONArray();
         if (rows == null || rows.length() == 0) {
@@ -319,6 +322,7 @@ final class HongguoApi {
             if (row != null) ids.add(row.optString("id"));
         }
         Map<String, JSONObject> credits = credits(ids);
+        String target = normalize(name);
         for (int i = 0; i < rows.length(); i++) {
             JSONObject row = rows.optJSONObject(i);
             if (row == null) continue;
@@ -326,11 +330,16 @@ final class HongguoApi {
             if (credit == null) continue;
             String creditMedia = credit.optString("mediaId", "");
             String creditName = credit.optString("name", "");
-            boolean same = mediaId.isEmpty() ? creditName.equals(name) : creditMedia.equals(mediaId);
+            boolean same = !mediaId.isEmpty() && mediaId.equals(creditMedia);
+            if (!same && (mediaId.isEmpty() || creditMedia.isEmpty())) {
+                same = !target.isEmpty() && target.equals(normalize(creditName));
+            }
             if (!same) continue;
+            String title = credit.optString("title", row.optString("title"));
+            if (title.isEmpty()) continue;
             out.put(new JSONObject()
                     .put("id", row.optString("id"))
-                    .put("title", credit.optString("title", row.optString("title")))
+                    .put("title", title)
                     .put("cover", credit.optString("cover", row.optString("cover")))
                     .put("episodeLabel", credit.optString("episodeLabel", "")));
         }
@@ -540,6 +549,14 @@ final class HongguoApi {
     // ---------------- 官网搜索（兜底 / 制作方作品） ----------------
 
     private static JSONObject siteSearch(String keyword, int page) throws Exception {
+        return siteSearch(keyword, page, true);
+    }
+
+    /**
+     * @param filterTitle true = 只留标题里含关键词的结果（普通搜剧）；
+     *                    false = 保留全部候选（按制作方署名搜，标题里当然没有署名）。
+     */
+    private static JSONObject siteSearch(String keyword, int page, boolean filterTitle) throws Exception {
         Request request = new Request.Builder()
                 .url(SITE + "/api/search/result?query=" + HongguoV5.encode(keyword) + "&page=" + page)
                 .header("User-Agent", "Mozilla/5.0")
@@ -561,7 +578,7 @@ final class HongguoApi {
             String title = video.optString("series_title", row.optString("name", ""));
             String genre = video.optString("genre", "");
             if (!"203".equals(genre) || !id.matches("[0-9]{1,30}") || title.isEmpty()) continue;
-            if (!query.isEmpty() && !normalize(title).contains(query) && !isPinyin(query)) continue;
+            if (filterTitle && !query.isEmpty() && !normalize(title).contains(query) && !isPinyin(query)) continue;
             if (!seen.add(id)) continue;
             items.put(new JSONObject()
                     .put("id", id)

@@ -188,6 +188,8 @@ public final class PlayerActivity extends Activity {
     private boolean danmakuHinted;
     private LinearLayout titleBar;
     private LinearLayout controls;
+    private LinearLayout buttonsRow;
+    private LinearLayout buttonRow2;
     private FrameLayout miniProgress;
     private View miniProgressFill;
     private float miniProgressFraction;
@@ -713,19 +715,8 @@ public final class PlayerActivity extends Activity {
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, dp(tvMode ? 52 : 42), 1);
         titleParams.leftMargin = dp(12);
         top.addView(title, titleParams);
-        if (!tvMode) {
-            /* 手机端点标题栏右角；电视端靠遥控器，走控件条那两颗「弹幕 / 评论」。 */
-            danmakuButton = icon(R.drawable.player_danmaku, "弹幕设置");
-            danmakuButton.setBackgroundColor(Color.TRANSPARENT);
-            danmakuButton.setOnClickListener(v -> { showDanmakuPanel(); revealControls(); });
-            top.addView(danmakuButton, new LinearLayout.LayoutParams(dp(38), dp(38)));
-            commentButton = icon(R.drawable.player_comment, "本集评论");
-            commentButton.setBackgroundColor(Color.TRANSPARENT);
-            commentButton.setOnClickListener(v -> toggleComments());
-            LinearLayout.LayoutParams commentParams = new LinearLayout.LayoutParams(dp(38), dp(38));
-            commentParams.leftMargin = dp(2);
-            top.addView(commentButton, commentParams);
-        }
+        /* 弹幕 / 评论不再挂标题栏右上角：它们跟播放/选集一样是「播放操作」，
+           统一收进底部控件条，控件收起时一起消失，画面只有一个标题。 */
         if (tvMode) {
             /* 标题靠左占满，时间贴右边。只在控件条唤出期间可见 */
             tvClock = label("", 14, 0xFFD5D0CD);
@@ -791,6 +782,7 @@ public final class PlayerActivity extends Activity {
         timeText = label("0:00 / 0:00", 11, Color.WHITE);
         controls.addView(timeline, new LinearLayout.LayoutParams(-1, dp(37)));
         LinearLayout buttons = new LinearLayout(this);
+        buttonsRow = buttons;
         buttons.setGravity(Gravity.CENTER_VERTICAL);
         buttons.setPadding(dp(7), 0, dp(7), 0);
         GradientDrawable remote = background(0xF2292720, 12);
@@ -885,7 +877,31 @@ public final class PlayerActivity extends Activity {
             revealControls();
         });
         buttons.addView(bookmarkButton, new LinearLayout.LayoutParams(dp(36), dp(38)));
+        if (!tvMode) {
+            danmakuButton = icon(R.drawable.player_danmaku, "弹幕设置");
+            danmakuButton.setBackgroundColor(Color.TRANSPARENT);
+            danmakuButton.setOnClickListener(v -> { showDanmakuPanel(); revealControls(); });
+            buttons.addView(danmakuButton, new LinearLayout.LayoutParams(dp(34), dp(38)));
+            commentButton = icon(R.drawable.player_comment, "本集评论");
+            commentButton.setBackgroundColor(Color.TRANSPARENT);
+            commentButton.setOnClickListener(v -> toggleComments());
+            buttons.addView(commentButton, new LinearLayout.LayoutParams(dp(34), dp(38)));
+        }
         controls.addView(buttons, new LinearLayout.LayoutParams(-2, dp(52)));
+        /* 竖屏第二排：选集 / 倍速 / 收藏 / 弹幕 / 评论。
+           全塞进第一排的话，360dp 宽的手机加起来 430dp，右边两颗按钮直接被切掉。 */
+        buttonRow2 = new LinearLayout(this);
+        buttonRow2.setGravity(Gravity.CENTER_VERTICAL);
+        buttonRow2.setPadding(dp(7), 0, dp(7), 0);
+        GradientDrawable remote2 = background(0xF2292720, 12);
+        remote2.setStroke(dp(1), 0xFF796D53);
+        buttonRow2.setBackground(remote2);
+        buttonRow2.setElevation(dp(12));
+        buttonRow2.setVisibility(View.GONE);
+        LinearLayout.LayoutParams row2Params = new LinearLayout.LayoutParams(-2, dp(46));
+        row2Params.topMargin = dp(6);
+        row2Params.gravity = Gravity.CENTER_HORIZONTAL;
+        controls.addView(buttonRow2, row2Params);
         root.addView(controls, new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM));
         // 电视端整条控件栏都不要：遥控器上左右是拖进度、确定是暂停，没有用鼠标去点按钮的场景
         if (tvMode) controls.setVisibility(View.GONE);
@@ -1321,8 +1337,12 @@ public final class PlayerActivity extends Activity {
     private void buildCommentHost() {
         commentHost = new FrameLayout(this);
         commentHost.setVisibility(View.GONE);
+        /* 评论是「压在画面最上层」的浮层：播放/暂停那颗圆钮带 elevation，
+           光靠添加顺序会被它盖住，所以浮层自己要把层级抬到控件条之上。 */
+        commentHost.setElevation(dp(40));
         View scrim = new View(this);
-        scrim.setBackgroundColor(0x66000000);
+        /* 电视上的评论是右侧一条，不要把整幅画面压暗：只留一层很轻的暗底 */
+        scrim.setBackgroundColor(tvMode ? 0x33000000 : 0x66000000);
         scrim.setOnClickListener(v -> closeComments());
         commentHost.addView(scrim, new FrameLayout.LayoutParams(-1, -1));
         root.addView(commentHost, new FrameLayout.LayoutParams(-1, -1));
@@ -1339,21 +1359,23 @@ public final class PlayerActivity extends Activity {
         String episodeId = currentEpisodeId();
         if (episodeId.isEmpty()) { toast("这一集没有评论"); return; }
         handler.removeCallbacks(hideControls);
-        CommentPanel panel = new CommentPanel(this, repository, currentId, episodeId, currentEpisode,
-                () -> { closeComments(); if (tvMode) showTvBar(); }, tvMode);
+        CommentPanel panel = new CommentPanel(this, repository, currentId, episodeId, currentEpisode, tvMode);
         int screen = getResources().getDisplayMetrics().widthPixels;
         if (tvMode) {
-            /* 电视不看侧边抽屉：居中的大板，左右留白，上下不压系统边。 */
-            int width = Math.min(dp(960), Math.round(screen * 0.74f));
-            FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(width, -1, Gravity.CENTER);
-            params.topMargin = dp(44);
-            params.bottomMargin = dp(44);
+            /* 电视上评论收到右侧：竖着的长条，只占画面右边一条，中间继续看剧。
+               原来是居中 960dp 的大板，把画面挡掉一大半。 */
+            int width = Math.min(dp(430), Math.round(screen * 0.34f));
+            FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(width, -1, Gravity.RIGHT);
+            params.topMargin = dp(26);
+            params.bottomMargin = dp(26);
+            params.rightMargin = dp(28);
             commentHost.addView(panel, params);
             commentHost.setVisibility(View.VISIBLE);
             commentHost.setClickable(true);
             commentPanel = panel;
             panel.setAlpha(0f);
-            panel.animate().alpha(1f).setDuration(160).start();
+            panel.setTranslationX(dp(24));
+            panel.animate().alpha(1f).translationX(0).setDuration(180).start();
             panel.post(panel::focusDefault);
             return;
         }
@@ -2278,8 +2300,30 @@ public final class PlayerActivity extends Activity {
         revealControls();
     }
 
+    /** 把控件在两条按钮排之间搬：竖屏两排，横屏一排。 */
+    private void reparent(LinearLayout target, View... views) {
+        if (target == null) return;
+        for (View view : views) {
+            if (view == null) continue;
+            ViewGroup parent = view.getParent() instanceof ViewGroup ? (ViewGroup) view.getParent() : null;
+            if (parent == target) continue;
+            LinearLayout.LayoutParams params = view.getLayoutParams() instanceof LinearLayout.LayoutParams
+                    ? (LinearLayout.LayoutParams) view.getLayoutParams() : new LinearLayout.LayoutParams(-2, dp(38));
+            if (parent != null) parent.removeView(view);
+            target.addView(view, params);
+        }
+    }
+
     private void updateControlLayout() {
         boolean landscape = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
+        if (buttonRow2 != null) {
+            buttonRow2.setVisibility(landscape ? View.GONE : View.VISIBLE);
+            if (landscape) {
+                reparent(buttonsRow, speedTrigger, episodeTrigger, bookmarkButton, danmakuButton, commentButton);
+            } else {
+                reparent(buttonRow2, episodeTrigger, speedTrigger, bookmarkButton, danmakuButton, commentButton);
+            }
+        }
         if (landscapeSeek != null) landscapeSeek.setVisibility(landscape ? View.VISIBLE : View.GONE);
         if (volumeButton != null) volumeButton.setVisibility(landscape ? View.VISIBLE : View.GONE);
         if (volumeSeek != null) volumeSeek.setVisibility(landscape ? View.VISIBLE : View.GONE);
@@ -3185,7 +3229,12 @@ public final class PlayerActivity extends Activity {
                 case android.view.KeyEvent.KEYCODE_DPAD_CENTER:
                 case android.view.KeyEvent.KEYCODE_ENTER:
                 case android.view.KeyEvent.KEYCODE_NUMPAD_ENTER:
+                    /* 确定键只唤出控件条，不直接暂停：想暂停就在条上按「播放/暂停」。
+                       以前一按就停，用户以为选错了东西。 */
+                    if (event.getRepeatCount() == 0) showTvBar();
+                    return true;
                 case android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
+                    /* 遥控器上那颗专门的播放/暂停键仍然直接控制播放 */
                     if (event.getRepeatCount() == 0) tvTogglePlay();
                     return true;
                 case android.view.KeyEvent.KEYCODE_DPAD_UP:

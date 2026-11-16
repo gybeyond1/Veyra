@@ -54,7 +54,8 @@ const state = {
   search: null, searchPending: false, searchError: '', query: '', filter: 'all', banner: 0, categoryBanner: 0,
   listing: null, tags: null, tagsReturn: null, listingReturn: null, settingsReturn: null,
   libraryTab: 'history', libraryQuery: '', accountReturn: null, account: { loggedIn: false },
-  sourceGroup: '', sourceQueue: [], previous: null, compactHeld: false
+  sourceGroup: '', sourceQueue: [], previous: null, compactHeld: false,
+  epGroup: 0, epPickerOpen: false, detailProducer: null
 };
 contentReady = api('content-status').then(status => {
   contentSource = status.source || 'hongguo';
@@ -847,39 +848,67 @@ function updateCategoryFooter() {
   observeCategoryEnd();
 }
 
-function renderLibrary() {
+function libraryBodyHtml() {
   const data = state.library || { progress: [], bookmarks: [] };
   const query = state.libraryQuery.trim().toLocaleLowerCase();
   const matches = item => String(item.title || '').toLocaleLowerCase().includes(query);
   const progress = asArray(data.progress).filter(matches);
   const bookmarks = asArray(data.bookmarks).filter(matches);
-  const historyActive = state.libraryTab === 'history';
-  const downloadsActive = state.libraryTab === 'downloads';
-  const historyCards = progress.map(item => {
-    const completed = Boolean(item.completed);
-    const episode = Number(item.episode) || 1;
-    const percentage = completed ? 100 : Math.max(0, Math.min(100, item.duration ? item.position / item.duration * 100 : 0));
-    return `<button type="button" class="history-card" data-history-id="${esc(item.id)}" data-history-episode="${episode}" data-history-completed="${completed}" aria-label="${esc(item.title)}，第 ${episode} 集，${completed ? '已看完，打开详情' : '继续观看'}">
+  if (query) {
+    return `<div class="library-results"><p class="library-count">在观看历史中找到 ${progress.length} 部，在我的收藏中找到 ${bookmarks.length} 部</p>
+      <h2>观看历史</h2>${progress.length ? `<div class="history-list">${progress.map(historyCard).join('')}</div>` : '<p class="library-no-match">没有匹配的观看记录</p>'}
+      <h2>我的收藏</h2>${bookmarks.length ? `<div class="search-grid library-bookmark-grid">${bookmarks.map(itemCard).join('')}</div>` : '<p class="library-no-match">没有匹配的收藏</p>'}</div>`;
+  }
+  if (state.libraryTab === 'downloads') {
+    return '<div id="library-downloads"><p class="page-loading">正在加载…</p></div>';
+  }
+  const history = state.libraryTab === 'history';
+  return `<p class="library-count">${history ? `最近观看的 ${progress.length} 部作品` : `已收藏 ${bookmarks.length} 部作品`}</p>
+    ${history
+      ? (progress.length ? `<div class="history-list">${progress.map(historyCard).join('')}</div>` : '<div class="empty-state">还没有观看记录，播放作品后会出现在这里</div>')
+      : (bookmarks.length ? `<div class="search-grid library-bookmark-grid">${bookmarks.map(itemCard).join('')}</div>` : '<div class="empty-state">还没有收藏作品</div>')}`;
+}
+
+function historyCard(item) {
+  const completed = Boolean(item.completed);
+  const episode = Number(item.episode) || 1;
+  const percentage = completed ? 100 : Math.max(0, Math.min(100, item.duration ? item.position / item.duration * 100 : 0));
+  return `<button type="button" class="history-card" data-history-id="${esc(item.id)}" data-history-episode="${episode}" data-history-completed="${completed}" aria-label="${esc(item.title)}，第 ${episode} 集，${completed ? '已看完，打开详情' : '继续观看'}">
       <span class="history-poster poster loading"><span class="poster-letter">${esc(String(item.title || '影片').slice(0, 1))}</span><img data-cover="${esc(item.cover || '')}" alt=""></span><span class="history-copy"><span class="history-status">${completed ? '已看完' : '继续观看'} · 第 ${episode} 集</span>
       <strong>${esc(item.title || '影片')}</strong><span class="progress"><i style="width:${percentage}%"></i></span><span class="history-hint">${completed ? '打开详情选择剧集' : `已看 ${Math.floor(item.position / 60000)} 分钟`}</span></span></button>`;
-  }).join('');
+}
+
+function libraryTabsHtml() {
+  const active = state.libraryTab;
+  const tab = (id, label) => `<button type="button" role="tab" data-library-tab="${id}" aria-selected="${active === id}" class="${active === id ? 'selected' : ''}">${label}</button>`;
+  return `<div class="segmented library-tabs" role="tablist" aria-label="我的片单分类">${tab('history', '观看历史')}${tab('bookmarks', '我的收藏')}${tab('downloads', '我的下载')}</div>`;
+}
+
+function renderLibrary() {
   content.innerHTML = `<div class="library-page"><div class="my-heading"><h1>我的</h1></div>
     ${state.account.loggedIn ? '' : `<button type="button" class="my-account" data-account-action="1">点击头像登录，同步收藏和观看历史 ${icon('arrow')}</button>`}
-    ${query ? `<div class="library-results"><p class="library-count">在观看历史中找到 ${progress.length} 部，在我的收藏中找到 ${bookmarks.length} 部</p>
-      <h2>观看历史</h2>${progress.length ? `<div class="history-list">${historyCards}</div>` : '<p class="library-no-match">没有匹配的观看记录</p>'}
-      <h2>我的收藏</h2>${bookmarks.length ? `<div class="search-grid library-bookmark-grid">${bookmarks.map(itemCard).join('')}</div>` : '<p class="library-no-match">没有匹配的收藏</p>'}</div>` : downloadsActive ? `
-    <div class="segmented library-tabs" role="tablist" aria-label="我的片单分类"><button type="button" role="tab" data-library-tab="history" aria-selected="${false}" class="">观看历史</button>
-    <button type="button" role="tab" data-library-tab="bookmarks" aria-selected="${false}" class="">我的收藏</button>
-    <button type="button" role="tab" data-library-tab="downloads" aria-selected="${true}" class="selected">我的下载</button></div>
-    <div id="library-downloads"><p class="page-loading">正在加载…</p></div>` : `
-    <div class="segmented library-tabs" role="tablist" aria-label="我的片单分类"><button type="button" role="tab" data-library-tab="history" aria-selected="${historyActive}" class="${historyActive ? 'selected' : ''}">观看历史</button>
-    <button type="button" role="tab" data-library-tab="bookmarks" aria-selected="${!historyActive}" class="${!historyActive ? 'selected' : ''}">我的收藏</button>
-    <button type="button" role="tab" data-library-tab="downloads" aria-selected="${false}" class="">我的下载</button></div>
-    <p class="library-count">${historyActive ? `最近观看的 ${progress.length} 部作品` : `已收藏 ${bookmarks.length} 部作品`}</p>
-    ${historyActive ? (progress.length ? `<div class="history-list">${historyCards}</div>` : '<div class="empty-state">还没有观看记录，播放作品后会出现在这里</div>') :
-      (bookmarks.length ? `<div class="search-grid library-bookmark-grid">${bookmarks.map(itemCard).join('')}</div>` : '<div class="empty-state">还没有收藏作品</div>')}`}</div>`;
+    ${libraryTabsHtml()}
+    <div id="library-body">${libraryBodyHtml()}</div></div>`;
   hydrateImages();
-  if (downloadsActive && !swipePrefetchBusy) renderLibraryDownloads();
+  if (state.libraryTab === 'downloads' && !swipePrefetchBusy) renderLibraryDownloads();
+}
+
+/* 切子项只换下半身：tab 栏和它那枚玻璃透镜原地不动。
+   整页重画会把 segmented 拆了重建，透镜跟着消失再出现 —— 就是那一下「闪屏」。 */
+function paintLibraryBody() {
+  const body = document.getElementById('library-body');
+  if (!body) { renderLibrary(); return; }
+  body.innerHTML = libraryBodyHtml();
+  hydrateImages();
+  if (state.libraryTab === 'downloads') renderLibraryDownloads();
+}
+
+function syncLibraryTabs() {
+  document.querySelectorAll('[data-library-tab]').forEach(button => {
+    const on = button.dataset.libraryTab === state.libraryTab;
+    button.classList.toggle('selected', on);
+    button.setAttribute('aria-selected', String(on));
+  });
 }
 
 let libraryDownloadsToken = 0;
@@ -1684,25 +1713,69 @@ function renderListing() {
   observeListingEnd();
 }
 
+/* 详情页选集：每 20 集一组，用选择器切组，下面只画当前组。
+ * 电视端走同一套分组（tv.js 的 EP_PAGE），两边集数分档保持一致。 */
+const DETAIL_EP_PAGE = 20;
+
+function detailMetaText(data) {
+  const label = String(data.episodeLabel || '').trim();
+  if (label) return label;
+  const total = asArray(data.episodes).length;
+  return total ? `共 ${total} 集` : '';
+}
+
+function detailEpisodeSection(data) {
+  const episodes = asArray(data.episodes).filter(item => Number(item.number) > 0);
+  if (!episodes.length) return '';
+  const groups = Math.ceil(episodes.length / DETAIL_EP_PAGE);
+  const group = Math.min(Math.max(0, Number(state.epGroup) || 0), groups - 1);
+  state.epGroup = group;
+  const from = group * DETAIL_EP_PAGE;
+  const to = Math.min(episodes.length, from + DETAIL_EP_PAGE);
+  let picker = '';
+  if (groups > 1) {
+    const options = [];
+    for (let i = 0; i < groups; i++) {
+      const start = i * DETAIL_EP_PAGE + 1;
+      const end = Math.min(episodes.length, (i + 1) * DETAIL_EP_PAGE);
+      options.push(`<button type="button" role="option" aria-selected="${i === group}" data-ep-group="${i}" class="${i === group ? 'selected' : ''}">第 ${start}-${end} 集</button>`);
+    }
+    picker = `<div class="ep-picker"><button type="button" class="ep-picker-trigger" data-ep-picker="1" aria-haspopup="listbox" aria-expanded="${state.epPickerOpen ? 'true' : 'false'}">第 ${from + 1}-${to} 集<i class="ep-picker-caret" aria-hidden="true"></i></button>
+      ${state.epPickerOpen ? `<div class="ep-picker-menu" role="listbox" aria-label="选择集数分组">${options.join('')}</div>` : ''}</div>`;
+  }
+  return `<div class="detail-ep-head"><h2>选集</h2><span class="detail-ep-count">共 ${episodes.length} 集</span>${picker}</div>
+    <div class="episode-grid">${episodes.slice(from, to).map(item => `<button type="button" data-episode="${item.number}">${item.number}</button>`).join('')}</div>`;
+}
+
+function paintEpisodeSection() {
+  const host = document.getElementById('detail-episodes');
+  if (!host || !state.detail) return;
+  host.innerHTML = detailEpisodeSection(state.detail);
+}
+
 function renderDetail() {
   const data = state.detail;
   if (!data) { renderSkeleton(); return; }
   const loading = state.detailLoading;
   window.AndroidHost?.setDetailMode?.(true);
-  const episodes = asArray(data.episodes);
+  const meta = loading ? '正在获取内容…' : [data.score, detailMetaText(data)].filter(Boolean).join(' · ');
   content.innerHTML = `<div class="detail-page"><button class="detail-back" type="button" data-back="1">${icon('back')} 返回</button>
-    <div class="detail-art"><img data-cover="${esc(data.cover)}" alt=""></div><div class="detail-copy"><h1>${esc(data.title)}</h1><p>${loading ? '正在获取内容…' : `${esc(data.score)} ${esc(data.episodeLabel)}`}</p><div class="detail-desc-wrap"><p class="detail-description">${esc(data.description || '')}</p></div>
+    <div class="detail-art"><img data-cover="${esc(data.cover)}" alt=""></div><div class="detail-copy"><h1>${esc(data.title)}</h1>
+    <p class="detail-meta"><span class="detail-meta-text">${esc(meta)}</span><span class="detail-meta-producer" data-producer-slot></span></p>
+    <div class="detail-desc-wrap"><p class="detail-description">${esc(data.description || '')}</p></div>
     <div class="detail-buttons"><button class="detail-play" type="button" data-play="1" ${loading ? 'disabled' : ''}>${loading ? '正在加载…' : '立即播放'}</button><button class="bookmark-button" type="button" data-bookmark="1" aria-label="${state.bookmarked ? '取消收藏' : '收藏'}" ${loading ? 'disabled' : ''}>${state.bookmarked ? '★' : '☆'}</button><button class="detail-download" type="button" data-download="1" ${loading ? 'disabled' : ''}>下载</button></div>
-    ${loading ? '<div class="detail-loading" role="status">正在获取选集…</div>' : episodes.length ? `<h2>选集</h2><div class="episode-grid">${episodes.map((item, index) => `<button type="button" data-episode="${item.number}" class="${index === 0 ? 'active' : ''}">${item.number}</button>`).join('')}</div>` : ''}<div class="detail-extras" id="detail-extras"></div></div></div>`;
+    ${loading ? '<div class="detail-loading" role="status">正在获取选集…</div>' : `<div class="detail-episodes" id="detail-episodes">${detailEpisodeSection(data)}</div>`}<div class="detail-extras" id="detail-extras"></div></div></div>`;
   hydrateImages();
+  paintProducerInline(data.id);
   scheduleDetailExtras(data);
 }
 
 /*
- * 详情页的三块附加内容：制作方、相关作品（其他季）、热评。
+ * 详情页附加内容：制作方（塞进标题下那行「共 N 集」右侧）+ 相关作品。
  *
- * 都不阻塞主详情：主详情先出，这三块各自异步填，哪块失败就哪块显示「暂无」，
- * 不影响播放按钮和选集。私密（黄果）模式没有这些接口，直接不渲染。
+ * 都不阻塞主详情：主详情先出，这两块各自异步填，失败就不显示，不影响播放按钮和选集。
+ * 热评已经去掉：三米外看剧的人不会先读三条评论，倒是把选集挤到了第二屏。
+ * 私密（黄果）模式没有这些接口，直接不渲染。
  */
 const detailExtrasCache = new Map();
 let detailExtrasToken = 0;
@@ -1710,50 +1783,50 @@ let detailExtrasToken = 0;
 function scheduleDetailExtras(data) {
   if (!data || !data.id || privateMode()) return;
   const token = ++detailExtrasToken;
-  const host = document.getElementById('detail-extras');
-  if (!host) return;
   const cached = detailExtrasCache.get(data.id);
-  if (cached) { renderDetailExtras(host, cached, data); return; }
-  const result = { related: [], producer: null, comments: [] };
-  const done = () => {
+  if (cached) { renderDetailExtras(document.getElementById('detail-extras'), cached, data); paintProducerInline(data.id); return; }
+  const result = { related: [], producer: null, id: data.id };
+  let pending = 2;
+  const settle = () => {
+    if (--pending > 0) return;
     if (token !== detailExtrasToken) return;
     detailExtrasCache.set(data.id, result);
-    renderDetailExtras(document.getElementById('detail-extras'), result, data);
+    if (state.detail && String(state.detail.id) === String(data.id)) {
+      renderDetailExtras(document.getElementById('detail-extras'), result, data);
+      paintProducerInline(data.id);
+    }
   };
-  let pending = 2;
-  const settle = () => { if (--pending <= 0) done(); };
   api('related', { id: data.id }).then(res => { result.related = asArray(res.items); settle(); }).catch(settle);
   api('producer', { id: data.id }).then(res => { if (res && res.name) result.producer = res; settle(); }).catch(settle);
-  const first = asArray(data.episodes)[0];
-  if (first && first.videoId) {
-    result.commentEpisode = Number(first.number) || 1;
-    api('comments', { id: data.id, episodeId: first.videoId, cursor: '' })
-      .then(res => { if (token === detailExtrasToken) { result.comments = asArray(res.items).slice(0, 3); } })
-      .catch(() => {});
-  }
+}
+
+/** 制作方紧跟在「共 N 集」右边，做成一颗小胶囊，点了看同制作方的其他作品。 */
+function paintProducerInline(id) {
+  const slot = document.querySelector('[data-producer-slot]');
+  if (!slot) return;
+  const cached = detailExtrasCache.get(id);
+  const producer = cached && cached.producer;
+  if (!producer || !producer.name) { slot.innerHTML = ''; return; }
+  if (state.detailProducer && state.detailProducer.name === producer.name && slot.firstChild) return;
+  state.detailProducer = producer;
+  slot.innerHTML = `<button class="detail-producer-chip" type="button" data-producer-open="1"><span>制作方 · ${esc(producer.name)}</span>${icon('arrow')}</button>`;
 }
 
 function renderDetailExtras(host, result, data) {
   if (!host) return;
-  const producer = result.producer;
-  const related = asArray(result.related);
-  const comments = asArray(result.comments);
-  const producerBlock = producer
-    ? `<button class="detail-producer" type="button" data-producer-open="1"><span>制作方 · ${esc(producer.name)}</span>${icon('arrow')}</button>`
-    : '';
-  const relatedBlock = related.length
-    ? `<section class="detail-section"><h2>相关作品</h2><div class="film-row detail-related">${related.map(relatedCard).join('')}</div></section>`
-    : '';
-  const commentBlock = comments.length
-    ? `<section class="detail-section"><h2>热评 · 第 ${esc(String(result.commentEpisode || 1))} 集</h2><div class="detail-comments">${comments.map(commentRow).join('')}</div></section>`
-    : '';
-  if (!producerBlock && !relatedBlock && !commentBlock) { host.innerHTML = ''; return; }
-  host.innerHTML = producerBlock + relatedBlock + commentBlock;
+  const related = sortRelated(asArray(result.related));
+  if (!related.length) { host.innerHTML = ''; return; }
+  host.innerHTML = `<section class="detail-section"><h2>相关作品</h2><div class="detail-related-grid">${related.map(relatedCard).join('')}</div></section>`;
   hydrateImages();
-  const button = host.querySelector('[data-producer-open]');
-  if (button && producer) {
-    button.addEventListener('click', () => openProducerPanel(producer.name, producer.mediaId || '', data.id));
-  }
+}
+
+/** 同一部剧的其他季排前面（按季号），其余同 IP/推荐排后面。 */
+function sortRelated(items) {
+  const season = item => Number(item.seasonIndex) || 0;
+  const head = items.filter(item => season(item) > 0 || item.season);
+  const tail = items.filter(item => !(season(item) > 0 || item.season));
+  head.sort((a, b) => season(a) - season(b));
+  return [...head, ...tail];
 }
 
 function relatedCard(item) {
@@ -1763,25 +1836,6 @@ function relatedCard(item) {
     <span class="poster loading"><span class="poster-letter">${esc(letter)}</span><img data-cover="${esc(item.cover || '')}" alt=""></span>
     <span class="film-title">${esc(item.title || '')}</span>
     <span class="film-info">${esc(label)}${item.upcoming ? ' · 待上线' : ''}</span></button>`;
-}
-
-function commentRow(item) {
-  const when = relativeTime(item.created);
-  return `<article class="detail-comment"><header><strong>${esc(item.author || '匿名用户')}</strong><span>${esc(when)}</span></header><p>${esc(item.content || '')}</p></article>`;
-}
-
-function relativeTime(seconds) {
-  const value = Number(seconds) || 0;
-  if (!value) return '';
-  const at = value > 1e12 ? value : value * 1000;
-  const diff = Date.now() - at;
-  if (diff < 0) return '';
-  const minute = 60000, hour = 3600000, day = 86400000;
-  if (diff < hour) return `${Math.max(1, Math.round(diff / minute))} 分钟前`;
-  if (diff < day) return `${Math.round(diff / hour)} 小时前`;
-  if (diff < day * 30) return `${Math.round(diff / day)} 天前`;
-  const date = new Date(at);
-  return `${date.getMonth() + 1} 月 ${date.getDate()} 日`;
 }
 
 /*
@@ -1817,15 +1871,28 @@ function openProducerPanel(name, mediaId, currentId) {
     try {
       const data = await api('producer-works', { name, mediaId, page });
       const items = asArray(data.items).filter(item => item.id && item.id !== currentId);
-      list.insertAdjacentHTML('beforeend', items.map(item => `<button class="producer-item" type="button" data-producer-id="${esc(item.id)}">
-        <span class="producer-poster loading"><img data-cover="${esc(item.cover || '')}" alt=""></span>
-        <span class="producer-copy"><strong>${esc(item.title || '')}</strong><em>${esc(item.episodeLabel || '查看详情')}</em></span></button>`).join(''));
+      list.insertAdjacentHTML('beforeend', items.map(producerItemHtml).join(''));
       hydrateImages();
       hasMore = Boolean(data.hasMore);
       page += 1;
       const count = list.childElementCount;
-      status.textContent = count ? `已确认 ${count} 部作品 · 以平台当前检索结果为准` : '没有检索到其他作品';
-      more.hidden = !hasMore;
+      if (count) {
+        status.textContent = `已确认 ${count} 部作品 · 以平台当前检索结果为准`;
+      } else {
+        /* 平台按「剧名」检索，制作方是署名不是标题 —— 搜不到是常态。
+           退一步把同系列其他季摆出来，至少不是一块空白。 */
+        const seasons = sortRelated(asArray(detailExtrasCache.get(currentId)?.related))
+          .filter(item => (Number(item.seasonIndex) || 0) > 0 || item.season)
+          .filter(item => item.id && String(item.id) !== String(currentId));
+        list.insertAdjacentHTML('beforeend', seasons.map(item => producerItemHtml({
+          id: item.id, title: item.title, cover: item.cover, episodeLabel: item.season || item.episodeLabel
+        })).join(''));
+        hydrateImages();
+        status.textContent = seasons.length
+          ? '平台检索不到该制作方的其他作品，先看同系列'
+          : '平台没有收录这位制作方的其他作品';
+      }
+      more.hidden = !hasMore || !list.childElementCount;
     } catch (error) {
       status.textContent = list.childElementCount ? `已确认 ${list.childElementCount} 部作品 · 更多作品暂时无法读取` : '作品暂时无法读取';
       more.textContent = '重试';
@@ -1837,6 +1904,12 @@ function openProducerPanel(name, mediaId, currentId) {
   };
   more.addEventListener('click', () => { hasMore = true; load(); });
   load();
+}
+
+function producerItemHtml(item) {
+  return `<button class="producer-item" type="button" data-producer-id="${esc(item.id)}">
+    <span class="producer-poster loading"><img data-cover="${esc(item.cover || '')}" alt=""></span>
+    <span class="producer-copy"><strong>${esc(item.title || '')}</strong><em>${esc(item.episodeLabel || '查看详情')}</em></span></button>`;
 }
 
 function searchFeedback() {
@@ -2403,6 +2476,7 @@ async function goDetail(id, trigger) {
   const candidates = state.route === 'category' ? asArray(state.category?.items) : state.route === 'search' ? asArray(state.search?.items) : state.route === 'listing' ? asArray(state.listing?.items) :
     [...asArray(state.home?.recommend?.items), ...asArray(state.home?.newest?.items)];
   state.sourceQueue = aiGroup ? candidates.filter(item => item.category === state.sourceGroup) : [];
+  state.epGroup = 0; state.epPickerOpen = false; state.detailProducer = null;
   setRoute('detail'); state.detail = { ...state.sourceItem }; state.detailLoading = true; state.bookmarked = false;
   // title→cover 记录：NAS 老任务后端没存封面，下载列表渲染时按剧名兜底
   if (state.detail && state.detail.title) rememberTitleCover(state.detail.title, state.detail.cover || '');
@@ -2940,11 +3014,7 @@ function swipeResolve(delta) {
               // 沿用滑动放下的真内容，绝不整套重渲染（那一闪就是它）。
               // 下载页仍需拉最新进度并启动轮询 —— 交给 renderLibraryDownloads，
               // 命中签名守卫时只补图、不重建 DOM。
-              for (const b of content.querySelectorAll('[data-library-tab]')) {
-                const on = b.dataset.libraryTab === next;
-                b.classList.toggle('selected', on);
-                if (on) b.setAttribute('aria-selected', 'true'); else b.removeAttribute('aria-selected');
-              }
+              syncLibraryTabs();
               if (next === 'downloads') { try { renderLibraryDownloads(); } catch (ignore) { } }
               try { hydrateImages(); } catch (ignore) { }
             }
@@ -2962,7 +3032,7 @@ function swipeResolve(delta) {
     : next === 'home' ? 'home' : 'category:' + next + ':' + (state.sub[next] || 0);
   return {
     mode: 'page',       // 底栏页之间：整页平移
-    key,
+    key, from: index, to: index + delta,
     go: () => navigateDock(next),
     build: () => swipeBuildCached(key) || swipeBuildSkeleton(key),
   };
@@ -3016,7 +3086,7 @@ function swipeOpenTrack(delta, dx) {
   (document.getElementById('app') || document.body).appendChild(panel);
   // inline（页内子项）：页头克隆到独立固定层绝对钉住（不可能被任何容器裁剪），
   // 内容区单独平移；面板从内容区顶部开始，目标页页头临时摘除使内容对齐。
-  const track = { panel, inner, mode: 'page', width: Math.round(box.width || scroll.clientWidth || 360), dirSign: delta > 0 ? 1 : -1, guard: 0, resolve, pinned: [], clones: [], moving: [], savedDisplays: [] };
+  const track = { panel, inner, mode: 'page', from: resolve.from, to: resolve.to, width: Math.round(box.width || scroll.clientWidth || 360), dirSign: delta > 0 ? 1 : -1, guard: 0, resolve, pinned: [], clones: [], moving: [], savedDisplays: [] };
   const pageNode = content.firstElementChild;
   if (resolve.mode === 'inline' && pageNode) {
     const tab = pageNode.querySelector(SWIPE_TAB_BAR_SELECTOR);
@@ -3081,9 +3151,26 @@ function swipeOpenTrack(delta, dx) {
   inner.appendChild(node);
   swipeTrack = track;
   routeToken++;   // 作废未落地的异步渲染，防止拖动中 content 被覆盖
+  swipeDock(true);
   swipeLayTrack(dx);
   swipeTrack.guard = setTimeout(() => { if (swipeTrack) swipeCloseTrack(false); }, 1500);
   return true;
+}
+
+/* 底栏那枚玻璃透镜跟着整页横滑位移动 —— 以前只有点按才动，滑动手势和底栏是两套。
+   DockGlass 由 dock-glass.js 提供；万一没加载（老包/被裁）就静默跳过。 */
+function swipeDock(begin, ratio) {
+  const t = swipeTrack;
+  if (!t || t.mode !== 'page' || !window.DockGlass || t.from == null || t.to == null) return;
+  try {
+    if (begin) window.DockGlass.begin(t.from, t.to);
+    else window.DockGlass.progress(t.from, t.to, ratio || 0);
+  } catch (error) { }
+}
+
+function swipeDockDone(commit) {
+  if (!window.DockGlass || typeof window.DockGlass.settle !== 'function') return;
+  try { window.DockGlass.settle(commit); } catch (error) { }
 }
 
 function swipeLayTrack(dx) {
@@ -3094,6 +3181,7 @@ function swipeLayTrack(dx) {
     swipeTabProgress(t, Math.abs(dx) / t.width);                              // 高亮同步跟到哪一格
   } else {
     scroll.style.transform = `translateX(${dx}px)`;
+    swipeDock(false, Math.min(1, Math.abs(dx) / t.width));
   }
   t.panel.style.transform = `translateX(${t.dirSign * t.width + dx}px)`;
 }
@@ -3114,6 +3202,7 @@ function swipeCloseTrack(commit) {
   if (!t) return;
   swipeTrack = null;
   swiping = true;
+  swipeDockDone(commit);
   clearTimeout(t.guard);
   const ease = 'transform .2s cubic-bezier(.22,.61,.36,1)';
   scroll.style.transition = ease;
@@ -3266,6 +3355,11 @@ function tapDock(button) {
 }
 
 document.addEventListener('click', async event => {
+  /* 选集分组菜单：点在菜单外面就收起（点菜单项由后面的分支处理） */
+  if (state.epPickerOpen && !event.target.closest('.ep-picker')) {
+    state.epPickerOpen = false;
+    paintEpisodeSection();
+  }
   // 搜索浮层：历史词条 / 单条删除 / 清空
   const ssWord = event.target.closest('[data-ss-word]');
   if (ssWord) {
@@ -3461,7 +3555,15 @@ function refreshCurrentDownloads() {
   const nav = event.target.closest('[data-nav]');
   if (nav) { tapDock(nav); return; }
   const libraryTab = event.target.closest('[data-library-tab]');
-  if (libraryTab) { state.libraryTab = libraryTab.dataset.libraryTab; renderLibrary(); scroll.scrollTop = 0; return; }
+  if (libraryTab) {
+    const next = libraryTab.dataset.libraryTab;
+    if (next === state.libraryTab) return;
+    state.libraryTab = next;
+    syncLibraryTabs();
+    paintLibraryBody();
+    scroll.scrollTop = 0;
+    return;
+  }
   if (event.target.closest('[data-all-history]')) { state.libraryQuery = ''; goLibrary('history'); return; }
   const continueCard = event.target.closest('[data-continue-id]');
   if (continueCard) { resumeFromHome(continueCard.dataset.continueId).catch(error => toast(error.message || '续播失败，请重试', true)); return; }
@@ -3487,6 +3589,25 @@ function refreshCurrentDownloads() {
   const slide = event.target.closest('[data-slide]');
   if (slide) { const target = Number(slide.dataset.slide); changeBanner(target, target > bannerIndex() ? 1 : -1); return; }
   if (event.target.closest('[data-back]')) { window.hgBack(); return; }
+  /* 选集分组选择器：点一次展开、再点收起；选了哪组就只重画集数那一块 */
+  if (event.target.closest('[data-ep-picker]')) {
+    state.epPickerOpen = !state.epPickerOpen;
+    paintEpisodeSection();
+    return;
+  }
+  const epGroup = event.target.closest('[data-ep-group]');
+  if (epGroup) {
+    state.epGroup = Number(epGroup.dataset.epGroup) || 0;
+    state.epPickerOpen = false;
+    paintEpisodeSection();
+    return;
+  }
+  const producerOpen = event.target.closest('[data-producer-open]');
+  if (producerOpen) {
+    const producer = state.detailProducer;
+    if (producer && producer.name) openProducerPanel(producer.name, producer.mediaId || '', state.detail?.id || '');
+    return;
+  }
   const episode = event.target.closest('[data-episode]');
   if (episode) { openPlayer(Number(episode.dataset.episode)); return; }
   if (event.target.closest('[data-play]')) { openPlayer(1); return; }

@@ -529,23 +529,32 @@ html[data-theme=dark] #binge-fab{background:rgba(34,40,43,.04);background:color-
 #binge-fab.active{background:var(--accent);color:var(--accent-ink);border-color:transparent}
 /* 刷剧层由原生 BingeActivity 承载，这里只负责按钮可见性 */
 
-/* 详情页附加内容：制作方 / 相关作品 / 热评 */
+/* 详情页：集数分组选择器 / 制作方胶囊 / 相关作品三列瀑布 */
+.detail-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.detail-meta-text{flex:none}
+.detail-meta-producer{display:inline-flex;min-width:0}
+.detail-producer-chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);border-radius:calc(999px * var(--corner-scale,1));background:var(--panel);color:var(--text);padding:4px 9px;font-size:11px;font-weight:700;line-height:1.2}
+.detail-producer-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.detail-producer-chip svg{width:11px;height:11px;opacity:.55}
+.detail-episodes{margin-top:2px}
+.detail-ep-head{display:flex;align-items:center;gap:9px;margin:22px 0 12px}
+.detail-ep-head h2{font-size:19px;margin:0}
+.detail-ep-count{font-size:11px;color:var(--muted)}
+.ep-picker{position:relative;margin-left:auto}
+.ep-picker-trigger{display:inline-flex;align-items:center;gap:5px;height:29px;padding:0 10px;border:1px solid var(--line);border-radius:calc(999px * var(--corner-scale,1));background:var(--panel);color:var(--text);font-size:12px;font-weight:700}
+.ep-picker-caret{width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid currentColor;opacity:.65}
+.ep-picker-trigger[aria-expanded=true] .ep-picker-caret{transform:rotate(180deg)}
+.ep-picker-menu{position:absolute;right:0;top:34px;z-index:8;width:max-content;min-width:128px;max-height:216px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;padding:5px;border:1px solid var(--line);border-radius:calc(13px * var(--corner-scale,1));background:var(--surface,#fff);box-shadow:0 14px 34px #0003}
+.ep-picker-menu button{border:0;border-radius:calc(9px * var(--corner-scale,1));background:none;color:var(--text);text-align:left;padding:9px 11px;font-size:12px;white-space:nowrap}
+.ep-picker-menu button.selected{background:var(--accent);color:var(--accent-ink);font-weight:800}
 .detail-extras{margin-top:8px}
-.detail-producer{display:flex;align-items:center;gap:8px;margin:14px 0 4px;padding:9px 13px;border:1px solid var(--line);border-radius:calc(12px * var(--corner-scale,1));background:var(--panel);color:var(--text);font-size:13px;font-weight:700;width:100%;text-align:left}
-.detail-producer svg{width:14px;height:14px;margin-left:auto;opacity:.6}
 .detail-section{margin-top:22px}
-.detail-section h2{margin:0 0 10px;font-size:17px;letter-spacing:-.02em}
-.detail-related{display:flex;gap:12px;overflow-x:auto;padding:2px 2px 6px;scrollbar-width:none}
-.detail-related::-webkit-scrollbar{display:none}
-.detail-related-card{flex:0 0 108px;width:108px;text-align:left}
-.detail-related-card .poster{height:144px}
-.detail-related-card .film-title{font-size:12px;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;white-space:normal;overflow:hidden}
-.detail-related-card .film-info{font-size:11px;color:var(--muted)}
-.detail-comments{display:flex;flex-direction:column;gap:12px}
-.detail-comment{padding:11px 13px;border-radius:calc(12px * var(--corner-scale,1));background:var(--panel)}
-.detail-comment header{display:flex;justify-content:space-between;gap:10px;margin-bottom:6px;font-size:11px;color:var(--muted)}
-.detail-comment header strong{color:var(--text);font-size:12px}
-.detail-comment p{margin:0;font-size:13px;line-height:1.55;white-space:pre-wrap;word-break:break-word}
+.detail-section h2{margin:0 0 12px;font-size:17px;letter-spacing:-.02em}
+.detail-related-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px 10px}
+.detail-related-grid .detail-related-card{width:100%;min-width:0;text-align:left}
+.detail-related-card .poster{height:auto;aspect-ratio:114/153}
+.detail-related-card .film-title{font-size:12px;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;white-space:normal;overflow:hidden;margin-top:5px}
+.detail-related-card .film-info{font-size:11px;color:var(--muted);margin-top:2px}
 
 /* 制作方作品弹窗 */
 .producer-overlay{position:fixed;inset:0;z-index:60;display:grid;place-items:center;background:#0008;backdrop-filter:blur(3px)}
@@ -565,3 +574,74 @@ html[data-theme=dark] #binge-fab{background:rgba(34,40,43,.04);background:color-
 
 /* 我的：胶囊吸顶，遥控器从列表第一行按 ↑ 一定能回到上面三个胶囊 */
 @media(min-width:720px){.library-page .library-tabs{position:sticky;top:0;z-index:6;background:var(--bg);padding-top:6px;padding-bottom:6px}}
+
+/* ===================== 液态玻璃：统一底色 + 可读性（0.29.2） =====================
+ * 0.28.66 那版把玻璃交给 SVG 折射滤镜（backdrop-filter: url(#lens)），底色只有 4%。
+ * 折射在部分 WebView 上「语法支持、但画不出来」—— 结果是底栏、搜索框、联想面板
+ * 全部变成纯透明，字压在内容上看不清。
+ * 这里把材质拆成两层，任何一层失效都不会退化成透明：
+ *   ① 底色：--glass-fill（浅色 46% / 深色 56% 的 surface），保证可读；
+ *   ② 霜面：backdrop-filter 的 blur 用 --glass-frost（滑杆值 + 10px 兜底模糊）；
+ *   ③ 折射：data-lens=on 时才把 ② 换成 SVG 透镜（拼不出来的设备就当没开）。
+ * 外观设置接管：data-glass=off → 实底不模糊不折射；data-btn-mat=fuzzy → 只模糊。
+ */
+:root{
+  --glass-frost:calc(var(--glass-blur, 2.2px) + 10px);
+  --glass-fill-mix:40%;
+}
+html[data-theme=dark]{--glass-fill-mix:56%}
+html[data-glass=off]{--glass-fill-mix:100%;--glass-frost:0px}
+
+#dock, .search-form, #search-suggest, .header-settings, #binge-fab {
+  background:rgba(255,252,244,.40);
+  background:color-mix(in srgb,var(--surface) var(--glass-fill-mix,40%),transparent);
+  -webkit-backdrop-filter:blur(var(--glass-frost)) saturate(1.25);
+  backdrop-filter:blur(var(--glass-frost)) saturate(1.25);
+}
+html[data-theme=dark] #dock,
+html[data-theme=dark] .search-form,
+html[data-theme=dark] #search-suggest,
+html[data-theme=dark] .header-settings,
+html[data-theme=dark] #binge-fab{
+  background:rgba(26,30,34,.50);
+  background:color-mix(in srgb,var(--surface) var(--glass-fill-mix,56%),transparent);
+}
+/* 玻璃关掉：实底，别再透出后面的内容 */
+html[data-glass=off] #dock,
+html[data-glass=off] .search-form,
+html[data-glass=off] #search-suggest,
+html[data-glass=off] .header-settings,
+html[data-glass=off] #binge-fab{
+  -webkit-backdrop-filter:none;backdrop-filter:none;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.28),0 8px 20px rgba(8,14,24,.10);
+}
+/* 选中透镜：底色比底板再厚一点，拖动时「拿起来的那块玻璃」才看得见 */
+#dock-blob b{
+  background:rgba(255,252,244,.32);
+  background:color-mix(in srgb,var(--surface) 34%,transparent);
+}
+html[data-theme=dark] #dock-blob b{background:rgba(255,255,255,.16)}
+html[data-glass=off] #dock-blob b{background:color-mix(in srgb,var(--accent) 16%,var(--surface))}
+
+/* 折射线：0.28.66 把透镜改成动态挂载（每条一个 veyra-lens-N），但这里还写着
+ * 旧的固定 id（#dock-lens / #search-lens…）。那些滤镜早就不存在了 ——
+ * url(#不存在的滤镜) 等于「没有 backdrop-filter」，玻璃于是变成纯透明。
+ * 统一改成消费 dock-refract.js 写在元素上的 --sunny-glass-filter。 */
+#dock[data-lens=on],
+.search-form[data-lens=on],
+#search-suggest[data-lens=on],
+.header-settings[data-lens=on],
+#binge-fab[data-lens=on],
+#dock-blob b[data-lens=on]{
+  -webkit-backdrop-filter:var(--sunny-glass-filter);
+  backdrop-filter:var(--sunny-glass-filter);
+}
+/* 联想面板压在封面大图上，跟底栏同材质但要多一层底：菜单是用来读的 */
+.search-suggest{--glass-fill-mix:72%}
+html[data-theme=dark] .search-suggest{--glass-fill-mix:76%}
+/* 联想面板是「读字」的地方：只保留底色 + 模糊，不上折射。
+   折射滤镜的边缘位移会把后面的封面推进文字行里，越靠下越糊 —— 菜单不需要这种效果。 */
+#search-suggest[data-lens=on]{
+  -webkit-backdrop-filter:blur(var(--glass-frost)) saturate(1.25);
+  backdrop-filter:blur(var(--glass-frost)) saturate(1.25);
+}

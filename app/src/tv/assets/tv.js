@@ -54,6 +54,9 @@ var state = {
   detailLoading: false,
   detailProgress: null, /* 上次看到的集与位置，用来把「立即播放」改成「继续播放」 */
   epGroup: 0,           /* 剧集分组：每 20 集一组 */
+  detailExtrasId: '',   /* 制作方 / 相关作品按剧只拉一次 */
+  detailProducer: null,
+  detailRelated: [],
   account: { loggedIn: false },
   version: '',
   update: null,         /* 检查更新查到的可更新版本 */
@@ -77,6 +80,7 @@ var toastEl = document.getElementById('toast');
    inRail / railKeyForRoute 这套函数原样留着：里面的 querySelector 拿不到元素时
    都直接 return，调用点又只有老代码那几处，删了反而容易漏改。
    换句话说：抽屉的「逻辑」还在，只是没有入口、没有样式，点不出来。 */
+var producerPanel = null;
 var themePanel = document.getElementById('theme');
 var themeGrid = document.getElementById('theme-grid');
 var themeSub = document.getElementById('theme-sub');
@@ -582,6 +586,7 @@ function closeRail() {
 function activeOverlay() {
   /* 动态码浮窗优先级最高：它开着的时候背后就是整页海报，
      不锁住的话上下左右会直接选到浮窗后面的剧集封面上。 */
+  if (producerPanel) return producerPanel;
   if (otpPanel && !otpPanel.hidden) return otpPanel;
   if (sourcePanel && !sourcePanel.hidden) return sourcePanel;
   if (proxyPanel && !proxyPanel.hidden) return proxyPanel;
@@ -692,19 +697,28 @@ function exitToTopbar(current) {
   if (!card) return null;
   var grid = card.closest('.grid');
   if (!grid) return null;
-  var first = view && view.querySelector('.grid');
-  if (first !== grid) return null;
-  var cards = grid.querySelectorAll('.card');
-  var rowH = wallRowHeight(card);
-  if (!rowH) return null;
-  var cardBox = card.getBoundingClientRect();
-  /* 第几个「显示槽」：0 就是屏幕上第一排 */
-  var natural = cardBox.top - cards[0].getBoundingClientRect().top;
-  if (Math.round((natural - stage.scrollTop) / rowH) !== 0) return null;
   if (!topbar) return null;
+  /* 只对页面上第一面墙生效：后面的分区块还是要能上下互达。
+     注意不能拿 view.querySelector('.grid') 硬比 —— 我的页「收藏」「下载」
+     只有一个网格，但结构各自包了一层，比错了就永远出不去。 */
+  var grids = view ? view.querySelectorAll('.grid') : [];
+  var firstGrid = null;
+  for (var i = 0; i < grids.length; i++) {
+    if (grids[i].querySelector('.card')) { firstGrid = grids[i]; break; }
+  }
+  if (firstGrid !== grid) return null;
+
+  var cards = grid.querySelectorAll('.card');
+  if (!cards.length) return null;
+  /* 是不是这面墙的第一排：比 offsetTop，不依赖「一行几张」 */
+  var minTop = Infinity;
+  for (var t = 0; t < cards.length; t++) minTop = Math.min(minTop, cards[t].offsetTop);
+  if (Math.abs(card.offsetTop - minTop) > 4) return null;
+
   var chips = topbar.querySelectorAll('.chip');
   var tools = topbar.querySelectorAll('.tool');
   /* 第几列：同一排里比它靠左的有几张 */
+  var cardBox = card.getBoundingClientRect();
   var col = 0;
   for (var j = 0; j < cards.length; j++) {
     var c = cards[j];
@@ -713,16 +727,17 @@ function exitToTopbar(current) {
   }
   /* 一行 6 张，按列硬性分派，不做「全墙就近」：
      前两列 → 分类胶囊，最后一列 → 搜索/最近/设置，中间三列 → 不出去，正常翻上一排。
-     就近那一版是错的：屏幕上第一排的中间几列，几何上离胶囊也不远，于是一按上就
-     被送到顶栏；翻到第三页第四页时想看上一页，按上却回不到上一页。
-     中间三列只有在真的到了整面墙最顶上（上面已经没有任何一排）时，才落到顶栏上。 */
+     但整面墙只有一排时（收藏、下载通常就几张），上面本来就没有上一排，
+     中间几列也必须能回到页签 —— 否则遥控器按上完全没反应。 */
+  var singleRow = cards.length <= 6 || !wallRowHeight(card);
   var pool = null;
-  if (col <= 1 && chips.length) pool = chips;
+  if (singleRow) {
+    pool = [];
+    for (var a = 0; a < chips.length; a++) pool.push(chips[a]);
+    for (var b = 0; b < tools.length; b++) pool.push(tools[b]);
+  } else if (col <= 1 && chips.length) pool = chips;
   else if (col >= 5 && tools.length) pool = tools;
-  else if (stage.scrollTop <= 1) {
-    /* 到了整面墙最顶上，中间列上面确实什么都没有了，才落到胶囊上 */
-    pool = chips;
-  }
+  else if (stage.scrollTop <= 1) pool = chips;
   if (!pool || !pool.length) return null;
   var cx = (cardBox.left + cardBox.right) / 2;
   var best = null, bestD = Infinity;
@@ -1704,6 +1719,7 @@ function renderDetail() {
     return;
   }
   var data = state.detail;
+  loadDetailExtras(String(data.id || ''));
   var episodes = list(data.episodes);
   var total = episodes.length;
 
@@ -1715,26 +1731,40 @@ function renderDetail() {
   var start = gi * EP_PAGE;
   var end = Math.min(total, start + EP_PAGE);
 
+  /* 分组胶囊搬到「收藏」右边：选集标题下面不再单独占一行，
+     集数网格因此整体上移一行，一屏能多看一排集数。 */
+  var groupChips = '';
+  if (groups > 1) {
+    groupChips = '<div class="ep-chips">';
+    for (var g = 0; g < groups; g++) {
+      var from = g * EP_PAGE + 1;
+      var to = Math.min(total, (g + 1) * EP_PAGE);
+      groupChips += '<button type="button" class="chip' + (g === gi ? ' is-active' : '')
+        + '" data-focusable data-key="epg:' + g + '" data-epgroup="' + g + '">' + from + '-' + to + '</button>';
+    }
+    groupChips += '</div>';
+  }
+
   var eps = '';
   if (total) {
-    var groupHtml = '';
-    if (groups > 1) {
-      groupHtml = '<div class="ep-groups"><div class="chips">';
-      for (var g = 0; g < groups; g++) {
-        var from = g * EP_PAGE + 1;
-        var to = Math.min(total, (g + 1) * EP_PAGE);
-        groupHtml += '<button type="button" class="chip' + (g === gi ? ' is-active' : '') + '" data-focusable data-key="epg:' + g + '" data-epgroup="' + g + '">' + from + '-' + to + '</button>';
-      }
-      groupHtml += '</div></div>';
-    }
-    eps = '<h2 class="eps-title">选集<span>' + (start + 1) + '-' + end + ' / 共 ' + total + ' 集</span></h2>'
-      + groupHtml + '<div class="eps">';
+    eps = '<h2 class="eps-title">选集<span>' + (start + 1) + '-' + end + ' / 共 ' + total + ' 集</span></h2><div class="eps">';
     for (var i = start; i < end; i++) {
       var number = episodes[i].number || (i + 1);
       eps += '<button type="button" data-focusable data-key="ep:' + number + '" data-episode="' + number + '">' + number + '</button>';
     }
     eps += '</div>';
   }
+
+  var producer = state.detailProducer;
+  var producerChip = producer && producer.name
+    ? '<button type="button" class="chip producer-chip" data-focusable data-key="producer" data-producer="1">制作方 · ' + esc(producer.name) + '</button>'
+    : '';
+
+  var related = sortRelatedTv(list(state.detailRelated));
+  var relatedHtml = related.length
+    ? '<section class="detail-related"><h2 class="eps-title">相关作品<span>同系列排前面</span></h2><div class="grid">'
+      + related.map(function (item, index) { return cardMarkup(item, index); }).join('') + '</div></section>'
+    : '';
 
   var resume = resumePlan();
   var playText = state.detailLoading ? '正在加载…' : (resume ? ('继续播放 · 第' + resume.episode + '集') : '立即播放');
@@ -1743,7 +1773,7 @@ function renderDetail() {
     + '<div class="detail-art"><img data-cover="' + esc(data.cover || '') + '" alt=""></div>'
     + '<div class="detail-info">'
     + '<h1>' + esc(data.title || '') + '</h1>'
-    + '<p class="meta">' + esc(data.score || '') + '　' + esc(data.episodeLabel || '') + '</p>'
+    + '<p class="meta">' + esc(data.score || '') + '　' + esc(data.episodeLabel || '') + producerChip + '</p>'
     + (resume && !resume.restart ? '<p class="resume-line">上次看到第 ' + resume.episode + ' 集 · ' + clock(state.detailProgress.position) + '</p>' : '')
     + (resume && resume.restart ? '<p class="resume-line">第 ' + state.detailProgress.episode + ' 集已看完，接着看第 ' + resume.episode + ' 集</p>' : '')
     + '<p class="desc">' + esc(data.description || '') + '</p>'
@@ -1752,10 +1782,85 @@ function renderDetail() {
     + (resume ? '<button type="button" class="btn icon-only" data-focusable data-key="restart" data-restart="1" aria-label="从头播放" title="从头播放">'
       + '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V1L7 6l5 5V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z"/></svg></button>' : '')
     + '<button type="button" class="btn" data-focusable data-key="bookmark" data-bookmark="1">' + (data.bookmarked ? '已收藏' : '收藏') + '</button>'
-    + '</div>' + eps + '</div></div>';
+    + groupChips
+    + '</div>' + eps + relatedHtml + '</div></div>';
   paintCovers(view);
   restoreFocus();
   syncBackdropFromFocus();
+}
+
+/* 详情页附加信息（制作方 / 相关作品）：接口慢，回来再补画一次，不挡主详情 */
+function loadDetailExtras(id) {
+  if (!id || state.detailExtrasId === id) return;
+  state.detailExtrasId = id;
+  state.detailProducer = null;
+  state.detailRelated = [];
+  api('producer', { id: id }).then(function (res) {
+    if (String((state.detail && state.detail.id) || '') !== id) return;
+    state.detailProducer = res && res.name ? res : null;
+    if (state.route === 'detail') renderDetail();
+  }).catch(function () { });
+  api('related', { id: id }).then(function (res) {
+    if (String((state.detail && state.detail.id) || '') !== id) return;
+    state.detailRelated = list(res && res.items);
+    if (state.route === 'detail') renderDetail();
+  }).catch(function () { });
+}
+
+/* 同一部剧的其他季排前面（按季号），其余同 IP / 平台推荐排后面 —— 和手机端同一套排序 */
+function sortRelatedTv(items) {
+  var head = [], tail = [];
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    if (!item) continue;
+    if ((Number(item.seasonIndex) || 0) > 0 || item.season) head.push(item);
+    else tail.push(item);
+  }
+  head.sort(function (a, b) { return (Number(a.seasonIndex) || 0) - (Number(b.seasonIndex) || 0); });
+  return head.concat(tail);
+}
+
+/* ---------------- 制作方作品（遥控器可点） ---------------- */
+function openProducerPanel() {
+  var producer = state.detailProducer;
+  if (!producer || !producer.name) return;
+  closeProducerPanel();
+  var layer = document.createElement('div');
+  layer.id = 'producer';
+  layer.className = 'producer-layer';
+  layer.innerHTML = '<section class="producer-panel" role="dialog" aria-modal="true">'
+    + '<h2>制作方 · ' + esc(producer.name) + '</h2>'
+    + '<p class="producer-status" data-producer-status>正在检索作品…</p>'
+    + '<div class="grid producer-grid" data-producer-grid></div>'
+    + '</section>';
+  document.body.appendChild(layer);
+  producerPanel = layer;
+  var grid = layer.querySelector('[data-producer-grid]');
+  var status = layer.querySelector('[data-producer-status]');
+  var current = String((state.detail && state.detail.id) || '');
+  api('producer-works', { name: producer.name, mediaId: producer.mediaId || '', page: 1 }).then(function (data) {
+    var items = list(data && data.items).filter(function (item) { return item && item.id && String(item.id) !== current; });
+    if (!items.length) {
+      /* 平台按剧名检索，制作方是署名 —— 搜不到就退回同系列，别给一块空白 */
+      items = sortRelatedTv(list(state.detailRelated)).filter(function (item) {
+        return (Number(item.seasonIndex) || 0) > 0 || item.season;
+      });
+      status.textContent = items.length ? '平台检索不到该制作方的其他作品，先看同系列' : '平台没有收录这位制作方的其他作品';
+    } else {
+      status.textContent = '已确认 ' + items.length + ' 部作品 · 以平台当前检索结果为准';
+    }
+    grid.innerHTML = items.map(function (item, index) { return cardMarkup(item, index); }).join('');
+    paintCovers(grid);
+    var first = grid.querySelector('[data-focusable]');
+    if (first) { state.focusKey = first.dataset.key; focusElement(first, false); }
+  }).catch(function () {
+    status.textContent = '作品暂时无法读取';
+  });
+}
+
+function closeProducerPanel() {
+  if (producerPanel && producerPanel.parentNode) producerPanel.parentNode.removeChild(producerPanel);
+  producerPanel = null;
 }
 
 function clock(ms) {
@@ -1796,6 +1901,9 @@ function openDetail(id) {
   state.detailProgress = null;
   state.detailLoading = true;
   state.epGroup = 0;
+  state.detailExtrasId = '';
+  state.detailProducer = null;
+  state.detailRelated = [];
   state.focusKey = 'play';
   stage.scrollTop = 0;
   /* 刚点进来的那张卡片，封面早就解密好了 —— 先铺上，别让背景空着等详情接口。
@@ -1973,6 +2081,7 @@ window.veyraTvKey = function (code) {
 };
 
 window.hgBack = function () {
+  if (producerPanel) { closeProducerPanel(); state.focusKey = 'producer'; restoreFocus(); return true; }
   if (otpPanel && !otpPanel.hidden) {
     closeOtp();
     if (accountPanel) { accountPanel.hidden = false; showAccountPage('privacy'); }
@@ -2016,6 +2125,9 @@ document.addEventListener('click', function (event) {
 
   /* 平板上没有返回键：点弹窗外的空白就收起来，不用再去找「关闭」。
      只认遮罩本身（点面板内的空白不算），避免刚打开就被关掉。 */
+  if (producerPanel && target.id === 'producer') { closeProducerPanel(); return; }
+  var producerBtn = target.closest('[data-producer]');
+  if (producerBtn) { openProducerPanel(); return; }
   if (accountPanel && !accountPanel.hidden && target.id === 'account') { closeAccount(); return; }
   if (themePanel && !themePanel.hidden && target.id === 'theme') { closeTheme(); return; }
   if (sourcePanel && !sourcePanel.hidden && target.id === 'source') { closeSourcePanel(); return; }
@@ -2130,7 +2242,7 @@ document.addEventListener('click', function (event) {
   if (target.closest('#login-retry')) { showLoginQr(); return; }
 
   var card = target.closest('[data-id]');
-  if (card && card.dataset.id) { openDetail(card.dataset.id); return; }
+  if (card && card.dataset.id) { if (producerPanel) closeProducerPanel(); openDetail(card.dataset.id); return; }
 });
 
 /* ---------------- 登录 ---------------- */

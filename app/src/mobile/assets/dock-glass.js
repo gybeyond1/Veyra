@@ -90,7 +90,9 @@
       contentFollowing = false;
       blob.style.transition = '';
       clearHover();
-      animate();
+      /* 不再立刻 animate() 回当前 active：落位时导航可能刚更新 active，
+         这一下回弹会和页面落位撞在一起，看着就是「闪一下」。 */
+      contentFollowing = false;
     }, 210);
   }
   window.DockGlass = { begin: contentBegin, progress: contentProgress, settle: contentSettle };

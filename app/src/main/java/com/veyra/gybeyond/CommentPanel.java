@@ -28,7 +28,6 @@ final class CommentPanel extends LinearLayout {
     private final String seriesId;
     private final String episodeId;
     private final int episodeNumber;
-    private final Runnable onClose;
     /** 电视端：三米外看，字号和行距都要放大，操作全交给遥控器。 */
     private final boolean tv;
 
@@ -42,25 +41,19 @@ final class CommentPanel extends LinearLayout {
     private final LinearLayout list;
     private final TextView status;
     private final TextView more;
-    private TextView closeButton;
+    private View firstRow;
     private String cursor = "";
     private boolean busy = false;
     private boolean finished = false;
     private int loaded = 0;
 
     CommentPanel(Context context, DualContentRepository repository, String seriesId,
-                 String episodeId, int episodeNumber, Runnable onClose) {
-        this(context, repository, seriesId, episodeId, episodeNumber, onClose, false);
-    }
-
-    CommentPanel(Context context, DualContentRepository repository, String seriesId,
-                 String episodeId, int episodeNumber, Runnable onClose, boolean tv) {
+                 String episodeId, int episodeNumber, boolean tv) {
         super(context);
         this.repository = repository;
         this.seriesId = seriesId;
         this.episodeId = episodeId;
         this.episodeNumber = episodeNumber;
-        this.onClose = onClose;
         this.tv = tv;
         setOrientation(VERTICAL);
         setPadding(dp(tv ? 32 : 16), dp(tv ? 28 : 14), dp(tv ? 32 : 16), dp(tv ? 22 : 12));
@@ -78,31 +71,8 @@ final class CommentPanel extends LinearLayout {
         title.setTypeface(null, android.graphics.Typeface.BOLD);
         title.setTextColor(Color.WHITE);
         header.addView(title, new LayoutParams(0, -2, 1));
-        closeButton = new TextView(context);
-        closeButton.setText("关闭");
-        closeButton.setTextSize(tv ? 18 : 13);
-        closeButton.setTextColor(0xFFB9BCC4);
-        closeButton.setGravity(Gravity.CENTER);
-        closeButton.setPadding(dp(tv ? 26 : 12), dp(tv ? 14 : 8), dp(tv ? 26 : 4), dp(tv ? 14 : 8));
-        if (tv) {
-            GradientDrawable closeBackground = new GradientDrawable();
-            closeBackground.setColor(0xFF262A31);
-            closeBackground.setCornerRadius(dp(12));
-            closeButton.setBackground(closeBackground);
-            closeButton.setTextColor(Color.WHITE);
-            /* 遥控器要有地方落脚：关闭键是进面板后的第一个焦点 */
-            closeButton.setFocusable(true);
-            closeButton.setFocusableInTouchMode(false);
-            closeButton.setOnFocusChangeListener((view, hasFocus) -> {
-                GradientDrawable face = new GradientDrawable();
-                face.setColor(hasFocus ? 0xFF3A4048 : 0xFF262A31);
-                face.setCornerRadius(dp(12));
-                if (hasFocus) face.setStroke(dp(2), 0xFFFFD45B);
-                view.setBackground(face);
-            });
-        }
-        closeButton.setOnClickListener(view -> { if (onClose != null) onClose.run(); });
-        header.addView(closeButton);
+        /* 不给关闭按钮：手机上点评论外面就收，电视上按返回就收。
+           三米外多一颗只能靠遥控器挪过去点的按钮，纯粹是负担。 */
         addView(header, new LayoutParams(-1, -2));
 
         status = new TextView(context);
@@ -148,9 +118,10 @@ final class CommentPanel extends LinearLayout {
         load();
     }
 
-    /** 打开面板时把遥控器焦点放到关闭键上，方向键再从这儿往下走。 */
+    /** 打开面板时把遥控器焦点放到第一条评论上；一条都没有就落到「加载更多/重试」。 */
     void focusDefault() {
-        if (closeButton != null) closeButton.requestFocus();
+        if (firstRow != null && firstRow.isAttachedToWindow()) { firstRow.requestFocus(); return; }
+        if (more != null && more.getVisibility() == VISIBLE) more.requestFocus();
     }
 
     void destroy() {
@@ -252,9 +223,15 @@ final class CommentPanel extends LinearLayout {
             row.addView(digg, new LayoutParams(-1, -2));
         }
 
+        if (tv && firstRow == null) firstRow = row;
         LayoutParams params = new LayoutParams(-1, -2);
         params.bottomMargin = dp(tv ? 14 : 8);
         list.addView(row, params);
+        if (tv && firstRow == row) {
+            /* 面板先开、评论后到：数据回来时把焦点从「正在读取」挪到第一条评论上 */
+            View current = getRootView().findFocus();
+            if (current == null || current == more) row.post(row::requestFocus);
+        }
     }
 
     private static String relative(long seconds) {
