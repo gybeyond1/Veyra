@@ -177,9 +177,30 @@ final class HongguoRepository {
             new java.util.concurrent.atomic.AtomicInteger();
     private static volatile long directHoldUntil = 0L;
     private static final long DIRECT_COOLDOWN_MS = 5 * 60 * 1000L;
-    private static final long DIRECT_TIMEOUT_MS = 6000L;
+    private static final long DIRECT_TIMEOUT_MS = 4000L;
+    /* 新链路（匿名注册 + 551 签名）单次预算：注册 ~0.3s、取址 ~0.5s，
+       两条退路加起来也不会超过这个数，超了就是网络有问题，直接降级。 */
+    private static final long FRESH_TIMEOUT_MS = 9000L;
 
     private StreamInfo resolveStream(String id, String vid) throws Exception {
+        /*
+         * 第一道：匿名注册 + 551 Argus/Ladon 签名（HongguoDirect）。
+         * 红果在 2026-10-27 之后把播放取址改成「注册过的设备身份 + 551 签名」，
+         * 老的 8402 签名和现编的 device_id 一律回 HTTP 200 + 空正文 ——
+         * 这就是「点开一直转、最后报没找到地址」的直接原因。
+         */
+        java.util.concurrent.Future<StreamInfo> fresh =
+                RESOLVE_POOL.submit(() -> HongguoDirect.fetch(vid));
+        try {
+            StreamInfo freshInfo = fresh.get(FRESH_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+            if (freshInfo != null && freshInfo.getUrl() != null && freshInfo.getUrl().startsWith("http")) {
+                DIRECT_MISSES.set(0);
+                return freshInfo;
+            }
+        } catch (Exception error) {
+            fresh.cancel(true);
+            android.util.Log.w("Veyra", "新链路取址失败: " + error.getMessage());
+        }
         if (System.currentTimeMillis() >= directHoldUntil) {
             java.util.concurrent.Callable<StreamInfo> call =
                     () -> com.hongguotv.core.HongguoSigner.INSTANCE.resolve(vid);
