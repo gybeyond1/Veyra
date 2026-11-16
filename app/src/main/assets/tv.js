@@ -711,12 +711,19 @@ function exitToTopbar(current) {
     if (Math.abs(c.offsetTop - card.offsetTop) > 4) continue;
     if (c.getBoundingClientRect().left < cardBox.left - 4) col++;
   }
-  var pool;
-  if (col <= 1 && chips.length) pool = chips;                       /* 左边两列 → 分类胶囊 */
-  else if (col >= 5 && tools.length) pool = tools;                  /* 最右一列 → 搜索/最近/设置 */
-  else { pool = []; for (var k = 0; k < chips.length; k++) pool.push(chips[k]);
-         for (var k2 = 0; k2 < tools.length; k2++) pool.push(tools[k2]); }
-  if (!pool.length) return null;
+  /* 一行 6 张，按列硬性分派，不做「全墙就近」：
+     前两列 → 分类胶囊，最后一列 → 搜索/最近/设置，中间三列 → 不出去，正常翻上一排。
+     就近那一版是错的：屏幕上第一排的中间几列，几何上离胶囊也不远，于是一按上就
+     被送到顶栏；翻到第三页第四页时想看上一页，按上却回不到上一页。
+     中间三列只有在真的到了整面墙最顶上（上面已经没有任何一排）时，才落到顶栏上。 */
+  var pool = null;
+  if (col <= 1 && chips.length) pool = chips;
+  else if (col >= 5 && tools.length) pool = tools;
+  else if (stage.scrollTop <= 1) {
+    /* 到了整面墙最顶上，中间列上面确实什么都没有了，才落到胶囊上 */
+    pool = chips;
+  }
+  if (!pool || !pool.length) return null;
   var cx = (cardBox.left + cardBox.right) / 2;
   var best = null, bestD = Infinity;
   for (var m = 0; m < pool.length; m++) {
@@ -1055,7 +1062,16 @@ function move(direction) {
   var best = pickNearest(current, scope, direction, true);
   /* 上下允许放宽：不同区块宽度不一致时（分类条、按钮、剧集格），
      严格对齐会把人卡死，所以放宽再找一次。左右不放宽 —— 放宽就会斜着跳。 */
-  if (!best && (direction === 'up' || direction === 'down')) best = pickNearest(current, all, direction, false);
+  if (!best && (direction === 'up' || direction === 'down')) {
+    /* 放宽时同样不许往顶栏跑：上键能不能到顶栏只由 exitToTopbar 按列决定，
+       否则中间三列会从这条后门上去，把「上一排」跳过去。 */
+    var wide = all;
+    if (direction === 'up') {
+      wide = [];
+      for (var w = 0; w < all.length; w++) if (!inTopbar(all[w])) wide.push(all[w]);
+    }
+    best = pickNearest(current, wide, direction, false);
+  }
   if (best) { focusElement(best, true, direction); return; }
   if (onRail) return;
   /* 浮层开着时到边就停，别让按键穿透到背后的内容 */

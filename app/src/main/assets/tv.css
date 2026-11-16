@@ -366,16 +366,17 @@ body.page-windowed #stage{overflow:hidden}
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
   transition:transform .16s cubic-bezier(.22,.61,.36,1);
 }
-/* 焦点：整张海报放大 + 四边完整描边。
-   描边比上一版细一点、圆角放大到 1.1rem，跟海报本身同一个轮廓，不会出现
-   「圆角框套一个直角图」的割裂感。放大后海报下沿会多吃掉约 1.7rem，
-   剧名跟着下移 1.1rem，才不会贴着框底。 */
+/* 焦点：只靠「放大 + 投影」表达，不画描边框。
+   海报本身就是一块实色矩形，再套一圈高亮描边，等于在图上又画了一个框 ——
+   电视上离三米看，那圈框比海报还抢眼。放大 1.12 已经足够把焦点从一整排里
+   挑出来，投影负责把它从背景上托起来。
+   放大后海报下沿多吃掉约 2.6rem，剧名跟着下移 2.6rem，才不会贴着图底。 */
 .card.is-focused{z-index:8}
 .card.is-focused .art{
-  transform:scale(1.08);
-  box-shadow:0 0 0 .34rem var(--focus),0 .9rem 2.4rem rgba(0,0,0,.42);
+  transform:scale(1.12);
+  box-shadow:0 1.1rem 3rem rgba(0,0,0,.55);
 }
-.card.is-focused .name{transform:translateY(1.3rem)}
+.card.is-focused .name{transform:translateY(2.6rem)}
 /* 标题超长：选中后跑马灯。
    外层 .name 负责裁剪；内层 .mq-track 用 inline-block（电视端老内核也稳），
    里面是三段：文本 / 固定宽度的空档 / 文本。空档用真实 span 占位，
