@@ -492,14 +492,22 @@ final class HongguoV5 {
         return out;
     }
 
+    /**
+     * ByteArrayOutputStream.write(byte[]) 在 API 33 才随 Java 11 提供，
+     * 电视盒子多为 Android 9~11，直接调会在运行期抛 NoSuchMethodError。
+     */
+    private static void emit(ByteArrayOutputStream out, byte[] data) {
+        out.write(data, 0, data.length);
+    }
+
     // ---------------- protobuf 编码 ----------------
 
     private static final class Proto {
         private final ByteArrayOutputStream out = new ByteArrayOutputStream();
 
         Proto sint(int tag, long value) {
-            out.writeBytes(varint((long) tag << 3));
-            out.writeBytes(varint(value < 0 ? -value * 2 - 1 : value * 2));
+            emit(out, varint((long) tag << 3));
+            emit(out, varint(value < 0 ? -value * 2 - 1 : value * 2));
             return this;
         }
 
@@ -510,9 +518,9 @@ final class HongguoV5 {
 
         Proto bytes(int tag, byte[] value) {
             if (value == null || value.length == 0) return this;
-            out.writeBytes(varint(((long) tag << 3) | 2));
-            out.writeBytes(varint(value.length));
-            out.writeBytes(value);
+            emit(out, varint(((long) tag << 3) | 2));
+            emit(out, varint(value.length));
+            emit(out, value);
             return this;
         }
 
@@ -568,7 +576,7 @@ final class HongguoV5 {
         for (int i = text.length; i < data.length; i++) data[i] = (byte) padding;
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();
-        out.writeBytes(le32(random));
+        emit(out, le32(random));
         for (int at = 0; at < data.length; at += 16) {
             long a = i64le(data, at);
             long b = i64le(data, at + 8);
@@ -576,8 +584,8 @@ final class HongguoV5 {
                 b = table.get(i) ^ (a + Long.rotateRight(b, 8));
                 a = b ^ Long.rotateRight(a, 61);
             }
-            out.writeBytes(le64(a));
-            out.writeBytes(le64(b));
+            emit(out, le64(a));
+            emit(out, le64(b));
         }
         return Base64.getEncoder().encodeToString(out.toByteArray());
     }
