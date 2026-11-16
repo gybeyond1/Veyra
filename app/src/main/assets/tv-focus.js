@@ -14,7 +14,7 @@
   window.__veyraTvFocusReady = true;
 
   var KEY_UP = 19, KEY_DOWN = 20, KEY_LEFT = 21, KEY_RIGHT = 22, KEY_CENTER = 23, KEY_ENTER = 66, KEY_NUMPAD_ENTER = 160;
-  var OVERLAYS = ['#detail-overlay', '#download-overlay', '#auth-overlay', '#unlock-overlay', '#confirm-overlay', '#update-overlay', '#age-gate', '#relay-overlay'];
+  var OVERLAYS = ['#detail-overlay', '#download-overlay', '#auth-overlay', '#unlock-overlay', '#confirm-overlay', '#update-overlay', '#age-gate', '#relay-overlay', '.producer-overlay'];
   var FOCUSABLE = 'button, [role="button"], a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
   var current = null;

@@ -23,11 +23,34 @@ final class DeviceProfile {
         return isTablet(context) ? TABLET : PHONE;
     }
 
-    /** 电视盒子 / Android TV：有 Leanback 或电视硬件特性。 */
+    /**
+     * 电视 / 电视盒子。
+     *
+     * 三条判据，命中一条就算：
+     * 1. Leanback / Television 硬件特性 —— 标准 Android TV；
+     * 2. {@code uiMode} 报的是电视 —— 一部分国产电视系统把特性表删了，但 uiMode 还是对的；
+     * 3. TV 独立包 + 没有触摸屏 —— 海信、创维、TCL 那批机器经常什么特性都不声明，
+     *    只靠 1、2 会把它当手机，整台电视就渲染成手机那套小字号界面。
+     *
+     * 第 3 条要求「无触摸屏」，所以 TV 包装在有触摸屏的平板/手机上仍按原来的形态走。
+     */
     static boolean isTv(Context context) {
         PackageManager pm = context.getPackageManager();
-        return pm.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
-                || pm.hasSystemFeature(PackageManager.FEATURE_TELEVISION);
+        if (pm.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+                || pm.hasSystemFeature(PackageManager.FEATURE_TELEVISION)) return true;
+        Configuration config = context.getResources().getConfiguration();
+        int mode = config.uiMode & Configuration.UI_MODE_TYPE_MASK;
+        if (mode == Configuration.UI_MODE_TYPE_TELEVISION) return true;
+        return litePackage(context) && !pm.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN);
+    }
+
+    /** TV 独立包（flavor tv 里 R.bool.veyra_lite 为 true），与屏幕形态无关。 */
+    private static boolean litePackage(Context context) {
+        try {
+            return context.getResources().getBoolean(R.bool.veyra_lite);
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     /**
@@ -42,9 +65,7 @@ final class DeviceProfile {
      * 投屏发现、指令轮询间隔、接不接投屏指令都按这个判。
      */
     static boolean isTvRole(Context context) {
-        try {
-            if (context.getResources().getBoolean(R.bool.veyra_lite)) return true;
-        } catch (Exception ignored) { }
+        if (litePackage(context)) return true;
         return isTv(context);
     }
 

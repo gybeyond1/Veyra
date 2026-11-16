@@ -336,3 +336,55 @@ html[data-device="tv"] #dock button { height: 50px; }
   html:not([data-device="tv"]) .hero-dots { display: none !important; }
   html:not([data-device="tv"]) .home-tag-scroll { padding-top: 14px; }
 }
+
+/* ---------------- 详情页附加块（相关作品 / 制作方 / 热评）的大屏尺寸 ----------------
+ *
+ * 这三块是后加的，手机那套 108px 小卡在电视上只有巴掌大：字看不清，
+ * 遥控焦点框也比卡片还宽。这里统一按电视重排一遍。
+ *
+ * 电视 WebView 只有 Chrome 61 那一档（见 tv-lite.css 的兼容说明）：
+ * 不用 min()/clamp()，也不用 flex gap —— 全部换成固定宽度和 margin。
+ */
+html[data-device="tv"] .detail-extras { margin-top: 14px; max-width: 1320px; }
+html[data-device="tv"] .detail-producer {
+  font-size: 17px;
+  padding: 14px 20px;
+  margin: 18px 0 6px;
+}
+html[data-device="tv"] .detail-producer svg { width: 18px; height: 18px; margin-left: 12px; }
+html[data-device="tv"] .detail-section { margin-top: 30px; }
+html[data-device="tv"] .detail-section h2 { font-size: 25px; margin: 0 0 16px; }
+
+html[data-device="tv"] .detail-related { padding: 4px 4px 10px; gap: 0; }
+html[data-device="tv"] .detail-related-card {
+  flex: 0 0 160px;
+  width: 160px;
+  margin-right: 18px;
+}
+html[data-device="tv"] .detail-related-card .poster { height: 213px; }
+html[data-device="tv"] .detail-related-card .film-title { font-size: 15px; line-height: 1.35; }
+html[data-device="tv"] .detail-related-card .film-info { font-size: 13px; }
+
+html[data-device="tv"] .detail-comments { gap: 0; }
+html[data-device="tv"] .detail-comment { padding: 18px 22px; margin-bottom: 16px; }
+html[data-device="tv"] .detail-comment header { font-size: 14px; margin-bottom: 9px; }
+html[data-device="tv"] .detail-comment header strong { font-size: 17px; }
+html[data-device="tv"] .detail-comment p { font-size: 17px; line-height: 1.6; }
+
+/* 制作方弹窗：视口宽度不固定，固定宽 + max-width 兜住，不用 min() */
+html[data-device="tv"] .producer-panel {
+  gap: 0;
+  width: 880px;
+  max-width: 86vw;
+  max-height: 84vh;
+  padding: 26px;
+}
+html[data-device="tv"] .producer-panel h2 { font-size: 26px; margin-right: 16px; }
+html[data-device="tv"] .producer-close { font-size: 17px; padding: 12px 22px; }
+html[data-device="tv"] .producer-status { font-size: 16px; margin: 10px 0; }
+html[data-device="tv"] .producer-list { gap: 0; }
+html[data-device="tv"] .producer-item { padding: 12px; margin-bottom: 12px; }
+html[data-device="tv"] .producer-poster { width: 76px; height: 101px; margin-right: 16px; }
+html[data-device="tv"] .producer-copy strong { font-size: 18px; }
+html[data-device="tv"] .producer-copy em { font-size: 14px; margin-top: 4px; }
+html[data-device="tv"] .producer-more { font-size: 18px; padding: 16px; margin-top: 4px; }

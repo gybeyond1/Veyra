@@ -180,6 +180,7 @@ public final class PlayerActivity extends Activity {
     private String danmakuArea = "top";
     private int danmakuAlpha = 85;
     private boolean danmakuMerge = true;
+    private int danmakuChipSeq;
     private long danmakuCursor;
     private int danmakuToken;
     private boolean danmakuBusy;
@@ -704,11 +705,11 @@ public final class PlayerActivity extends Activity {
             back.setOnClickListener(v -> handlePlayerBack());
             top.addView(back, new LinearLayout.LayoutParams(dp(38), dp(38)));
         }
-        title = label("", 16, Color.WHITE);
+        title = label("", tvMode ? 21 : 16, Color.WHITE);
         title.setTypeface(null, Typeface.BOLD);
         title.setSingleLine(true);
         title.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, dp(42), 1);
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, dp(tvMode ? 52 : 42), 1);
         titleParams.leftMargin = dp(12);
         top.addView(title, titleParams);
         if (!tvMode) {
@@ -734,7 +735,7 @@ public final class PlayerActivity extends Activity {
             clockParams.leftMargin = dp(16);
             top.addView(tvClock, clockParams);
         }
-        FrameLayout.LayoutParams topParams = new FrameLayout.LayoutParams(-1, dp(70), Gravity.TOP);
+        FrameLayout.LayoutParams topParams = new FrameLayout.LayoutParams(-1, dp(tvMode ? 86 : 70), Gravity.TOP);
         topParams.topMargin = dp(24);
         root.addView(top, topParams);
 
@@ -757,7 +758,7 @@ public final class PlayerActivity extends Activity {
         });
         int centerSize = tvMode ? 116 : 62;
         root.addView(centerToggle, new FrameLayout.LayoutParams(dp(centerSize), dp(centerSize), Gravity.CENTER));
-        message = label("", 14, Color.WHITE);
+        message = label("", tvMode ? 18 : 14, Color.WHITE);
         message.setGravity(Gravity.CENTER);
         message.setBackground(background(0xCC16191B, 10));
         message.setPadding(dp(16), dp(10), dp(16), dp(10));
@@ -1026,7 +1027,8 @@ public final class PlayerActivity extends Activity {
 
     private void applyDanmakuSettings() {
         if (danmakuView == null) return;
-        danmakuView.setFontSize(danmakuSize);
+        /* 电视在客厅看，同一档字号要再放大一截，否则三米外就是一排糊字 */
+        danmakuView.setFontSize(tvMode ? Math.round(danmakuSize * 1.45f) : danmakuSize);
         danmakuView.setLanes(danmakuLanes);
         danmakuView.setArea(danmakuArea);
         danmakuView.setAlphaPercent(danmakuAlpha);
@@ -1137,24 +1139,40 @@ public final class PlayerActivity extends Activity {
         });
     }
 
+    /* 弹幕面板有两套尺寸：手机是贴底的小条，电视是三米外能看清的居中大板。
+       电视那套每个选项都是真的可聚焦控件，遥控器左右走、确认键切换。 */
     private LinearLayout danmakuRow(String name) {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(0, dp(3), 0, dp(3));
-        TextView heading = label(name, 11, 0xFFB9BCC4);
-        row.addView(heading, new LinearLayout.LayoutParams(dp(44), dp(32)));
+        row.setPadding(0, dp(tvMode ? 9 : 3), 0, dp(tvMode ? 9 : 3));
+        TextView heading = label(name, tvMode ? 18 : 11, 0xFFB9BCC4);
+        row.addView(heading, new LinearLayout.LayoutParams(dp(tvMode ? 104 : 44), dp(tvMode ? 58 : 32)));
         return row;
     }
 
     private void danmakuChip(LinearLayout row, String text, boolean active, Runnable action) {
-        TextView chip = label(text, 12, active ? Color.BLACK : Color.WHITE);
+        TextView chip = label(text, tvMode ? 18 : 12, active ? Color.BLACK : Color.WHITE);
         chip.setGravity(Gravity.CENTER);
-        chip.setPadding(dp(10), 0, dp(10), 0);
-        chip.setBackground(background(active ? YELLOW : 0xFF3B4042, 8));
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-2, dp(30));
-        params.rightMargin = dp(6);
+        chip.setPadding(dp(tvMode ? 24 : 10), 0, dp(tvMode ? 24 : 10), 0);
+        chip.setBackground(background(active ? YELLOW : 0xFF3B4042, tvMode ? 12 : 8));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-2, dp(tvMode ? 58 : 30));
+        params.rightMargin = dp(tvMode ? 10 : 6);
         row.addView(chip, params);
         chip.setClickable(true);
+        /* 重建面板后靠这个 tag 把焦点放回原处 */
+        chip.setTag("dchip:" + (++danmakuChipSeq));
+        if (tvMode) {
+            /* 遥控器只能落到 focusable 的视图上。选中项描金边 + 轻微放大，
+               和播放控件条的焦点反馈保持一致。 */
+            chip.setFocusable(true);
+            chip.setFocusableInTouchMode(false);
+            chip.setOnFocusChangeListener((view, hasFocus) -> {
+                view.setBackground(background(hasFocus ? (active ? 0xFFFFE49A : 0xFF5A616B)
+                        : (active ? YELLOW : 0xFF3B4042), 12));
+                view.setScaleX(hasFocus ? 1.06f : 1f);
+                view.setScaleY(hasFocus ? 1.06f : 1f);
+            });
+        }
         chip.setOnClickListener(v -> {
             action.run();
             saveDanmakuSettings();
@@ -1176,28 +1194,55 @@ public final class PlayerActivity extends Activity {
     }
 
     private void renderDanmakuPanel() {
-        if (danmakuPanel == null) {
+        /** 选中项会重建整个面板，先把焦点记下来，重建后放回同一个选项上。 */
+        String keepTag = null;
+        if (danmakuPanel != null) {
+            View focused = danmakuPanel.findFocus();
+            if (focused != null && focused.getTag() instanceof String) keepTag = (String) focused.getTag();
+            root.removeView(danmakuPanel);
+            danmakuPanel = null;
+        } else {
             danmakuScrim = new View(this);
             danmakuScrim.setOnClickListener(v -> { closeDanmakuPanel(); revealControls(); });
             root.addView(danmakuScrim, new FrameLayout.LayoutParams(-1, -1));
-        } else {
-            root.removeView(danmakuPanel);
-            danmakuPanel = null;
         }
+        danmakuChipSeq = 0;
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(12), dp(10), dp(12), dp(10));
-        GradientDrawable shell = background(0xF326292A, 13);
-        shell.setStroke(dp(1), 0xFF796D53);
+        panel.setPadding(dp(tvMode ? 30 : 12), dp(tvMode ? 26 : 10),
+                dp(tvMode ? 30 : 12), dp(tvMode ? 22 : 10));
+        GradientDrawable shell = background(0xF326292A, tvMode ? 20 : 13);
+        shell.setStroke(dp(tvMode ? 2 : 1), 0xFF796D53);
         panel.setBackground(shell);
         panel.setElevation(dp(18));
 
-        LinearLayout head = danmakuRow("弹幕");
-        TextView badge = label(danmakuOn ? "开" : "关", 12, danmakuOn ? Color.BLACK : Color.WHITE);
+        if (tvMode) {
+            /* 电视上先给个标题，不然一屏色块看不出这是干什么的 */
+            TextView heading = label("弹幕设置", 26, Color.WHITE);
+            heading.setTypeface(null, Typeface.BOLD);
+            LinearLayout.LayoutParams headingParams = new LinearLayout.LayoutParams(-1, -2);
+            headingParams.bottomMargin = dp(10);
+            panel.addView(heading, headingParams);
+        }
+
+        LinearLayout head = danmakuRow(tvMode ? "弹幕显示" : "弹幕");
+        TextView badge = label(danmakuOn ? (tvMode ? "已开启" : "开") : (tvMode ? "已关闭" : "关"),
+                tvMode ? 18 : 12, danmakuOn ? Color.BLACK : Color.WHITE);
         badge.setGravity(Gravity.CENTER);
-        badge.setPadding(dp(14), 0, dp(14), 0);
-        badge.setBackground(background(danmakuOn ? YELLOW : 0xFF3B4042, 8));
+        badge.setPadding(dp(tvMode ? 26 : 14), 0, dp(tvMode ? 26 : 14), 0);
+        badge.setBackground(background(danmakuOn ? YELLOW : 0xFF3B4042, tvMode ? 12 : 8));
         badge.setClickable(true);
+        badge.setTag("dchip:" + (++danmakuChipSeq));
+        if (tvMode) {
+            badge.setFocusable(true);
+            badge.setFocusableInTouchMode(false);
+            badge.setOnFocusChangeListener((view, hasFocus) -> {
+                view.setBackground(background(hasFocus ? 0xFFFFE49A : (danmakuOn ? YELLOW : 0xFF3B4042),
+                        tvMode ? 12 : 8));
+                view.setScaleX(hasFocus ? 1.06f : 1f);
+                view.setScaleY(hasFocus ? 1.06f : 1f);
+            });
+        }
         badge.setOnClickListener(v -> {
             danmakuOn = !danmakuOn;
             saveDanmakuSettings();
@@ -1205,7 +1250,7 @@ public final class PlayerActivity extends Activity {
             if (danmakuOn) maybeFetchDanmaku(player == null ? 0 : player.getCurrentPosition());
             renderDanmakuPanel();
         });
-        head.addView(badge, new LinearLayout.LayoutParams(-2, dp(30)));
+        head.addView(badge, new LinearLayout.LayoutParams(-2, dp(tvMode ? 58 : 30)));
         panel.addView(head, new LinearLayout.LayoutParams(-1, -2));
 
         LinearLayout sizeRow = danmakuRow("字号");
@@ -1246,10 +1291,30 @@ public final class PlayerActivity extends Activity {
         danmakuChip(mergeRow, "不合并", !danmakuMerge, () -> danmakuMerge = false);
         panel.addView(mergeRow, new LinearLayout.LayoutParams(-1, -2));
 
+        if (tvMode) {
+            TextView hint = label("方向键选择 · 确认键切换 · 返回键收起", 14, 0xFF8D9099);
+            hint.setPadding(0, dp(12), 0, 0);
+            panel.addView(hint, new LinearLayout.LayoutParams(-1, -2));
+        }
+
         danmakuPanel = panel;
-        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
-        params.bottomMargin = navigationInsetBottom + dp(96);
+        FrameLayout.LayoutParams params;
+        if (tvMode) {
+            params = new FrameLayout.LayoutParams(dp(760), -2, Gravity.CENTER);
+        } else {
+            params = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+            params.bottomMargin = navigationInsetBottom + dp(96);
+        }
         root.addView(panel, params);
+
+        if (tvMode) {
+            final String restore = keepTag;
+            panel.post(() -> {
+                View target = restore == null ? null : panel.findViewWithTag(restore);
+                if (target == null) target = panel.findViewWithTag("dchip:1");
+                if (target != null) target.requestFocus();
+            });
+        }
     }
 
     private void buildCommentHost() {
@@ -1273,8 +1338,24 @@ public final class PlayerActivity extends Activity {
         String episodeId = currentEpisodeId();
         if (episodeId.isEmpty()) { toast("这一集没有评论"); return; }
         handler.removeCallbacks(hideControls);
-        CommentPanel panel = new CommentPanel(this, repository, currentId, episodeId, currentEpisode, this::closeComments);
+        CommentPanel panel = new CommentPanel(this, repository, currentId, episodeId, currentEpisode,
+                () -> { closeComments(); if (tvMode) showTvBar(); }, tvMode);
         int screen = getResources().getDisplayMetrics().widthPixels;
+        if (tvMode) {
+            /* 电视不看侧边抽屉：居中的大板，左右留白，上下不压系统边。 */
+            int width = Math.min(dp(960), Math.round(screen * 0.74f));
+            FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(width, -1, Gravity.CENTER);
+            params.topMargin = dp(44);
+            params.bottomMargin = dp(44);
+            commentHost.addView(panel, params);
+            commentHost.setVisibility(View.VISIBLE);
+            commentHost.setClickable(true);
+            commentPanel = panel;
+            panel.setAlpha(0f);
+            panel.animate().alpha(1f).setDuration(160).start();
+            panel.post(panel::focusDefault);
+            return;
+        }
         int width = Math.min(dp(340), Math.round(screen * 0.86f));
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(width, -1, Gravity.RIGHT);
         params.topMargin = dp(72);
@@ -1294,12 +1375,18 @@ public final class PlayerActivity extends Activity {
             if (commentHost != null) commentHost.setVisibility(View.GONE);
             return;
         }
-        int width = Math.max(dp(200), panel.getWidth());
-        panel.animate().translationX(width).setDuration(160).withEndAction(() -> {
+        Runnable teardown = () -> {
             panel.destroy();
             if (commentHost != null) commentHost.removeView(panel);
             if (commentPanel == null && commentHost != null) commentHost.setVisibility(View.GONE);
-        }).start();
+        };
+        if (tvMode) {
+            /* 居中面板横向滑出会甩到屏幕外，电视上直接淡出 */
+            panel.animate().alpha(0f).setDuration(140).withEndAction(teardown).start();
+            return;
+        }
+        int width = Math.max(dp(200), panel.getWidth());
+        panel.animate().translationX(width).setDuration(160).withEndAction(teardown).start();
     }
 
     private void buildSeekPreview() {
@@ -2780,9 +2867,12 @@ public final class PlayerActivity extends Activity {
                 paintTvBar();
                 break;
             case 6:
+                /* 面板开在控件条上面会打架：先收条，再弹板 */
+                hideTvBar();
                 showDanmakuPanel();
                 break;
             case 7:
+                hideTvBar();
                 toggleComments();
                 break;
             default:
@@ -3069,10 +3159,16 @@ public final class PlayerActivity extends Activity {
                于是弹窗关不掉、人也退不出去。先收面板，再收控件条，都没有才走退出确认。 */
             if (code == android.view.KeyEvent.KEYCODE_BACK
                     || code == android.view.KeyEvent.KEYCODE_ESCAPE) {
+                if (danmakuPanel != null) { closeDanmakuPanel(); showTvBar(); return true; }
+                if (commentPanel != null) { closeComments(); showTvBar(); return true; }
                 if (tvEpPanel != null) { closeTvEpisodes(); showTvBar(); return true; }
                 if (tvBarShown) { hideTvBar(); return true; }
                 return super.dispatchKeyEvent(event);
             }
+            /* 弹幕设置 / 评论面板开着时，方向键和确认键交给系统做焦点导航。
+               不交出去的话会被下面的「暂停时方向键弹控件条」和快进快退吃掉，
+               面板里那些选项遥控器永远点不到。 */
+            if (danmakuPanel != null || commentPanel != null) return super.dispatchKeyEvent(event);
             /* 选集面板 / 暂停控件条优先吃按键，别让方向键漏到下面的快进、切集 */
             if (tvEpPanel != null) return tvEpKey(code);
             if (tvBarShown) return tvBarKey(code);

@@ -29,6 +29,8 @@ final class CommentPanel extends LinearLayout {
     private final String episodeId;
     private final int episodeNumber;
     private final Runnable onClose;
+    /** 电视端：三米外看，字号和行距都要放大，操作全交给遥控器。 */
+    private final boolean tv;
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService worker = Executors.newSingleThreadExecutor(runnable -> {
@@ -40,6 +42,7 @@ final class CommentPanel extends LinearLayout {
     private final LinearLayout list;
     private final TextView status;
     private final TextView more;
+    private TextView closeButton;
     private String cursor = "";
     private boolean busy = false;
     private boolean finished = false;
@@ -47,40 +50,65 @@ final class CommentPanel extends LinearLayout {
 
     CommentPanel(Context context, DualContentRepository repository, String seriesId,
                  String episodeId, int episodeNumber, Runnable onClose) {
+        this(context, repository, seriesId, episodeId, episodeNumber, onClose, false);
+    }
+
+    CommentPanel(Context context, DualContentRepository repository, String seriesId,
+                 String episodeId, int episodeNumber, Runnable onClose, boolean tv) {
         super(context);
         this.repository = repository;
         this.seriesId = seriesId;
         this.episodeId = episodeId;
         this.episodeNumber = episodeNumber;
         this.onClose = onClose;
+        this.tv = tv;
         setOrientation(VERTICAL);
-        setPadding(dp(16), dp(14), dp(16), dp(12));
+        setPadding(dp(tv ? 32 : 16), dp(tv ? 28 : 14), dp(tv ? 32 : 16), dp(tv ? 22 : 12));
         GradientDrawable background = new GradientDrawable();
-        background.setColor(0xF2141519);
-        background.setCornerRadius(dp(18));
+        background.setColor(tv ? 0xFF121316 : 0xF2141519);
+        background.setCornerRadius(dp(tv ? 22 : 18));
+        if (tv) background.setStroke(dp(2), 0xFF796D53);
         setBackground(background);
 
         LinearLayout header = new LinearLayout(context);
         header.setGravity(Gravity.CENTER_VERTICAL);
         TextView title = new TextView(context);
         title.setText("评论 · 第 " + episodeNumber + " 集");
-        title.setTextSize(17);
+        title.setTextSize(tv ? 26 : 17);
         title.setTypeface(null, android.graphics.Typeface.BOLD);
         title.setTextColor(Color.WHITE);
         header.addView(title, new LayoutParams(0, -2, 1));
-        TextView close = new TextView(context);
-        close.setText("关闭");
-        close.setTextSize(13);
-        close.setTextColor(0xFFB9BCC4);
-        close.setPadding(dp(12), dp(8), dp(4), dp(8));
-        close.setOnClickListener(view -> { if (onClose != null) onClose.run(); });
-        header.addView(close);
+        closeButton = new TextView(context);
+        closeButton.setText("关闭");
+        closeButton.setTextSize(tv ? 18 : 13);
+        closeButton.setTextColor(0xFFB9BCC4);
+        closeButton.setGravity(Gravity.CENTER);
+        closeButton.setPadding(dp(tv ? 26 : 12), dp(tv ? 14 : 8), dp(tv ? 26 : 4), dp(tv ? 14 : 8));
+        if (tv) {
+            GradientDrawable closeBackground = new GradientDrawable();
+            closeBackground.setColor(0xFF262A31);
+            closeBackground.setCornerRadius(dp(12));
+            closeButton.setBackground(closeBackground);
+            closeButton.setTextColor(Color.WHITE);
+            /* 遥控器要有地方落脚：关闭键是进面板后的第一个焦点 */
+            closeButton.setFocusable(true);
+            closeButton.setFocusableInTouchMode(false);
+            closeButton.setOnFocusChangeListener((view, hasFocus) -> {
+                GradientDrawable face = new GradientDrawable();
+                face.setColor(hasFocus ? 0xFF3A4048 : 0xFF262A31);
+                face.setCornerRadius(dp(12));
+                if (hasFocus) face.setStroke(dp(2), 0xFFFFD45B);
+                view.setBackground(face);
+            });
+        }
+        closeButton.setOnClickListener(view -> { if (onClose != null) onClose.run(); });
+        header.addView(closeButton);
         addView(header, new LayoutParams(-1, -2));
 
         status = new TextView(context);
-        status.setTextSize(12);
+        status.setTextSize(tv ? 16 : 12);
         status.setTextColor(0xFF9AA0AA);
-        status.setPadding(0, dp(6), 0, dp(8));
+        status.setPadding(0, dp(tv ? 12 : 6), 0, dp(tv ? 14 : 8));
         status.setText("正在读取…");
         addView(status, new LayoutParams(-1, -2));
 
@@ -88,24 +116,41 @@ final class CommentPanel extends LinearLayout {
         list.setOrientation(VERTICAL);
         ScrollView scroll = new ScrollView(context);
         scroll.setVerticalScrollBarEnabled(false);
+        scroll.setClipToPadding(false);
         scroll.addView(list, new LayoutParams(-1, -2));
         addView(scroll, new LayoutParams(-1, 0, 1f));
 
         more = new TextView(context);
-        more.setTextSize(13);
+        more.setTextSize(tv ? 19 : 13);
         more.setGravity(Gravity.CENTER);
         more.setTextColor(Color.WHITE);
         GradientDrawable button = new GradientDrawable();
         button.setColor(0xFF262A31);
-        button.setCornerRadius(dp(12));
+        button.setCornerRadius(dp(tv ? 16 : 12));
         more.setBackground(button);
-        more.setPadding(dp(12), dp(10), dp(12), dp(10));
+        more.setPadding(dp(12), dp(tv ? 18 : 10), dp(12), dp(tv ? 18 : 10));
         more.setText("加载更多");
         more.setVisibility(GONE);
+        if (tv) {
+            more.setFocusable(true);
+            more.setFocusableInTouchMode(false);
+            more.setOnFocusChangeListener((view, hasFocus) -> {
+                GradientDrawable face = new GradientDrawable();
+                face.setColor(hasFocus ? 0xFF3A4048 : 0xFF262A31);
+                face.setCornerRadius(dp(16));
+                if (hasFocus) face.setStroke(dp(2), 0xFFFFD45B);
+                view.setBackground(face);
+            });
+        }
         more.setOnClickListener(view -> load());
         addView(more, new LayoutParams(-1, -2));
 
         load();
+    }
+
+    /** 打开面板时把遥控器焦点放到关闭键上，方向键再从这儿往下走。 */
+    void focusDefault() {
+        if (closeButton != null) closeButton.requestFocus();
     }
 
     void destroy() {
@@ -161,54 +206,54 @@ final class CommentPanel extends LinearLayout {
     private void addRow(JSONObject item) {
         LinearLayout row = new LinearLayout(getContext());
         row.setOrientation(VERTICAL);
-        row.setPadding(dp(12), dp(10), dp(12), dp(10));
+        row.setPadding(dp(tv ? 20 : 12), dp(tv ? 16 : 10), dp(tv ? 20 : 12), dp(tv ? 16 : 10));
         GradientDrawable card = new GradientDrawable();
         card.setColor(0xFF1D2027);
-        card.setCornerRadius(dp(12));
+        card.setCornerRadius(dp(tv ? 16 : 12));
         row.setBackground(card);
         /* 电视端没有手指，只能靠遥控器上下走：每条评论自己可聚焦，ScrollView 才会自动滚。 */
-        row.setFocusable(true);
+        row.setFocusable(tv);
         row.setFocusableInTouchMode(false);
         GradientDrawable focused = new GradientDrawable();
         focused.setColor(0xFF262B33);
-        focused.setCornerRadius(dp(12));
-        focused.setStroke(dp(2), 0xFFFFD45B);
+        focused.setCornerRadius(dp(tv ? 16 : 12));
+        focused.setStroke(dp(tv ? 3 : 2), 0xFFFFD45B);
         row.setOnFocusChangeListener((view, hasFocus) -> view.setBackground(hasFocus ? focused : card));
 
         LinearLayout head = new LinearLayout(getContext());
         head.setGravity(Gravity.CENTER_VERTICAL);
         TextView author = new TextView(getContext());
         author.setText(item.optString("author", "匿名用户"));
-        author.setTextSize(12);
+        author.setTextSize(tv ? 18 : 12);
         author.setTextColor(0xFFFFD45B);
         head.addView(author, new LayoutParams(0, -2, 1));
         TextView when = new TextView(getContext());
         when.setText(relative(item.optLong("created", 0)));
-        when.setTextSize(11);
+        when.setTextSize(tv ? 14 : 11);
         when.setTextColor(0xFF8A9099);
         head.addView(when);
         row.addView(head, new LayoutParams(-1, -2));
 
         TextView content = new TextView(getContext());
         content.setText(item.optString("content", ""));
-        content.setTextSize(13);
+        content.setTextSize(tv ? 19 : 13);
         content.setTextColor(0xFFE6E8EC);
-        content.setLineSpacing(dp(2), 1f);
-        content.setPadding(0, dp(5), 0, 0);
+        content.setLineSpacing(dp(tv ? 5 : 2), 1f);
+        content.setPadding(0, dp(tv ? 9 : 5), 0, 0);
         row.addView(content, new LayoutParams(-1, -2));
 
         int likes = item.optInt("likes", 0);
         if (likes > 0) {
             TextView digg = new TextView(getContext());
             digg.setText("赞 " + likes);
-            digg.setTextSize(11);
+            digg.setTextSize(tv ? 14 : 11);
             digg.setTextColor(0xFF8A9099);
-            digg.setPadding(0, dp(4), 0, 0);
+            digg.setPadding(0, dp(tv ? 7 : 4), 0, 0);
             row.addView(digg, new LayoutParams(-1, -2));
         }
 
         LayoutParams params = new LayoutParams(-1, -2);
-        params.bottomMargin = dp(8);
+        params.bottomMargin = dp(tv ? 14 : 8);
         list.addView(row, params);
     }
 
