@@ -8,6 +8,13 @@
 
     <application>
         <!-- 同样不锁方向：平板上扫码框跟着屏幕走，不再是一条竖窗口 -->
+        <!-- 刷剧：全屏竖滑连播。只在手机包里编译（BingeActivity/BingeEngine/BingeGlass
+             都在 src/mobile/java），电视端没有这个入口。 -->
+        <activity
+            android:name=".BingeActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize"
+            android:theme="@style/BingeTheme" />
         <activity
             android:name=".QrScanActivity"
             android:exported="false"

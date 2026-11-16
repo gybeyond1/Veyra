@@ -7,6 +7,13 @@
         <item name="android:navigationBarColor">#F5F2E9</item>
         <item name="android:windowLightNavigationBar">true</item>
     </style>
+    <!-- 刷剧：全屏竖滑视频流，深色底，不要启动页那张海报（会闪一下）。 -->
+    <style name="BingeTheme" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#17181A</item>
+        <item name="android:statusBarColor">#00000000</item>
+        <item name="android:navigationBarColor">#00000000</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
     <!-- 启动页：深色底 + 金色 V，接管系统冷启动时那一帧白屏。
          页面通过后再由 MainActivity 的 splash 层淡出。 -->
     <style name="LaunchTheme" parent="@style/AppTheme">
