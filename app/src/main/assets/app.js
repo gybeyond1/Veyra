@@ -1534,12 +1534,35 @@ function closeProxyPop() {
 window.__veyraProxyBack = () => { if (proxyPop && !proxyPop.hidden) { closeProxyPop(); return true; } return false; };
 window.__veyraProxyOpen = () => !!(proxyPop && !proxyPop.hidden);
 
+/* 关于页里的设备一行：排查「电视上却是手机界面」这类问题时，
+ * 先要确认页面到底把自己认成了什么。这里把判定依据（原生报的形态、机型、
+ * 触摸点数、WebView 版本、视口尺寸、资源包版本）都摊开写出来，
+ * 用户截一张图就能定位，不用靠猜。 */
+function deviceLine() {
+  var parts = [];
+  var device = window.VEYRA_DEVICE || '未知';
+  var names = { tv: '电视', tablet: '平板', phone: '手机' };
+  parts.push('界面形态 ' + (names[device] || device));
+  if (window.VEYRA_MODEL) parts.push(window.VEYRA_MODEL);
+  var chrome = '';
+  try { chrome = ((navigator.userAgent || '').match(/Chrome\/(\d+)/) || [])[1] || ''; } catch (error) { }
+  if (chrome) parts.push('WebView ' + chrome);
+  parts.push('触摸点 ' + (navigator.maxTouchPoints || 0));
+  parts.push(window.innerWidth + '×' + window.innerHeight);
+  if (window.VEYRA_LITE) parts.push('电视包');
+  try {
+    if (window.HotRuntime && window.HotRuntime.version) parts.push('界面 ' + window.HotRuntime.version);
+  } catch (error) { }
+  return parts.join(' · ');
+}
+
 var aboutPop = null;
 function buildAboutPopHtml() {
   return `<div class="appearance-pop account-pop" role="dialog" aria-modal="true" aria-labelledby="about-title">
     <div class="appearance-head"><h2 id="about-title">关于 Veyra</h2><button type="button" class="appearance-close" data-about-close aria-label="关闭">✕</button></div>
     <p class="appearance-note">项目地址：<button type="button" class="settings-url" data-open-url="https://github.com/gybeyond1/Veyra">github.com/gybeyond1/Veyra</button> <button type="button" data-check-update>检查更新</button></p>
     <p class="appearance-note">Veyra 基于开源项目二次开发，遵循 GPL-3.0 开源协议发布，完整源码、自建后端与 Docker 部署说明见仓库。</p>
+    <p class="appearance-note appearance-device">${esc(deviceLine())}</p>
   </div>`;
 }
 function ensureAboutPop() {

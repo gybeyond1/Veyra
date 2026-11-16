@@ -12,6 +12,7 @@
   var type = 'phone';
   var model = '';
   var native = false;
+  var lite = false;
 
   try {
     if (window.AndroidHost && typeof window.AndroidHost.deviceProfile === 'function') {
@@ -21,8 +22,18 @@
         native = true;
       }
       model = info && info.model ? String(info.model) : '';
+      lite = !!(info && info.lite);
     }
   } catch (error) { /* 桥还没注入（极早期）就当手机，不阻断页面 */ }
+  if (!lite) lite = !!window.__VEYRA_LITE;
+
+  /* 原生判成平板、但这台机器没有触摸屏、装的又是电视包 —— 原生的 uiMode/特性表漏了，
+     页面这边再兜一次。少了这一条，界面会停在平板那套（device-layout.css 里平板只有 1 条规则），
+     看起来就是「电视上是手机界面」。 */
+  if (lite && type !== 'tv' && !(navigator.maxTouchPoints > 0)) {
+    type = 'tv';
+    native = true;
+  }
 
   if (!native) {
     var forced = '';
@@ -39,6 +50,7 @@
   root.setAttribute('data-device', type);
   window.VEYRA_DEVICE = type;
   window.VEYRA_MODEL = model;
+  window.VEYRA_LITE = lite;
   window.veyraIsTv = type === 'tv';
   window.veyraIsTablet = type === 'tablet';
 })();

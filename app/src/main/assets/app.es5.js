@@ -1701,12 +1701,34 @@ window.__veyraProxyBack = () => {
   return false;
 };
 window.__veyraProxyOpen = () => !!(proxyPop && !proxyPop.hidden);
+function deviceLine() {
+  var parts = [];
+  var device = window.VEYRA_DEVICE || "未知";
+  var names = { tv: "电视", tablet: "平板", phone: "手机" };
+  parts.push("界面形态 " + (names[device] || device));
+  if (window.VEYRA_MODEL) parts.push(window.VEYRA_MODEL);
+  var chrome = "";
+  try {
+    chrome = ((navigator.userAgent || "").match(/Chrome\/(\d+)/) || [])[1] || "";
+  } catch (error) {
+  }
+  if (chrome) parts.push("WebView " + chrome);
+  parts.push("触摸点 " + (navigator.maxTouchPoints || 0));
+  parts.push(window.innerWidth + "×" + window.innerHeight);
+  if (window.VEYRA_LITE) parts.push("电视包");
+  try {
+    if (window.HotRuntime && window.HotRuntime.version) parts.push("界面 " + window.HotRuntime.version);
+  } catch (error) {
+  }
+  return parts.join(" · ");
+}
 var aboutPop = null;
 function buildAboutPopHtml() {
   return `<div class="appearance-pop account-pop" role="dialog" aria-modal="true" aria-labelledby="about-title">
     <div class="appearance-head"><h2 id="about-title">关于 Veyra</h2><button type="button" class="appearance-close" data-about-close aria-label="关闭">✕</button></div>
     <p class="appearance-note">项目地址：<button type="button" class="settings-url" data-open-url="https://github.com/gybeyond1/Veyra">github.com/gybeyond1/Veyra</button> <button type="button" data-check-update>检查更新</button></p>
     <p class="appearance-note">Veyra 基于开源项目二次开发，遵循 GPL-3.0 开源协议发布，完整源码、自建后端与 Docker 部署说明见仓库。</p>
+    <p class="appearance-note appearance-device">${esc(deviceLine())}</p>
   </div>`;
 }
 function ensureAboutPop() {
