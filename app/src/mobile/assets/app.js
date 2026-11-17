@@ -93,10 +93,12 @@ contentReady = Promise.all([api('content-status'), privateSiteReady]).then(([sta
     if (aiLabel) aiLabel.textContent = '最新';
   }
   if (!privateMode()) {
-    /* 公开源：短剧/漫剧之外再挂上站点的四个热播榜，作为同一页里的二级切换。
-       榜单只有红果站点有，私密源（黄果）保持原样。 */
-    categoryIds.adult = ['short', 'hot-drama', 'hot-real-drama'];
-    categoryIds.ai = ['comic', 'hot-comic-drama', 'hot-ai-drama'];
+    /* 公开源：只留站点的四个热播榜。
+       「短剧」和「真人榜」、「漫剧」和「漫剧榜」在同一时刻是同一批内容（榜单就是
+       按形态切的首页推荐），两个入口并排只会让人以为重复加载，所以直接去掉
+       短剧 / 漫剧这两个 tab，只留榜单。 */
+    categoryIds.adult = ['hot-drama', 'hot-real-drama'];
+    categoryIds.ai = ['hot-comic-drama', 'hot-ai-drama'];
     document.querySelector('[data-nav="adult"] > span:last-child').textContent = '剧场';
     document.querySelector('[data-nav="ai"] > span:last-child').textContent = '漫剧';
     searchInput.placeholder = '搜索剧名';
@@ -1915,7 +1917,7 @@ function buildAccountPopHtml() {
     : `<section class="settings-account"><p>登录后可同步收藏和观看历史，并管理头像与密码。</p><button type="button" data-account-action="1">登录或注册</button></section>
       <section class="settings-account"><h2>扫码登录其它设备</h2><p>电视、电脑、平板登录页上的二维码都能扫：扫完这台手机的账号会直接同步过去，不用敲密码。</p><button type="button" data-qr-login="1">去扫码登录</button></section>`;
   return `<div class="appearance-pop account-pop" role="dialog" aria-modal="true" aria-labelledby="account-title">
-    <div class="appearance-head"><h2 id="account-title">账号管理</h2><button type="button" class="appearance-close" data-account-close aria-label="关闭">✕</button></div>
+    <div class="appearance-head"><h2 id="account-title">账号管理</h2></div>
     ${body}</div>`;
 }
 function ensureAccountPop() {
@@ -1954,7 +1956,7 @@ function updateProxySummary() {
 var proxyPop = null;
 function buildProxyPopHtml() {
   return `<div class="appearance-pop account-pop proxy-pop" role="dialog" aria-modal="true" aria-labelledby="proxy-title">
-    <div class="appearance-head"><h2 id="proxy-title">私密网络模式</h2><button type="button" class="appearance-close" data-proxy-close aria-label="关闭">✕</button></div>
+    <div class="appearance-head"><h2 id="proxy-title">私密网络模式</h2></div>
     <p class="appearance-note">只对私密模式生效，且对所选内容源全部有效：黄果走本机通道，剧果/野果等由服务器按同一模式取流。公开内容永远直连。</p>
     ${privateMode() ? `<button type="button" class="site-option proxy-source-row" data-source-open><strong>内容源 · ${esc((state.privateSite && state.privateSite.name) || '黄果')}</strong><small>点此切换黄果 / 剧果 / 帝果 / 黄豆 …</small></button>` : ''}
     <div class="settings-storage">${privateMode() ? '<button type="button" data-return-public>返回红果（公开模式）</button>' : '<button type="button" data-enter-private>进入私密模式</button>'}</div>
@@ -1994,7 +1996,7 @@ function buildSourcePopHtml() {
   const rows = [{ id: 'huangguo', name: '黄果', description: '视频 · AI · 旧版（直连 / 代理 / 后端）' }]
     .concat(asArray(state.privateSites));
   return `<div class="appearance-pop account-pop proxy-pop" role="dialog" aria-modal="true" aria-labelledby="source-title">
-    <div class="appearance-head"><h2 id="source-title">私密内容源</h2><button type="button" class="appearance-close" data-source-close aria-label="关闭">✕</button></div>
+    <div class="appearance-head"><h2 id="source-title">私密内容源</h2></div>
     <p class="appearance-note">黄果旧版 / 黄果 AI / 黄豆 / 帝果 / 剧果 都在手机上直接取数，请求走你自己的网络，不经过服务器；其余源仍由服务器解析。切完自动刷新首页。</p>
     <div class="site-list">${rows.map(row => `<button type="button" class="site-option${row.id === current ? ' is-active' : ''}" data-site-id="${esc(row.id)}" data-site-name="${esc(row.name)}"><strong>${esc(row.name)}</strong><small>${esc(row.description || '')}</small></button>`).join('')}</div>
   </div>`;
@@ -2086,7 +2088,7 @@ window.__veyraProxyOpen = () => !!(proxyPop && !proxyPop.hidden);
 var aboutPop = null;
 function buildAboutPopHtml() {
   return `<div class="appearance-pop account-pop" role="dialog" aria-modal="true" aria-labelledby="about-title">
-    <div class="appearance-head"><h2 id="about-title">关于 Veyra</h2><button type="button" class="appearance-close" data-about-close aria-label="关闭">✕</button></div>
+    <div class="appearance-head"><h2 id="about-title">关于 Veyra</h2></div>
     <p class="appearance-note">项目地址：<button type="button" class="settings-url" data-open-url="https://github.com/gybeyond1/Veyra">github.com/gybeyond1/Veyra</button> <button type="button" data-check-update>检查更新</button></p>
     <p class="appearance-note">Veyra 基于开源项目二次开发，遵循 GPL-3.0 开源协议发布，完整源码、自建后端与 Docker 部署说明见仓库。</p>
   </div>`;
@@ -2234,7 +2236,7 @@ function renderRemotePop() {
   const editing = remoteEditing;
   const title = editing === null ? '远程服务器' : (editing ? '编辑服务器' : '添加服务器');
   remotePop.innerHTML = `<div class="appearance-pop account-pop remote-pop" role="dialog" aria-modal="true" aria-labelledby="remote-title">
-    <div class="appearance-head"><h2 id="remote-title">${title}</h2><button type="button" class="appearance-close" data-remote-close aria-label="关闭">✕</button></div>
+    <div class="appearance-head"><h2 id="remote-title">${title}</h2></div>
     ${editing === null ? buildRemoteListHtml() : buildRemoteFormHtml()}
   </div>`;
 }
@@ -2375,7 +2377,7 @@ async function openRemotePicker(taskId, title) {
   ensureRemotePicker();
   remotePickerTaskId = String(taskId);
   remotePicker.innerHTML = `<div class="appearance-pop account-pop remote-pop" role="dialog" aria-modal="true" aria-labelledby="remote-pick-title">
-    <div class="appearance-head"><h2 id="remote-pick-title">传到远程服务器</h2><button type="button" class="appearance-close" data-remote-pick-close aria-label="关闭">✕</button></div>
+    <div class="appearance-head"><h2 id="remote-pick-title">传到远程服务器</h2></div>
     <p class="appearance-note">《${esc(title || '这部')}》会在服务器上建同名文件夹，成品直接放进去。</p>
     <div class="remote-list">${list.map(s => `<button type="button" class="remote-item" data-remote-pick="${esc(s.id)}">
         <span class="remote-item-main"><strong>${esc(s.name)}</strong><small>${esc(s.typeName || remoteTypeName(s.type))} · ${esc(s.address || '')}${s.cleanup === false ? ' · 本地保留' : ' · 传完删本地'}</small></span>
@@ -3744,11 +3746,12 @@ async function loadMoreCategory() {
   const id = categoryId();
   category.loading = true;
   updateCategoryFooter();
+  let added = [];
   try {
     const page = await api('category', { id, page: next });
     if (token !== routeToken || state.category !== category || state.route !== 'category' || categoryId() !== id) return;
     const existing = new Set(asArray(category.items).map(item => String(item.id)));
-    const added = asArray(page.items).filter(item => {
+    added = asArray(page.items).filter(item => {
       const itemId = String(item.id);
       if (existing.has(itemId)) return false;
       existing.add(itemId);
@@ -3769,6 +3772,13 @@ async function loadMoreCategory() {
   } finally {
     category.loading = false;
     if (state.category === category && state.route === 'category') updateCategoryFooter();
+    /* 榜单只有 100 部，之后接的是同形态分类流，前几页和榜单重合度很高，可能整页都是
+       已有的剧。这一页没插进新卡，哨兵就不会再进视口，得自己接着要下一页，不然会停在
+       100 部那里假装到底了。连续几页都空就收手，避免无意义地一路打到最后一页。 */
+    category.emptyRuns = added.length ? 0 : (category.emptyRuns || 0) + 1;
+    if (!added.length && category.nextPage && category.emptyRuns <= 6) {
+      setTimeout(() => { if (state.category === category && state.route === 'category') loadMoreCategory(); }, 40);
+    }
   }
 }
 
@@ -5247,7 +5257,6 @@ async function handleEnterPrivate() {
     document.getElementById('unlock-password').focus();
   } catch (error) { toast(error.message, true); }
 }
-document.getElementById('unlock-close').addEventListener('click', closeUnlock);
 document.getElementById('unlock-form').addEventListener('submit', async event => {
   event.preventDefault();
   const button = event.target.querySelector('button[type="submit"]');

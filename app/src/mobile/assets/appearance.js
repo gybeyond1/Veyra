@@ -233,8 +233,7 @@
 
   /* ---------- 弹窗 ---------- */
   function renderPop(pop) {
-    pop.innerHTML = '<div class="appearance-head"><h2 id="appearance-title">外观</h2>'
-      + '<button type="button" class="appearance-close" data-appearance-close aria-label="关闭">✕</button></div>'
+    pop.innerHTML = '<div class="appearance-head"><h2 id="appearance-title">外观</h2></div>'
       + '<p class="appearance-note">玻璃材质、按钮材质、背景各存一份，改了立刻生效。</p>'
       + '<div class="appearance ap-panel" id="appearance-panel">' + panelHtml() + '</div>';
   }

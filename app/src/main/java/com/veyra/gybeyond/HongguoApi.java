@@ -698,7 +698,10 @@ final class HongguoApi {
             String id = video.optString("series_id", "");
             String title = video.optString("series_title", row.optString("name", ""));
             String genre = video.optString("genre", "");
-            if (!"203".equals(genre) || !id.matches("[0-9]{1,30}") || title.isEmpty()) continue;
+            /* 203 = 真人短剧，205 = 漫剧。以前只收 203，于是漫剧详情点「制作方」永远是
+               “平台检索不到该制作方的其他作品”—— 漫剧署名下的作品全被这一行筛掉了。 */
+            if (!"203".equals(genre) && !"205".equals(genre)) continue;
+            if (!id.matches("[0-9]{1,30}") || title.isEmpty()) continue;
             if (filterTitle && !query.isEmpty() && !normalize(title).contains(query) && !isPinyin(query)) continue;
             if (!seen.add(id)) continue;
             items.put(new JSONObject()

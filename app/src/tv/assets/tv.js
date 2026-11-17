@@ -589,6 +589,7 @@ function activeOverlay() {
   /* 动态码浮窗优先级最高：它开着的时候背后就是整页海报，
      不锁住的话上下左右会直接选到浮窗后面的剧集封面上。 */
   if (epMenu) return epMenu;
+  if (seasonPanel) return seasonPanel;
   if (producerPanel) return producerPanel;
   if (otpPanel && !otpPanel.hidden) return otpPanel;
   if (sourcePanel && !sourcePanel.hidden) return sourcePanel;
@@ -1150,10 +1151,10 @@ function categoryList() {
     if (privateSite.id !== 'huangguo') return siteCats;
     return [['ai-duanju', '成人短剧'], ['ai-manju', '成人漫剧'], ['ai-huanlian', 'AI换脸'], ['ai-mogai', 'AI魔改']];
   }
-  /* 前两个是常规分类，后四个是红果的热播榜（后端按榜单页解析，卡片带名次角标）。
-     排在一起是因为对用户来说「看什么」是一件事，不必再开一级菜单。 */
-  return [['short', '短剧'], ['comic', '漫剧'],
-    ['hot-drama', '热播榜'], ['hot-real-drama', '真人榜'], ['hot-comic-drama', '漫剧榜'], ['hot-ai-drama', 'AI榜']];
+  /* 和手机端一致：只留四个榜单。短剧/漫剧和真人榜/漫剧榜是同一批内容，
+     并排摆着只会显得重复。 */
+  return [['hot-drama', '热播榜'], ['hot-real-drama', '真人榜'],
+    ['hot-comic-drama', '漫剧榜'], ['hot-ai-drama', 'AI榜']];
 }
 function filterList() {
   if (state.source === 'huangguo') {
@@ -1387,30 +1388,183 @@ function observeStageEnd() {
 }
 
 /* ---------------- 搜索（对齐安卓端：同样的过滤与系列合并） ---------------- */
-function seriesGroups(items) {
+/* 手机端那套三层判据，搬过来：
+   1) 形态隔离 —— 真人短剧(short) 和漫剧(comic) 是两个池子，同名也不许并组；
+   2) 系列键 —— 官方 albumId 优先，其次剥掉季号后的剧名；
+   3) 合并许可 —— 不同标题要并族，必须同形态且制作方(mediaId)相同。 */
+function formOfTv(item) {
+  var kind = String((item && item.category) || '');
+  return kind || 'any';
+}
+function seasonNumberOf(item) {
+  var direct = Number(item && item.seasonIndex) || 0;
+  if (direct > 0) return direct;
+  return relatedSeason(item) || 0;
+}
+function sameProducerTv(item, members) {
+  var media = String((item && item.mediaId) || '');
+  if (!media) return true;
+  for (var i = 0; i < members.length; i++) if (String(members[i].mediaId || '') === media) return true;
+  return false;
+}
+function titleRankTv(title, base) {
+  var body = relatedBase(title);
+  if (!base) return 1;
+  if (body === base) return -1;
+  if (body.indexOf(base) === 0) return 0;
+  if (sameIpBase(base, body)) return 1;
+  return 2;
+}
+function stripSeasonTitleTv(title) {
+  var text = String(title || '')
+    .replace(/\s*第\s*[0-9零〇一二两兩三四五六七八九十百]{1,3}\s*[季部](?=\s*[：:，,、]|\s*$)/g, '')
+    .replace(/\s*[：:]\s*$/, '')
+    .trim();
+  return text || String(title || '系列');
+}
+
+/* 返回 entries：block = 一部剧的多季（只画一张卡，点开看季列表），single = 单卡。 */
+function seriesGroups(items, query) {
+  var base = relatedBase(query || '');
   var groups = {};
-  var order = [];
-  var singles = [];
-  for (var i = 0; i < items.length; i++) {
-    var aid = items[i].albumId;
-    if (aid && String(aid) !== '0') {
-      if (!groups[aid]) { groups[aid] = []; order.push(aid); }
-      groups[aid].push(items[i]);
-    } else singles.push(items[i]);
+  var keys = [];
+  var entries = [];
+  var i, j;
+  for (i = 0; i < items.length; i++) {
+    var item = items[i];
+    if (!item || item.upcoming) continue;
+    var aid = String(item.albumId || '');
+    var body = relatedBase(item.title);
+    var handle = (aid && aid !== '0') ? ('a:' + aid) : (body ? ('t:' + body) : '');
+    if (!handle) { entries.push({ kind: 'single', item: item, index: i }); continue; }
+    var form = formOfTv(item);
+    var key = form + '|' + handle;
+    if (groups[key]) groups[key].members.push(item);
+    else {
+      groups[key] = { key: key, handle: handle, form: form, members: [item], index: i };
+      keys.push(key);
+    }
   }
-  var blocks = [];
-  for (var j = 0; j < order.length; j++) {
-    var members = groups[order[j]].slice();
-    members.sort(function (a, b) {
-      var sa = Number(a.seasonIndex) > 0 ? Number(a.seasonIndex) : 99;
-      var sb = Number(b.seasonIndex) > 0 ? Number(b.seasonIndex) : 99;
-      return sa - sb;
+
+  /* 标题正好等于搜索词、又没季号的孤儿组：它可能是某一族省略了「第一季」的第 1 季，
+     也可能是同名的另一部剧。只有同形态 + 同制作方 + 前缀一族才并进去。 */
+  if (base) {
+    var families = [];
+    for (i = 0; i < keys.length; i++) {
+      var g = groups[keys[i]];
+      if (g.handle.indexOf('t:') === 0) families.push(g);
+    }
+    for (i = 0; i < families.length; i++) {
+      var solo = families[i];
+      if (solo.members.length !== 1 || seasonNumberOf(solo.members[0])) continue;
+      if (solo.handle.slice(2) !== base) continue;
+      var target = null;
+      for (j = 0; j < families.length; j++) {
+        var other = families[j];
+        if (other === solo || other.form !== solo.form) continue;
+        if (other.handle.slice(2).indexOf(base) !== 0) continue;
+        if (other.members.length < 2) continue;
+        if (!sameProducerTv(solo.members[0], other.members)) continue;
+        if (!target || other.members.length > target.members.length) target = other;
+      }
+      if (!target) continue;
+      target.members.unshift(solo.members[0]);
+      target.alias = solo.members[0].title;
+      groups[solo.key] = null;
+    }
+  }
+
+  for (i = 0; i < keys.length; i++) {
+    var group = groups[keys[i]];
+    if (!group) continue;
+    if (group.members.length < 2 && !seasonNumberOf(group.members[0])) {
+      entries.push({ kind: 'single', item: group.members[0], index: group.index });
+      continue;
+    }
+    /* 组里没标季号的那条通常就是第 1 季，补上；其余没季号的夹在 1 和 2 之间 */
+    var seasons = group.members.slice();
+    var ranked = [];
+    var hasFirst = false;
+    for (j = 0; j < seasons.length; j++) {
+      ranked[j] = seasonNumberOf(seasons[j]);
+      if (ranked[j] === 1) hasFirst = true;
+    }
+    if (!hasFirst) {
+      for (j = 0; j < seasons.length; j++) if (!ranked[j]) { ranked[j] = 1; break; }
+    }
+    for (j = 0; j < seasons.length; j++) if (!ranked[j]) ranked[j] = 1.5;
+    var order = [];
+    for (j = 0; j < seasons.length; j++) order.push({ item: seasons[j], n: ranked[j] || 99, i: j });
+    order.sort(function (a, b) { return a.n - b.n || a.i - b.i; });
+    seasons = order.map(function (row) { return row.item; });
+    var lead = seasons[0];
+    for (j = 0; j < seasons.length; j++) if (seasonNumberOf(seasons[j]) === 1) { lead = seasons[j]; break; }
+    entries.push({
+      kind: 'block', key: group.key, index: group.index, form: group.form,
+      title: group.alias || stripSeasonTitleTv((lead && lead.title) || '系列'),
+      cover: (lead && lead.cover) || '', seasons: seasons
     });
-    var lead = members[0];
-    for (var k = 0; k < members.length; k++) { if (Number(members[k].seasonIndex) === 1) { lead = members[k]; break; } }
-    blocks.push({ id: order[j], title: (lead && lead.title) || '系列', seasons: members });
   }
-  return { blocks: blocks, singles: singles };
+
+  /* 同档内系列块连着排、且排在单卡前面；块与块之间季数多的在上 */
+  entries.sort(function (a, b) {
+    var diff = titleRankTv(a.title || (a.item && a.item.title), base) - titleRankTv(b.title || (b.item && b.item.title), base);
+    if (diff) return diff;
+    var blockA = a.kind === 'block' ? 1 : 0;
+    var blockB = b.kind === 'block' ? 1 : 0;
+    if (blockA !== blockB) return blockB - blockA;
+    if (blockA && blockB) return b.seasons.length - a.seasons.length || a.index - b.index;
+    return a.index - b.index;
+  });
+  return entries;
+}
+
+/* 系列卡：封面用第 1 季，角标写「共 N 季」，点开弹季列表 —— 电视上不摆左右滑的卡组。 */
+var seasonBlocks = {};
+function seriesCardMarkup(block) {
+  var cover = block.cover || (block.seasons[0] && block.seasons[0].cover) || '';
+  return '<button type="button" class="card" data-focusable data-key="series:' + esc(block.key) + '" data-series="' + esc(block.key) + '">'
+    + '<span class="art"><img data-cover="' + esc(cover) + '" alt="">'
+    + '<i class="badge is-season">共 ' + block.seasons.length + ' 季</i>'
+    + '</span><span class="name">' + esc(block.title) + '</span></button>';
+}
+
+var seasonPanel = null;
+var seasonReturnKey = '';
+function openSeasonMenu(key) {
+  var block = seasonBlocks[key];
+  if (!block) return;
+  closeSeasonMenu();
+  seasonReturnKey = 'series:' + key;
+  var layer = document.createElement('div');
+  layer.id = 'season-menu';
+  layer.className = 'season-layer';
+  var html = '<section class="season-pop" role="dialog" aria-modal="true">'
+    + '<h2>' + esc(block.title) + '<span>共 ' + block.seasons.length + ' 季</span></h2>'
+    + '<div class="season-grid">';
+  for (var i = 0; i < block.seasons.length; i++) {
+    var item = block.seasons[i];
+    var n = seasonNumberOf(item);
+    var label = n ? ('第' + n + '季') : (item.season || '');
+    if (!label) {
+      /* 没季号的通常是省了「第一季」的主剧：用它的本名，别写成「正片」 */
+      var plain = stripSeasonTitleTv(item.title);
+      label = plain && plain !== block.title ? plain : '第1季';
+    }
+    html += '<button type="button" class="season-item" data-focusable data-key="season:' + esc(item.id) + '" data-season-id="' + esc(item.id) + '">'
+      + '<strong>' + esc(label) + '</strong><small>' + esc(item.episodeLabel || '') + '</small></button>';
+  }
+  html += '</div></section>';
+  layer.innerHTML = html;
+  document.body.appendChild(layer);
+  seasonPanel = layer;
+  var first = layer.querySelector('[data-focusable]');
+  if (first) { state.focusKey = first.dataset.key; focusElement(first, false); }
+}
+function closeSeasonMenu() {
+  if (seasonPanel && seasonPanel.parentNode) seasonPanel.parentNode.removeChild(seasonPanel);
+  seasonPanel = null;
+  if (seasonReturnKey) { state.focusKey = seasonReturnKey; seasonReturnKey = ''; }
 }
 
 function filteredSearchItems() {
@@ -1503,15 +1657,16 @@ function renderSearch() {
     /* 上次的结果一直留在页面上，直到下次搜索覆盖它 */
     html += '<p class="search-count">' + esc(query) + ' · ' + items.length + ' 部作品'
       + (loading ? ' · 正在更新…' : '') + '</p>';
-    var grouped = seriesGroups(items);
-    if (grouped.blocks.length) {
-      for (var b = 0; b < grouped.blocks.length; b++) {
-        var block = grouped.blocks[b];
-        html += '<section class="section"><div class="section-head"><h2>' + esc(block.title) + '</h2><span>官方系列 · ' + block.seasons.length + ' 季</span></div>'
-          + gridMarkup(block.seasons) + '</section>';
-      }
+    var entries = seriesGroups(items, query);
+    seasonBlocks = {};
+    var cards = '';
+    for (var e = 0; e < entries.length; e++) {
+      if (entries[e].kind === 'block') {
+        seasonBlocks[entries[e].key] = entries[e];
+        cards += seriesCardMarkup(entries[e]);
+      } else cards += cardMarkup(entries[e].item, e);
     }
-    if (grouped.singles.length) html += gridMarkup(grouped.singles, '没有找到匹配的影片');
+    html += cards ? ('<div class="grid">' + cards + '</div>') : '<p class="empty">没有找到匹配的影片</p>';
   }
   view.innerHTML = html;
   paintCovers(view);
@@ -1734,7 +1889,7 @@ function renderDetail() {
     ? '<button type="button" class="chip producer-chip" data-focusable data-key="producer" data-producer="1">制作方 · ' + esc(producer.name) + '</button>'
     : '';
 
-  var related = sortRelatedTv(list(state.detailRelated));
+  var related = sortRelatedTv(list(state.detailRelated), data.title || '');
   var relatedHtml = related.length
     ? '<section class="detail-related"><h2 class="eps-title">相关作品<span>同系列排前面</span></h2><div class="grid">'
       + related.map(function (item, index) { return cardMarkup(item, index); }).join('') + '</div></section>'
@@ -1873,17 +2028,75 @@ function loadDetailExtras(id, title) {
   }).catch(function () { });
 }
 
-/* 同一部剧的其他季排前面（按季号），其余同 IP / 平台推荐排后面 —— 和手机端同一套排序 */
-function sortRelatedTv(items) {
-  var head = [], tail = [];
+/* 相关作品排序：和手机端同一套判据。
+   1) 同一部剧的其他季排最前，按季号升序；标题里没写「第N季」的那条通常就是第 1 季，
+      排在所有带季号的前面。
+   2) 其次同 IP（标题主体相同 / 一方包含另一方）。
+   3) 最后才是平台推荐。
+   以前这里只按 seasonIndex 排，没季号的条目全掉到最后，「这个破盆是宝物」这种
+   推荐位就顶到了第一张。 */
+var TV_CN_DIGITS = { '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10 };
+
+function relatedBase(title) {
+  return String(title || '')
+    .replace(/[（(【[]?[全共]?\s*[0-9]{1,4}\s*集[)）】\]]?/g, '')
+    .replace(/第\s*[0-9一二三四五六七八九十百]{1,3}\s*[季部期篇]/g, '')
+    .replace(/season\s*[0-9]{1,2}/ig, '')
+    .replace(/[\s·・:：;；,，.。、!！?？\-—_|/\\"'“”‘’（）()《》【】\[\]…～]/g, '')
+    .toLowerCase();
+}
+
+function relatedSeason(item) {
+  var fromField = Number(item && item.seasonIndex) || 0;
+  if (fromField > 0) return fromField;
+  var title = String((item && item.title) || '');
+  var digits = title.match(/第\s*([0-9]{1,2})\s*[季部期篇]/);
+  if (digits) return Number(digits[1]);
+  var chinese = title.match(/第\s*([一二三四五六七八九十]{1,3})\s*[季部期篇]/);
+  if (!chinese) return 0;
+  var text = chinese[1];
+  if (text === '十') return 10;
+  if (text.length === 1) return TV_CN_DIGITS[text] || 0;
+  if (text[0] === '十') return 10 + (TV_CN_DIGITS[text[1]] || 0);
+  if (text[1] === '十') return (TV_CN_DIGITS[text[0]] || 0) * 10 + (TV_CN_DIGITS[text[2]] || 0);
+  return 0;
+}
+
+function sameIpBase(a, b) {
+  if (!a || !b) return false;
+  if (a.indexOf(b) >= 0 || b.indexOf(a) >= 0) return true;
+  var shorter = Math.min(a.length, b.length);
+  var i = 0;
+  while (i < shorter && a.charAt(i) === b.charAt(i)) i++;
+  return i >= 4 && i >= shorter * .6;
+}
+
+function sortRelatedTv(items, currentTitle) {
+  var base = relatedBase(currentTitle || '');
+  var rankOf = function (item) {
+    var other = relatedBase(item.title);
+    if (!other) return 2;
+    var sameWork = (base && other === base) || (relatedSeason(item) > 0 && base && sameIpBase(base, other));
+    if (sameWork) return 0;
+    return sameIpBase(base, other) ? 1 : 2;
+  };
+  var rows = [];
   for (var i = 0; i < items.length; i++) {
     var item = items[i];
     if (!item) continue;
-    if ((Number(item.seasonIndex) || 0) > 0 || item.season) head.push(item);
-    else tail.push(item);
+    /* 同一部剧、又没季号的那条就是这部剧自己（不同 id 的同一部），别占第一张 */
+    if (base && relatedBase(item.title) === base && relatedSeason(item) === 0) continue;
+    rows.push({ item: item, index: i, rank: rankOf(item) });
   }
-  head.sort(function (a, b) { return (Number(a.seasonIndex) || 0) - (Number(b.seasonIndex) || 0); });
-  return head.concat(tail);
+  rows.sort(function (a, b) {
+    if (a.rank !== b.rank) return a.rank - b.rank;
+    if (a.rank === 0) {
+      var seasonDiff = relatedSeason(a.item) - relatedSeason(b.item);
+      if (seasonDiff) return seasonDiff;
+    }
+    return a.index - b.index;
+  });
+  return rows.map(function (row) { return row.item; });
 }
 
 /* ---------------- 制作方作品（遥控器可点） ---------------- */
@@ -1908,7 +2121,7 @@ function openProducerPanel() {
     var items = list(data && data.items).filter(function (item) { return item && item.id && String(item.id) !== current; });
     if (!items.length) {
       /* 平台按剧名检索，制作方是署名 —— 搜不到就退回同系列，别给一块空白 */
-      items = sortRelatedTv(list(state.detailRelated)).filter(function (item) {
+      items = sortRelatedTv(list(state.detailRelated), (state.detail && state.detail.title) || '').filter(function (item) {
         return (Number(item.seasonIndex) || 0) > 0 || item.season;
       });
       status.textContent = items.length ? '平台检索不到该制作方的其他作品，先看同系列' : '平台没有收录这位制作方的其他作品';
@@ -2148,6 +2361,7 @@ window.veyraTvKey = function (code) {
 
 window.hgBack = function () {
   if (epMenu) { closeEpMenu(); return true; }
+  if (seasonPanel) { closeSeasonMenu(); restoreFocus(); return true; }
   if (producerPanel) { closeProducerPanel(); state.focusKey = 'producer'; restoreFocus(); return true; }
   if (otpPanel && !otpPanel.hidden) {
     closeOtp();
@@ -2193,6 +2407,16 @@ document.addEventListener('click', function (event) {
   /* 平板上没有返回键：点弹窗外的空白就收起来，不用再去找「关闭」。
      只认遮罩本身（点面板内的空白不算），避免刚打开就被关掉。 */
   if (epMenu && target.id === 'ep-menu') { closeEpMenu(); return; }
+  if (seasonPanel && target.id === 'season-menu') { closeSeasonMenu(); restoreFocus(); return; }
+  var seasonPick = target.closest('[data-season-id]');
+  if (seasonPick) {
+    var seasonId = seasonPick.getAttribute('data-season-id');
+    closeSeasonMenu();
+    if (seasonId) openDetail(seasonId);
+    return;
+  }
+  var seriesCard = target.closest('[data-series]');
+  if (seriesCard) { openSeasonMenu(seriesCard.getAttribute('data-series')); return; }
   var epToggle = target.closest('[data-ep-menu]');
   if (epToggle) { epMenu ? closeEpMenu() : openEpMenu(); return; }
   if (producerPanel && target.id === 'producer') { closeProducerPanel(); return; }

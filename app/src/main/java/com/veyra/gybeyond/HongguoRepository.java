@@ -59,17 +59,116 @@ final class HongguoRepository {
         }
         return new JSONObject().put("items", items).put("nextPage", page.getHasMore() ? number + 1 : JSONObject.NULL);
     }
+    /*
+     * 榜单的翻页现实：官网每个榜固定 5 页 × 20 部 = 100 部，第 6 页直接 404。
+     * 用户滑到第 100 部时如果显示「已经到底了」，这条流就断了；所以第 5 页先装作
+     * 还有下一页，第 6 页起改接同形态的分类流（官网分类页最多 100 页），
+     * 前端按 id 去重后续排，视觉上就是一直往下有内容。
+     */
+    private static final int RANK_PAGES_FALLBACK = 5;
+    private static final java.util.Map<String, Integer> rankPages = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static boolean comicBoard(String id) {
+        return "hot-comic-drama".equals(id) || "hot-ai-drama".equals(id);
+    }
+
     JSONObject category(String id, int page) throws Exception {
-        if (BOARDS.contains(id)) return listing(upstream.ranking(id, page), page, id);
+        if (BOARDS.contains(id)) {
+            int last = rankPages.getOrDefault(id, RANK_PAGES_FALLBACK);
+            if (page <= last) {
+                try {
+                    CatalogPage ranked = upstream.ranking(id, page);
+                    if (ranked.getRanking() != null && ranked.getRanking().getTotalPages() > 0)
+                        rankPages.put(id, ranked.getRanking().getTotalPages());
+                    JSONObject result = listing(ranked, page, id);
+                    if (page >= rankPages.getOrDefault(id, last)) result.put("nextPage", page + 1);
+                    return result;
+                } catch (Exception error) {
+                    /* 榜单实际页数比记录少：最后一页别再抛「加载失败」，直接接分类流 */
+                    if (page < last) throw error;
+                }
+            }
+            int feedPage = Math.max(1, page - last);
+            if (feedPage > 100)
+                return new JSONObject().put("items", new JSONArray()).put("nextPage", JSONObject.NULL);
+            /* 漫剧的分类流和短剧不是一个接口：home(COMIC) 其实是漫剧榜（同样只有 5 页），
+               所以这里按题材接（comic:xxx），一个题材翻完换下一个。 */
+            if (comicBoard(id)) return comicFeedPage(feedPage, page);
+            return listing(upstream.home(feedPage, ContentType.SHORT), page, id);
+        }
         if (!"short".equals(id) && !"comic".equals(id)) throw new IllegalArgumentException("无效分类");
         return listing(upstream.home(page, "comic".equals(id) ? ContentType.COMIC : ContentType.SHORT), page, id);
     }
+
+    /* 漫剧题材缓存：题材列表要抓两个分类页，翻页时不该每次都拉。 */
+    private static volatile JSONArray comicSlugs;
+    private static volatile long comicSlugsAt;
+
+    private JSONObject comicFeedPage(int feedPage, int page) throws Exception {
+        JSONArray slugs = comicSlugs;
+        if (slugs == null || slugs.length() == 0 || System.currentTimeMillis() - comicSlugsAt > 10 * 60 * 1000L) {
+            JSONArray all = genres.tags().getJSONArray("items");
+            JSONArray picked = new JSONArray();
+            for (int i = 0; i < all.length(); i++) {
+                JSONObject tag = all.getJSONObject(i);
+                if ("comic".equals(tag.optString("group"))) picked.put(tag.optString("slug"));
+            }
+            comicSlugs = picked;
+            comicSlugsAt = System.currentTimeMillis();
+            slugs = picked;
+        }
+        JSONArray items = new JSONArray();
+        if (slugs.length() > 0) {
+            /* 一个题材约 34 页；翻满就换下一个题材，避免同一批海报无限重复 */
+            final int perTopic = 30;
+            int topic = ((feedPage - 1) / perTopic) % slugs.length();
+            int topicPage = (feedPage - 1) % perTopic + 1;
+            items = genres.listing(slugs.getString(topic), topicPage).getJSONArray("items");
+        }
+        return new JSONObject().put("items", items)
+                .put("nextPage", items.length() > 0 ? page + 1 : JSONObject.NULL);
+    }
     JSONObject home() throws Exception {
         JSONObject shorts = category("short", 1), comics = category("comic", 1);
-        JSONArray featured = new JSONArray(), items = shorts.getJSONArray("items");
-        for (int i = 0; i < Math.min(5, items.length()); i++) featured.put(items.getJSONObject(i));
-        return new JSONObject().put("featured", featured).put("items", items)
+        JSONArray featured = boardFeatured(shorts.getJSONArray("items"));
+        return new JSONObject().put("featured", featured).put("items", shorts.getJSONArray("items"))
                 .put("recommend", shorts).put("newest", comics);
+    }
+    /**
+     * 首页轮播：四个榜各取前 2 部。
+     *
+     * 以前只取短剧首页前 5，结果永远在放同一批真人剧，翻来覆去就是那几张海报。
+     * 四个榜（热播 / 真人 / 漫剧 / AI）并行拉第一页，各挑 2 部，轮播才看得出类型差异。
+     * 任意一个榜挂了就跳过，四个全挂再退回短剧前 5。
+     */
+    private JSONArray boardFeatured(JSONArray fallback) {
+        final String[] boards = {"hot-drama", "hot-real-drama", "hot-comic-drama", "hot-ai-drama"};
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(boards.length);
+        java.util.List<java.util.concurrent.Future<JSONArray>> jobs = new java.util.ArrayList<>();
+        for (final String board : boards) {
+            jobs.add(pool.submit(() -> {
+                JSONArray picked = new JSONArray();
+                try {
+                    CatalogPage page = upstream.ranking(board, 1);
+                    for (int i = 0; i < Math.min(2, page.getItems().size()); i++)
+                        picked.put(card(page.getItems().get(i), board));
+                } catch (Exception ignore) { /* 单个榜失败不影响其余三个 */ }
+                return picked;
+            }));
+        }
+        JSONArray merged = new JSONArray();
+        for (java.util.concurrent.Future<JSONArray> job : jobs) {
+            try {
+                JSONArray part = job.get(8, java.util.concurrent.TimeUnit.SECONDS);
+                for (int i = 0; i < part.length(); i++) merged.put(part.get(i));
+            } catch (Exception ignore) { job.cancel(true); }
+        }
+        pool.shutdownNow();
+        if (merged.length() == 0) {
+            for (int i = 0; i < Math.min(5, fallback.length()); i++)
+                try { merged.put(fallback.get(i)); } catch (Exception ignore) { }
+        }
+        return merged;
     }
     JSONObject recommend(int page, boolean comics) throws Exception { return category(comics ? "comic" : "short", page); }
     /** 刷剧随机池：全库按题材随机取样，和首页榜单没有关系。 */

@@ -423,22 +423,27 @@ body.page-windowed #stage{overflow:hidden}
   overflow:hidden;background:var(--panel);
 }
 .detail-art img{width:100%;height:100%;object-fit:cover}
-/* 信息列跟海报等高：集数块用 margin-top:auto 顶到最底下，
-   底边因此和海报底边齐平；标题太长时先由简介让位（flex 收缩），不会顶穿出去。 */
+/* 信息列至少跟海报等高：集数块用 margin-top:auto 顶到最底下，
+   底边因此和海报底边齐平。高度用 min-height 而不是死高 —— 标题两行、简介四行加
+   选集两排时总高会超过海报，死高会把简介压到「继续播放」底下形成重叠。 */
 .detail-info{
   min-width:0;display:flex;flex-direction:column;
-  height:50.4rem;
+  min-height:50.4rem;
 }
 .detail-eps{margin-top:auto;padding-top:1.2rem}
-.detail .desc{flex:0 1 auto;min-height:0}
+/* flex 里 desc 不参与收缩：min-height:0 + shrink 会让它被压成两行，
+   四行截断就失效了。改成不收缩，内容多时让信息列整体变高。 */
+.detail .desc{flex:0 0 auto;min-height:0}
 /* 信息列改成 flex 了：续播行是 inline-block，被 stretch 会拉成一整条色带 */
 .detail .resume-line{align-self:flex-start}
 .detail h1{font-size:3.8rem;line-height:1.15;margin:0 0 .9rem}
 .detail .meta{font-size:2rem;color:var(--muted);margin:0 0 1.6rem}
+/* 简介占满右栏可用宽度：以前卡了 max-width:96rem，1920 下右栏还有四百多像素空着，
+   文字却在中间就折行。折满之后仍放不下就四行截断加省略号，绝不往下压按钮。 */
 .detail .desc{
   font-size:1.8rem;line-height:1.6;color:var(--chip-ink);
-  margin:0 0 2.2rem;max-width:96rem;
-  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;
+  margin:0 0 2.2rem;max-width:none;
+  display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;
 }
 .actions{display:block;margin-bottom:2.4rem}
 .btn{
@@ -903,3 +908,33 @@ body[data-backdrop="custom"] #tv-bg{background:#0d1013}
 .producer-panel h2{font-size:3rem;margin:0 0 1rem}
 .producer-status{font-size:1.9rem;color:var(--muted);margin:0 0 2.4rem}
 .producer-grid{grid-template-columns:repeat(6,minmax(0,1fr))}
+
+/* 系列卡角标：封面左下角写「共 N 季」，跟榜单名次角标同位置 */
+.card .art .badge.is-season{
+  background:linear-gradient(180deg,#ffd76a,#eda21a);color:#2b1d04;
+  font-size:1.4rem;font-weight:800;
+}
+/* 季列表浮层：电视上一部剧 16 季，摆成左右滑的卡组很难点到，
+   改成一张卡点开、季号平铺，遥控器四向走 */
+.season-layer{
+  position:fixed;left:0;right:0;top:0;bottom:0;z-index:60;
+  display:flex;align-items:center;justify-content:center;background:rgba(6,7,9,.72);
+}
+.season-pop{
+  width:78rem;max-height:78vh;overflow:auto;padding:3.2rem 3.6rem;
+  border-radius:1.6rem;background:var(--panel-strong,#15171a);box-shadow:0 3rem 8rem rgba(0,0,0,.5);
+}
+.season-pop h2{font-size:2.8rem;margin:0 0 2rem;line-height:1.3}
+.season-pop h2 span{font-size:1.8rem;color:var(--muted);margin-left:1.2rem;font-weight:400}
+.season-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-column-gap:1.2rem;grid-row-gap:1.2rem}
+.season-item{
+  display:flex;flex-direction:column;align-items:flex-start;justify-content:center;
+  height:7.2rem;padding:0 1.6rem;border-radius:1rem;background:var(--chip-bg);color:var(--text);text-align:left;
+}
+.season-item strong{font-size:1.9rem;font-weight:700}
+.season-item small{font-size:1.5rem;color:var(--muted);margin-top:.4rem}
+.season-item.is-focused{
+  background:var(--accent);color:var(--accent-ink);
+  box-shadow:0 0 0 .4rem var(--halo),0 0 0 .8rem var(--focus);
+}
+.season-item.is-focused small{color:var(--accent-ink);opacity:.75}
