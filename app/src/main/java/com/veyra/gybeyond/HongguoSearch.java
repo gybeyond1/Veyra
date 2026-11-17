@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Future;
 
@@ -74,7 +75,128 @@ final class HongguoSearch {
             android.util.Log.w("Veyra", "App 搜索失败：" + error);
         }
         if (merged.length() == 0 && failure != null) throw failure;
+        attachCredits(merged);
+        expandByProducer(merged);
         return new JSONObject().put("items", merged).put("nextPage", JSONObject.NULL);
+    }
+
+    /**
+     * 用制作方把系列补全。
+     *
+     * 站内搜索只按标题匹配，「聚宝仙盆仙界篇」这种只剩第六、八、九、十季的情况很常见
+     * —— 缺的那几季标题里没写编号，或者压根没被索引，搜索就是命不中。制作方是署名，
+     * 拿到 media_id 就能把同一个人名下的作品拉回来，再挑「和已有系列同名」的补进去。
+     *
+     * 只补已有系列的缺季，不引入新族：一个制作方名下往往还有一堆无关的剧，
+     * 全塞进搜索结果就成噪音了。所以只对「已命中 ≥2 部」的系列动手，最多 3 个制作方、
+     * 每家一页，失败就算了，不影响已经取到的结果。
+     */
+    private void expandByProducer(JSONArray items) {
+        if (items.length() == 0) return;
+        Map<String, Integer> baseCount = new java.util.LinkedHashMap<>();
+        Map<String, JSONObject> repByProducer = new java.util.LinkedHashMap<>();
+        Map<String, Integer> weight = new java.util.LinkedHashMap<>();
+        Set<String> known = new HashSet<>();
+        for (int i = 0; i < items.length(); i++) {
+            JSONObject item = items.optJSONObject(i);
+            if (item == null) continue;
+            known.add(item.optString("id"));
+            String base = normalize(seasonBase(item.optString("title")));
+            if (!base.isEmpty()) baseCount.merge(base, 1, Integer::sum);
+            String media = item.optString("mediaId", "");
+            String author = item.optString("author", "");
+            if (media.isEmpty() || author.isEmpty()) continue;
+            repByProducer.putIfAbsent(media, item);
+            weight.merge(media, 1, Integer::sum);
+        }
+        Set<String> allowed = new HashSet<>();
+        for (Map.Entry<String, Integer> entry : baseCount.entrySet()) {
+            if (entry.getValue() >= 2) allowed.add(entry.getKey());
+        }
+        if (allowed.isEmpty() || repByProducer.isEmpty()) return;
+        List<String> picked = new ArrayList<>(repByProducer.keySet());
+        picked.sort((a, b) -> Integer.compare(weight.getOrDefault(b, 0), weight.getOrDefault(a, 0)));
+        if (picked.size() > 3) picked = picked.subList(0, 3);
+
+        List<Future<JSONObject>> futures = new ArrayList<>();
+        for (String media : picked) {
+            final String name = repByProducer.get(media).optString("author", "");
+            futures.add(POOL.submit(new java.util.concurrent.Callable<JSONObject>() {
+                @Override public JSONObject call() throws Exception { return HongguoApi.producerWorks(name, media, 1); }
+            }));
+        }
+        for (int i = 0; i < futures.size(); i++) {
+            JSONObject page;
+            try { page = futures.get(i).get(4, java.util.concurrent.TimeUnit.SECONDS); }
+            catch (Exception ignored) { continue; }
+            if (page == null) continue;
+            JSONObject sample = repByProducer.get(picked.get(i));
+            JSONArray rows = page.optJSONArray("items");
+            for (int j = 0; rows != null && j < rows.length(); j++) {
+                JSONObject row = rows.optJSONObject(j);
+                String id = row == null ? "" : row.optString("id");
+                if (id.isEmpty() || !id.matches("[0-9]{1,30}") || !known.add(id)) continue;
+                String title = row.optString("title", "");
+                if (title.isEmpty()) continue;
+                if (!allowed.contains(normalize(seasonBase(title)))) continue;
+                try {
+                    items.put(new JSONObject()
+                            .put("id", id)
+                            .put("title", title)
+                            .put("cover", row.optString("cover", ""))
+                            .put("description", "")
+                            .put("episodeLabel", row.optString("episodeLabel", ""))
+                            .put("category", sample == null ? "" : sample.optString("category", ""))
+                            .put("mediaId", picked.get(i))
+                            .put("author", sample == null ? "" : sample.optString("author", ""))
+                            .put("tags", new JSONArray()));
+                } catch (Exception ignored) { }
+            }
+        }
+    }
+
+    /**
+     * 给结果补上制作方（author / media_id）。
+     *
+     * 光靠标题没法判断两条结果是不是同一部剧：搜「聚宝仙盆」时「聚宝仙盆」是真人短剧
+     * （genre 203）、「聚宝仙盆之杂灵根才是真BOSS」是漫剧（205），名字是包含关系，
+     * 实际是两部作品 —— 按标题前缀合并就会把真人剧塞进漫剧系列里当第 1 季。
+     * 制作方是署名，同一系列必然同一个 media_id，拿它当「能不能合并」的许可条件才靠谱。
+     *
+     * 详情接口一次吃 20 个 book_id，35 条结果两批并行就够；失败只是少了这个字段，
+     * 前端会退回按标题判断，不影响搜索本身。
+     */
+    private void attachCredits(JSONArray items) {
+        List<String> ids = new ArrayList<>();
+        for (int i = 0; i < items.length(); i++) {
+            JSONObject item = items.optJSONObject(i);
+            String id = item == null ? "" : item.optString("id");
+            if (id.matches("[0-9]{1,30}")) ids.add(id);
+        }
+        if (ids.isEmpty()) return;
+        List<Future<Map<String, JSONObject>>> futures = new ArrayList<>();
+        for (int from = 0; from < ids.size(); from += 20) {
+            final List<String> batch = new ArrayList<>(ids.subList(from, Math.min(ids.size(), from + 20)));
+            futures.add(POOL.submit(new java.util.concurrent.Callable<Map<String, JSONObject>>() {
+                @Override public Map<String, JSONObject> call() throws Exception { return HongguoApi.credits(batch); }
+            }));
+        }
+        Map<String, JSONObject> credits = new java.util.LinkedHashMap<>();
+        for (Future<Map<String, JSONObject>> future : futures) {
+            try { credits.putAll(future.get(3, java.util.concurrent.TimeUnit.SECONDS)); }
+            catch (Exception ignored) { }
+        }
+        for (int i = 0; i < items.length(); i++) {
+            JSONObject item = items.optJSONObject(i);
+            JSONObject credit = item == null ? null : credits.get(item.optString("id"));
+            if (credit == null) continue;
+            String media = credit.optString("mediaId", "");
+            String author = credit.optString("name", "").trim();
+            try {
+                if (media.matches("[1-9][0-9]{0,29}")) item.put("mediaId", media);
+                if (!author.isEmpty()) item.put("author", author);
+            } catch (Exception ignored) { }
+        }
     }
 
     /** 站点搜索一页；totalPages / hasMore 都在响应里，可以老实翻页。 */

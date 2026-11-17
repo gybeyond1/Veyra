@@ -238,9 +238,10 @@ html[data-theme=dark] .search-suggest{background:rgba(34,40,43,.04);background:c
 .search-grid .series-block{grid-column:1/-1;border:1px solid var(--line);border-radius:calc(14px * var(--corner-scale,1));background:var(--panel);padding:12px 12px 14px;margin-bottom:2px}
 .series-head{display:flex;align-items:center;gap:10px;margin-bottom:10px}
 .series-head .poster{width:40px;height:56px;aspect-ratio:auto;border-radius:calc(6px * var(--corner-scale,1))}
-.series-meta{min-width:0}
+.series-meta{min-width:0;flex:1}
 .series-meta h3{font-size:15px;margin:0;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.series-meta span{font-size:11px;color:var(--muted)}
+/* 第二行带形态和制作方，署名可能很长，单行省略不把组头撑开 */
+.series-meta span{display:block;font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .series-row{display:flex;gap:9px;overflow:auto;padding-bottom:4px;scrollbar-width:none}
 .series-row .film-card{width:100px;min-width:100px}
 .series-row .poster{height:134px;aspect-ratio:auto}

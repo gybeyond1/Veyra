@@ -2438,20 +2438,24 @@ function renderSearch() {
 /**
  * 搜索结果的系列归并。
  *
- * 分组键优先用官方系列键（albumId = related_album_id），没有就用「剧名本体」：
- * 「聚宝仙盆之杂灵根才是真boss」「…第 2 季」「…第三季」剥掉季号和标点之后同名，
- * 就是同一部剧。真人短剧的搜索响应经常两个字段都不给，只按 albumId 分的话
- * 16 季会散成 16 张卡。
- *
- * 只有一季又没有季号的，算普通结果，不硬凑成「系列」。
+ * 三层判据，从硬到软：
+ * 1) 形态隔离：真人短剧（genre 203 → category "short"）和漫剧（205 → "comic"）是两个池子。
+ *    搜「聚宝仙盆」时，前者是 119 集的真人剧、后者是「之杂灵根才是真BOSS」16 季漫剧，
+ *    标题是包含关系，混在一组就会把真人剧当成漫剧系列的第 1 季 —— 封面一个是演员剧照、
+ *    一个是漫画，一眼就是错的。
+ * 2) 系列键：官方 albumId 优先，其次剧名本体（剥掉季号和标点后同名）。
+ * 3) 合并许可：两个不同标题要并成一族，必须形态相同，且制作方（mediaId）相同。
+ *    制作方是署名，同一系列必然同一个 media_id；没有 mediaId 时退回「标题前缀」，
+ *    但形态必须一致。
  */
+/** 季号：官方字段优先，没有再抠标题里的「第N季」。 */
 function seasonNumber(item) {
   const direct = Number(item && item.seasonIndex) || 0;
   if (direct > 0) return direct;
   return relatedSeason(item) || 0;
 }
 
-/** 组间排序：名字以搜索词开头的（主剧 + 它的各季）→ 同 IP 的其他剧 → 其余相关。 */
+/** 组间排序：完全命中 → 名字以搜索词开头（主剧 + 它的各季）→ 同 IP 的其他剧 → 其余相关。 */
 function titleRank(title, base) {
   const body = relatedBase(title);
   if (!base) return 1;
@@ -2461,38 +2465,64 @@ function titleRank(title, base) {
   return 2;
 }
 
+function formOf(item) {
+  const kind = String((item && item.category) || '');
+  if (kind) return kind;
+  return 'any';
+}
+
+function formLabel(form) {
+  if (form === 'short') return '真人短剧';
+  if (form === 'comic') return '漫剧';
+  return '';
+}
+
+/** 有制作方编号就比编号；没有（详情接口没取到）就放行，交给标题前缀判断。 */
+function sameProducer(item, members) {
+  const media = String((item && item.mediaId) || '');
+  if (!media) return true;
+  return members.some(member => String(member.mediaId || '') === media);
+}
+
 function seriesGroups(items, query) {
   const base = relatedBase(query || '');
   const groups = new Map();
   const entries = [];
-  items = items.filter(item => !item.upcoming);
-  items.forEach((item, index) => {
+  const list = items.filter(item => !item.upcoming);
+  list.forEach((item, index) => {
     const aid = String(item.albumId || '');
     const body = relatedBase(item.title);
-    const key = aid && aid !== '0' ? 'a:' + aid : (body ? 't:' + body : '');
-    if (!key) { entries.push({ kind: 'single', item, index }); return; }
+    const handle = aid && aid !== '0' ? 'a:' + aid : (body ? 't:' + body : '');
+    if (!handle) { entries.push({ kind: 'single', item, index }); return; }
+    const form = formOf(item);
+    const key = form + '|' + handle;
     const group = groups.get(key);
     if (group) group.members.push(item);
-    else groups.set(key, { key, members: [item], index });
+    else groups.set(key, { key, handle, form, members: [item], index });
   });
-  /* 「聚宝仙盆」这种标题正好等于搜索词本体、又没有季号的条目，通常就是同 IP 那一族的
-     第 1 季：它自己成一组只有一张卡，而「…之杂灵根才是真boss」有 16 季，两边都留着
-     就会出现「第一季一张卡、二到十六季另一块」。并进入口最多、且同前缀的那一族。 */
-  const familyKey = base ? 't:' + base : '';
-  const main = familyKey ? groups.get(familyKey) : null;
-  if (main && main.members.length === 1 && !seasonNumber(main.members[0])) {
-    let target = null;
-    for (const [key, group] of groups) {
-      if (key === familyKey || key.indexOf('t:') !== 0) continue;
-      if (key.slice(2).indexOf(base) !== 0) continue;
-      if (!target || group.members.length > target.members.length) target = group;
-    }
-    if (target && target.members.length >= 2) {
-      target.members.unshift(main.members[0]);
-      target.head = main.members[0].title;
-      groups.delete(familyKey);
+
+  /* 标题正好等于搜索词本体、又没有季号的孤儿组：它既可能是某一族的第 1 季（标题里省了
+     「第一季」），也可能是同名的另一部剧。只有同形态 + 同制作方 + 同前缀族才并。 */
+  if (base) {
+    const families = [...groups.values()].filter(group => group.handle.indexOf('t:') === 0);
+    for (const solo of families) {
+      if (solo.members.length !== 1 || seasonNumber(solo.members[0])) continue;
+      if (solo.handle.slice(2) !== base) continue;
+      let target = null;
+      for (const other of families) {
+        if (other === solo || other.form !== solo.form) continue;
+        if (other.handle.slice(2).indexOf(base) !== 0) continue;
+        if (other.members.length < 2) continue;
+        if (!sameProducer(solo.members[0], other.members)) continue;
+        if (!target || other.members.length > target.members.length) target = other;
+      }
+      if (!target) continue;
+      target.members.unshift(solo.members[0]);
+      target.alias = solo.members[0].title;
+      groups.delete(solo.key);
     }
   }
+
   for (const group of groups.values()) {
     if (group.members.length < 2 && !seasonNumber(group.members[0])) {
       entries.push({ kind: 'single', item: group.members[0], index: group.index });
@@ -2512,16 +2542,31 @@ function seriesGroups(items, query) {
     seasons.forEach(it => { if (!ranked.get(it)) ranked.set(it, 1.5); });
     seasons.sort((a, b) => (ranked.get(a) || 99) - (ranked.get(b) || 99));
     const lead = seasons.find(it => ranked.get(it) === 1) || seasons[0];
-    entries.push({ kind: 'block', key: group.key, index: group.index,
-      title: group.head || lead?.title || '系列', cover: lead?.cover || '', seasons });
+    entries.push({ kind: 'block', key: group.key, index: group.index, form: group.form,
+      title: group.alias || lead?.title || '系列', cover: lead?.cover || '', seasons });
   }
-  entries.sort((a, b) => titleRank(a.title || a.item?.title, base) - titleRank(b.title || b.item?.title, base) || a.index - b.index);
+  /* 同档内让系列块连着排、并且排在单卡前面：块与块之间按季数从多到少，
+     这样「之杂灵根 16 季」永远在「仙界篇 4 季」之上，不会被单卡插在中间割断。 */
+  entries.sort((a, b) => {
+    const diff = titleRank(a.title || a.item?.title, base) - titleRank(b.title || b.item?.title, base);
+    if (diff) return diff;
+    const blockA = a.kind === 'block' ? 1 : 0;
+    const blockB = b.kind === 'block' ? 1 : 0;
+    if (blockA !== blockB) return blockB - blockA;
+    if (blockA && blockB) return b.seasons.length - a.seasons.length || a.index - b.index;
+    return a.index - b.index;
+  });
   return entries;
 }
 
-/** 组头只留剧名：取到的那一季标题常带「第1季」，顶在组头上会像只有一季。 */
+/** 组头只留剧名：取到的那一季标题常带「第1季」，顶在组头上会像只有一季。
+ *  季号也可能夹在中间（「某某第二季：灵根亿点点废」），一并去掉，
+ *  组头才不会写成「第二季」、组内又是第2季第3季。 */
 function stripSeasonTitle(title) {
-  const text = String(title || '').replace(/\s*第\s*[0-9零〇一二两兩三四五六七八九十百]{1,3}\s*[季部]\s*$/, '').trim();
+  const text = String(title || '')
+    .replace(/\s*第\s*[0-9零〇一二两兩三四五六七八九十百]{1,3}\s*[季部](?=\s*[：:，,、]|\s*$)/g, '')
+    .replace(/\s*[：:]\s*$/, '')
+    .trim();
   return text || String(title || '系列');
 }
 
@@ -2540,9 +2585,14 @@ function seriesBlock(group) {
     const rest = text.indexOf(rawHead) === 0 ? text.slice(rawHead.length).replace(/^[\s·:：,，\-—_]+/, '') : text;
     return itemCard({ ...item, title: rest || `第${index + 1}季` });
   }).join('');
+  /* 组头第二行带上形态和制作方：真人短剧和漫剧是两个池子，同名也不是同一部；
+     制作方是署名，同一个系列必然同一个人，写出来用户自己就能核对归类对不对。 */
+  const meta = [formLabel(group.form), `共 ${group.seasons.length} 季`];
+  const producer = (group.seasons.find(it => it.author) || {}).author;
+  if (producer) meta.push(producer);
   return `<section class="series-block">
     <div class="series-head"><span class="poster loading small"><img data-cover="${esc(group.cover || '')}" alt=""></span>
-    <div class="series-meta"><h3>${head}</h3><span>共 ${group.seasons.length} 季</span></div></div>
+    <div class="series-meta"><h3>${head}</h3><span>${esc(meta.filter(Boolean).join(' · '))}</span></div></div>
     <div class="series-row">${cards}</div></section>`;
 }
 
