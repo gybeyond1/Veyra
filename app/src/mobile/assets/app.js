@@ -1,4 +1,6 @@
 'use strict';
+// 给 device-mode 的看门狗一个「脚本真的跑起来了」的信号：解析阶段就挂掉时它不会存在
+window.__veyraBooted = true;
 
 const callbacks = new Map();
 let requestNumber = 0;
@@ -36,6 +38,14 @@ const confirmOverlay = document.getElementById('confirm-overlay');
 const unlockOverlay = document.getElementById('unlock-overlay');
 const downloadOverlay = document.getElementById('download-overlay');
 const categoryIds = { adult: ['ai-duanju', 'ai-manju'], ai: ['ai-huanlian', 'ai-mogai'] };
+/* 分类 id → 显示名。榜单（hot-*）是红果站点自己的热播榜，卡片带名次角标。 */
+const CATEGORY_NAMES = {
+  short: '短剧', comic: '漫剧',
+  'hot-drama': '热播榜', 'hot-real-drama': '真人榜', 'hot-comic-drama': '漫剧榜', 'hot-ai-drama': 'AI榜',
+  'ai-duanju': '成人短剧', 'ai-manju': '成人漫剧', 'ai-huanlian': 'AI换脸', 'ai-mogai': 'AI魔改'
+};
+function isRankId(id) { return /^hot-(drama|real-drama|comic-drama|ai-drama)$/.test(String(id || '')); }
+function tabNames(tab) { return (categoryIds[tab] || []).map(id => CATEGORY_NAMES[id] || id); }
 const popularTags = [
   ['dushi', '都市'], ['xiaoyuan', '校园'], ['gufeng', '古风'], ['haomen', '豪门'],
   ['chuanyue', '穿越'], ['chongsheng', '重生'], ['qihuan', '奇幻'], ['zhichang', '职场']
@@ -49,40 +59,45 @@ const tagGroups = [
   ['relationship', '人物与关系'], ['style', '外形风格'], ['plot', '情节元素'], ['other', '更多标签']
 ];
 const state = {
-  route: 'home', tab: 'home', sub: { adult: 0, ai: 0 }, home: null,
+  route: 'home', tab: 'home', sub: { adult: 0, ai: 0 }, home: null, binge: false,
   category: null, categoryItems: [], detail: null, detailLoading: false, sourceItem: null,
   search: null, searchPending: false, searchError: '', query: '', filter: 'all', banner: 0, categoryBanner: 0,
   listing: null, tags: null, tagsReturn: null, listingReturn: null, settingsReturn: null,
   libraryTab: 'history', libraryQuery: '', accountReturn: null, account: { loggedIn: false },
   sourceGroup: '', sourceQueue: [], previous: null, compactHeld: false,
-  epGroup: 0, epPickerOpen: false, detailProducer: null,
-  /* 详情页里再点进另一部剧：A→B 时把 A 压栈，返回逐级退回，不回到列表 */
-  detailStack: []
+  detailProgress: null,
+  /* 详情→详情（制作方作品、相关作品）的返回栈：返回先退栈回到上一部剧 */
+  detailStack: [], detailProducer: null, epGroup: 0, epPickerOpen: false
 };
-contentReady = api('content-status').then(status => {
+/* 当前私密源：黄果走端侧三通道，其余源由后端网关解析。
+   必须在 contentReady 赋值「之前」发请求 —— contentReady 还没就绪时 api 才直接下发，
+   否则回调里再调 api 会等 contentReady 自己，直接死锁。 */
+const privateSiteReady = api('private-site').catch(() => ({ id: 'huangguo', name: '黄果' }));
+contentReady = Promise.all([api('content-status'), privateSiteReady]).then(([status, site]) => {
   contentSource = status.source || 'hongguo';
   state.privateUnlocked = Boolean(status.unlocked);
+  state.privateSite = site && site.id ? site : { id: 'huangguo', name: '黄果' };
   // 启动即拉取黄果网络通道（避免重启后 state.proxyMode 未初始化导致下载误判手机直连）
   try { api('get-proxy-mode').then(v => { state.proxyMode = Number(v) || 3; }).catch(() => {}); } catch (ignore) {}
-  // 私密模式还要知道当前选的是哪个内容源：黄果走原生四级分类，其余源按自己的分类来
-  if (privateMode()) {
-    try {
-      api('private-site').then(value => {
-        if (!value || !value.id) return;
-        privateSite = { id: value.id, name: value.name || value.id };
-        if (!siteIsHuangguo()) {
-          /* 分类页可能在源信息回来之前就已经按黄果画好了：补一次重绘 */
-          loadSiteCats().then(() => {
-            if (state.route === 'category') renderCategory(state.compactHeld);
-          }).catch(() => {});
-        }
-      }).catch(() => {});
-    } catch (ignore) {}
-  }
   document.title = 'Veyra';
+  if (privateMode() && state.privateSite && state.privateSite.id && state.privateSite.id !== 'huangguo') {
+    /* 接口型源没有黄果那套"成人/漫剧 + 分类"结构：
+       一级仍是两个 tab，但内容换成「全部 / 最新」，具体题材走「全部类型」页（后端分类）。 */
+    categoryIds.adult = ['', 'new'];
+    categoryIds.ai = ['', 'new'];
+    CATEGORY_NAMES[''] = '全部';
+    CATEGORY_NAMES['new'] = '最新';
+    const adultLabel = document.querySelector('[data-nav="adult"] > span:last-child');
+    const aiLabel = document.querySelector('[data-nav="ai"] > span:last-child');
+    if (adultLabel) adultLabel.textContent = '全部';
+    if (aiLabel) aiLabel.textContent = '最新';
+  }
   if (!privateMode()) {
-    categoryIds.adult = ['short']; categoryIds.ai = ['comic'];
-    document.querySelector('[data-nav="adult"] > span:last-child').textContent = '短剧';
+    /* 公开源：短剧/漫剧之外再挂上站点的四个热播榜，作为同一页里的二级切换。
+       榜单只有红果站点有，私密源（黄果）保持原样。 */
+    categoryIds.adult = ['short', 'hot-drama', 'hot-real-drama'];
+    categoryIds.ai = ['comic', 'hot-comic-drama', 'hot-ai-drama'];
+    document.querySelector('[data-nav="adult"] > span:last-child').textContent = '剧场';
     document.querySelector('[data-nav="ai"] > span:last-child').textContent = '漫剧';
     searchInput.placeholder = '搜索剧名';
     searchInput.setAttribute('aria-label', '搜索剧名');
@@ -102,15 +117,8 @@ let predictiveSourceNode;
 let predictiveFrame;
 let pendingPredictiveProgress = 0;
 let detailCard;
-/* 制作方作品弹窗：托管在这里，返回键 / 点遮罩都要能关掉它 */
+/* 制作方作品弹窗：托管在这里，返回键与点遮罩都要能关掉它 */
 let producerOverlay = null;
-/* 私密模式的内容源：huangguo 之外是剧果 / 帝果 / 黄豆 / 黄果 AI / 黄果旧版，
-   以及后端下发的接口型源。切换后原生会立刻重绑仓库，这里只需清前端缓存重拉。 */
-let privateSite = { id: 'huangguo', name: '黄果' };
-let siteCats = [];   // 非黄果源自己的分类（由该源的 tags 下发，id 直接当 category 用）
-const siteIsHuangguo = () => privateSite.id === 'huangguo';
-const siteDisplayName = () => (privateMode() ? (siteIsHuangguo() ? '黄果' : privateSite.name || privateSite.id) : '红果');
-const plainSite = () => privateMode() && !siteIsHuangguo();
 const coverRequests = new Map();
 let bannerChanging = false;
 let bannerTimer;
@@ -118,6 +126,8 @@ let lastDockTap = { tab: '', at: 0, navigated: false };
 let updateChecking = false;
 let updateDownloading = false;
 let updateAvailable = null;
+// 当前弹窗对应的版本号：用户点「取消」后记下来，同一个版本不再每次冷启动都弹
+let updatePendingVersion = '';
 let appVersion = '';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
@@ -127,7 +137,8 @@ const icon = name => {
     play: '<path d="m8 5 11 7-11 7z"/>',
     arrow: '<path d="m9 5 7 7-7 7"/>',
     back: '<path d="m15 5-7 7 7 7"/>',
-    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    restart: '<path d="M3.5 12a8.5 8.5 0 1 0 2.7-6.2"/><path d="M3.5 4.5V10h5.5"/>'
   };
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`;
 };
@@ -137,6 +148,21 @@ function toast(message, info = false) {
   toastHost.innerHTML = `<div class="toast ${info ? 'info' : ''}"><i></i><span>${esc(message)}</span></div>`;
   toastHost.classList.add('visible');
   toastTimer = setTimeout(() => toastHost.classList.remove('visible'), 3000);
+}
+
+/**
+ * 系统 Toast：APK 内嵌页面走原生（屏幕底部的小黑条），浏览器 / 网页版回退到页面浮层。
+ * 页面自带的 #toast-host 固定在顶部 75px，位置离手远、又容易被顶栏压住；
+ * 「已开始下载 N 集」这种交给后台的确认提示，用系统 toast 更符合手机习惯。
+ */
+function nativeToast(message, info = false) {
+  try {
+    if (window.AndroidHost && typeof window.AndroidHost.toast === 'function') {
+      window.AndroidHost.toast(String(message == null ? '' : message));
+      return;
+    }
+  } catch (ignore) { /* 桥不可用就走页面提示 */ }
+  toast(message, info);
 }
 
 let finishConfirmation;
@@ -197,7 +223,18 @@ api('server-base').then(serverBase => {
 window.hgWindowInsets = height => {
   document.getElementById('app').style.setProperty('--status-bar-height', `${Math.max(0, Number(height) || 0)}px`);
 };
+// 手势导航条/三键导航栏占的高度：WebView 已经铺到屏幕最底，底栏自己让开这么多。
+// 旧版 APK 没有这个回调，--safe-bottom 保持 0（旧版仍由 Window 留白）。
+window.hgSafeInsets = bottom => {
+  const app = document.getElementById('app');
+  if (!app) return;
+  app.style.setProperty('--safe-bottom', `${Math.max(0, Number(bottom) || 0)}px`);
+};
 api('window-insets').then(window.hgWindowInsets).catch(() => {});
+api('window-safe-insets').then(value => {
+  const values = Array.isArray(value) ? value : [value];
+  window.hgSafeInsets(values[0], values[1]);
+}).catch(() => {});
 api('screen-corners').then(corners => {
   const app = document.getElementById('app');
   for (const name of ['topLeft', 'topRight', 'bottomRight', 'bottomLeft']) {
@@ -216,12 +253,113 @@ function setAuthPending(pending, mode = authMode) {
   submit.textContent = pending ? (mode === 'login' ? '正在登录…' : '正在注册…') : (mode === 'login' ? '登录' : '注册并登录');
   document.querySelectorAll('[data-auth-mode]').forEach(button => { button.disabled = pending; });
 }
+function tvDevice() {
+  return window.VEYRA_DEVICE === 'tv' || document.documentElement.dataset.device === 'tv';
+}
+
+/** 电视登录页：只有二维码。遥控器敲账号密码不现实，注册也只在手机上做。 */
+function showTvLoginPanel() {
+  const panel = authOverlay.querySelector('.auth-panel');
+  const tabs = panel?.querySelector('.auth-tabs');
+  const form = document.getElementById('auth-form');
+  const footnote = panel?.querySelector('.auth-footnote');
+  if (tabs) tabs.hidden = true;
+  if (form) form.hidden = true;
+  if (footnote) footnote.hidden = true;
+  document.getElementById('auth-title').textContent = '登录电视';
+  document.getElementById('auth-subtitle').textContent = '用手机上的 Veyra 扫一下，账号直接同步过来';
+  document.getElementById('tv-login').hidden = false;
+  requestTvLoginQr();
+}
+
+/** 拉一次电视端登录码并画成二维码；relay 没起来时给重试入口。 */
+function requestTvLoginQr() {
+  const code = document.getElementById('tv-login-code');
+  const note = document.getElementById('tv-login-note');
+  const start = document.getElementById('tv-login-start');
+  let info = null;
+  try { info = JSON.parse(window.AndroidHost?.tvLoginInfo?.() || 'null'); } catch (error) { }
+  if (!info || !info.ready) {
+    showQrUnavailable();
+    return;
+  }
+  if (!window.qrcode) {
+    if (note) { note.textContent = '二维码组件没加载，请更新应用'; note.hidden = false; }
+    return;
+  }
+  try {
+    const qr = window.qrcode(0, 'M');
+    qr.addData(info.url);
+    qr.make();
+    code.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+    code.hidden = false;
+    if (start) start.hidden = true;
+    if (note) {
+      // 这台设备可以是被电视扫、被另一台手机/平板扫，也可以被电脑扫 —— 文案别再写死「电视」
+      note.textContent = '用另一台已登录的 Veyra 扫这个码：电视 / 电脑 / 平板 / 手机都行（' + info.host + ':' + info.port + '）';
+      note.hidden = false;
+    }
+  } catch (error) {
+    if (note) { note.textContent = '二维码生成失败，请重试'; note.hidden = false; }
+  }
+}
+
+/** 二维码还没准备好（局域网服务刚起来 / 没连 Wi-Fi）时的提示。 */
+function showQrUnavailable() {
+  const code = document.getElementById('tv-login-code');
+  const note = document.getElementById('tv-login-note');
+  const start = document.getElementById('tv-login-start');
+  if (code) { code.hidden = true; code.innerHTML = ''; }
+  if (start) { start.hidden = false; start.textContent = '重试'; }
+  if (note) { note.textContent = '局域网没起来，确认这台设备和扫码的设备连在同一个 Wi-Fi 后再试'; note.hidden = false; }
+}
+
+/**
+ * 手机 / 平板登录页的扫码登录：
+ * 让原生起一个局域网服务（和电视端同一套协议），把二维码画出来。
+ * 服务是异步 bind 的，端口可能还没好，所以这里轮询几次再显示。
+ */
+function startLoginHostAndRender() {
+  let info = null;
+  try { info = JSON.parse(window.AndroidHost?.startLoginHost?.() || 'null'); } catch (error) { }
+  if (info && info.ready) { requestTvLoginQr(); return; }
+  let tries = 0;
+  const tick = () => {
+    let next = null;
+    try { next = JSON.parse(window.AndroidHost?.tvLoginInfo?.() || 'null'); } catch (error) { }
+    if (next && next.ready) { requestTvLoginQr(); return; }
+    if (++tries < 12) { setTimeout(tick, 400); return; }
+    showQrUnavailable();
+  };
+  setTimeout(tick, 300);
+}
+
+// 手机扫码授权完成后，电视这边收尾
+window.hgTvLogin = (ok) => {
+  if (!ok) { toast('登录没成功，重新扫一次', true); requestTvLoginQr(); return; }
+  api('account').then(profile => {
+    setAccount(profile);
+    if (profile?.loggedIn) { hideAuth(); toast('已登录'); }
+  }).catch(() => { });
+};
+
 function showAuth(mode = 'login') {
   if (authPending) mode = authMode;
   authMode = mode;
   authOverlay.hidden = false;
   updateBackEnabled();
-  document.getElementById('auth-title').textContent = mode === 'login' ? '登录应用账号' : '注册应用账号';
+  if (tvDevice()) { showTvLoginPanel(); return; }
+  const scan = mode === 'scan';
+  const form = document.getElementById('auth-form');
+  const panel = authOverlay.querySelector('.auth-panel');
+  const footnote = panel?.querySelector('.auth-footnote');
+  const scanBox = document.getElementById('tv-login');
+  if (form) form.hidden = scan;
+  if (footnote) footnote.hidden = scan;
+  if (scanBox) scanBox.hidden = !scan;
+  document.getElementById('auth-title').textContent = scan ? '扫码登录' : mode === 'login' ? '登录应用账号' : '注册应用账号';
+  const subtitle = document.getElementById('auth-subtitle');
+  if (subtitle) subtitle.textContent = scan ? '用另一台已登录的 Veyra 扫下面的码，账号直接同步过来' : '登录后同步收藏和观看历史';
   setAuthPending(authPending, mode);
   document.getElementById('auth-password').autocomplete = mode === 'login' ? 'current-password' : 'new-password';
   const codeField = document.getElementById('auth-code');
@@ -230,11 +368,18 @@ function showAuth(mode = 'login') {
   if (codeLabel) codeLabel.hidden = mode !== 'register';
   document.querySelectorAll('[data-auth-mode]').forEach(button => button.classList.toggle('selected', button.dataset.authMode === mode));
   document.getElementById('auth-error').hidden = true;
+  if (scan) startLoginHostAndRender();
 }
 function hideAuth() {
   authOverlay.hidden = true;
   updateBackEnabled();
-  document.getElementById('auth-form').reset();
+  const form = document.getElementById('auth-form');
+  if (form) { form.reset(); form.hidden = false; }
+  const panel = authOverlay.querySelector('.auth-panel');
+  const footnote = panel?.querySelector('.auth-footnote');
+  if (footnote) footnote.hidden = false;
+  const scanBox = document.getElementById('tv-login');
+  if (scanBox) scanBox.hidden = true;
 }
 avatarButton.addEventListener('click', () => {
   if (state.account.loggedIn) goAccountManagement();
@@ -242,6 +387,20 @@ avatarButton.addEventListener('click', () => {
 });
 headerSettings.addEventListener('click', goSettings);
 document.querySelectorAll('[data-auth-mode]').forEach(button => button.addEventListener('click', () => showAuth(button.dataset.authMode)));
+document.getElementById('tv-login-start')?.addEventListener('click', () => {
+  if (tvDevice()) requestTvLoginQr();
+  else startLoginHostAndRender();
+});
+
+/** 手机端：打开扫码页去扫另一台设备的登录码，结果异步回到这里。 */
+function startQrScan() {
+  if (!window.AndroidHost?.startQrScan) { toast('当前版本不支持扫码，请更新应用', true); return; }
+  try { window.AndroidHost.startQrScan(); }
+  catch (error) { toast(error.message || '打不开扫码页', true); }
+}
+window.hgQrScan = (ok, message) => {
+  toast(message || (ok ? '已登录' : '扫码失败'), !ok);
+};
 document.getElementById('auth-form').addEventListener('submit', async event => {
   event.preventDefault();
   if (authPending) return;
@@ -282,8 +441,20 @@ window.hgCloudSynced = () => {
   }
 };
 
+const UPDATE_DISMISS_KEY = 'veyra.update.dismissed';
+function dismissedUpdateVersion() {
+  try { return localStorage.getItem(UPDATE_DISMISS_KEY) || ''; } catch (error) { return ''; }
+}
+function rememberDismissedUpdate(version) {
+  try {
+    if (version) localStorage.setItem(UPDATE_DISMISS_KEY, String(version));
+    else localStorage.removeItem(UPDATE_DISMISS_KEY);
+  } catch (error) { /* 隐私模式写不了就每次都弹，不致命 */ }
+}
+
 function setAvailableUpdate(result) {
   updateAvailable = result?.status === 'available' ? result : null;
+  updatePendingVersion = updateAvailable ? String(updateAvailable.version || '') : '';
   headerSettings.classList.toggle('has-update', Boolean(updateAvailable));
   const versionButton = content.querySelector('.app-version');
   if (versionButton) {
@@ -320,6 +491,8 @@ async function checkUpdate(manual) {
     if (result.status === 'available') {
       setAvailableUpdate(result);
       if (manual) { showUpdate(result); return; }
+      // 这个版本用户已经点过「取消」：只留角标，别再每次冷启动都静默下 10MB 再弹窗
+      if (dismissedUpdateVersion() === String(result.version || '')) return;
       // 启动自动模式：静默下载更新包，完成后弹窗提示安装（无需手动点检测）
       try {
         await api('download-update');
@@ -331,6 +504,11 @@ async function checkUpdate(manual) {
       setAvailableUpdate(null);
       if (manual && result.status === 'current') toast(`已是最新版本 ${result.version}`);
       if (manual && result.status === 'unpublished') toast('暂未发布更新包', true);
+    }
+    else if (result.status === 'channel-missing') {
+      // 新版发了但这个渠道还没打包：不能说「已是最新」，也不能把别的渠道的包装上去
+      setAvailableUpdate(null);
+      if (manual) toast('这个版本还没发布手机版安装包，等打包后再试', true);
     }
     else if (manual && result.status === 'unconfigured') toast('暂未发布更新包', true);
     else if (manual && result.status === 'throttled') toast('一小时内最多手动检查 5 次，请稍后再试', true);
@@ -361,6 +539,7 @@ updateDownloadButton.addEventListener('click', async () => {
     // 原生侧 download-update 返回前已自动拉起系统安装页（缺权限时先跳授权页），
     // 这里收起弹窗，避免 WebView 盖在系统安装界面下面。
     updateOverlay.hidden = true;
+    rememberDismissedUpdate('');   // 用户是真想更新：清掉「已取消」记录，装失败下轮还能提示
     updateDownloadButton.textContent = '立即下载';
     updateLaterButton.textContent = '取消';
     toast('下载完成，正在打开安装程序');
@@ -380,41 +559,87 @@ updateLaterButton.addEventListener('click', () => {
   updateOverlay.hidden = true;
   updateBackEnabled();
   if (updateDownloading) toast('已转入后台下载，完成后会自动弹出安装', true);
+  // 没在下载就说明用户这次不想更新：记下版本，下次冷启动不再自动弹同一个版本
+  else rememberDismissedUpdate(updatePendingVersion);
 });
 
-window.hgTheme = dark => {
+window.hgTheme = info => {
   // 外观（明暗/质感/配色/圆角）现在由 appearance.js 管理并存在 localStorage：
   // 用户在本机选过就以本地为准，否则跟随原生传来的系统主题，并把结果记下来当初始值。
+  //
+  // 原生回的是 { dark: false } 这种对象，不是布尔值。以前这个对象被直接当条件用，
+  // 对象恒为真 → 永远判成深色；只是外观模块一直在，这条路径从没走到，才没暴露。
+  // 电视版不加载 appearance.js，必须自己把字段取出来。
+  const isDark = !!(info && typeof info === 'object' ? info.dark : info);
   const A = window.VeyraAppearance;
   if (A) {
     let saved = null;
     try { saved = localStorage.getItem('veyra.appearance.v1'); } catch (e) {}
-    if (!saved) A.set({ theme: dark ? 'dark' : 'light' });
+    if (!saved) A.set({ theme: isDark ? 'dark' : 'light' });
     return;
   }
-  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  document.documentElement.dataset.theme = isDark ? 'dark' : 'light';
 };
 api('theme').then(window.hgTheme).catch(() => {});
 
 function itemCard(item) {
   const id = esc(item.id);
   const title = esc(item.title || '影片');
-  const info = esc(item.episodeLabel || asArray(item.tags).slice(0, 2).join(' · ') || '打开详情');
+  /* 榜单条目带的是热度（9009万热度），比「打开详情」有用；普通列表还是集数/标签 */
+  const info = esc(item.heat || item.episodeLabel || asArray(item.tags).slice(0, 2).join(' · ') || '打开详情');
+  /* 榜单里用名次（#1~#3 描金），普通列表还是评分 */
+  const rank = Number(item.rank) || 0;
+  const scoreText = rank ? `#${rank}` : (item.score || '');
+  const scoreClass = rank ? `poster-score is-rank${rank <= 3 ? ' is-top' : ''}` : 'poster-score';
   return `<button class="film-card" type="button" data-open-id="${id}" aria-label="查看${title}">
-    <span class="poster loading"><span class="poster-letter">${title.slice(0, 1)}</span><img data-cover="${esc(item.cover || '')}" alt=""><span class="poster-score" ${item.score ? '' : 'hidden'}>${esc(item.score || '')}</span></span>
+    <span class="poster loading"><span class="poster-letter">${title.slice(0, 1)}</span><img data-cover="${esc(item.cover || '')}" alt=""><span class="${scoreClass}" ${scoreText ? '' : 'hidden'}>${esc(scoreText)}</span></span>
     <span class="film-title">${title}</span><span class="film-info">${info}</span></button>`;
 }
 
-function moreCard(kind) {
+/* 「更多推荐」那张卡也要有封面：从本板块里随机挑一张，挑中之后记在本地，
+   以后都用这一张（不每次进首页换一张脸）。 */
+var moreCoverCache = {};
+function moreCoverFor(kind, items) {
+  if (moreCoverCache[kind]) return moreCoverCache[kind];
+  var key = 'veyra-morecover-' + kind;
+  try { var saved = localStorage.getItem(key); if (saved) { moreCoverCache[kind] = saved; return saved; } } catch (ignore) { }
+  var pool = asArray(items).filter(function (item) { return item && item.cover; });
+  var pick = pool.length ? pool[Math.floor(Math.random() * pool.length)].cover : '';
+  if (pick) {
+    moreCoverCache[kind] = pick;
+    try { localStorage.setItem(key, pick); } catch (ignore) { }
+  }
+  return pick;
+}
+
+function moreCard(kind, items) {
+  var cover = moreCoverFor(kind, items);
   return `<button class="film-card more-tile" type="button" data-more="${esc(kind)}" aria-label="查看更多推荐">
-    <span class="poster more-poster"><span class="more-tile-label">更多推荐 ${icon('arrow')}</span></span>
+    <span class="poster more-poster">${cover ? `<img data-cover="${esc(cover)}" alt="">` : ''}<span class="more-veil"></span><span class="more-tile-label">更多推荐 ${icon('arrow')}</span></span>
     <span class="film-title">查看全部</span><span class="film-info">打开完整列表</span></button>`;
+}
+/* 板块不足 5 个时，从同页其它列表里补满：私密首页的「精选推荐」源站只给 4 个，
+   空一格很难看（公开模式是 6 格满的）。补进来的都是同源内容，点开一样能看。 */
+function fillSection(items, pools, count) {
+  var out = asArray(items).slice();
+  var seen = {};
+  out.forEach(function (item) { seen[String(item.id)] = 1; });
+  for (var p = 0; p < pools.length && out.length < count; p++) {
+    var pool = asArray(pools[p]);
+    for (var i = 0; i < pool.length && out.length < count; i++) {
+      var item = pool[i];
+      if (!item || !item.id || seen[String(item.id)]) continue;
+      seen[String(item.id)] = 1;
+      out.push(item);
+    }
+  }
+  return out;
 }
 function section(title, items, kind = '') {
   if (!items.length) return '';
   // 3×2 固定六格：前 5 个放推荐位，第 6 格就是原来右上角「更多」的入口，板块标题行不再带按钮。
   const cells = items.slice(0, 5).map(itemCard);
-  if (kind) cells.push(moreCard(kind));
+  if (kind) cells.push(moreCard(kind, items));
   return `<section class="film-section"><div class="section-heading"><h2>${esc(title)}</h2></div><div class="film-row">${cells.join('')}</div></section>`;
 }
 function homeTagBar() {
@@ -650,9 +875,17 @@ function stopBannerAuto() {
   clearTimeout(bannerTimer);
   bannerTimer = null;
 }
+/* 平板 / 桌面宽度下首页不展示轮播（device-layout.css 里已隐藏），定时器也就没必要空转，
+   每 3 秒切一张看不见的图纯属浪费。电视保留自己的轮播。 */
+function bannerHiddenByLayout() {
+  try {
+    return window.matchMedia('(min-width: 600px)').matches && window.VEYRA_DEVICE !== 'tv';
+  } catch (error) { return false; }
+}
 function scheduleBannerAuto() {
   stopBannerAuto();
   if (!isBannerRoute() || document.hidden || bannerSlides().length < 2 || !content.querySelector('.hero')) return;
+  if (bannerHiddenByLayout()) return;
   bannerTimer = setTimeout(() => {
     bannerTimer = null;
     if (!isBannerRoute() || document.hidden) return;
@@ -758,10 +991,12 @@ async function resumeFromHome(id) {
   if (!item || String(item.id) !== id) return;
   const source = contentSource;
   const episode = Math.max(1, Number(item.episode) || 1) + (item.completed ? 1 : 0);
+  // 点下去就预热，和 goDetail 的请求并行，别串着等
+  api('prewarm', { id, episode }).catch(() => {});
   const token = routeToken + 1;
   await goDetail(id);
   if (routeToken !== token || contentSource !== source || state.route !== 'detail' || state.detailLoading || String(state.detail?.id) !== id) return;
-  if (episode <= asArray(state.detail.episodes).length) await openPlayer(episode);
+  if (episode <= asArray(state.detail.episodes).length) await openPlayer(episode, Boolean(item.completed));
 }
 
 function renderHome() {
@@ -774,7 +1009,7 @@ function renderHome() {
       <div class="hero-dots">${slides.map((_, i) => `<i class="${i === index ? 'active' : ''}" data-slide="${i}"></i>`).join('')}</div>
       ${homeTagBar()}
       <div class="home-continue">${continueWatchingMarkup()}</div>
-      ${section('精选推荐', asArray(data.homepageRecommend).length ? asArray(data.homepageRecommend) : asArray(data.recommend?.items).slice(0, 12), 'recommend')}
+      ${section('精选推荐', fillSection(asArray(data.homepageRecommend).length ? asArray(data.homepageRecommend) : asArray(data.recommend?.items).slice(0, 12), [asArray(data.items), asArray(data.homepageNewest), asArray(data.newest?.items), asArray(data.recommend?.items)], 5), 'recommend')}
       ${section(privateMode() ? '最近上新' : '热门漫剧', asArray(data.homepageNewest).length ? asArray(data.homepageNewest) : asArray(data.newest?.items).slice(0, 12), 'newest')}</div>`;
   hydrateImages();
   slides.forEach(item => { if (item.cover) getCover(item.cover).catch(() => {}); });
@@ -810,18 +1045,18 @@ function refreshMissingImages(items) {
   });
 }
 
-function categoryId() { return categoryIds[state.tab][state.sub[state.tab]]; }
+function categoryId() {
+  const list = categoryIds[state.tab] || [];
+  /* 恢复上次页面时 sub 可能是旧长度（比如从私密模式切回来），钳一下免得取到 undefined */
+  const index = Math.min(Math.max(0, Number(state.sub[state.tab]) || 0), Math.max(0, list.length - 1));
+  state.sub[state.tab] = index;
+  return list[index];
+}
 function compactMarkup() {
   if (!privateMode()) return '';
   const adult = state.tab === 'adult';
-  /* 剧果 / 帝果这类接口型源没有黄果那套「成人短剧/成人漫剧」分级，
-     收缩条只报源名 + 当前分类，避免上面顶着一排点不动的假页签。 */
-  if (plainSite()) {
-    const name = siteCats[state.sub[state.tab]]?.name || '全部';
-    return `<strong>${esc(siteDisplayName())}</strong><span class="compact-site-cat">${esc(name)}</span>`;
-  }
-  const tabs = adult ? ['成人短剧', '成人漫剧'] : ['AI换脸', 'AI魔改'];
-  return `<strong>${adult ? '成人剧场' : 'AI专区'}</strong><div class="compact-tabs" role="tablist">${tabs.map((name, index) => `<button type="button" role="tab" aria-selected="${index === state.sub[state.tab]}" data-sub="${index}" class="${index === state.sub[state.tab] ? 'selected' : ''}">${name}</button>`).join('')}</div>`;
+  const tabs = privateMode() ? (adult ? ['成人短剧', '成人漫剧'] : ['AI换脸', 'AI魔改']) : tabNames(state.tab);
+  return `<strong>${privateMode() ? (adult ? '成人剧场' : 'AI专区') : (adult ? '短剧' : '漫剧')}</strong><div class="compact-tabs" role="tablist">${tabs.map((name, index) => `<button type="button" role="tab" aria-selected="${index === state.sub[state.tab]}" data-sub="${index}" class="${index === state.sub[state.tab] ? 'selected' : ''}">${name}</button>`).join('')}</div>`;
 }
 function updateCompact() {
   const eligible = privateMode() && state.route === 'category';
@@ -838,28 +1073,23 @@ scroll.addEventListener('scroll', updateCompact, { passive: true });
 function renderCategory(keepCompact = false) {
   categoryObserver?.disconnect();
   const adult = state.tab === 'adult';
-  const plain = plainSite();
-  const tabs = plain
-    ? (siteCats.length ? siteCats.map(row => row.name) : ['全部'])
-    : (privateMode() ? (adult ? ['成人短剧', '成人漫剧'] : ['AI换脸', 'AI魔改']) : [adult ? '短剧' : '漫剧']);
-  if (state.sub[state.tab] >= tabs.length) state.sub[state.tab] = 0;
+  const currentId = categoryId();
+  const currentName = tabNames(state.tab)[state.sub[state.tab]] || tabNames(state.tab)[0] || '';
+  const tabs = privateMode() ? (adult ? ['成人短剧', '成人漫剧'] : ['AI换脸', 'AI魔改']) : tabNames(state.tab);
   const items = asArray(state.category?.items);
   const lead = items[0] || null;
   const slides = privateMode() ? [] : items.slice(0, 5);
   const banner = Math.min(state.categoryBanner, Math.max(0, slides.length - 1));
   state.categoryBanner = banner;
   const spotlight = !privateMode() && slides.length ? `<div class="hero category-spotlight category-carousel">${categorySlide(slides[banner], banner, slides.length)}</div><div class="hero-dots">${slides.map((_, index) => `<i class="${index === banner ? 'active' : ''}" data-slide="${index}"></i>`).join('')}</div>` : lead ? `<div class="category-spotlight"><img data-cover="${esc(lead.cover)}" alt=""><div class="category-spotlight-copy"><h2>${esc(lead.title)}</h2><button type="button" data-open-id="${esc(lead.id)}">查看作品 ${icon('arrow')}</button></div></div>` : '';
-  /* 黄果：两级页签（成人剧场/AI 专区）；其它源：分类数量不定，用横滑胶囊行，跟搜索页的类型条一致 */
-  const switcher = plain
-    ? `<div class="filter-row category-site-cats" role="tablist">${tabs.map((name, index) => `<button type="button" role="tab" data-sub="${index}" aria-selected="${index === state.sub[state.tab]}" class="${index === state.sub[state.tab] ? 'active' : ''}">${name}</button>`).join('')}</div>`
-    : privateMode() ? `<div class="segmented" role="tablist">${tabs.map((name, index) => `<button type="button" role="tab" data-sub="${index}" aria-selected="${index === state.sub[state.tab]}" class="${index === state.sub[state.tab] ? 'selected' : ''}">${name}</button>`).join('')}</div>` : '';
-  const heading = plain ? siteDisplayName() : (privateMode() ? (adult ? '成人剧场' : 'AI专区') : (adult ? '短剧' : '漫剧'));
-  const subtitle = plain ? `内容源：${siteDisplayName()}` : (privateMode() ? (adult ? '短剧与漫剧，走进不同的人生。' : '换脸与魔改，探索影像新可能。') : (adult ? '真人演的看了不烧心' : '探索热门漫剧。'));
-  const sectionTitle = plain ? (tabs[state.sub[state.tab]] || '全部') : `${tabs[state.sub[state.tab]]}作品`;
-  content.innerHTML = `<div class="category-page"><div class="category-head"><h1>${esc(heading)}</h1><p>${esc(subtitle)}</p></div>
+  /* 二级切换：私密源是两个分类；公开源是「短剧/漫剧 + 热播榜」，两边都要有入口 */
+  const switcher = tabs.length > 1 ? `<div class="segmented cols-${tabs.length}" role="tablist">${tabs.map((name, index) => `<button type="button" role="tab" data-sub="${index}" aria-selected="${index === state.sub[state.tab]}" class="${index === state.sub[state.tab] ? 'selected' : ''}">${name}</button>`).join('')}</div>` : '';
+  const heading = privateMode() ? (adult ? '成人剧场' : 'AI专区') : currentName;
+  const intro = isRankId(currentId) ? '红果官方热播榜，按观看与互动综合热度排序，每日更新。' : privateMode() ? (adult ? '短剧与漫剧，走进不同的人生。' : '换脸与魔改，探索影像新可能。') : (adult ? '真人演的看了不烧心' : '探索热门漫剧。');
+  content.innerHTML = `<div class="category-page"><div class="category-head"><h1>${esc(heading)}</h1><p>${intro}</p></div>
     ${switcher}
     ${spotlight}
-    <section class="category-section"><div class="section-heading"><h2>${esc(sectionTitle)}</h2><span class="category-count">已显示 ${items.length} 部</span></div>
+    <section class="category-section"><div class="section-heading"><h2>${esc(isRankId(currentId) ? currentName : currentName + '作品')}</h2><span class="category-count">已显示 ${items.length} 部</span></div>
     <div class="search-grid category-grid">${items.map(itemCard).join('')}</div><div class="category-footer">${categoryFooter()}</div></section></div>`;
   compact.innerHTML = compactMarkup();
   scroll.scrollTop = keepCompact ? 150 : 0;
@@ -974,8 +1204,11 @@ async function renderLibraryDownloads(prefetched) {
     try { phone = asArray(await withTimeout(api('download-list'), 4000)); } catch (error) { phone = []; }
     if (state.account.loggedIn) {
       try { const result = await withTimeout(api('nas-download-list'), 4000); nas = asArray(result.tasks); } catch (error) { nas = []; }
+      // 同一账号下在线电脑的下载记录，跟 NAS 任务并排显示
+      try { const pc = await withTimeout(api('desktop-download-list'), 4000); nas = nas.concat(asArray(pc.tasks)); } catch (error) { /* 电脑不在线就不显示 */ }
     }
   }
+  await loadRemoteJobs();
   if (state.route !== 'library' || state.libraryTab !== 'downloads' || token !== libraryDownloadsToken) return;
   const list = document.getElementById('library-downloads');
   if (!list) return;
@@ -992,7 +1225,8 @@ function commitDownloadList(list, phone, nas, opts = {}) {
   const phoneTasks = phone.map(t => Object.assign({}, t, { kind: 'phone' }));
   // 手机转发任务关联的 NAS 任务不在下载页单独显示（由"下载到手机"触发，属内部步骤；主动下载到 NAS 的任务正常显示）
   const forwardNas = new Set(phone.filter(t => t.nasTaskId).map(t => String(t.nasTaskId)));
-  const nasTasks = nas.filter(t => !forwardNas.has(String(t.id)) && (!t.source || t.source === contentSource)).map(t => Object.assign({}, t, { kind: 'nas' }));
+  const nasTasks = nas.filter(t => !forwardNas.has(String(t.id)) && (!t.source || t.source === contentSource)).map(t => Object.assign({}, t, { kind: (t.kind === 'desktop' || t.kind === 'tv' || t.kind === 'android') ? t.kind : 'nas' }));
+  state.deviceTasks = nasTasks.filter(t => t.kind === 'desktop' || t.kind === 'tv' || t.kind === 'android');
   list.innerHTML = renderDownloadList([...phoneTasks, ...nasTasks]);
   hydrateImages();   // 下载封面是 data-cover，必须补 src 才出图（之前缺这步 → 灰块）
   backfillNasCovers(nasTasks);   // 老 NAS 任务后端没存封面：用 seriesId 现拉详情页封面兜底（尽力而为）
@@ -1023,8 +1257,14 @@ function backfillNasCovers(nasTasks) {
 
 // 仅当任务状态真正变化时才重建列表，避免滑动落位后无谓重绘（那一闪）。
 function downloadListSignature(phone, nas) {
-  const red = t => [t.id, t.status, t.percent, t.doneCount, t.totalCount, t.nasTaskId, t.cover].map(v => v == null ? '' : v).join('|');
-  return [...phone.map(red), ...nas.map(red)].join(',');
+  // detail 也要进签名：合并阶段百分比会长时间停在同一位数，只有"第 63 集/第 64 集"这类文字在变，
+  // 不带上它就轮询不重绘，进度文字定在打开那一刻。
+  const red = t => [t.id, t.status, t.percent, t.doneCount, t.totalCount, t.nasTaskId, t.cover, t.detail].map(v => v == null ? '' : v).join('|');
+  // 远程传输进度也算进签名：否则 2s 轮询时列表不重绘，传输百分比永远停在打开那一瞬
+  const remote = [...remoteJobs.values()]
+    .map(j => [j.taskId, j.status, j.percent, j.serverName, j.error].map(v => v == null ? '' : v).join('|'))
+    .join(';');
+  return [...phone.map(red), ...nas.map(red), remote].join(',');
 }
 
 // 下载任务是否仍在进行（手机端 running/pulling；NAS 端 queued/downloading/merging）
@@ -1063,7 +1303,7 @@ async function processForwardTasks(phoneTasks, nasTasks) {
 
 // 有进行中任务则维持 2s 轮询，全部终态则停止；避免反复 stop/start 重置定时器
 function syncDownloadsTimer(tasks) {
-  const active = tasks.some(downloadTaskActive);
+  const active = tasks.some(downloadTaskActive) || [...remoteJobs.values()].some(job => job && (job.status === 'running' || job.status === 'queued'));
   if (active) {
     if (!downloadsTimer) downloadsTimer = setInterval(() => {
       if (state.route === 'downloads') refreshDownloads(routeToken, true);
@@ -1073,8 +1313,23 @@ function syncDownloadsTimer(tasks) {
   } else stopDownloadsTimer();
 }
 
-// ---- 下载（手机本地 + NAS 后端）----
+// ---- 下载（手机本地 + NAS 后端 + 远程服务器）----
 let downloadsTimer = null;
+/** 远程传输任务：taskId → 最新一条任务（列表里按下载任务展示状态） */
+let remoteJobs = new Map();
+async function loadRemoteJobs() {
+  try {
+    const list = asArray(await withTimeout(api('remote-transfer-list'), 3000));
+    const map = new Map();
+    for (const job of list) {
+      if (job && job.taskId) map.set(String(job.taskId), job);
+    }
+    remoteJobs = map;
+  } catch (error) {
+    // 拉不到就沿用上一轮，别让下载列表因为远程状态失败而空掉
+  }
+  return remoteJobs;
+}
 
 function stopDownloadsTimer() { if (downloadsTimer) { clearInterval(downloadsTimer); downloadsTimer = null; } }
 
@@ -1093,7 +1348,9 @@ async function refreshDownloads(token, keepTimer) {
   try { phone = await api('download-list'); } catch (error) { phone = []; }
   if (state.account.loggedIn) {
     try { const result = await api('nas-download-list'); nas = asArray(result.tasks); } catch (error) { nas = []; }
+    try { const pc = await api('desktop-download-list'); nas = nas.concat(asArray(pc.tasks)); } catch (error) { /* 电脑不在线 */ }
   }
+  await loadRemoteJobs();
   if (state.route !== 'downloads' || routeToken !== token) return;
   const list = document.getElementById('downloads-list');
   if (!list) return;
@@ -1102,7 +1359,8 @@ async function refreshDownloads(token, keepTimer) {
   const phoneTasks = phone.map(t => Object.assign({}, t, { kind: 'phone' }));
   // 手机转发任务关联的 NAS 任务不在下载页单独显示（由"下载到手机"触发，属内部步骤；主动下载到 NAS 的任务正常显示）
   const forwardNas = new Set(phone.filter(t => t.nasTaskId).map(t => String(t.nasTaskId)));
-  const nasTasks = nas.filter(t => !forwardNas.has(String(t.id)) && (!t.source || t.source === contentSource)).map(t => Object.assign({}, t, { kind: 'nas' }));
+  const nasTasks = nas.filter(t => !forwardNas.has(String(t.id)) && (!t.source || t.source === contentSource)).map(t => Object.assign({}, t, { kind: (t.kind === 'desktop' || t.kind === 'tv' || t.kind === 'android') ? t.kind : 'nas' }));
+  state.deviceTasks = nasTasks.filter(t => t.kind === 'desktop' || t.kind === 'tv' || t.kind === 'android');
   list.innerHTML = renderDownloadList([...phoneTasks, ...nasTasks]);
 }
 
@@ -1169,14 +1427,33 @@ function coverForTask(task) {
 }
 
 function downloadTaskRow(task, kind) {
-  const running = task.status === 'running';
+  // NAS 任务的状态是 queued/downloading/merging，不是 'running'；
+  // 以前只认 'running'，NAS 合并中会被当成"已结束"，按钮和状态文案全错。
+  const running = downloadTaskActive(task);
+  const merging = task.status === 'merging';
   const statusText = downloadStatusText(task, kind);
+  // 下载行来源：本机 / NAS / 同一账号下在线设备（电脑、电视、另一台手机）
+  const remoteKind = kind === 'desktop' || kind === 'tv' || kind === 'android';
+  const deviceLabel = kind === 'desktop' ? '电脑' : kind === 'tv' ? '电视' : '手机';
   const sourceBadge = kind === 'nas'
     ? '<span class="dl-source-badge nas">NAS</span>'
-    : '<span class="dl-source-badge phone">手机</span>';
+    : remoteKind
+      ? `<span class="dl-source-badge ${kind}">${deviceLabel} · ${esc(task.deviceName || '在线')}</span>`
+      : '<span class="dl-source-badge phone">手机</span>';
+  // 远程传输（手机下载 → SMB/WebDAV/FTP）：一部剧只有一条最新记录，直接挂在下载行上显示
+  const remoteJob = kind === 'phone' ? remoteJobs.get(String(task.id)) : null;
+  const remoteText = remoteJobText(remoteJob);
+  const remoteBusy = !!(remoteJob && (remoteJob.status === 'running' || remoteJob.status === 'queued'));
+  const canTransfer = kind === 'phone' && !running && !remoteBusy
+    && (task.status === 'done' || task.status === 'ready' || task.status === 'failed');
+  const transferBtn = canTransfer
+    ? `<button type="button" class="dl-cancel dl-transfer" data-dl-transfer="${esc(task.id)}">${remoteJob && remoteJob.status === 'failed' ? '重传' : '传到服务器'}</button>` : '';
+  const transferCancel = remoteJob && (remoteJob.status === 'running' || remoteJob.status === 'queued')
+    ? `<button type="button" class="dl-cancel" data-dl-transfer-cancel="${esc(remoteJob.id)}">取消传输</button>` : '';
   // 直写导出后 output 是 file:// 路径（不再走 MediaStore 的 content://），两者都按「已保存」展示
   const output = task.output && (task.output.startsWith('content://') || task.output.startsWith('file://')) ? '已保存到系统下载目录' : task.output || '';
-  const cancelBtn = running ? `<button type="button" class="dl-cancel" data-dl-cancel="${kind}" data-dl-id="${esc(task.id)}">取消</button>` : '';
+  // 合并中不给取消：后端删任务会把分集目录整个 rm，正在被 ffmpeg 读的文件会中途消失
+  const cancelBtn = running && !merging ? `<button type="button" class="dl-cancel" data-dl-cancel="${kind}" data-dl-id="${esc(task.id)}">取消</button>` : '';
   const retryBtn = !running && kind === 'phone' && (task.status === 'failed' || task.status === 'canceled') && !(task.error || '').includes('合并失败')
     ? `<button type="button" class="dl-cancel dl-retry" data-dl-retry="phone" data-dl-id="${esc(task.id)}">重试</button>` : '';
   const failedList = task.failedEpisodes || [];
@@ -1187,26 +1464,45 @@ function downloadTaskRow(task, kind) {
   const retryFailedBtn = !running && kind === 'nas' && canRetryFailed && failedList.length > 0
     ? `<button type="button" class="dl-cancel dl-retry" data-dl-retry-failed="nas" data-dl-id="${esc(task.id)}">重试失败${failedList.length}集</button>` : '';
   // 手动合并：下载完成（ready，含部分失败）或合并失败（分集保留）时显示合并按钮，等用户点合并才合并
-  const mergeBtn = !running && (task.status === 'ready' || ((task.status === 'failed' || task.status === 'done') && (task.error || '').includes('合并失败')))
+  const mergeBtn = !running && !remoteKind && (task.status === 'ready' || ((task.status === 'failed' || task.status === 'done') && (task.error || '').includes('合并失败')))
     ? `<button type="button" class="dl-cancel dl-retry" data-dl-merge="${kind}" data-dl-id="${esc(task.id)}">合并</button>` : '';
-  const deleteBtn = !running ? `<button type="button" class="dl-cancel" data-dl-delete="${kind}" data-dl-id="${esc(task.id)}"${task.children && task.children.length > 1 ? ` data-dl-siblings="${esc(task.children.map(c => c.id).join(','))}"` : ''}>删除</button>` : '';
+  const deleteBtn = !running && !remoteKind ? `<button type="button" class="dl-cancel" data-dl-delete="${kind}" data-dl-id="${esc(task.id)}"${task.children && task.children.length > 1 ? ` data-dl-siblings="${esc(task.children.map(c => c.id).join(','))}"` : ''}>删除</button>` : '';
   const failedInfo = failedList.length > 0
     ? `<span class="dl-error" data-dl-copy="${esc(task.id)}" data-dl-log="${esc('失败集: ' + failedList.map(f => '第' + f.index + '集(' + (f.error || '') + ')').join('；'))}" title="点击复制失败明细">失败 ${failedList.length} 集：${esc(failedList.slice(0, 3).map(f => '第' + f.index + '集').join('、'))}${failedList.length > 3 ? ' 等' : ''}</span>` : '';
   const errLog = task.error || task.debug || '';
   const errBlock = errLog
-    ? `<span class="dl-error" data-dl-copy="${esc(task.id)}" data-dl-log="${esc(errLog.replace(/\n/g, '\\n'))}" title="点击复制全部日志">${task.error ? esc(task.error.split('\n').slice(0, 4).join('<br>')) : '<span class="dl-log-link">复制合并日志</span>'}</span>` : '';
-  const detailHint = task.detail && (/片/.test(task.detail) || task.detail.includes('合并中')) ? ` · <span class="dl-detail-hint">${esc(task.detail)}</span>` : '';
-  const playAttr = kind === 'nas' ? 'data-dl-play-nas' : 'data-dl-play';
-  const playHint = kind === 'nas' ? '播放 NAS 成品' : '本地播放';
+    ? `<span class="dl-error" data-dl-copy="${esc(task.id)}" data-dl-log="${esc(errLog.replace(/\n/g, '\\n'))}" title="点击复制全部日志">${task.error ? task.error.split('\n').slice(0, 4).map(esc).join('<br>') : '<span class="dl-log-link">复制合并日志</span>'}</span>` : '';
+  const detailText = (task.detail || '').trim();
+  // 进行中的任务把后端给的阶段文字原样透出来（"按多数派转码音轨 第 63 集"、"音频整轨重编码 42%"），
+  // 跟 WebUI 里看到的一致；合并阶段这段直接占 meta 行，不重复挂 hint。
+  const detailHint = detailText && !merging && (running || /片/.test(detailText))
+    ? ` · <span class="dl-detail-hint">${esc(detailText)}</span>` : '';
+  // meta 中段：合并中显示后端阶段；下载中留空（阶段文字由 detailHint 出），避免出现「·  ·」
+  const metaMid = merging
+    ? (detailText || '合并中')
+    : (task.doneCount === task.totalCount && !running ? '已下载全部集' : (failedList.length ? `失败 ${failedList.length} 集` : ''));
+  const playAttr = kind === 'nas' ? 'data-dl-play-nas' : remoteKind ? 'data-dl-play-device' : 'data-dl-play';
+  const playHint = kind === 'nas' ? '播放 NAS 成品' : remoteKind ? `播放${deviceLabel}上的成品` : '本地播放';
   const playTile = `<button type="button" class="download-cover" ${playAttr}="${esc(task.id)}" aria-label="${playHint}《${esc(task.title || '未知剧集')}》">
     <span class="poster loading"><span class="poster-letter">${esc(String(task.title || '影').slice(0, 1))}</span><img data-cover="${esc(coverForTask(task))}" alt=""></span>
     <span class="download-cover-hint">${playHint}</span></button>`;
   return `<div class="download-card">${playTile}<div class="download-task">
     <div class="download-task-head"><strong>${esc(task.title || '未知剧集')}</strong>${sourceBadge}<span class="dl-status ${running ? 'is-running' : ''}">${statusText}</span></div>
-    <div class="download-task-meta">${task.doneCount}/${task.totalCount} 集 · ${task.doneCount === task.totalCount && task.status !== 'running' ? '已下载全部集' : (failedList.length ? `失败 ${failedList.length} 集` : '')}${srcNote ? ` · <b class="dl-src-note">${esc(srcNote)}</b>` : ''}${detailHint}</div>
+    <div class="download-task-meta">${task.doneCount}/${task.totalCount} 集${metaMid ? ` · ${esc(metaMid)}` : ''}${srcNote ? ` · <b class="dl-src-note">${esc(srcNote)}</b>` : ''}${detailHint}${remoteText ? ` · <span class="dl-remote-note ${remoteJob.status}">${esc(remoteText)}</span>` : ''}</div>
     <div class="download-track"><i style="width:${Math.max(0, Math.min(100, Number(task.percent) || 0))}%"></i></div>
-    <div class="download-task-foot">${output ? `<span class="dl-output">${esc(output)}</span>` : ''}${failedInfo}${errBlock}${mergeBtn}${retryFailedBtn}${retryBtn}${cancelBtn}${deleteBtn}</div>
+    <div class="download-task-foot">${output ? `<span class="dl-output">${esc(output)}</span>` : ''}${failedInfo}${errBlock}${transferBtn}${transferCancel}${mergeBtn}${retryFailedBtn}${retryBtn}${cancelBtn}${deleteBtn}</div>
   </div></div>`;
+}
+
+/** 远程传输状态文案（没有任务就返回空串，行里不显示） */
+function remoteJobText(job) {
+  if (!job) return '';
+  const name = job.serverName || '远程服务器';
+  if (job.status === 'running' || job.status === 'queued') return `传输到 ${name} ${Number(job.percent) || 0}%`;
+  if (job.status === 'done') return `已传到 ${name}`;
+  if (job.status === 'failed') return `传输失败：${job.error || '未知错误'}`;
+  if (job.status === 'canceled') return '传输已取消';
+  return '';
 }
 
 function downloadStatusText(task, kind) {
@@ -1216,6 +1512,9 @@ function downloadStatusText(task, kind) {
     if (d.includes('拉取')) return d.replace(/已从 NAS /, '从 NAS ');
     return '等待 NAS 下载';
   }
+  // NAS 端合并：状态码直接就是 merging，具体在做什么看 detail（逐集转码 / 音频整轨重编码 / 校验）
+  if (task.status === 'merging') return '合并中';
+  if (task.status === 'queued') return '排队中';
   if (task.status === 'ready') return failedCount > 0 ? `已下载 · 失败${failedCount}集` : '已下载 · 待合并';
   if (task.status === 'done') {
     if (kind === 'nas') return '已下载 · 已合并';
@@ -1248,6 +1547,10 @@ function showDownloadSheet() {
   downloadSelection.clear();
   downloadParsing = false;
   downloadOverlay.hidden = false;
+  /* 弹层是 #app 上的绝对定位层，底下的详情页仍在 #scroll 里。
+     不锁住 #scroll 的话，手指在弹层里往下拖，滚动链会传给详情页：
+     详情被滚走、弹层原地浮着 —— 看着就是「弹窗没关、剧却翻页了」。 */
+  scroll.style.overflow = 'hidden';
   updateBackEnabled();
   // 先强制拉服务端最新角色（管理员/NAS 下载鉴权），再渲染弹层
   if (state.account.loggedIn) {
@@ -1259,12 +1562,21 @@ function showDownloadSheet() {
 function hideDownloadSheet() {
   downloadOverlay.hidden = true;
   downloadParsing = false;
+  scroll.style.removeProperty('overflow');
   updateBackEnabled();
 }
+
+var targetDevices = null;
+var targetDeviceKind = 'device';
+var manageDeviceId = '';
+
+let downloadGridScroll = 0;   // 选集网格的滚动位置，跨重绘保留
 
 function renderDownloadSheet() {
   const sheet = document.getElementById('download-sheet');
   if (!sheet) return;
+  const prevGrid = sheet.querySelector('.download-sheet-grid');
+  if (prevGrid) downloadGridScroll = prevGrid.scrollTop;
   const episodes = asArray(state.detail.episodes);
   if (downloadMode === 'parsing') {
     sheet.innerHTML = `<p class="download-parsing">正在解析播放地址…<br><small>需要逐集解析，请稍候</small></p>`;
@@ -1275,23 +1587,89 @@ function renderDownloadSheet() {
     // 「调试」只在私密（黄果）模式给：那条链路才是 m3u8 → ts 分片 → 本地合并，
     // 也只有它能保留 TS/KEY 给开发者复现黑屏。公开模式没有分片可留。
     const canDebug = privateMode();
+    // 没进过设置页时 remoteServers 还是 null：这里补拉一次再重画，
+    // 否则配好的服务器会被误判成「还没配置」，点进去还是空列表。
+    if (remoteServers === null) {
+      loadRemoteServers(true).then(() => { if (downloadMode === 'target') renderDownloadSheet(); }).catch(() => {});
+    }
     sheet.innerHTML = `<div class="download-pick">
       <button type="button" class="download-pick-option" data-dl-pick="phone"><strong>下载到手机</strong></button>
       <button type="button" class="download-pick-option" data-dl-pick="nas" ${isAdmin ? '' : 'disabled'}><strong>下载到 NAS</strong>${isAdmin ? '' : '<small>仅管理员可用</small>'}</button>
+      <button type="button" class="download-pick-option" data-dl-pick="desktop"><strong>下载到电脑</strong></button>
+      <button type="button" class="download-pick-option" data-dl-pick="device"><strong>下载到其他设备</strong></button>
+      <button type="button" class="download-pick-option" data-dl-pick="remote"><strong>下载到远程服务器</strong></button>
       ${canDebug ? '<button type="button" class="download-pick-option" data-dl-pick="phone-debug"><strong>下载到手机（调试）</strong><small>保留 TS 与 Key，不自动合并，导出调试包</small></button>' : ''}
-      <p class="download-nas-note">${state.account.loggedIn ? '' : 'NAS 下载需要先登录账号。'}</p>
     </div>`;
+    return;
+  }
+  if (downloadMode === 'device') {
+    const list = asArray(targetDevices).filter(d => (targetDeviceKind === 'desktop'
+      ? String(d.platform) === 'desktop'
+      : String(d.platform) !== 'desktop'));
+    sheet.innerHTML = (list.length
+      ? `<div class="download-pick">${list.map(d => `<div class="dl-device-row">
+          <button type="button" class="download-pick-option" data-dl-device="${esc(d.id)}"><strong>${esc(d.name || '未命名设备')}</strong><small>${d.online ? '在线' : '离线 · 上线后自动开始'}</small></button>
+          <button type="button" class="dl-device-menu" data-dl-device-menu="${esc(d.id)}" aria-label="管理这台设备">⋯</button>
+        </div>`).join('')}</div>`
+      : `<p class="download-parsing">没有在线的${targetDeviceKind === 'desktop' ? '电脑' : '其他设备'}<br><small>在另一端登录同一账号并保持在线</small></p>`)
+      + `<div class="download-sheet-buttons"><button type="button" class="dl-secondary" data-dl-back-target="1">返回</button></div>`;
+    return;
+  }
+  if (downloadMode === 'device-manage') {
+    const d = asArray(targetDevices).find(item => String(item.id) === String(manageDeviceId)) || {};
+    sheet.innerHTML = `<div class="dl-manage">
+      <h3>${esc(d.name || '未命名设备')}</h3>
+      <p class="dl-manage-sub">${esc(d.model || '')}${d.online ? ' · 在线' : ' · 离线'}</p>
+      <label class="dl-field"><span>设备名</span><input id="dl-device-name" class="settings-input" type="text" maxlength="24" value="${esc(d.name || '')}" autocomplete="off"></label>
+      <div class="download-sheet-buttons"><button type="button" class="dl-secondary" data-dl-manage-back="1">返回</button><button type="button" class="dl-primary" data-dl-rename="1">保存名字</button></div>
+      <div class="dl-danger-block">
+        <strong>移除这台设备</strong>
+        <p>移除后它会退出登录，重新登录前收不到任何下载指令。需要输入验证器里的 6 位动态码。</p>
+        <label class="dl-field"><span>动态码</span><input id="dl-device-code" class="settings-input" type="text" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="off"></label>
+        <button type="button" class="dl-danger" data-dl-revoke="1">移除设备</button>
+      </div>
+    </div>`;
+    return;
+  }
+  if (downloadMode === 'remote') {
+    const servers = asArray(remoteServers);
+    sheet.innerHTML = `<div class="download-pick">${servers.map(s => `<button type="button" class="download-pick-option" data-dl-remote="${esc(s.id)}"><strong>${esc(s.name)}</strong><small>${esc(s.typeName)} · ${esc(s.address)}</small></button>`).join('')}</div>
+      <div class="download-sheet-buttons"><button type="button" class="dl-secondary" data-dl-back-target="1">返回</button></div>`;
     return;
   }
   const all = episodes.map(ep => Number(ep.number) || 0);
   const checked = all.filter(n => downloadSelection.has(n)).length;
   const allSelected = all.length && checked === all.length;
-  sheet.innerHTML = `<div class="download-sheet-toolbar"><button type="button" class="dl-secondary" data-dl-all="1">${allSelected ? '取消全选' : '全选'}</button><span>已选 ${checked}/${all.length} 集</span></div>
+  sheet.innerHTML = `<div class="download-sheet-toolbar"><button type="button" class="dl-secondary" data-dl-all="1">${allSelected ? '取消全选' : '全选'}</button><span data-dl-count>已选 ${checked}/${all.length} 集</span></div>
     <div class="download-sheet-grid">${episodes.map(ep => {
       const n = Number(ep.number) || 0;
       return `<label class="dl-ep ${downloadSelection.has(n) ? 'checked' : ''}" data-dl-ep="${n}"><span>${n}</span></label>`;
     }).join('')}</div>
     <div class="download-sheet-buttons"><button type="button" class="dl-secondary" data-dl-back="1">取消</button><button type="button" class="dl-primary" data-dl-confirm="1" ${checked ? '' : 'disabled'}>下载 ${checked ? checked + ' 集' : ''}</button></div>`;
+  // 列表刚重建时还没有布局高度，直接设 scrollTop 会被夹成 0，等一帧再恢复
+  const gridNow = sheet.querySelector('.download-sheet-grid');
+  if (gridNow && downloadGridScroll > 0) {
+    requestAnimationFrame(() => { gridNow.scrollTop = downloadGridScroll; });
+  }
+}
+
+/** 只刷「已选 X/Y」和下载按钮状态，不重建列表 DOM。
+ *  整块重绘会把 .download-sheet-grid 的滚动位置清零：一季几十集时，
+ *  用户滑到第 80 集点一下选中，界面立刻弹回最前面，等于白滑。 */
+function syncDownloadSheetSelection() {
+  const episodes = asArray(state.detail && state.detail.episodes);
+  const total = episodes.length;
+  let checked = 0;
+  for (const ep of episodes) if (downloadSelection.has(Number(ep.number) || 0)) checked++;
+  const count = document.querySelector('#download-sheet [data-dl-count]');
+  if (count) count.textContent = `已选 ${checked}/${total} 集`;
+  const confirm = document.querySelector('#download-sheet [data-dl-confirm]');
+  if (confirm) {
+    confirm.disabled = checked === 0;
+    confirm.textContent = checked ? `下载 ${checked} 集` : '下载';
+  }
+  const allBtn = document.querySelector('#download-sheet [data-dl-all]');
+  if (allBtn) allBtn.textContent = total && checked === total ? '取消全选' : '全选';
 }
 
 async function resolveEpisodesForDownload(episodes) {
@@ -1332,7 +1710,7 @@ async function resolveEpisodesForDownload(episodes) {
   return resolved;
 }
 
-async function submitDownloadTo(target) {
+async function submitDownloadTo(target, remoteId) {
   if (downloadParsing) return;
   if (target === 'nas') {
     if (!state.account.loggedIn) { toast('请先登录账号', true); return; }
@@ -1340,18 +1718,34 @@ async function submitDownloadTo(target) {
     try { const fresh = await api('refresh-account'); if (fresh && fresh.role) setAccount(fresh); } catch (ignore) {}
     if (state.account.role !== 'admin') { toast('仅管理员可下载到 NAS', true); return; }
   }
+  if (target === 'remote' && !remoteId) { toast('请选择要传到哪台服务器', true); return; }
   const episodes = asArray(state.detail.episodes).map(ep => Number(ep.number) || 0).filter(n => downloadSelection.has(n));
   if (!episodes.length) { toast('请先选择集数', true); return; }
   downloadParsing = true;
   downloadMode = 'parsing';
   renderDownloadSheet();
   try {
+    if (target === 'device') {
+      const sourceNow = String(state.detail.source || contentSource) === 'huangguo' ? 'huangguo' : 'hongguo';
+      await api('download-dispatch', {
+        source: sourceNow,
+        title: state.detail.title,
+        seriesId: String(state.detail.seriesId || state.detail.id),
+        cover: state.detail.cover || '',
+        episodes,
+        kind: 'device',
+        deviceId: String(remoteId || '')
+      });
+      hideDownloadSheet();
+      nativeToast('已推送到设备，马上开始下载');
+      return;
+    }
     if (target === 'nas') {
       // NAS 自主解析：只推 seriesId/title/集数，由后端调红果 App 接口取流（最高画质档）
       await api('nas-download-start', { source: contentSource, title: state.detail.title, seriesId: String(state.detail.seriesId || state.detail.id), episodes, cover: state.detail.cover || '' });
-      toast('已提交 NAS 下载任务（后端自行解析取流）');
+      nativeToast(`已提交 NAS 下载任务（${episodes.length} 集）`);
     } else {
-      // 下载到手机。
+      // 下载到手机 / 下载到远程服务器。
       // 判定依据优先级：① 当前详情页实际内容源（detail.source，与详情/播放完全一致，杜绝全局模式脱节）；
       // ② 实时问原生端 content-status；③ 全局 contentSource。
       let sourceNow = String(state.detail?.source || '');
@@ -1365,16 +1759,25 @@ async function submitDownloadTo(target) {
       // NAS 端"下载到 NAS"入口仍保留（主动下载到 NAS 用）。
       let proxyModeNow = Number(state.proxyMode) || 3;
       try { const pmv = await api('get-proxy-mode'); if (pmv !== null && pmv !== undefined && pmv !== '') proxyModeNow = Number(pmv) || 3; } catch (ignore) {}
-      console.log(`[dl-judge] source=${sourceNow} proxyMode=${proxyModeNow} role=${state.account?.role}`);
+      console.log(`[dl-judge] source=${sourceNow} proxyMode=${proxyModeNow} role=${state.account?.role} remote=${remoteId || '-'}`);
       {
         const resolved = await resolveEpisodesForDownload(episodes);
         if (!resolved.length) throw new Error('没有可下载的分集');
         // 调试模式：仍是「下载到手机」，但要求原生保留 TS/KEY、不自动合并，最后打成一个调试包
         const debug = target === 'phone-debug';
-        await api('download-start', { source: sourceNow, title: state.detail.title, episodes: resolved, debug, cover: state.detail.cover || '' });
-        toast(debug
-          ? `调试模式已开始（${resolved.length} 集）：分片下完后会导出「第NN集_调试包.zip」到 Download/Veyra/${state.detail.title}`
-          : `判定[源=${sourceNow} 通道=${proxyModeNow}] 已开始下载到手机（手机经代理拉源合并）`);
+        // 远程服务器：先照常下到手机（同一条链路），下载+合并完成后原生自动上传到所选服务器
+        const targetRemote = target === 'remote' ? String(remoteId || '') : '';
+        await api('download-start', { source: sourceNow, title: state.detail.title, episodes: resolved, debug, cover: state.detail.cover || '', remoteId: targetRemote });
+        /* 成功提示走系统 Toast（屏幕底部小条）。原来这条塞了「判定[源=… 通道=…]」，
+         * 在顶部浮层里又长又难读；技术细节留 console，用户只需要知道已经开始下了。 */
+        console.log(`[dl-start] 源=${sourceNow} 通道=${proxyModeNow} 集数=${resolved.length} 远程=${targetRemote || '-'}`);
+        if (debug) {
+          toast(`调试模式已开始（${resolved.length} 集）：分片下完后会导出「第NN集_调试包.zip」到 Download/Veyra/${state.detail.title}`);
+        } else if (targetRemote) {
+          nativeToast(`已开始下载 ${resolved.length} 集，完成后自动传到服务器`);
+        } else {
+          nativeToast(`已开始下载 ${resolved.length} 集`);
+        }
       }
     }
     hideDownloadSheet();
@@ -1390,11 +1793,13 @@ function renderSettings() {
   content.innerHTML = `<div class="settings-page"><button type="button" class="listing-back" data-back="1">${icon('back')} 返回我的</button><h1>设置</h1>
     ${window.renderAppearance ? window.renderAppearance() : ''}
     <section><button type="button" class="settings-link" data-account-management="1"><span><strong>账号管理</strong><small>${state.account.loggedIn ? esc(state.account.username) : '登录或注册账号'}</small></span>${icon('arrow')}</button></section>
+    ${privateMode() ? `<section><button type="button" class="settings-link" data-source-open><span><strong>私密内容源</strong><small data-source-summary>${esc((state.privateSite && state.privateSite.name) || '黄果')}</small></span>${icon('arrow')}</button></section>` : ''}
     <section><button type="button" class="settings-link" data-proxy-open><span><strong>黄果网络通道</strong><small data-proxy-summary>${esc(proxySummaryText())}</small></span>${icon('arrow')}</button></section>
-    ${privateMode() ? `<section><button type="button" class="settings-link" data-source-open><span><strong>内容源</strong><small>${esc(siteDisplayName())}</small></span>${icon('arrow')}</button></section>` : ''}
+    <section><button type="button" class="settings-link" data-remote-open><span><strong>远程服务器</strong><small data-remote-summary>${esc(remoteSummaryText())}</small></span>${icon('arrow')}</button></section>
     <section><button type="button" class="settings-link" data-about-open><span><strong>关于 Veyra</strong><small>项目地址 · GPL-3.0 开源</small></span>${icon('arrow')}</button></section></div>`;
   if (window.bindAppearance) window.bindAppearance();
   api('hot-update-status').then(window.hgHotUpdateStatus).catch(() => {});
+  loadRemoteServers(true).catch(() => {});   // 设置页摘要要显示「已配置几台」
 }
 
 const PROXY_MODE_NAMES = { 1: '仅直连', 2: '仅代理', 3: '走后端转发' };
@@ -1488,7 +1893,9 @@ function renderAccountManagement() {
           <label for="new-password">新密码</label><input id="new-password" type="password" autocomplete="new-password" required>
           <p id="password-error" class="auth-error" role="alert" hidden></p><button type="submit">确认修改</button>
         </form></section>
-      <section class="settings-account"><h2>同步与登录</h2><button type="button" data-sync-now="1">立即同步片单</button><button type="button" data-logout="1" aria-live="polite">退出登录</button></section>` : `<section class="settings-account"><p>登录后可同步收藏和观看历史，并管理头像与密码。</p><button type="button" data-account-action="1">登录或注册</button></section>`}</div>`;
+      <section class="settings-account"><h2>同步与登录</h2><button type="button" data-sync-now="1">立即同步片单</button><button type="button" data-logout="1" aria-live="polite">退出登录</button></section>
+      <section class="settings-account"><h2>扫码登录其它设备</h2><p>电视、电脑、平板登录页上的二维码都能扫：扫完这台手机的账号会直接同步过去，不用敲密码。</p><button type="button" data-qr-login="1">去扫码登录</button></section>` : `<section class="settings-account"><p>登录后可同步收藏和观看历史，并管理头像与密码。</p><button type="button" data-account-action="1">登录或注册</button></section>
+      <section class="settings-account"><h2>扫码登录其它设备</h2><p>电视、电脑、平板登录页上的二维码都能扫：扫完这台手机的账号会直接同步过去，不用敲密码。</p><button type="button" data-qr-login="1">去扫码登录</button></section>`}</div>`;
 }
 
 // v0.18.108：账号管理弹窗（复用外观弹窗 scrim/pop 结构，body 锁滚动共用 .appearance-open）
@@ -1503,8 +1910,10 @@ function buildAccountPopHtml() {
           <label for="new-password">新密码</label><input id="new-password" type="password" autocomplete="new-password" required>
           <p id="password-error" class="auth-error" role="alert" hidden></p><button type="submit">确认修改</button>
         </form></section>
-      <section class="settings-account"><h2>同步与登录</h2><button type="button" data-sync-now="1">立即同步片单</button><button type="button" data-logout="1" aria-live="polite">退出登录</button></section>`
-    : `<section class="settings-account"><p>登录后可同步收藏和观看历史，并管理头像与密码。</p><button type="button" data-account-action="1">登录或注册</button></section>`;
+      <section class="settings-account"><h2>同步与登录</h2><button type="button" data-sync-now="1">立即同步片单</button><button type="button" data-logout="1" aria-live="polite">退出登录</button></section>
+      <section class="settings-account"><h2>扫码登录其它设备</h2><p>电视、电脑、平板登录页上的二维码都能扫：扫完这台手机的账号会直接同步过去，不用敲密码。</p><button type="button" data-qr-login="1">去扫码登录</button></section>`
+    : `<section class="settings-account"><p>登录后可同步收藏和观看历史，并管理头像与密码。</p><button type="button" data-account-action="1">登录或注册</button></section>
+      <section class="settings-account"><h2>扫码登录其它设备</h2><p>电视、电脑、平板登录页上的二维码都能扫：扫完这台手机的账号会直接同步过去，不用敲密码。</p><button type="button" data-qr-login="1">去扫码登录</button></section>`;
   return `<div class="appearance-pop account-pop" role="dialog" aria-modal="true" aria-labelledby="account-title">
     <div class="appearance-head"><h2 id="account-title">账号管理</h2><button type="button" class="appearance-close" data-account-close aria-label="关闭">✕</button></div>
     ${body}</div>`;
@@ -1545,12 +1954,12 @@ function updateProxySummary() {
 var proxyPop = null;
 function buildProxyPopHtml() {
   return `<div class="appearance-pop account-pop proxy-pop" role="dialog" aria-modal="true" aria-labelledby="proxy-title">
-    <div class="appearance-head"><h2 id="proxy-title">黄果网络通道</h2><button type="button" class="appearance-close" data-proxy-close aria-label="关闭">✕</button></div>
-    <p class="appearance-note">仅私密模式生效（黄果 / 剧果 / 帝果等共用这套通道），红果永远直连不受影响；选择后立即生效，无需重启。</p>
+    <div class="appearance-head"><h2 id="proxy-title">私密网络模式</h2><button type="button" class="appearance-close" data-proxy-close aria-label="关闭">✕</button></div>
+    <p class="appearance-note">只对私密模式生效，且对所选内容源全部有效：黄果走本机通道，剧果/野果等由服务器按同一模式取流。公开内容永远直连。</p>
+    ${privateMode() ? `<button type="button" class="site-option proxy-source-row" data-source-open><strong>内容源 · ${esc((state.privateSite && state.privateSite.name) || '黄果')}</strong><small>点此切换黄果 / 剧果 / 帝果 / 黄豆 …</small></button>` : ''}
     <div class="settings-storage">${privateMode() ? '<button type="button" data-return-public>返回红果（公开模式）</button>' : '<button type="button" data-enter-private>进入私密模式</button>'}</div>
-    ${privateMode() ? `<button type="button" class="settings-link proxy-source-link" data-source-open><span><strong>内容源</strong><small>${esc(siteDisplayName())}</small></span>${icon('arrow')}</button>` : ''}
     <div class="proxy-test-row">
-      <input id="proxy-address" class="settings-input" type="text" placeholder="代理地址 host:port，如 192.168.31.108:7893" value="${esc(state.proxy || '')}" autocomplete="off" aria-label="黄果代理地址">
+      <input id="proxy-address" class="settings-input" type="text" placeholder="代理地址 host:port，如 192.168.31.108:7893" value="${esc(state.proxy || '')}" autocomplete="off" aria-label="代理地址">
       <button type="button" id="proxy-test" class="proxy-test-btn">检测</button>
     </div>
     <span id="proxy-test-result" class="proxy-test-result" hidden></span>
@@ -1564,6 +1973,62 @@ function buildProxyPopHtml() {
     </div>
   </div>`;
 }
+/* ---------------- 私密内容源 ---------------- */
+var sourcePop = null;
+function ensureSourcePop() {
+  if (sourcePop && document.body.contains(sourcePop)) return sourcePop;
+  sourcePop = document.createElement('div');
+  sourcePop.className = 'appearance-scrim';
+  sourcePop.hidden = true;
+  sourcePop.addEventListener('click', event => {
+    if (event.target === sourcePop || event.target.closest('[data-source-close]')) { closeSourcePop(); return; }
+    const pick = event.target.closest('[data-site-id]');
+    if (pick) pickPrivateSite(pick.dataset.siteId, pick.dataset.siteName);
+  });
+  document.body.appendChild(sourcePop);
+  return sourcePop;
+}
+function buildSourcePopHtml() {
+  const current = (state.privateSite && state.privateSite.id) || 'huangguo';
+  /* 黄果是内置源（端侧解析 + 三通道），永远排第一；其余是后端网关支持的源 */
+  const rows = [{ id: 'huangguo', name: '黄果', description: '视频 · AI · 旧版（直连 / 代理 / 后端）' }]
+    .concat(asArray(state.privateSites));
+  return `<div class="appearance-pop account-pop proxy-pop" role="dialog" aria-modal="true" aria-labelledby="source-title">
+    <div class="appearance-head"><h2 id="source-title">私密内容源</h2><button type="button" class="appearance-close" data-source-close aria-label="关闭">✕</button></div>
+    <p class="appearance-note">黄果旧版 / 黄果 AI / 黄豆 / 帝果 / 剧果 都在手机上直接取数，请求走你自己的网络，不经过服务器；其余源仍由服务器解析。切完自动刷新首页。</p>
+    <div class="site-list">${rows.map(row => `<button type="button" class="site-option${row.id === current ? ' is-active' : ''}" data-site-id="${esc(row.id)}" data-site-name="${esc(row.name)}"><strong>${esc(row.name)}</strong><small>${esc(row.description || '')}</small></button>`).join('')}</div>
+  </div>`;
+}
+async function openSourcePop() {
+  ensureSourcePop();
+  sourcePop.innerHTML = buildSourcePopHtml();
+  sourcePop.hidden = false;
+  document.body.classList.add('appearance-open');
+  try {
+    const data = await api('private-sites');
+    state.privateSites = asArray(data && data.sources);
+    sourcePop.innerHTML = buildSourcePopHtml();
+  } catch (ignore) { /* 拉不到后端清单就只显示黄果 */ }
+}
+function closeSourcePop() {
+  if (!sourcePop || sourcePop.hidden) return;
+  sourcePop.hidden = true;
+  document.body.classList.remove('appearance-open');
+}
+async function pickPrivateSite(id, name) {
+  if (!id) return;
+  if (id === ((state.privateSite && state.privateSite.id) || 'huangguo')) { closeSourcePop(); return; }
+  try {
+    const result = await api('private-site', { id, name });
+    state.privateSite = { id: (result && result.id) || id, name: (result && result.name) || name };
+    state.home = null; state.category = null; state.tags = null;
+    closeSourcePop();
+    toast(`已切换到 ${state.privateSite.name}`);
+    goHome();
+  } catch (error) { toast(error.message || '切换失败', true); }
+}
+window.__veyraSourceBack = () => { if (sourcePop && !sourcePop.hidden) { closeSourcePop(); return true; } return false; };
+
 function ensureProxyPop() {
   if (proxyPop && document.body.contains(proxyPop)) return proxyPop;
   proxyPop = document.createElement('div');
@@ -1618,134 +2083,12 @@ function closeProxyPop() {
 window.__veyraProxyBack = () => { if (proxyPop && !proxyPop.hidden) { closeProxyPop(); return true; } return false; };
 window.__veyraProxyOpen = () => !!(proxyPop && !proxyPop.hidden);
 
-/* ---------------- 私密模式：内容源切换 ----------------
-   原生 private-sites 会把「端侧能自己解析的源」排在前面，再补后端下发的接口型源。
-   黄果本身不在该清单里（它走 SiteProfile / 原生仓库），这里补在第一行。 */
-async function loadSiteCats() {
-  if (!plainSite()) { siteCats = []; resetCategoryIds(); return; }
-  try {
-    const data = await api('tags');
-    siteCats = asArray(data?.items)
-      .map(row => ({ id: String(row.slug || row.id || ''), name: String(row.name || row.slug || '') }))
-      .filter(row => row.id && row.name);
-  } catch { siteCats = []; }
-  resetCategoryIds();
-}
-function resetCategoryIds() {
-  if (!privateMode()) { categoryIds.adult = ['short']; categoryIds.ai = ['comic']; return; }
-  if (siteIsHuangguo()) { categoryIds.adult = ['ai-duanju', 'ai-manju']; categoryIds.ai = ['ai-huanlian', 'ai-mogai']; return; }
-  const ids = siteCats.length ? siteCats.map(row => row.id) : [''];
-  categoryIds.adult = ids;
-  categoryIds.ai = ids;
-}
-function sourceRowsHtml(sources) {
-  const rows = [{ id: 'huangguo', name: '黄果', description: '官方源 · 视频 / AI / 旧版' }];
-  for (const row of sources || []) {
-    if (!row || !row.id || row.id === 'huangguo') continue;
-    rows.push({ id: row.id, name: row.name || row.id, description: row.description || '' });
-  }
-  return rows.map(row => {
-    const active = row.id === privateSite.id;
-    return `<button type="button" class="source-row${active ? ' is-active' : ''}" data-pick-site="${esc(row.id)}" data-site-name="${esc(row.name)}">
-      <span><strong>${esc(row.name)}</strong><small>${esc(row.description)}</small></span>
-      <i class="source-check" aria-hidden="true">${active ? '✓' : ''}</i></button>`;
-  }).join('');
-}
-var sourcePop = null;
-function buildSourcePopHtml() {
-  return `<div class="appearance-pop account-pop source-pop" role="dialog" aria-modal="true" aria-labelledby="source-title">
-    <div class="appearance-head"><h2 id="source-title">内容源</h2><button type="button" class="appearance-close" data-source-close aria-label="关闭">✕</button></div>
-    <p class="appearance-note">仅私密模式生效；切换后首页、分类、搜索、详情立刻改用新源，无需重启。</p>
-    <div class="source-list" id="source-list">${sourceRowsHtml([])}</div>
-  </div>`;
-}
-function ensureSourcePop() {
-  if (sourcePop && document.body.contains(sourcePop)) return sourcePop;
-  sourcePop = document.createElement('div');
-  sourcePop.className = 'appearance-scrim';
-  sourcePop.hidden = true;
-  sourcePop.addEventListener('click', event => {
-    if (event.target === sourcePop || event.target.closest('[data-source-close]')) closeSourcePop();
-  });
-  document.body.appendChild(sourcePop);
-  return sourcePop;
-}
-function openSourcePop() {
-  if (!privateMode()) { toast('进入私密模式后才能切换内容源', true); return; }
-  closeProxyPop();
-  ensureSourcePop();
-  sourcePop.innerHTML = buildSourcePopHtml();
-  sourcePop.hidden = false;
-  document.body.classList.add('appearance-open');
-  api('private-sites').then(data => {
-    const list = document.getElementById('source-list');
-    if (list) list.innerHTML = sourceRowsHtml(asArray(data?.sources));
-  }).catch(() => {
-    const list = document.getElementById('source-list');
-    if (list) list.innerHTML = sourceRowsHtml([]) + '<p class="appearance-note">暂时拉不到可选源清单，仅能使用黄果。</p>';
-  });
-}
-function closeSourcePop() {
-  if (!sourcePop || sourcePop.hidden) return;
-  sourcePop.hidden = true;
-  document.body.classList.remove('appearance-open');
-}
-window.__veyraSourceBack = () => { if (sourcePop && !sourcePop.hidden) { closeSourcePop(); return true; } return false; };
-window.__veyraSourceOpen = () => !!(sourcePop && !sourcePop.hidden);
-
-let siteSwitching = false;
-async function pickPrivateSite(id, name) {
-  if (!id || siteSwitching) return;
-  if (id === privateSite.id) { closeSourcePop(); return; }
-  siteSwitching = true;
-  try {
-    const result = await api('private-site', { id, name: name || id });
-    privateSite = { id: (result && result.id) || id, name: (result && result.name) || name || id };
-    closeSourcePop();
-    // 原生已经 rebindContent + clearCache，这里把前端这一层的缓存也一并作废：
-    // 首页 / 分类 / 搜索 / 详情 / 返回快照 / 滑动页缓存，任何一处留着都会先闪一下上一个源的内容。
-    state.home = null; state.category = null; state.categoryItems = []; state.categoryBanner = 0;
-    state.search = null; state.detail = null; state.sourceItem = null; state.tags = null; state.library = null;
-    state.sub = { adult: 0, ai: 0 }; state.epGroup = 0;
-    for (const key of Object.keys(screenSnapshots)) delete screenSnapshots[key];
-    try { swipePageCache.clear(); } catch (ignore) {}
-    siteCats = [];
-    await loadSiteCats();
-    toast(`已切换到 ${siteDisplayName()}`);
-    goHome();
-  } catch (error) {
-    toast(error.message || '切换内容源失败', true);
-  } finally {
-    siteSwitching = false;
-  }
-}
-
-/* 关于页里的设备一行：排查「电视上却是手机界面」这类问题时，
- * 先要确认页面到底把自己认成了什么。这里把判定依据（原生报的形态、机型、
- * 触摸点数、WebView 版本、视口尺寸、资源包版本）都摊开写出来，
- * 用户截一张图就能定位，不用靠猜。 */
-function deviceLine() {
-  var parts = [];
-  var touch = (navigator.maxTouchPoints || 0) > 0;
-  var wide = Math.min(window.innerWidth, window.innerHeight) >= 600;
-  parts.push(touch && wide ? '平板版式' : '手机版式');
-  var chrome = '';
-  try { chrome = ((navigator.userAgent || '').match(/Chrome\/(\d+)/) || [])[1] || ''; } catch (error) { }
-  if (chrome) parts.push('WebView ' + chrome);
-  parts.push(window.innerWidth + '×' + window.innerHeight);
-  try {
-    if (window.HotRuntime && window.HotRuntime.version) parts.push('界面 ' + window.HotRuntime.version);
-  } catch (error) { }
-  return parts.join(' · ');
-}
-
 var aboutPop = null;
 function buildAboutPopHtml() {
   return `<div class="appearance-pop account-pop" role="dialog" aria-modal="true" aria-labelledby="about-title">
     <div class="appearance-head"><h2 id="about-title">关于 Veyra</h2><button type="button" class="appearance-close" data-about-close aria-label="关闭">✕</button></div>
     <p class="appearance-note">项目地址：<button type="button" class="settings-url" data-open-url="https://github.com/gybeyond1/Veyra">github.com/gybeyond1/Veyra</button> <button type="button" data-check-update>检查更新</button></p>
     <p class="appearance-note">Veyra 基于开源项目二次开发，遵循 GPL-3.0 开源协议发布，完整源码、自建后端与 Docker 部署说明见仓库。</p>
-    <p class="appearance-note appearance-device">${esc(deviceLine())}</p>
   </div>`;
 }
 function ensureAboutPop() {
@@ -1773,12 +2116,308 @@ function closeAboutPop() {
 window.__veyraAboutBack = () => { if (aboutPop && !aboutPop.hidden) { closeAboutPop(); return true; } return false; };
 window.__veyraAboutOpen = () => !!(aboutPop && !aboutPop.hidden);
 
+// ================= 远程服务器（SMB / WebDAV / FTP）=================
+// 配置在原生侧（SharedPreferences），这里只管展示与编辑；密码不回传，编辑时留空 = 不改。
+var REMOTE_TYPES = [['smb', 'SMB'], ['webdav', 'WebDAV'], ['ftp', 'FTP']];
+let remoteServers = null;
+let remoteEditing = null;    // null = 列表；'' = 新建；其它 = 正在编辑的 id
+let remoteDraft = null;      // 表单草稿（切类型重绘时保留已填内容）
+let remoteTestText = '';
+let remoteTestOk = false;
+
+function remoteTypeName(type) {
+  const hit = REMOTE_TYPES.find(t => t[0] === type);
+  return hit ? hit[1] : String(type || '').toUpperCase();
+}
+
+function remoteSummaryText() {
+  const list = asArray(remoteServers);
+  if (!list.length) return '未配置 · 支持 SMB / WebDAV / FTP';
+  if (list.length === 1) return `${list[0].name} · ${list[0].typeName || remoteTypeName(list[0].type)}`;
+  return `${list.length} 个服务器 · ${list.slice(0, 2).map(s => s.name).join('、')}`;
+}
+
+async function loadRemoteServers(force) {
+  if (remoteServers && !force) return remoteServers;
+  try { remoteServers = asArray(await api('remote-list')); }
+  catch (error) { if (!remoteServers) remoteServers = []; }
+  const summary = document.querySelector('[data-remote-summary]');
+  if (summary) summary.textContent = remoteSummaryText();
+  return remoteServers;
+}
+
+/* 账号里的远程服务器配置回填完成（登录后 / 冷启动）：
+   原生侧已经写进本地，这里只要把缓存丢掉重拉一遍，界面就跟着更新。
+   正在编辑表单时不重画，免得把用户填了一半的内容冲掉。 */
+window.hgRemotesRestored = () => {
+  remoteServers = null;
+  loadRemoteServers(true).then(() => {
+    if (remotePop && !remotePop.hidden && remoteEditing === null) renderRemotePop();
+  }).catch(() => { });
+};
+
+async function openDevicePicker() {
+  try {
+    const data = await api('download-targets');
+    targetDevices = asArray(data && data.devices);
+  } catch (error) {
+    toast((error && error.message) || '读取设备列表失败', true);
+    return;
+  }
+  downloadMode = 'device';
+  renderDownloadSheet();
+}
+
+var remotePop = null;
+
+function remoteDraftOf(server) {
+  const s = server || {};
+  return {
+    id: s.id || '',
+    type: s.type || 'smb',
+    name: s.name || '',
+    host: s.host || '',
+    port: Number(s.port) || 0,
+    share: s.share || '',
+    path: s.path || '',
+    user: s.user || '',
+    pass: '',
+    hasPass: !!s.hasPass,
+    secure: !!s.secure,
+    insecure: s.insecure !== false,
+    cleanup: s.cleanup !== false
+  };
+}
+
+function buildRemoteFormHtml() {
+  const d = remoteDraft;
+  const isSmb = d.type === 'smb';
+  const isWebdav = d.type === 'webdav';
+  const portHint = isSmb ? '445' : isWebdav ? (d.secure ? '443' : '80') : (d.secure ? '990' : '21');
+  // 表单压成「地址+端口」「用户名+密码」两排，一个弹窗就能看完，不用滚
+  return `<div class="remote-types">${REMOTE_TYPES.map(t => `<button type="button" data-remote-type="${t[0]}"${d.type === t[0] ? ' class="active"' : ''}>${t[1]}</button>`).join('')}</div>
+    <div class="remote-row"><label class="remote-field"><span>地址</span><input id="remote-host" class="settings-input" type="text" placeholder="192.168.1.10" value="${esc(d.host)}" autocomplete="off" inputmode="url"></label>
+      <label class="remote-field remote-field-port"><span>端口</span><input id="remote-port" class="settings-input" type="text" placeholder="${portHint}" value="${d.port ? esc(String(d.port)) : ''}" inputmode="numeric"></label></div>
+    ${isSmb ? `<div class="remote-row"><label class="remote-field"><span>共享名</span><input id="remote-share" class="settings-input" type="text" placeholder="video" value="${esc(d.share)}" autocomplete="off"></label>
+      <label class="remote-field"><span>目录（可选）</span><input id="remote-path" class="settings-input" type="text" placeholder="/短剧" value="${esc(d.path)}" autocomplete="off"></label></div>`
+      : `<label class="remote-field"><span>目录（可选）</span><input id="remote-path" class="settings-input" type="text" placeholder="/短剧" value="${esc(d.path)}" autocomplete="off"></label>`}
+    <div class="remote-row"><label class="remote-field"><span>用户名（可选）</span><input id="remote-user" class="settings-input" type="text" value="${esc(d.user)}" autocomplete="off"></label>
+      <label class="remote-field"><span>密码${d.hasPass ? '（已存，留空不改）' : '（可选）'}</span><input id="remote-pass" class="settings-input" type="password" placeholder="${d.hasPass ? '••••••' : ''}" autocomplete="new-password"></label></div>
+    <label class="remote-field"><span>显示名称（可选）</span><input id="remote-name" class="settings-input" type="text" placeholder="客厅 NAS" value="${esc(d.name)}" autocomplete="off"></label>
+    ${isSmb ? '' : `<label class="remote-check"><input id="remote-secure" type="checkbox"${d.secure ? ' checked' : ''}><span>${isWebdav ? '使用 HTTPS' : '使用 FTPS（显式 TLS）'}</span></label>`}
+    ${isSmb ? '' : `<label class="remote-check"><input id="remote-insecure" type="checkbox"${d.insecure ? ' checked' : ''}><span>忽略证书校验（家用 NAS 常是自签证书）</span></label>`}
+    <label class="remote-check"><input id="remote-cleanup" type="checkbox"${d.cleanup ? ' checked' : ''}><span>传完删本地（大小对不上会保留）</span></label>
+    <div class="remote-test-row"><button type="button" class="remote-secondary" data-remote-test>测试连接</button><span class="remote-test-result ${remoteTestOk ? 'ok' : 'fail'}" data-remote-result${remoteTestText ? '' : ' hidden'}>${esc(remoteTestText)}</span></div>
+    <div class="remote-actions">
+      <button type="button" class="remote-secondary" data-remote-cancel>返回</button>
+      ${d.id ? '<button type="button" class="remote-danger" data-remote-delete="1">删除</button>' : ''}
+      <button type="button" class="remote-primary" data-remote-save>保存</button>
+    </div>`;
+}
+
+function buildRemoteListHtml() {
+  const list = asArray(remoteServers);
+  if (!list.length) {
+    return `<p class="appearance-note">还没有服务器。添加后，下载完成的剧会按剧名在服务器上建同名文件夹，把成品放进去。</p>
+      <div class="remote-actions"><button type="button" class="remote-primary" data-remote-add>添加服务器</button></div>`;
+  }
+  return `<p class="appearance-note">支持 SMB（Windows 共享 / NAS）、WebDAV、FTP。点条目可修改。</p>
+    <div class="remote-list">${list.map(s => `<button type="button" class="remote-item" data-remote-edit="${esc(s.id)}">
+        <span class="remote-item-main"><strong>${esc(s.name)}</strong><small>${esc(s.typeName || remoteTypeName(s.type))} · ${esc(s.address || '')}${s.cleanup === false ? ' · 本地保留' : ' · 传完删本地'}</small></span>
+        ${icon('arrow')}
+      </button>`).join('')}</div>
+    <div class="remote-actions"><button type="button" class="remote-primary" data-remote-add>添加服务器</button></div>`;
+}
+
+function renderRemotePop() {
+  if (!remotePop) return;
+  const editing = remoteEditing;
+  const title = editing === null ? '远程服务器' : (editing ? '编辑服务器' : '添加服务器');
+  remotePop.innerHTML = `<div class="appearance-pop account-pop remote-pop" role="dialog" aria-modal="true" aria-labelledby="remote-title">
+    <div class="appearance-head"><h2 id="remote-title">${title}</h2><button type="button" class="appearance-close" data-remote-close aria-label="关闭">✕</button></div>
+    ${editing === null ? buildRemoteListHtml() : buildRemoteFormHtml()}
+  </div>`;
+}
+
+function ensureRemotePop() {
+  if (remotePop && document.body.contains(remotePop)) return remotePop;
+  remotePop = document.createElement('div');
+  remotePop.className = 'appearance-scrim';
+  remotePop.hidden = true;
+  remotePop.addEventListener('click', event => {
+    if (event.target === remotePop || event.target.closest('[data-remote-close]')) { closeRemotePop(); return; }
+  });
+  document.body.appendChild(remotePop);
+  return remotePop;
+}
+
+async function openRemotePop() {
+  ensureRemotePop();
+  remoteEditing = null;
+  remoteDraft = null;
+  remoteTestText = '';
+  remoteTestOk = false;
+  remotePop.hidden = false;
+  document.body.classList.add('appearance-open');
+  await loadRemoteServers(true);
+  renderRemotePop();
+  updateBackEnabled();
+}
+
+function closeRemotePop() {
+  if (!remotePop || remotePop.hidden) return;
+  remotePop.hidden = true;
+  document.body.classList.remove('appearance-open');
+  remoteEditing = null;
+  remoteDraft = null;
+  updateBackEnabled();
+}
+
+window.__veyraRemoteBack = () => {
+  if (!remotePop || remotePop.hidden) return false;
+  // 表单里按返回先回到列表，再按一次才关弹窗
+  if (remoteEditing !== null) { remoteEditing = null; renderRemotePop(); return true; }
+  closeRemotePop();
+  return true;
+};
+window.__veyraRemoteOpen = () => !!(remotePop && !remotePop.hidden);
+
+/** 读表单当前值（草稿 + DOM），保存/测试都用它，避免两组字段口径不一致。 */
+function readRemoteForm() {
+  const value = id => { const el = document.getElementById(id); return el ? String(el.value || '').trim() : ''; };
+  const checked = id => { const el = document.getElementById(id); return !!(el && el.checked); };
+  const isSmb = remoteDraft.type === 'smb';
+  return {
+    id: remoteDraft.id || '',
+    type: remoteDraft.type,
+    name: value('remote-name'),
+    host: value('remote-host'),
+    port: Number(value('remote-port')) || 0,
+    share: isSmb ? value('remote-share') : '',
+    path: value('remote-path'),
+    user: value('remote-user'),
+    pass: value('remote-pass'),
+    secure: isSmb ? false : checked('remote-secure'),
+    insecure: isSmb ? true : checked('remote-insecure'),
+    cleanup: checked('remote-cleanup')
+  };
+}
+
+function stashRemoteForm() {
+  if (remoteEditing === null || !remoteDraft) return;
+  const form = readRemoteForm();
+  remoteDraft = Object.assign({}, remoteDraft, form, { hasPass: remoteDraft.hasPass || !!remoteDraft.pass });
+}
+
+async function saveRemoteForm() {
+  const server = readRemoteForm();
+  if (!server.host) { toast('请填写服务器地址', true); return; }
+  if (server.type === 'smb' && !server.share) { toast('请填写共享文件夹名', true); return; }
+  try {
+    await api('remote-save', { server });
+    remoteServers = null;
+    await loadRemoteServers(true);
+    remoteEditing = null;
+    remoteDraft = null;
+    remoteTestText = '';
+    renderRemotePop();
+    toast('服务器已保存');
+  } catch (error) { toast(error.message, true); }
+}
+
+async function testRemoteForm(button) {
+  const server = readRemoteForm();
+  const result = remotePop && remotePop.querySelector('[data-remote-result]');
+  if (!server.host) { toast('请填写服务器地址', true); return; }
+  if (button) { button.disabled = true; button.textContent = '测试中…'; }
+  remoteTestText = '';
+  if (result) result.hidden = true;
+  try {
+    const info = await api('remote-test', { server });
+    remoteTestOk = true;
+    remoteTestText = `连接正常 · ${Number(info && info.ms) || 0}ms`;
+    toast(`连接成功：${(info && info.address) || server.host}`);
+  } catch (error) {
+    remoteTestOk = false;
+    remoteTestText = `连接失败：${error.message}`;
+    toast(`连接失败：${error.message}`, true);
+  } finally {
+    if (button) { button.disabled = false; button.textContent = '测试连接'; }
+    if (result) {
+      result.textContent = remoteTestText;
+      result.classList.toggle('ok', remoteTestOk);
+      result.classList.toggle('fail', !remoteTestOk);
+      result.hidden = !remoteTestText;
+    }
+  }
+}
+
+// ---- 传输到远程服务器：从「我的下载」手动补传 ----
+var remotePicker = null;
+let remotePickerTaskId = '';
+
+function ensureRemotePicker() {
+  if (remotePicker && document.body.contains(remotePicker)) return remotePicker;
+  remotePicker = document.createElement('div');
+  remotePicker.className = 'appearance-scrim';
+  remotePicker.hidden = true;
+  remotePicker.addEventListener('click', event => {
+    if (event.target === remotePicker || event.target.closest('[data-remote-pick-close]')) closeRemotePicker();
+  });
+  document.body.appendChild(remotePicker);
+  return remotePicker;
+}
+
+async function openRemotePicker(taskId, title) {
+  await loadRemoteServers(true);
+  const list = asArray(remoteServers);
+  if (!list.length) { toast('还没有远程服务器，请先到「设置 → 远程服务器」添加', true); return; }
+  ensureRemotePicker();
+  remotePickerTaskId = String(taskId);
+  remotePicker.innerHTML = `<div class="appearance-pop account-pop remote-pop" role="dialog" aria-modal="true" aria-labelledby="remote-pick-title">
+    <div class="appearance-head"><h2 id="remote-pick-title">传到远程服务器</h2><button type="button" class="appearance-close" data-remote-pick-close aria-label="关闭">✕</button></div>
+    <p class="appearance-note">《${esc(title || '这部')}》会在服务器上建同名文件夹，成品直接放进去。</p>
+    <div class="remote-list">${list.map(s => `<button type="button" class="remote-item" data-remote-pick="${esc(s.id)}">
+        <span class="remote-item-main"><strong>${esc(s.name)}</strong><small>${esc(s.typeName || remoteTypeName(s.type))} · ${esc(s.address || '')}${s.cleanup === false ? ' · 本地保留' : ' · 传完删本地'}</small></span>
+        ${icon('arrow')}
+      </button>`).join('')}</div>
+  </div>`;
+  remotePicker.hidden = false;
+  document.body.classList.add('appearance-open');
+  updateBackEnabled();
+}
+
+function closeRemotePicker() {
+  if (!remotePicker || remotePicker.hidden) return;
+  remotePicker.hidden = true;
+  document.body.classList.remove('appearance-open');
+  remotePickerTaskId = '';
+  updateBackEnabled();
+}
+
+window.__veyraRemotePickBack = () => { if (remotePicker && !remotePicker.hidden) { closeRemotePicker(); return true; } return false; };
+window.__veyraRemotePickOpen = () => !!(remotePicker && !remotePicker.hidden);
+
+async function startRemoteTransfer(taskId, remoteId) {
+  try {
+    const job = await api('remote-transfer-start', { taskId, remoteId });
+    const name = (job && job.serverName) || '远程服务器';
+    toast(`已开始传输到 ${name}`);
+    closeRemotePicker();
+    await loadRemoteJobs();
+    // 注意：refreshCurrentDownloads 是点击监听函数内部的局部函数，这里（顶层）调不到，
+    // 直接按当前路由重绘列表。
+    if (state.route === 'library' && state.libraryTab === 'downloads') renderLibraryDownloads();
+    else if (state.route === 'downloads') refreshDownloads(routeToken, true);
+  } catch (error) {
+    toast(error.message || '传输失败', true);
+  }
+}
+
+
 
 function renderSearch() {
-  /* 接口型源的分类是它自己下发的名字，过滤条跟着源走；黄果/红果保持原有固定几档 */
-  const filters = plainSite()
-    ? [['all', '全部'], ...siteCats.map(row => [row.name, row.name])]
-    : privateMode() ? [['all', '全部'], ['ai-duanju', '成人短剧'], ['ai-manju', '成人漫剧'], ['ai-huanlian', 'AI换脸'], ['ai-mogai', 'AI魔改']] : [['all', '全部'], ['short', '短剧'], ['comic', '漫剧']];
+  const filters = privateMode() ? [['all', '全部'], ['ai-duanju', '成人短剧'], ['ai-manju', '成人漫剧'], ['ai-huanlian', 'AI换脸'], ['ai-mogai', 'AI魔改']] : [['all', '全部'], ['short', '短剧'], ['comic', '漫剧']];
   const all = asArray(state.search?.items);
   const items = state.filter === 'all' ? all : all.filter(item => {
     if (item.category) return item.category === state.filter;
@@ -1919,13 +2558,14 @@ function renderDetail() {
   const loading = state.detailLoading;
   window.AndroidHost?.setDetailMode?.(true);
   const meta = loading ? '正在获取内容…' : [data.score, detailMetaText(data)].filter(Boolean).join(' · ');
-  content.innerHTML = `<div class="detail-page"><button class="detail-back" type="button" data-back="1">${icon('back')} 返回</button>
+  content.innerHTML = `<div class="detail-page">
     <div class="detail-art"><img data-cover="${esc(data.cover)}" alt=""></div><div class="detail-copy"><h1>${esc(data.title)}</h1>
     <p class="detail-meta"><span class="detail-meta-text">${esc(meta)}</span><span class="detail-meta-producer" data-producer-slot></span></p>
     <div class="detail-desc-wrap"><p class="detail-description">${esc(data.description || '')}</p></div>
-    <div class="detail-buttons"><button class="detail-play" type="button" data-play="1" ${loading ? 'disabled' : ''}>${loading ? '正在加载…' : '立即播放'}</button><button class="bookmark-button" type="button" data-bookmark="1" aria-label="${state.bookmarked ? '取消收藏' : '收藏'}" ${loading ? 'disabled' : ''}>${state.bookmarked ? '★' : '☆'}</button><button class="detail-download" type="button" data-download="1" ${loading ? 'disabled' : ''}>下载</button></div>
+    <div class="detail-buttons"><button class="detail-play" type="button" data-play="1" ${loading ? 'disabled' : ''}>${loading ? '正在加载…' : resumeLabel()}</button><button class="detail-restart" type="button" data-restart="1" aria-label="从头播放" title="从头播放" ${resumeReady() ? '' : 'hidden'}>${icon('restart')}</button><button class="bookmark-button" type="button" data-bookmark="1" aria-label="${state.bookmarked ? '取消收藏' : '收藏'}" ${loading ? 'disabled' : ''}>${state.bookmarked ? '★' : '☆'}</button><button class="detail-download" type="button" data-download="1" ${loading ? 'disabled' : ''}>下载</button></div>
     ${loading ? '<div class="detail-loading" role="status">正在获取选集…</div>' : `<div class="detail-episodes" id="detail-episodes">${detailEpisodeSection(data)}</div>`}<div class="detail-extras" id="detail-extras"></div></div></div>`;
   hydrateImages();
+  ensureDetailFilled();
   paintProducerInline(data.id);
   scheduleDetailExtras(data);
 }
@@ -2085,6 +2725,34 @@ function producerItemHtml(item) {
     <span class="producer-copy"><strong>${esc(item.title || '')}</strong><em>${esc(item.episodeLabel || '查看详情')}</em></span></button>`;
 }
 
+/**
+ * 详情页铺满兜底。
+ * 不写进 CSS：`#app.route-detail .detail-page{min-height:100vh}` 这种全局规则会连带
+ * 影响所有进详情的路径（实测把本来正常的入口也顶出屏幕）。这里改成渲染后实测一次，
+ * 只有真的不够高才用视口高兜住，够高就把内联样式摘掉，别的路由完全不受影响。
+ * 刷剧形态进来时 #scroll 刚从 display:none 恢复，首帧高度可能是 0，所以量两次。
+ */
+function ensureDetailFilled() {
+  const scrollEl = document.getElementById('scroll');
+  const page = content.querySelector('.detail-page');
+  if (!page) return;
+  if (scrollEl && getComputedStyle(scrollEl).display === 'none') scrollEl.style.removeProperty('display');
+  const fit = () => {
+    if (!page.isConnected) return;
+    const need = window.innerHeight || document.documentElement.clientHeight || 0;
+    if (need <= 0) return;
+    if (page.getBoundingClientRect().height < need - 2) {
+      page.style.minHeight = need + 'px';
+      if (getComputedStyle(page).backgroundColor === 'rgba(0, 0, 0, 0)') page.style.backgroundColor = 'var(--bg)';
+    } else if (page.style.minHeight) {
+      page.style.removeProperty('min-height');
+      page.style.removeProperty('background-color');
+    }
+  };
+  fit();
+  requestAnimationFrame(fit);
+}
+
 function searchFeedback() {
   if (state.searchPending) return '<div class="search-feedback" role="status" aria-live="polite"><span class="search-spinner" aria-hidden="true"></span><span>正在更新搜索结果…</span></div>';
   if (state.searchError) return `<div class="search-feedback search-feedback--error" role="status"><span>更新失败，当前显示缓存结果</span><button type="button" data-retry="search">重试</button></div>`;
@@ -2165,9 +2833,8 @@ function updateBackEnabled() {
 
 function setRoute(route) {
   stopBannerAuto();
-  resumeBingeIfReturned(route);   // 详情返回首页 → 自动回到刷剧模式同一部剧（须在 state.route 更新前判断）
   if (route !== 'downloads') stopDownloadsTimer();
-  if (state.route === 'detail' && route !== 'detail') { detailCard?.dispose(); detailCard = null; state.detailStack.length = 0; }
+  if (state.route === 'detail' && route !== 'detail') { detailCard?.dispose(); detailCard = null; state.detailStack.length = 0; producerOverlay && closeProducerPanel(); }
   const libraryArea = ['library', 'settings', 'account-management'].includes(route);
   if (state.route === 'library' && route !== 'library') searchInput.value = '';
   state.route = route;
@@ -2177,7 +2844,8 @@ function setRoute(route) {
   document.getElementById('app').classList.toggle('route-detail', route === 'detail');
   window.AndroidHost?.setDetailMode?.(route === 'detail');
   headerSettings.hidden = route !== 'library';
-  window.__bingeUpdateChrome && window.__bingeUpdateChrome();
+  // 刷剧形态的可见性跟着 route 走：回首页 → resume，离开首页 → pause（不销毁播放器）
+  window.__bingeSync && window.__bingeSync();
   searchInput.placeholder = libraryArea ? '搜索观看历史和收藏' : privateMode() ? '搜索剧名或 #标签' : '搜索剧名';
   searchInput.setAttribute('aria-label', libraryArea ? '搜索观看历史和收藏' : '搜索剧名或标签');
   if (route === 'library') searchInput.value = state.libraryQuery;
@@ -2211,6 +2879,8 @@ function backDestination() {
   return state.route === 'home' ? null : 'home';
 }
 
+let bingePreviewClass = false;
+
 function clearPredictivePreview() {
   clearTimeout(predictiveTimer);
   if (predictiveFrame) cancelAnimationFrame(predictiveFrame);
@@ -2219,21 +2889,54 @@ function clearPredictivePreview() {
   predictiveSourceNode = null;
   predictivePreview?.remove();
   predictivePreview = null;
-  document.getElementById('app').classList.remove('predictive-active');
+  document.getElementById('app').classList.remove('predictive-active', 'binge-preview');
+  document.body.classList.remove('binge-preview');
+  if (bingePreviewClass) {
+    // 这次预览是我们临时给 #app 挂的 binge 类：先撤掉，再让 syncBinge 按真实状态决定要不要加回来
+    // （提交返回时 home 已经进入刷剧态，syncBinge 会立刻把它加回去；取消时则不该有任何残留）
+    bingePreviewClass = false;
+    document.getElementById('app').classList.remove('binge');
+    window.__bingeSync && window.__bingeSync();
+  }
   scroll.style.removeProperty('transition');
   scroll.style.removeProperty('transform');
 }
 
 window.hgPredictiveBackStart = fromRight => {
   clearPredictivePreview();
-  /* 制作方弹窗盖在详情页上：手势不该带动下面页面，松手只收弹窗 */
-  if (producerOverlay) return false;
-  if (!downloadOverlay.hidden || (window.__veyraAppearanceOpen && window.__veyraAppearanceOpen()) || (window.__veyraAccountOpen && window.__veyraAccountOpen()) || (window.__veyraProxyOpen && window.__veyraProxyOpen()) || (window.__veyraSourceOpen && window.__veyraSourceOpen()) || (window.__veyraAboutOpen && window.__veyraAboutOpen())) return false;
+  if (!downloadOverlay.hidden || (window.__veyraAppearanceOpen && window.__veyraAppearanceOpen()) || (window.__veyraAccountOpen && window.__veyraAccountOpen()) || (window.__veyraProxyOpen && window.__veyraProxyOpen()) || (window.__veyraAboutOpen && window.__veyraAboutOpen()) || (window.__veyraRemoteOpen && window.__veyraRemoteOpen()) || (window.__veyraRemotePickOpen && window.__veyraRemotePickOpen())) return false;
   if (state.route === 'detail' && detailCard && authOverlay.hidden && confirmOverlay.hidden && updateOverlay.hidden && unlockOverlay.hidden) {
     detailCard.fromRight = fromRight;
     return detailCard.begin();
   }
   const destination = backDestination();
+  // 刷剧态从详情返回：快照里存的是「传统首页」，直接拿来当预览就会看到
+  // 「先跳回原首页、再跳回刷剧页」。这里改成透明预览层 + 克隆刷剧 UI，
+  // 透出后面暂停住的原生视频帧 —— 视觉上就是原地返回，不经过首页。
+  if (state.route === 'detail' && destination === 'home' && state.binge) {
+    const preview = document.createElement('div');
+    preview.className = 'back-preview back-preview-binge';
+    preview.setAttribute('aria-hidden', 'true');
+    // 克隆保留 id：样式表全是 #dock / #binge 这种 id 选择器，去掉 id 就散架了。
+    // 真元素在详情路由下本来就被藏起来（#app.route-detail>#dock{visibility:hidden}、#binge hidden），
+    // 克隆在 .back-preview 里不是 #app 的直接子元素，所以不会被那条规则命中。
+    const layer = document.getElementById('binge')?.cloneNode(true);
+    const dock = document.getElementById('dock')?.cloneNode(true);
+    const fab = document.getElementById('binge-fab')?.cloneNode(true);
+    if (layer) { layer.hidden = false; preview.appendChild(layer); }
+    if (dock) preview.appendChild(dock);
+    if (fab) { fab.hidden = false; preview.appendChild(fab); }
+    const app = document.getElementById('app');
+    app.appendChild(preview);
+    app.classList.add('predictive-active', 'binge-preview');
+    // 让克隆出来的底栏/卡片吃刷剧态那套玻璃（选择器是 #app.binge #dock）
+    if (!app.classList.contains('binge')) { app.classList.add('binge'); bingePreviewClass = true; }
+    document.body.classList.add('binge-preview');
+    scroll.style.transition = 'none';
+    predictivePreview = preview;
+    predictivePreview.fromRight = fromRight;
+    return true;
+  }
   const fromDetail = state.route === 'detail' && state.previous?.route === destination && state.previous.pageNode;
   const snapshot = fromDetail ? state.previous : screenSnapshots[destination];
   if (!snapshot) return false;
@@ -2301,16 +3004,16 @@ window.hgPredictiveBackCancel = () => {
 };
 
 window.hgPredictiveBackCommit = () => {
-  /* 宿主在 targetSdk 36 上走的就是这个函数（不是 hgBack）：弹窗必须在这里先被拦下，
-     否则 detailCard.close() 会把底下的详情页一起退掉，而弹窗还留在屏幕上。 */
+  /* 制作方弹窗排在最前：targetSdk 36 走的是这条 commit，它原先没有弹窗分支，
+     按返回会把底层详情页退掉、弹窗留在屏幕上。 */
   if (producerOverlay) return closeProducerPanel();
   if (!downloadOverlay.hidden) { hideDownloadSheet(); return true; }
   if (window.__veyraAppearanceBack && window.__veyraAppearanceBack()) return true;
   if (window.__veyraAccountBack && window.__veyraAccountBack()) return true;
   if (window.__veyraProxyBack && window.__veyraProxyBack()) return true;
-  if (window.__veyraSourceBack && window.__veyraSourceBack()) return true;
   if (window.__veyraAboutBack && window.__veyraAboutBack()) return true;
-  /* 详情里跳进来的另一部剧：直接退回上一部，别走 close 动画缩到列表卡片上 */
+  if (window.__veyraRemoteBack && window.__veyraRemoteBack()) return true;
+  if (window.__veyraRemotePickBack && window.__veyraRemotePickBack()) return true;
   if (state.route === 'detail' && state.detailStack.length) { clearPredictivePreview(); restoreDetailFromStack(); return true; }
   if (state.route === 'detail' && detailCard && downloadOverlay.hidden && authOverlay.hidden && confirmOverlay.hidden && updateOverlay.hidden && unlockOverlay.hidden) {
     detailCard.close(); return true;
@@ -2331,6 +3034,7 @@ window.hgPredictiveBackCommit = () => {
 };
 
 function setNav(tab) {
+  // 刷剧形态是首页自己的记忆，切 tab 不再退出：离开首页由 syncBinge 暂停，回到首页自动 resume
   listingObserver?.disconnect();
   categoryObserver?.disconnect();
   document.querySelectorAll('#dock [data-nav]').forEach(button => button.classList.toggle('active', button.dataset.nav === tab));
@@ -2753,23 +3457,24 @@ function returnFromDetail() {
 }
 
 window.hgBack = () => {
-  /* 制作方作品弹窗盖在详情页之上：返回先收它，不能把底下的详情一起退掉 */
-  if (producerOverlay) return closeProducerPanel();
   if (window.__veyraAppearanceBack && window.__veyraAppearanceBack()) return true;
   if (window.__veyraAccountBack && window.__veyraAccountBack()) return true;
   if (window.__veyraProxyBack && window.__veyraProxyBack()) return true;
-  if (window.__veyraSourceBack && window.__veyraSourceBack()) return true;
   if (window.__veyraAboutBack && window.__veyraAboutBack()) return true;
+  if (window.__veyraRemoteBack && window.__veyraRemoteBack()) return true;
+  if (window.__veyraRemotePickBack && window.__veyraRemotePickBack()) return true;
+  if (producerOverlay) return closeProducerPanel();
   if (!downloadOverlay.hidden) { hideDownloadSheet(); return true; }
   if (!unlockOverlay.hidden) { closeUnlock(); return true; }
   if (!authOverlay.hidden) { if (state.account.loggedIn) hideAuth(); return true; }
   if (!confirmOverlay.hidden) { closeConfirmation(false); return true; }
   if (!updateOverlay.hidden) { updateOverlay.hidden = true; updateBackEnabled(); if (updateDownloading) toast('已转入后台下载，完成后会自动弹出安装', true); return true; }
+  if (state.binge && state.route === 'home') { exitBingeMode(); return true; }
   if (isRootColumn()) return false;
   if (state.route === 'campaign') { restoreScreen(state.campaignReturn); return true; }
   if (state.route === 'account-management') { restoreScreen(state.accountReturn); return true; }
   if (state.route === 'settings') { restoreScreen(state.settingsReturn); return true; }
-  if (state.route === 'detail') { if (restoreDetailFromStack()) return true; if (detailCard) detailCard.close(); else returnFromDetail(); return true; }
+  if (state.route === 'detail') { if (state.detailStack.length) { restoreDetailFromStack(); return true; } if (detailCard) detailCard.close(); else returnFromDetail(); return true; }
   if (state.route === 'listing' && state.listing?.kind === 'tag-list') { restoreScreen(state.listingReturn); return true; }
   if (state.route === 'tags') { restoreScreen(state.tagsReturn); return true; }
   if (state.route === 'listing') { goHome(); return true; }
@@ -2783,17 +3488,62 @@ window.hgResume = () => {
   retryFailedImages(true);
   if (state.route === 'library') goLibrary(state.libraryTab);
   if (state.route === 'home') refreshHomeHistory();
-  if (state.route === 'detail' && state.detail) api('bookmark-state', { id: state.detail.id }).then(value => { state.bookmarked = value; renderDetail(); });
+  if (state.route === 'detail' && state.detail) {
+    const id = String(state.detail.id);
+    const token = routeToken;
+    // 详情页停在下面看了一集又一集，回来时「继续播放」必须跟着变：
+    // 只刷收藏状态是不够的，进度也要重取（否则一直停在进来前那一集，
+    // 进来时没进度的话更是永远「立即播放」）。
+    api('latest-progress', { id }).then(progress => {
+      if (token !== routeToken || state.route !== 'detail' || !state.detail || String(state.detail.id) !== id) return;
+      const before = JSON.stringify(state.detailProgress || null);
+      state.detailProgress = progress || null;
+      if (JSON.stringify(state.detailProgress) !== before) renderDetail();
+    }).catch(() => {});
+    api('bookmark-state', { id }).then(value => {
+      if (token !== routeToken || state.route !== 'detail' || !state.detail) return;
+      if (state.bookmarked === value) return;
+      state.bookmarked = value;
+      renderDetail();
+    }).catch(() => {});
+  }
+  window.__bingeSync && window.__bingeSync();
 };
 
-async function openPlayer(episode = 1) {
+/**
+ * 续播只认一件事：这部剧最后一次看的是哪一集、哪一秒。
+ * 不再用「不足 5 秒不算」「离结尾不足 5 秒不算」这类门槛 —— 看 2 秒也是看，
+ * 这些门槛只会造成「历史里明明有进度，详情页却写立即播放」。
+ * 唯一的例外：这一集已经看完，就顺延到下一集从头开始。
+ */
+function resumePlan() {
+  const progress = state.detailProgress;
+  if (!progress) return null;
+  const episode = Number(progress.episode) || 0;
+  if (episode < 1) return null;
+  if (progress.completed) {
+    const total = Number(progress.episodeCount) || 0;
+    if (total > 0 && episode >= total) return null; // 全剧看完，回详情自己选集
+    return { episode: episode + 1, restart: true };
+  }
+  return { episode, restart: false };
+}
+function resumeReady() { return Boolean(resumePlan()); }
+function resumeEpisode() { const plan = resumePlan(); return plan ? plan.episode : 1; }
+function resumeRestart() { const plan = resumePlan(); return plan ? plan.restart : false; }
+function resumeLabel() {
+  const plan = resumePlan();
+  return plan ? `继续播放 第${plan.episode}集` : '立即播放';
+}
+
+async function openPlayer(episode = 1, restart = false) {
   const detail = state.detail;
   if (!detail) return;
   const item = { ...state.sourceItem, ...detail };
   const queue = state.sourceQueue.length ? [...state.sourceQueue] : [item];
   if (!queue.some(candidate => candidate.id === item.id)) queue.unshift(item);
   const index = queue.findIndex(candidate => candidate.id === item.id);
-  await api('open-player', { item, detail, episodes: asArray(detail.episodes), queue, index, group: state.sourceGroup, episode });
+  await api('open-player', { item, detail, episodes: asArray(detail.episodes), queue, index, group: state.sourceGroup, episode, restart });
 }
 
 async function loadMoreCategory() {
@@ -2966,6 +3716,7 @@ let swiping = false;
 let swipeStart = null;
 let swipeAxis = null;
 let swipeTrack = null;
+let touching = false;   // 手指是否仍按在屏幕上：切页轨道的兜底定时器只在非触摸时才收尾
 
 // 目标页 DOM 缓存：key -> 节点克隆。滑动提交后写入，命中即免骨架。
 const swipePageCache = new Map();
@@ -3086,6 +3837,7 @@ async function swipePrefetchAll() {
       let nas = [];
       if (state.account.loggedIn) {
         try { nas = asArray((await withTimeout(api('nas-download-list'), 4000)).tasks); } catch (ignore) { nas = []; }
+        try { nas = nas.concat(asArray((await withTimeout(api('desktop-download-list'), 4000)).tasks)); } catch (ignore) { }
       }
       return { library: state.library, downloads: { phone, nas } };
     },
@@ -3230,9 +3982,10 @@ function swipeResolve(delta) {
       step: [pos, pos + delta],   // 高亮要跟着手从 pos 滑到 pos+delta
       // adopted：目标页 DOM 已由滑动的手放下（真内容），别再整体重渲染，否则会闪一下
       go: () => {
-        const adopted = swipeAdopting; swipeAdopting = false; swipeSaveGuard = true;
+        const adopted = swipeAdopting; swipeSaveGuard = true;
         try {
           if (state.route === 'library') {
+            swipeAdopting = false;
             state.libraryTab = next;
             if (!adopted) {
               // 没落下真内容（如首次滑动前尚未预取）——正常渲染
@@ -3241,7 +3994,11 @@ function swipeResolve(delta) {
               // 沿用滑动放下的真内容，绝不整套重渲染（那一闪就是它）。
               // 下载页仍需拉最新进度并启动轮询 —— 交给 renderLibraryDownloads，
               // 命中签名守卫时只补图、不重建 DOM。
-              syncLibraryTabs();
+              for (const b of content.querySelectorAll('[data-library-tab]')) {
+                const on = b.dataset.libraryTab === next;
+                b.classList.toggle('selected', on);
+                if (on) b.setAttribute('aria-selected', 'true'); else b.removeAttribute('aria-selected');
+              }
               if (next === 'downloads') { try { renderLibraryDownloads(); } catch (ignore) { } }
               try { hydrateImages(); } catch (ignore) { }
             }
@@ -3259,7 +4016,8 @@ function swipeResolve(delta) {
     : next === 'home' ? 'home' : 'category:' + next + ':' + (state.sub[next] || 0);
   return {
     mode: 'page',       // 底栏页之间：整页平移
-    key, from: index, to: index + delta,
+    key,
+    step: [index, index + delta], // 底栏透镜与页面共用同一滑动进度
     go: () => navigateDock(next),
     build: () => swipeBuildCached(key) || swipeBuildSkeleton(key),
   };
@@ -3292,6 +4050,21 @@ function swipeTabProgress(t, ratio) {
   anim.seg.progress(anim.from, anim.to, q);
 }
 
+function swipeBuildDockAnim(step) {
+  if (!step || !window.DockGlass) return null;
+  const [from, to] = step;
+  if (from === to || from < 0 || to < 0) return null;
+  window.DockGlass.begin(from, to);
+  return { api: window.DockGlass, from, to };
+}
+
+function swipeDockProgress(t, ratio) {
+  const anim = t && t.dockAnim;
+  if (!anim) return;
+  const q = Math.max(0, Math.min(1, ratio || 0));
+  anim.api.progress(anim.from, anim.to, q);
+}
+
 // 建轨：底层面板装目标页，真实 scroll 保持可见等待平移。
 function swipeOpenTrack(delta, dx) {
   if (swiping || swipeTrack) return false;
@@ -3300,21 +4073,30 @@ function swipeOpenTrack(delta, dx) {
   const node = resolve.build();
   if (!node) return false;
   const box = scroll.getBoundingClientRect();
-  const panel = document.createElement('div');
-  panel.className = 'swipe-under';
-  panel.style.background = getComputedStyle(scroll).background;   // 跟随当前页真实底色（主题渐变/暗色都一致）
-  panel.style.top = `${Math.round(box.top)}px`;
-  panel.style.height = `${Math.round(box.height)}px`;
-  const inner = document.createElement('div');
-  inner.className = 'swipe-page-inner';
-  inner.style.paddingTop = getComputedStyle(scroll).paddingTop;
-  inner.appendChild(node);
-  panel.appendChild(inner);
-  (document.getElementById('app') || document.body).appendChild(panel);
+  const current = content.firstElementChild;
+  const currentStyle = current ? current.getAttribute('style') : null;
+  const currentRect = current ? current.getBoundingClientRect() : null;
+  // 旧页临时脱离文档流；目标页从手势开始就处于最终普通文档流。
+  // 目标页全程只改横向 transform，不切 position/height/padding/overflow，落位不再跳变或整页重绘。
+  const panel = node;
+  const panelMotion = {
+    transform: panel.style.transform, transition: panel.style.transition,
+    willChange: panel.style.willChange, marginTop: panel.style.marginTop,
+  };
+  const scrollOverflowX = scroll.style.overflowX;
+  const previousScrollTop = scroll.scrollTop;
+  if (current && currentRect) {
+    current.style.cssText += `;position:absolute;left:0;top:${Math.round(currentRect.top - box.top)}px;`
+      + `width:100%;margin:0;z-index:2;background:${getComputedStyle(scroll).background};`;
+  }
+  scroll.style.overflowX = 'hidden';
+  // 同一 JS 帧内归零：旧页由 absolute 保持原视觉位置，目标页从最终滚动位置开始预览。
+  scroll.scrollTop = 0;
+  content.appendChild(panel);
   // inline（页内子项）：页头克隆到独立固定层绝对钉住（不可能被任何容器裁剪），
   // 内容区单独平移；面板从内容区顶部开始，目标页页头临时摘除使内容对齐。
-  const track = { panel, inner, mode: 'page', from: resolve.from, to: resolve.to, width: Math.round(box.width || scroll.clientWidth || 360), dirSign: delta > 0 ? 1 : -1, guard: 0, resolve, pinned: [], clones: [], moving: [], savedDisplays: [] };
-  const pageNode = content.firstElementChild;
+  const track = { panel, current, currentStyle, panelMotion, scrollOverflowX, previousScrollTop, mode: 'page', width: Math.round(box.width || scroll.clientWidth || 360), dirSign: delta > 0 ? 1 : -1, guard: 0, resolve, pinned: [], clones: [], moving: [], savedDisplays: [] };
+  const pageNode = current;
   if (resolve.mode === 'inline' && pageNode) {
     const tab = pageNode.querySelector(SWIPE_TAB_BAR_SELECTOR);
     if (tab && tab.parentElement) {
@@ -3350,15 +4132,6 @@ function swipeOpenTrack(delta, dx) {
   }
   if (track.mode === 'inline') {
     const firstMoving = track.moving[0];
-    const contentTop = firstMoving ? Math.round(firstMoving.getBoundingClientRect().top) : null;
-    if (contentTop != null && contentTop > box.top) {
-      panel.style.top = `${contentTop}px`;
-      panel.style.height = `${Math.max(80, Math.round(box.bottom - contentTop))}px`;
-      inner.style.paddingTop = '0';
-      inner.style.overflow = 'hidden';
-    } else {
-      inner.style.paddingTop = getComputedStyle(scroll).paddingTop;
-    }
     // 垂直对齐补偿：目标页页头摘除后，其根节点自身的 padding-top（如 .library-page 的 20px）
     // 仍占位，预览内容被往下推 —— 落地后页头恢复、内容上抬，肉眼就是一次跳变。
     // 测出目标内容首块与当前页内容首块的落差，用负 margin 拉平，预览与落地逐像素一致。
@@ -3372,32 +4145,13 @@ function swipeOpenTrack(delta, dx) {
       const align = Math.round(firstMoving.getBoundingClientRect().top - firstTarget.getBoundingClientRect().top);
       if (align) node.style.marginTop = `${align}px`;
     }
-  } else {
-    inner.style.paddingTop = getComputedStyle(scroll).paddingTop;
   }
-  inner.appendChild(node);
+  if (track.mode === 'page') track.dockAnim = swipeBuildDockAnim(resolve.step);
   swipeTrack = track;
   routeToken++;   // 作废未落地的异步渲染，防止拖动中 content 被覆盖
-  swipeDock(true);
   swipeLayTrack(dx);
-  swipeTrack.guard = setTimeout(() => { if (swipeTrack) swipeCloseTrack(false); }, 1500);
+  swipeTrack.guard = setTimeout(() => { if (swipeTrack && !touching) swipeCloseTrack(false); }, 1500);
   return true;
-}
-
-/* 底栏那枚玻璃透镜跟着整页横滑位移动 —— 以前只有点按才动，滑动手势和底栏是两套。
-   DockGlass 由 dock-glass.js 提供；万一没加载（老包/被裁）就静默跳过。 */
-function swipeDock(begin, ratio) {
-  const t = swipeTrack;
-  if (!t || t.mode !== 'page' || !window.DockGlass || t.from == null || t.to == null) return;
-  try {
-    if (begin) window.DockGlass.begin(t.from, t.to);
-    else window.DockGlass.progress(t.from, t.to, ratio || 0);
-  } catch (error) { }
-}
-
-function swipeDockDone(commit) {
-  if (!window.DockGlass || typeof window.DockGlass.settle !== 'function') return;
-  try { window.DockGlass.settle(commit); } catch (error) { }
 }
 
 function swipeLayTrack(dx) {
@@ -3406,9 +4160,9 @@ function swipeLayTrack(dx) {
   if (t.mode === 'inline') {
     for (const el of t.moving) el.style.transform = `translateX(${dx}px)`;   // 只有内容区跟手
     swipeTabProgress(t, Math.abs(dx) / t.width);                              // 高亮同步跟到哪一格
-  } else {
-    scroll.style.transform = `translateX(${dx}px)`;
-    swipeDock(false, Math.min(1, Math.abs(dx) / t.width));
+  } else if (t.current) {
+    t.current.style.transform = `translateX(${dx}px)`;
+    swipeDockProgress(t, Math.abs(dx) / t.width);                            // 底栏透镜同步跟手
   }
   t.panel.style.transform = `translateX(${t.dirSign * t.width + dx}px)`;
 }
@@ -3417,46 +4171,83 @@ function swipeLayTrack(dx) {
 function swipeClearTabs(t) {
   for (const el of t.pinned || []) el.style.visibility = '';
   for (const [el, d] of t.savedDisplays || []) el.style.display = d;
-  for (const el of t.moving || []) el.style.transform = '';
+  for (const el of t.moving || []) { el.style.transform = ''; el.style.transition = ''; }
+  // 预览时真实目标页头 display:none，SegGlass 首次测量会得到 0 宽度。
+  // 恢复页头后必须在同一帧重新测量并归位，否则临时壳一移除，真实高亮就消失。
+  if (t.mode === 'inline' && window.SegGlass) {
+    const selectedIndex = t.resolve.step ? t.resolve.step[1] : -1;
+    for (const bar of t.panel.querySelectorAll(SWIPE_TAB_BAR_SELECTOR)) {
+      const buttons = [...bar.querySelectorAll('button')];
+      buttons.forEach((button, index) => {
+        if (selectedIndex < 0) return;
+        button.classList.toggle('selected', index === selectedIndex);
+        button.classList.remove('drag-over', 'dim', 'holding');
+        if (index === selectedIndex) button.setAttribute('aria-selected', 'true');
+        else button.removeAttribute('aria-selected');
+      });
+      const seg = window.SegGlass.handle(bar);
+      seg.setDragging(false); seg.setFollow(false); seg.clearHover(); seg.sync(false);
+    }
+  }
   // 页头壳里的透镜提前释放：它是克隆体，随壳一起移除，这里只需把「拖动态」撤干净
   try { t.tabAnim?.seg?.blob && (t.tabAnim.seg.blob.style.transition = ''); } catch (ignore) { }
   for (const c of t.clones || []) c.remove();
 }
 
 // 松手：提交则当前页滑出、目标页落位并真正路由；取消则全部归位（零副作用）。
+// 目标页始终是 content 的直接子节点；提交只删除旧页，不搬动目标页或其图片。
 function swipeCloseTrack(commit) {
   const t = swipeTrack;
   if (!t) return;
   swipeTrack = null;
   swiping = true;
-  swipeDockDone(commit);
   clearTimeout(t.guard);
   const ease = 'transform .2s cubic-bezier(.22,.61,.36,1)';
-  scroll.style.transition = ease;
+  const restoreStyle = (el, value) => {
+    if (!el) return;
+    if (value == null) el.removeAttribute('style'); else el.setAttribute('style', value);
+  };
+  const restorePanelMotion = () => {
+    const m = t.panelMotion;
+    t.panel.style.transform = m.transform;
+    t.panel.style.transition = m.transition;
+    t.panel.style.willChange = m.willChange;
+    t.panel.style.marginTop = m.marginTop;
+    scroll.style.overflowX = t.scrollOverflowX;
+  };
+  const moveCurrent = x => {
+    if (t.mode === 'inline') {
+      for (const el of t.moving) { el.style.transition = ease; el.style.transform = `translateX(${x}px)`; }
+    } else if (t.current) {
+      t.current.style.transition = ease;
+      t.current.style.transform = `translateX(${x}px)`;
+    }
+  };
   t.panel.style.transition = ease;
   const tabEase = 'transform .2s cubic-bezier(.22,.61,.36,1),width .2s cubic-bezier(.22,.61,.36,1),height .2s cubic-bezier(.22,.61,.36,1)';
+  if (t.dockAnim) t.dockAnim.api.settle(commit);
   if (commit) {
-    if (t.tabAnim) {   // 透镜跟着收尾动画一路滑到目标格，不是落地才跳
+    if (t.tabAnim) {
       const anim = t.tabAnim;
       anim.seg.blob.style.transition = tabEase;
       for (const el of anim.items) el.style.transition = 'color .2s ease';
       swipeTabProgress(t, 1);
     }
-    scroll.style.transform = `translateX(${-t.dirSign * t.width}px)`;
+    moveCurrent(-t.dirSign * t.width);
     t.panel.style.transform = 'translateX(0)';
     setTimeout(() => {
-      swipeClearTabs(t);   // 先撤掉页头 hidden / 内容位移等临时样式，再存当前页 —— 缓存里不能有脏快照
+      swipeClearTabs(t);
+      // 旧页在跟手/收尾时被加了 translateX 和 transition。必须先恢复原始样式再入缓存，
+      // 否则下次滑回会把“仍在屏外”的 transform 一起恢复，造成全局页面空白/残条。
+      restoreStyle(t.current, t.currentStyle);
       swipeSaveCurrent();
-      const node = t.inner.firstElementChild;
-      if (node) node.style.marginTop = '';   // 撤掉滑动时的垂直对齐补偿，别带进真实页面
-      scroll.style.transition = '';
-      scroll.style.transform = '';
-      if (node) { content.replaceChildren(node); scroll.scrollTop = 0; }
-      t.panel.remove();
+      // 旧页此刻已在屏外，可以安全 detach；目标页保持在原容器、原文档位置。
+      if (t.current) t.current.remove();
+      scroll.scrollTop = 0;
+      restorePanelMotion();
       swiping = false;
-      // 预览已经是真内容 → 让这次路由只换状态、不再重画一遍（重画就是那一闪）
-      swipeAdopting = swipeAdoptable(node);
-      swipeSaveGuard = true;   // content 已被换成目标页，期间不许再存“当前页”
+      swipeAdopting = swipeAdoptable(t.panel);
+      swipeSaveGuard = true;
       try { const result = t.resolve.go(); if (result && result.catch) result.catch(() => { }); } catch (ignore) { }
       swipeSaveGuard = false;
       swipeAdopting = false;
@@ -3466,25 +4257,23 @@ function swipeCloseTrack(commit) {
     if (t.tabAnim) {
       const anim = t.tabAnim;
       for (const el of anim.items) el.style.transition = 'color .2s ease';
-      anim.seg.blob.style.transition = tabEase;   // 行内过渡优先于 .dragging 的 none
+      anim.seg.blob.style.transition = tabEase;
       swipeTabProgress(t, 0);
     }
-    scroll.style.transform = 'translateX(0)';
+    moveCurrent(0);
     t.panel.style.transform = `translateX(${t.dirSign * t.width}px)`;
     setTimeout(() => {
       swipeClearTabs(t);
-      const node = t.inner.firstElementChild;
-      if (node) node.style.marginTop = '';   // 缓存/复用的克隆不带对齐补偿
-      // 预览用的是缓存本体（取出式），取消要把节点放回缓存，否则这份真内容缓存被白白消耗
-      if (node && t.resolve.key && swipeAdoptable(node)) {
-        swipeCleanCloneImages(node);
-        swipePageCache.set(t.resolve.key, node);
+      restoreStyle(t.current, t.currentStyle);
+      restorePanelMotion();
+      // 取消时目标页已在屏外，归还缓存不会形成可见闪帧。
+      if (t.resolve.key && swipeAdoptable(t.panel)) {
+        swipeCleanCloneImages(t.panel);
+        swipePageCache.set(t.resolve.key, t.panel);
       }
-      scroll.style.transition = '';
-      scroll.style.transform = '';
       t.panel.remove();
+      scroll.scrollTop = t.previousScrollTop;
       swiping = false;
-      // downloads 页的轮询被 routeToken++ 打断过，重新挂上
       if (state.route === 'downloads') refreshDownloads(routeToken, true);
     }, 210);
   }
@@ -3497,6 +4286,7 @@ function swipeSettleBack() {
 }
 
 scroll.addEventListener('touchstart', event => {
+  touching = true;
   const touch = event.touches[0];
   if (!touch || swiping || swipeBlocked() || document.querySelector('.card-transition-stage')
     || !DOCK_ORDER.includes(state.route === 'category' ? state.tab : state.route)) {
@@ -3528,6 +4318,7 @@ scroll.addEventListener('touchmove', event => {
 }, { passive: false });
 
 scroll.addEventListener('touchend', event => {
+  touching = false;
   const start = swipeStart;
   const axis = swipeAxis, track = swipeTrack;
   swipeStart = null; swipeAxis = null;
@@ -3546,6 +4337,7 @@ scroll.addEventListener('touchend', event => {
 }, { passive: true });
 
 scroll.addEventListener('touchcancel', () => {
+  touching = false;
   const track = swipeTrack, axis = swipeAxis;
   swipeStart = null; swipeAxis = null;
   if (track) swipeCloseTrack(false);
@@ -3582,11 +4374,6 @@ function tapDock(button) {
 }
 
 document.addEventListener('click', async event => {
-  /* 选集分组菜单：点在菜单外面就收起（点菜单项由后面的分支处理） */
-  if (state.epPickerOpen && !event.target.closest('.ep-picker')) {
-    state.epPickerOpen = false;
-    paintEpisodeSection();
-  }
   // 搜索浮层：历史词条 / 单条删除 / 清空
   const ssWord = event.target.closest('[data-ss-word]');
   if (ssWord) {
@@ -3635,11 +4422,79 @@ document.addEventListener('click', async event => {
   }
   if (event.target.closest('[data-apply-resources]')) { api('apply-hot-update').catch(error => toast(error.message, true)); return; }
   if (event.target.closest('[data-account-management]')) { openAccountPop(); return; }
+  if (event.target.closest('[data-qr-login]')) { startQrScan(); return; }
+  if (event.target.closest('[data-source-open]')) {
+    /* 从「网络通道」弹窗里点内容源：先把那层收掉，否则两层叠着，返回要按两次 */
+    if (proxyPop && !proxyPop.hidden) closeProxyPop();
+    openSourcePop(); return;
+  }
   if (event.target.closest('[data-proxy-open]')) { openProxyPop(); return; }
-  if (event.target.closest('[data-source-open]')) { openSourcePop(); return; }
-  const siteRow = event.target.closest('[data-pick-site]');
-  if (siteRow) { pickPrivateSite(siteRow.dataset.pickSite, siteRow.dataset.siteName); return; }
   if (event.target.closest('[data-about-open]')) { openAboutPop(); return; }
+  // ---- 远程服务器配置 ----
+  if (event.target.closest('[data-remote-open]')) { openRemotePop(); return; }
+  if (event.target.closest('[data-remote-add]')) {
+    remoteEditing = '';
+    remoteDraft = remoteDraftOf(null);
+    remoteTestText = '';
+    remoteTestOk = false;
+    renderRemotePop();
+    return;
+  }
+  if (event.target.closest('[data-remote-edit]')) {
+    const id = event.target.closest('[data-remote-edit]').dataset.remoteEdit;
+    const server = asArray(remoteServers).find(s => String(s.id) === String(id));
+    if (!server) { toast('这条配置不存在了，请重新打开', true); return; }
+    remoteEditing = String(id);
+    remoteDraft = remoteDraftOf(server);
+    remoteTestText = '';
+    remoteTestOk = false;
+    renderRemotePop();
+    return;
+  }
+  if (event.target.closest('[data-remote-type]')) {
+    // 切协议：先把已填内容收进草稿，再按新协议重画表单（SMB 需要共享名，WebDAV/FTP 不需要）
+    stashRemoteForm();
+    remoteDraft.type = event.target.closest('[data-remote-type]').dataset.remoteType;
+    remoteTestText = '';
+    renderRemotePop();
+    return;
+  }
+  if (event.target.closest('[data-remote-cancel]')) { remoteEditing = null; remoteDraft = null; renderRemotePop(); return; }
+  if (event.target.closest('[data-remote-save]')) { saveRemoteForm(); return; }
+  if (event.target.closest('[data-remote-test]')) { testRemoteForm(event.target.closest('[data-remote-test]')); return; }
+  if (event.target.closest('[data-remote-delete]')) {
+    const current = remoteDraft ? remoteDraft.id : '';
+    const name = remoteDraft && remoteDraft.name ? remoteDraft.name : '这台服务器';
+    askConfirmation('删除服务器', `确定删除「${name}」的配置？已传过去的文件不受影响。`, '删除').then(ok => {
+      if (!ok || !current) return;
+      api('remote-delete', { id: current }).then(async () => {
+        remoteServers = null;
+        await loadRemoteServers(true);
+        remoteEditing = null;
+        remoteDraft = null;
+        renderRemotePop();
+        toast('已删除');
+      }).catch(error => toast(error.message, true));
+    });
+    return;
+  }
+  if (event.target.closest('[data-remote-pick]')) {
+    startRemoteTransfer(remotePickerTaskId, event.target.closest('[data-remote-pick]').dataset.remotePick);
+    return;
+  }
+  if (event.target.closest('[data-remote-pick-close]')) { closeRemotePicker(); return; }
+  if (event.target.closest('[data-dl-transfer]')) {
+    const button = event.target.closest('[data-dl-transfer]');
+    const head = button.closest('.download-task');
+    const title = head ? (head.querySelector('.download-task-head strong') || {}).textContent : '';
+    openRemotePicker(button.dataset.dlTransfer, title);
+    return;
+  }
+  if (event.target.closest('[data-dl-transfer-cancel]')) {
+    const id = event.target.closest('[data-dl-transfer-cancel]').dataset.dlTransferCancel;
+    api('remote-transfer-cancel', { id }).then(() => { toast('已取消传输'); refreshCurrentDownloads(); }).catch(error => toast(error.message, true));
+    return;
+  }
   const openUrl = event.target.closest('[data-open-url]');
   if (openUrl) {
     api('open-url', { url: openUrl.dataset.openUrl }).catch(error => toast(error.message, true));
@@ -3649,9 +4504,66 @@ document.addEventListener('click', async event => {
   if (event.target.closest('[data-download]')) { showDownloadSheet(); return; }
   if (event.target === downloadOverlay) { hideDownloadSheet(); return; }
   if (event.target.closest('[data-dl-pick]')) {
-    submitDownloadTo(event.target.closest('[data-dl-pick]').dataset.dlPick);
+    const pick = event.target.closest('[data-dl-pick]').dataset.dlPick;
+    if (pick === 'desktop' || pick === 'device') {
+      targetDeviceKind = pick;
+      openDevicePicker();
+      return;
+    }
+    if (pick === 'remote') {
+      // 先进服务器选择步骤；没配服务器就直接引导去设置，别让用户白点
+      loadRemoteServers(true).then(list => {
+        if (!asArray(list).length) { toast('还没有远程服务器，请先到「设置 → 远程服务器」添加', true); return; }
+        downloadMode = 'remote';
+        renderDownloadSheet();
+      });
+      return;
+    }
+    submitDownloadTo(pick);
     return;
   }
+  if (event.target.closest('[data-dl-remote]')) {
+    submitDownloadTo('remote', event.target.closest('[data-dl-remote]').dataset.dlRemote);
+    return;
+  }
+  if (event.target.closest('[data-dl-device]')) {
+    submitDownloadTo('device', event.target.closest('[data-dl-device]').dataset.dlDevice);
+    return;
+  }
+  if (event.target.closest('[data-dl-device-menu]')) {
+    manageDeviceId = event.target.closest('[data-dl-device-menu]').dataset.dlDeviceMenu;
+    downloadMode = 'device-manage';
+    renderDownloadSheet();
+    return;
+  }
+  if (event.target.closest('[data-dl-manage-back]')) { downloadMode = 'device'; renderDownloadSheet(); return; }
+  if (event.target.closest('[data-dl-rename]')) {
+    const input = document.getElementById('dl-device-name');
+    const name = String(input && input.value || '').trim();
+    if (!name) { toast('设备名不能为空', true); return; }
+    api('device-rename', { id: manageDeviceId, name }).then(() => {
+      const device = asArray(targetDevices).find(item => String(item.id) === String(manageDeviceId));
+      if (device) device.name = name;
+      toast('已改名');
+      downloadMode = 'device';
+      renderDownloadSheet();
+    }).catch(error => toast(error.message || '改名失败', true));
+    return;
+  }
+  if (event.target.closest('[data-dl-revoke]')) {
+    const input = document.getElementById('dl-device-code');
+    const code = String(input && input.value || '').replace(/\D/g, '');
+    if (code.length !== 6) { toast('请输入 6 位动态码', true); return; }
+    api('device-revoke', { id: manageDeviceId, code }).then(async () => {
+      toast('设备已移除');
+      manageDeviceId = '';
+      downloadMode = 'device';
+      try { const data = await api('download-targets'); targetDevices = asArray(data && data.devices); } catch (ignore) { }
+      renderDownloadSheet();
+    }).catch(error => toast(error.message || '移除失败', true));
+    return;
+  }
+  if (event.target.closest('[data-dl-back-target]')) { downloadMode = 'target'; renderDownloadSheet(); return; }
   if (event.target.closest('[data-dl-back]')) { hideDownloadSheet(); return; }
   if (event.target.closest('[data-dl-confirm]')) { downloadMode = 'target'; renderDownloadSheet(); return; }
   if (event.target.closest('[data-dl-all]')) {
@@ -3659,18 +4571,34 @@ document.addEventListener('click', async event => {
     const allSelected = episodes.length && episodes.every(n => downloadSelection.has(n));
     downloadSelection.clear();
     if (!allSelected) episodes.forEach(n => downloadSelection.add(n));
-    renderDownloadSheet();
+    // 同样不重绘：逐格切 class，滚动位置原地不动
+    document.querySelectorAll('#download-sheet .dl-ep').forEach(cell => {
+      cell.classList.toggle('checked', downloadSelection.has(Number(cell.dataset.dlEp)));
+    });
+    syncDownloadSheetSelection();
     return;
   }
   if (event.target.closest('[data-dl-ep]')) {
-    const n = Number(event.target.closest('[data-dl-ep]').dataset.dlEp);
+    const cell = event.target.closest('[data-dl-ep]');
+    const n = Number(cell.dataset.dlEp);
     if (downloadSelection.has(n)) downloadSelection.delete(n); else downloadSelection.add(n);
-    renderDownloadSheet();
+    // 只动这一格 + 顶部计数，绝不重绘列表（重绘 = 滚动条弹回顶部）
+    cell.classList.toggle('checked', downloadSelection.has(n));
+    syncDownloadSheetSelection();
     return;
   }
   if (event.target.closest('[data-dl-play]')) {
     const id = event.target.closest('[data-dl-play]').dataset.dlPlay;
     api('open-local-player', { id }).then(() => toast('正在播放本地成品')).catch(error => toast(error.message || '本地文件不可播放', true));
+    return;
+  }
+  if (event.target.closest('[data-dl-play-device]')) {
+    // 同一账号下在线设备（电脑/电视/另一台手机）：直连它的局域网媒体服务播成品
+    const id = event.target.closest('[data-dl-play-device]').dataset.dlPlayDevice;
+    const task = (state.deviceTasks || []).find(t => String(t.id) === String(id));
+    if (!task) return;
+    if (!task.url) { toast(task.merged ? '这台设备没有可用的局域网地址，确认在同一 Wi-Fi' : '对面还没合并成品，等它合并好再播'); return; }
+    api('open-desktop-player', { url: task.url, title: task.title }).catch(error => toast(error.message || '打开失败'));
     return;
   }
   if (event.target.closest('[data-dl-play-nas]')) {
@@ -3785,23 +4713,20 @@ function refreshCurrentDownloads() {
   const nav = event.target.closest('[data-nav]');
   if (nav) { tapDock(nav); return; }
   const libraryTab = event.target.closest('[data-library-tab]');
-  if (libraryTab) {
-    const next = libraryTab.dataset.libraryTab;
-    if (next === state.libraryTab) return;
-    state.libraryTab = next;
-    syncLibraryTabs();
-    paintLibraryBody();
-    scroll.scrollTop = 0;
-    return;
-  }
+  if (libraryTab) { state.libraryTab = libraryTab.dataset.libraryTab; syncLibraryTabs(); paintLibraryBody(); scroll.scrollTop = 0; return; }
   if (event.target.closest('[data-all-history]')) { state.libraryQuery = ''; goLibrary('history'); return; }
   const continueCard = event.target.closest('[data-continue-id]');
   if (continueCard) { resumeFromHome(continueCard.dataset.continueId).catch(error => toast(error.message || '续播失败，请重试', true)); return; }
   const historyCard = event.target.closest('[data-history-id]');
   if (historyCard) {
     const id = historyCard.dataset.historyId;
+    const episode = Number(historyCard.dataset.historyEpisode || 1);
     if (historyCard.dataset.historyCompleted === 'true') goDetail(id, historyCard);
-    else goDetail(id).then(() => openPlayer(Number(historyCard.dataset.historyEpisode || 1)));
+    else {
+      // 列表点「继续看」时先让原生端把取流跑起来，别等详情页这一圈网络走完才开始
+      api('prewarm', { id, episode }).catch(() => {});
+      goDetail(id).then(() => openPlayer(episode));
+    }
     return;
   }
   if (event.target.closest('[data-all-tags]')) { goTags(); return; }
@@ -3819,7 +4744,6 @@ function refreshCurrentDownloads() {
   const slide = event.target.closest('[data-slide]');
   if (slide) { const target = Number(slide.dataset.slide); changeBanner(target, target > bannerIndex() ? 1 : -1); return; }
   if (event.target.closest('[data-back]')) { window.hgBack(); return; }
-  /* 选集分组选择器：点一次展开、再点收起；选了哪组就只重画集数那一块 */
   if (event.target.closest('[data-ep-picker]')) {
     state.epPickerOpen = !state.epPickerOpen;
     paintEpisodeSection();
@@ -3840,7 +4764,8 @@ function refreshCurrentDownloads() {
   }
   const episode = event.target.closest('[data-episode]');
   if (episode) { openPlayer(Number(episode.dataset.episode)); return; }
-  if (event.target.closest('[data-play]')) { openPlayer(1); return; }
+  if (event.target.closest('[data-play]')) { openPlayer(resumeEpisode(), resumeRestart()); return; }
+  if (event.target.closest('[data-restart]')) { openPlayer(1, true); return; }
   if (event.target.closest('[data-bookmark]')) {
     if (!state.detail) return;
     try { state.bookmarked = await api('bookmark', state.detail); renderDetail(); toast(state.bookmarked ? '已加入我的片单' : '已取消收藏'); }
@@ -4009,7 +4934,19 @@ api('app-version').then(version => {
   setAvailableUpdate(updateAvailable);
 }).catch(() => {});
 api('cached-update').then(result => { if (result.status === 'available') setAvailableUpdate(result); }).catch(() => {});
-function startHome() { goHome(); setTimeout(() => checkUpdate(false), 3000); }
+// 冷启动：**先**恢复刷剧形态，再去拉首页数据。
+// 顺序反过来的话，goHome() 已经把传统首页画出来了（哪怕只有一帧），
+// 之后才切刷剧 —— 表现就是「打开先闪一下传统首页」。
+// 首页数据只是给「退出刷剧」时用的，刷剧本身吃的是记忆里的剧单，不依赖它。
+function startHome() {
+  window.__bingeRestore && window.__bingeRestore();
+  // 记忆没恢复成（内容源换了 / 私密模式 / 剧单失效）：立刻把首页还给传统形态
+  if (state.binge) armBingeBootFallback(); else clearBingeBoot();
+  goHome().then(() => {
+    window.__bingeRestore && window.__bingeRestore();   // 兜底：万一第一次没恢复成
+  }).catch(() => { });
+  setTimeout(() => checkUpdate(false), 3000);
+}
 // 崩溃日志提示：上次运行发生未捕获异常（含闪退）时，启动后提示并支持复制，便于把日志发给开发者排查
 api('crash-log').then(result => {
   const log = (result && result.log || '').trim();
@@ -4104,8 +5041,10 @@ function closeUnlock() {
 async function enterPrivate(password = '') {
   const result = await api('enter-private', { password });
   closeUnlock();
-  if (result.needsAgeConfirmation) document.getElementById('age-gate').hidden = false;
-  else location.reload();
+  if (result.needsAgeConfirmation) { document.getElementById('age-gate').hidden = false; return; }
+  // 先进私密模式页面前放启动动画（无声变有声都靠它自己兜底），播完再重载
+  try { await window.veyraIntro?.play(); } catch (error) { /* 动画失败不影响进入 */ }
+  location.reload();
 }
 async function handleEnterPrivate() {
   if (privateMode()) return;
@@ -4128,12 +5067,23 @@ document.getElementById('unlock-form').addEventListener('submit', async event =>
   finally { button.disabled = false; }
 });
 
-/* ================= 刷剧模式（公开模式首页悬浮按钮） =================
-   点击进入原生 BingeActivity：随机推荐剧第 1 集全屏自动播，上下滑换剧；
-   「查看详情」由 BingeActivity 通过 hgBingeAction 回传路由。 */
+/* ================= 刷剧模式（首页的第二形态，与首页平级、可记忆） =================
+   刷剧不是独立页面，而是首页 WebView 的一种形态：原生视频层垫在透明 WebView 之后，
+   真底栏 #dock 与真玻璃卡片都在首页里。上下滑换剧由 WebView 触发原生引擎。
+
+   状态模型（两层，别再混在一起）：
+     state.binge      —— 用户「想要的形态」。持久化到 localStorage：切 tab、进详情、退出软件
+                         重进都保留；只有点悬浮按钮才真正退出。
+     bingeOnScreen    —— 这一刻浮层是否真的在屏幕上（只有 route==='home' 才算）。
+   原生侧只认三件事：binge-start（建播放器）/ binge-pause（暂停保位）/ binge-exit（释放）。
+   切 tab、进详情、看全集都只 pause，不再 exit —— 回来时直接 resume，不会先闪一下传统首页。 */
 const bingeFab = document.getElementById('binge-fab');
-let bingePayload = null;     // 最近一次进入刷剧的剧单（返回恢复用）
-let bingeReturnIndex = null; // 从刷剧进详情后要恢复的位置
+const BINGE_STORE_KEY = 'veyra.binge.v2';
+let bingePayload = null;      // 当前剧单 { items: [...] }
+let bingeCurrentId = null;    // 当前剧 id（卡片按钮用）
+let bingeCurrentIndex = 0;    // 当前剧在剧单里的下标
+let bingeEngineLive = false;  // 原生引擎是否已经建好播放器（决定用 start 还是 resume）
+let bingeStarting = false;    // binge-start 正在途中（防止 setRoute 抖动时重复建播放器）
 
 function bingePoolItems() {
   const data = state.home || {};
@@ -4146,83 +5096,350 @@ function bingePoolItems() {
     && !seen.has(String(item.id)) && seen.add(String(item.id)));
 }
 
+// ---- 记忆：刷剧形态 + 剧单 + 停在第几部，一并落盘 ----
+function saveBingePref() {
+  try {
+    if (!state.binge || !bingePayload || !bingePayload.items || !bingePayload.items.length) {
+      localStorage.removeItem(BINGE_STORE_KEY);
+      return;
+    }
+    localStorage.setItem(BINGE_STORE_KEY, JSON.stringify({
+      on: true, source: contentSource, items: bingePayload.items, index: bingeCurrentIndex,
+    }));
+  } catch (error) { }
+}
+function readBingePref() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(BINGE_STORE_KEY) || 'null');
+    if (!raw || !raw.on || !Array.isArray(raw.items) || !raw.items.length) return null;
+    if (raw.source && raw.source !== contentSource) return null;   // 内容源换了就别恢复
+    return raw;
+  } catch (error) { return null; }
+}
+
 function updateBingeChrome() {
   if (!bingeFab) return;
-  const show = state.route === 'home' && !privateMode() && bingePoolItems().length > 0;
+  // 刷剧态无条件显示（否则退出按钮会跟着剧单一起消失）；传统态仍按首页池子决定
+  const show = !privateMode() && state.route === 'home'
+    && (state.binge || bingePoolItems().length > 0);
   bingeFab.hidden = !show;
+  // 始终是首页那一个按钮、那一个图标：进刷剧只切「按下态」，不换图标、不换底色。
+  const play = bingeFab.querySelector('.binge-fab-play');
+  const home = bingeFab.querySelector('.binge-fab-home');
+  if (play) play.hidden = false;
+  if (home) home.hidden = true;
+  bingeFab.classList.toggle('active', !!state.binge);
+  bingeFab.setAttribute('aria-pressed', state.binge ? 'true' : 'false');
 }
 window.__bingeUpdateChrome = updateBingeChrome;
 
-bingeFab?.addEventListener('click', async () => {
+/* 冷启动垫底的那张海报（app.html 的 boot 脚本插的 #binge-boot-cover）。
+   它一直盖在 WebView 里，直到原生把真海报画出来 —— 提前撤就会露出下面那层
+   还没上图的视频层（黑屏一闪）。撤除条件三选一：原生海报就位 / 退回传统首页 / 超时。 */
+let bingeBootTimer = 0;
+function clearBingeBoot() {
+  clearTimeout(bingeBootTimer);
+  bingeBootTimer = 0;
+  document.documentElement.removeAttribute('data-binge-boot');
+  const cover = document.getElementById('binge-boot-cover');
+  if (cover && cover.parentNode) cover.parentNode.removeChild(cover);
+}
+// 海报迟迟出不来（封面挂了、引擎没起来）也不能把首页永久盖住
+function armBingeBootFallback() {
+  clearTimeout(bingeBootTimer);
+  bingeBootTimer = setTimeout(clearBingeBoot, 4000);
+}
+window.__bingeBootClear = clearBingeBoot;
+window.hgBingePosterReady = () => clearBingeBoot();
+
+// 唯一的状态同步出口：形态 → 浮层可见性 → 原生引擎的 start/pause/resume
+function syncBinge() {
+  const app = document.getElementById('app');
+  const binge = document.getElementById('binge');
+  const hasItems = !!(bingePayload && bingePayload.items && bingePayload.items.length);
+  // 没有剧单就别进刷剧形态：否则会把首页藏起来、只留一块黑屏
+  const want = !!state.binge && hasItems && !privateMode();
+  const visible = want && state.route === 'home';
+  app?.classList.toggle('binge', visible);
+  document.body.classList.toggle('binge', visible);
+  if (binge) binge.hidden = !visible;
+  updateBingeChrome();
+  if (visible) {
+    if (!bingeEngineLive) startBingeEngine();
+    else if (window.api) api('binge-resume').catch(() => { });
+  } else if (bingeEngineLive && window.api) {
+    // 只是暂停：保留播放器与位置，回来 resume 就能接着播，不用重新 loadShow
+    api('binge-pause').catch(() => { });
+  }
+  if (!visible) clearBingeBoot();   // 退回传统首页：垫底海报必须撤，否则首页被永久盖住
+}
+window.__bingeSync = syncBinge;
+
+function startBingeEngine() {
+  const items = (bingePayload && bingePayload.items) || [];
+  if (!items.length) return;
+  const index = Math.max(0, Math.min(bingeCurrentIndex, items.length - 1));
+  if (!window.api || bingeStarting) return;
+  bingeStarting = true;
+  api('binge-start', { items: items, index: index, source: contentSource }).then(() => {
+    bingeStarting = false;
+    bingeEngineLive = true;
+  }).catch(error => {
+    bingeStarting = false;
+    // 原生引擎没起来（起播失败/异常）：退回传统首页，别把人卡在一个没有画面的刷剧页里
+    bingeEngineLive = false;
+    state.binge = false;
+    saveBingePref();
+    syncBinge();
+    toast(error.message || '进入刷剧模式失败', true);
+  });
+}
+
+function enterBingeFresh() {
   if (privateMode() || state.route !== 'home') return;
   const items = bingePoolItems();
   if (!items.length) { toast('首页还没有推荐内容，稍后再试', true); return; }
-  // 洗牌后取一批：每次进入刷的是不同的随机剧
-  for (let i = items.length - 1; i > 0; i--) {
+  // 洗牌后取一批：每次主动进入刷的是不同的随机剧（从记忆恢复时不动剧单）
+  const shuffled = items.slice();
+  for (let i = shuffled.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-    [items[i], items[j]] = [items[j], items[i]];
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
   }
-  const payload = items.slice(0, 40).map(item => ({
+  bingePayload = { items: shuffled.slice(0, 40).map(item => ({
     id: String(item.id), title: item.title || '',
     cover: item.cover || '', description: item.description || item.episodeLabel || '',
-  }));
-  bingePayload = { items: payload };
-  try { await api('open-binge', { items: payload, source: contentSource }); }
-  catch (error) { toast(error.message || '进入刷剧模式失败', true); }
-});
-
-window.hgBingeAction = (type, id, index) => {
-  if (type === 'detail' && id) {
-    // 记住刷剧位置：从详情返回首页时自动回到刷剧模式、停在同一部剧
-    if (bingePayload && typeof index === 'number') bingeReturnIndex = index;
-    goDetail(id).catch(() => {});
-  }
-};
-
-// 从详情返回首页 → 恢复刷剧（同一批剧 + 同一位置）；须在 setRoute 更新 state.route 之前调用
-function resumeBingeIfReturned(target) {
-  if (target !== 'home' || bingeReturnIndex == null || !bingePayload) return;
-  if (state.route !== 'detail') return;
-  const i = bingeReturnIndex;
-  bingeReturnIndex = null;
-  api('open-binge', { items: bingePayload.items, index: i, source: contentSource }).catch(() => {});
+  })) };
+  bingeCurrentIndex = 0;
+  bingeCurrentId = null;
+  state.binge = true;
+  saveBingePref();
+  syncBinge();
 }
 
-/*
- * 「我的」页面遥控器上下桥接。
- *
- * WebView 自己的方向键导航在网格里会横向打转：收藏是 3 列网格、下载是竖向列表，
- * 从第一行按 ↑ 有时找不到上面的三个胶囊（观看历史是宽列表，所以能回去）。
- * 这里只在「焦点位于列表第一行 + 按 ↑」时接管，把焦点交回当前选中的胶囊；
- * 其余方向键完全不动，避免破坏正常的行内移动。
- */
-(function tvLibraryTabsBridge() {
-  function tabsIn(page) {
-    return Array.from(page.querySelectorAll('.library-tabs button'));
+function exitBingeMode() {
+  state.binge = false;
+  bingeEngineLive = false;
+  saveBingePref();
+  syncBinge();
+  if (window.api) api('binge-exit').catch(() => { });
+}
+
+// 冷启动恢复：上次停在刷剧页，这次进来还是刷剧页（同一批剧、同一部）
+function restoreBingeFromStore() {
+  if (state.binge || privateMode() || state.route !== 'home') return;
+  const saved = readBingePref();
+  if (!saved) return;
+  bingePayload = { items: saved.items };
+  bingeCurrentIndex = Math.max(0, Math.min(saved.index || 0, saved.items.length - 1));
+  bingeCurrentId = saved.items[bingeCurrentIndex] ? saved.items[bingeCurrentIndex].id : null;
+  state.binge = true;
+  syncBinge();
+}
+window.__bingeRestore = restoreBingeFromStore;
+
+bingeFab?.addEventListener('click', () => {
+  if (privateMode()) return;
+  if (state.binge) exitBingeMode();
+  else if (state.route === 'home') enterBingeFresh();
+});
+
+// 卡片海报走首页同一个封面桥；序号 + 当前剧 id 双重校验，快速换剧不会串图。
+let bingePosterSeq = 0;
+function updateBingePoster(info) {
+  const img = document.getElementById('binge-poster');
+  const box = document.getElementById('binge-poster-box');
+  if (!img || !box) return;
+  const seq = ++bingePosterSeq;
+  const id = String(info.id || '');
+  const cover = info.cover || '';
+  const isCurrent = () => seq === bingePosterSeq && String(bingeCurrentId || '') === id;
+  box.hidden = true;
+  img.onload = img.onerror = null;
+  img.removeAttribute('src');
+  if (!cover) return;
+  img.alt = (info.title || '当前剧集') + ' 海报';
+  getCover(cover).then(src => {
+    if (!isCurrent()) return;
+    img.onload = () => { if (isCurrent()) box.hidden = false; };
+    img.onerror = () => { if (isCurrent()) { box.hidden = true; img.removeAttribute('src'); } };
+    img.src = src;
+    if (img.complete && img.naturalWidth > 0) box.hidden = false;
+  }).catch(() => { if (isCurrent()) box.hidden = true; });
+}
+
+// 原生引擎回写卡片（标题/简介/封面 + 当前剧 id/下标）
+window.hgBingeUpdate = (info) => {
+  if (!info) return;
+  const titleEl = document.getElementById('binge-title');
+  const descEl = document.getElementById('binge-desc');
+  const msgEl = document.getElementById('binge-msg');
+  if (titleEl) titleEl.textContent = info.title || '';
+  if (descEl) descEl.textContent = info.description || '';
+  if (msgEl) msgEl.hidden = true;
+  bingeCurrentId = info.id || null;
+  if (typeof info.index === 'number') bingeCurrentIndex = info.index;
+  updateBingePoster(info);
+  const card = document.getElementById('binge-card');
+  if (card) card.hidden = false;
+  if (document.documentElement.hasAttribute('data-binge-boot')) armBingeBootFallback();
+  saveBingePref();   // 换一部就记一部，冷启动能停在同一部
+};
+window.hgBingeFailed = (message) => {
+  const msgEl = document.getElementById('binge-msg');
+  if (msgEl) { msgEl.textContent = message || ''; msgEl.hidden = false; }
+  const card = document.getElementById('binge-card');
+  if (card) card.hidden = true;
+};
+
+// 卡片按钮：查看详情 —— 不退出刷剧形态，只让 syncBinge 把浮层收起并 pause；
+// 从详情返回时 route 回到 home，syncBinge 自动 resume，全程不经过传统首页。
+function openBingeDetail(id) {
+  if (id == null) return;
+  // 先把刷剧形态的 UI 同步收起，再跳详情。
+  // 刷剧态 #scroll 是 display:none，等 syncBinge 在 setRoute 里收尾的话，
+  // 详情页第一帧要和「视频层隐藏 + #scroll 恢复布局」抢同一帧 —— 真机上
+  // 就是顶部/底部露一条视频，看着像详情没铺满。这里提前一帧解决。
+  // state.binge 不动：返回时 syncBinge 看到 route 回到 home 会自动 resume。
+  const app = document.getElementById('app');
+  const layer = document.getElementById('binge');
+  if (app) app.classList.remove('binge');
+  document.body.classList.remove('binge');
+  if (layer) layer.hidden = true;
+  const scrollEl = document.getElementById('scroll');
+  if (scrollEl) scrollEl.style.removeProperty('display');
+  goDetail(String(id)).catch(() => { });
+}
+document.getElementById('binge-detail-btn')?.addEventListener('click', () => openBingeDetail(bingeCurrentId));
+document.getElementById('binge-full-btn')?.addEventListener('click', () => {
+  if (window.api) api('binge-full', { episode: 1 }).catch(() => { });
+});
+window.hgBingeAction = (type, id) => {
+  if (type === 'detail') openBingeDetail(id);
+};
+
+/* 上下滑换剧（跟手）—— 和红果一致：手指按住画面就跟着走，松手才决定切不切。
+   位移逐帧同步给原生视频层（AndroidHost.bingeDrag），判定在原生侧（BingeEngine.dragEnd）：
+     · 慢滑：位移超过屏高 22% → 切
+     · 快滑：抬手瞬间速度 > 780px/s → 直接切
+     · 边界方向：位移打三折，松手回弹
+   WebView 这边只负责把位移交出去，顺便给卡片一点视差，别让整屏像块贴纸。 */
+(function setupBingeSwipe() {
+  // 卡片文字区也要能滑（红果整屏都能划），只让按钮和底栏吃掉事件
+  const IGNORE = '#dock, #binge-fab, .binge-actions, .binge-msg, #toast-host';
+  let tracking = false, dragging = false;
+  let startX = 0, startY = 0, dy = 0, lastY = 0, lastAt = 0, velocity = 0, beginAt = 0;
+  // 最近 ~100ms 的位移样本，用来算「松手瞬间」的真实速度
+  let samples = [];
+  let dragAttrTimer = 0;
+
+  // 拖拽期间摘掉底栏 / 卡片的 backdrop-filter：它每帧要重新采样背后的视频层，
+  // 是全屏两处 blur，帧率直接被吃光。松手后延迟一点再戴回来（等回弹动画跑完）。
+  function setDragging(on) {
+    clearTimeout(dragAttrTimer);
+    if (on) {
+      document.documentElement.setAttribute('data-binge-drag', '1');
+    } else {
+      dragAttrTimer = setTimeout(() => {
+        document.documentElement.removeAttribute('data-binge-drag');
+      }, 260);
+    }
   }
-  function focusablesIn(page, tabs) {
-    return Array.from(page.querySelectorAll('button,[tabindex]:not([tabindex="-1"])'))
-      .filter(node => node.offsetParent !== null && tabs.indexOf(node) < 0);
+
+  const cardEl = () => document.getElementById('binge-card');
+
+  function onScreen() {
+    const layer = document.getElementById('binge');
+    return !!state.binge && layer && !layer.hidden;
   }
-  function toTabs() {
-    if (state.route !== 'library') return false;
-    const page = document.querySelector('.library-page');
-    const active = document.activeElement;
-    if (!page || !active || !page.contains(active)) return false;
-    const tabs = tabsIn(page);
-    if (!tabs.length || tabs.indexOf(active) >= 0) return false;
-    const items = focusablesIn(page, tabs);
-    if (!items.length) return false;
-    const top = Math.min.apply(null, items.map(node => node.getBoundingClientRect().top));
-    const current = active.getBoundingClientRect().top;
-    if (current - top > 8) return false;
-    const target = tabs.filter(node => node.getAttribute('aria-selected') === 'true')[0] || tabs[0];
-    target.focus();
-    return true;
+
+  function bridge(phase, offset, speed) {
+    const host = window.AndroidHost;
+    if (!host || typeof host.bingeDrag !== 'function') return;
+    try { host.bingeDrag(phase, offset || 0, speed || 0); } catch (error) { }
   }
-  document.addEventListener('keydown', function (event) {
-    if (event.key !== 'ArrowUp' || event.defaultPrevented) return;
-    if (event.altKey || event.ctrlKey || event.metaKey) return;
-    try { if (toTabs()) event.preventDefault(); } catch (error) { /* 交给默认导航 */ }
-  }, true);
+
+  function paintCard(value) {
+    const card = cardEl();
+    if (!card) return;
+    // 视差要克制：之前卡片会淡到 0.2，滑一下整块信息都没了，看着像坏了
+    card.style.transform = value ? 'translate3d(0,' + (value * 0.18).toFixed(1) + 'px,0)' : '';
+    card.style.opacity = value ? String(Math.max(0.74, 1 - Math.abs(value) / 900)) : '';
+  }
+
+  function begin(x, y) {
+    if (!onScreen()) return;
+    tracking = true;
+    dragging = false;
+    startX = x; startY = y;
+    dy = 0; lastY = y; lastAt = Date.now(); beginAt = lastAt; velocity = 0; samples = [{ t: lastAt, y: y }];
+  }
+
+  function move(x, y) {
+    if (!tracking) return;
+    const deltaY = y - startY;
+    const deltaX = x - startX;
+    if (!dragging) {
+      // 判定照抄 PlayerActivity.handleGesture：先过 slop（斜向距离），
+      // 再用 |dx| > |dy| * 1.15 分横竖。刷剧页只吃纵向，横向让回首页的整页横滑。
+      if (Math.hypot(deltaX, deltaY) < 10) return;
+      if (Math.abs(deltaX) > Math.abs(deltaY) * 1.15) { tracking = false; return; }
+      dragging = true;
+      setDragging(true);
+      bridge('start', 0, 0);
+      // 卡片不再跟着位移（红果的右侧信息栏也是浮层不动）。
+      // 每帧改 transform 会强制 WebView 重绘那块 backdrop-filter，是卡顿的另一半。
+      const card = cardEl();
+      if (card) { card.style.transition = 'none'; card.style.transform = ''; card.style.opacity = ''; }
+    }
+    const now = Date.now();
+    samples.push({ t: now, y: y });
+    // 只保留最近 100ms
+    while (samples.length > 2 && now - samples[0].t > 100) samples.shift();
+    const first = samples[0], last = samples[samples.length - 1];
+    // 用最近这一段窗口算速度，而不是全程平均：手指「先慢后快」是常态，
+    // 全程平均会被前面那段慢的拉平，快划判不出来 —— 感觉就是「滑不动」。
+    velocity = (last.y - first.y) / Math.max(1, last.t - first.t) * 1000;
+    lastY = y; lastAt = now;
+    dy = deltaY;
+    bridge('move', dy);
+  }
+
+  function finish(cancelled) {
+    if (!tracking) return;
+    tracking = false;
+    if (!dragging) return;
+    dragging = false;
+    bridge('end', dy, cancelled ? 0 : velocity);
+    setDragging(false);
+    dy = 0; velocity = 0; samples = [];
+  }
+
+  function fromIgnored(target) {
+    return !!(target && target.closest && target.closest(IGNORE));
+  }
+
+  window.addEventListener('touchstart', e => {
+    if (e.touches.length !== 1 || fromIgnored(e.target)) { tracking = false; return; }
+    begin(e.touches[0].clientX, e.touches[0].clientY);
+  }, { passive: true, capture: true });
+  // passive:false + preventDefault：不拦的话 WebView 会先把手势判成页面滚动，
+  // 手指抬起后自己弹一下 —— 表现就是「滑完又自己跳一下」，跟首页横滑同病。
+  window.addEventListener('touchmove', e => {
+    if (!tracking || e.touches.length !== 1) return;
+    move(e.touches[0].clientX, e.touches[0].clientY);
+    if (dragging && e.cancelable) e.preventDefault();
+  }, { passive: false, capture: true });
+  window.addEventListener('touchend', () => finish(false), { passive: true, capture: true });
+  window.addEventListener('touchcancel', () => finish(true), { passive: true, capture: true });
+  // 桌面/调试环境兜底
+  window.addEventListener('pointerdown', e => {
+    if (e.pointerType !== 'mouse' || fromIgnored(e.target)) return;
+    begin(e.clientX, e.clientY);
+  }, { passive: true, capture: true });
+  window.addEventListener('pointermove', e => {
+    if (e.pointerType === 'mouse') move(e.clientX, e.clientY);
+  }, { passive: true, capture: true });
+  window.addEventListener('pointerup', e => { if (e.pointerType === 'mouse') finish(false); }, { passive: true, capture: true });
 })();
+
+
