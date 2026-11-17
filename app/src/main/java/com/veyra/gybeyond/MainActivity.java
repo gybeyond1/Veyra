@@ -1674,7 +1674,13 @@ public final class MainActivity extends Activity {
             // 点下去先预热：列表/历史里点「继续看」时，详情页都还没打开就得先等一次网络，
             // 这里把取流提前跑起来，后面真正进播放器时首片已经在内存里。
             case "prewarm": repository.prewarmEpisode(args.optString("id"), args.optInt("episode", 1)); return true;
-            case "cover": return repository.coverData(args.optString("url"));
+            /* w 是前端要的目标宽度：网格封面 300、详情海报 640、背景 960。
+               不传就是原图（手机端一直不传，行为完全不变）。 */
+            case "cover": {
+                String data = repository.coverData(args.optString("url"));
+                int fitW = args.optInt("w", 0);
+                return fitW > 0 ? CoverShrink.fit(data, fitW) : data;
+            }
             case "library": return store.library();
             case "open-binge": {
                 // 刷剧是手机端独有的全屏 feed。BingeActivity 只在手机包里编译，

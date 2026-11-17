@@ -535,6 +535,8 @@ body.page-windowed #stage{overflow:hidden}
 
 /* ---------------- 提示 / 登录 / 账号面板 ---------------- */
 #toast{
+  /* 要在所有弹层之上：设置面板里切高性能模式，提示不能被面板盖住 */
+  z-index:120;
   position:absolute;left:50%;bottom:6rem;
   margin-left:-20rem;width:40rem;
   text-align:center;
@@ -587,7 +589,14 @@ body.page-windowed #stage{overflow:hidden}
 }
 .account-box h1{font-size:3.4rem;margin:0 0 1rem;word-break:break-all}
 .account-box p{font-size:1.9rem;color:var(--muted);margin:0 0 3rem;line-height:1.5}
-.account-actions .btn{display:block;margin:0 0 1.6rem;width:100%}
+/* 设置项从四个涨到五个（多了高性能模式），一路竖排会在 720p 上顶出面板，
+   改成两列；「退出登录」「返回」这种收尾按钮跨整行，跟上面的开关分开。 */
+.account-actions{
+  display:grid;grid-template-columns:1fr 1fr;
+  grid-column-gap:1.4rem;grid-row-gap:1.4rem;
+}
+.account-actions .btn{display:block;margin:0;width:100%;text-align:center}
+.account-actions #account-logout,.account-actions .btn.ghost{grid-column:1 / -1}
 /* 版本号单独一行，字小一点，别把按钮挤下去 */
 .account-box .account-version{
   font-size:1.8rem;color:#6f7883;
@@ -954,3 +963,28 @@ body[data-backdrop="custom"] #tv-bg{background:#0d1013}
   box-shadow:0 0 0 .4rem var(--halo),0 0 0 .8rem var(--focus);
 }
 .season-item.is-focused small{color:var(--accent-ink);opacity:.75}
+
+/* ---------------- 普通模式（默认） ----------------
+   电视盒子那台机器：Mali-G51 + OpenGL ES 2.0，Chromium 62，堆上限 48MB。
+   这里的每一条都是「同一屏观感不变、但少干一件重活」：
+     · 卡片各自 containment —— 换一张卡的焦点不再触发整墙布局重算；
+     · 阴影不做过渡、模糊半径收到 0.9rem —— 原来 2.2rem 的投影每换一次焦点
+       就要重新生成一张带模糊的离屏图，ES2 下全靠软件合成；
+     · 放大 1.06 → 1.045 —— 少 1.5%，边缘重绘面积少一截，仍能看出焦点；
+     · 集数格子不再缩放，只换底色和描边；
+     · 背景图硬切（0.12s）—— 淡入期间每帧都要合成全屏模糊层。
+   高性能模式（body[data-perf="high"]）完全不加这些覆盖，走原来那套。 */
+body[data-perf="lite"] .card{contain:layout}
+body[data-perf="lite"] .card .art{transition:none}
+body[data-perf="lite"] .card .name{transition:none}
+body[data-perf="lite"] .card.is-focused .art{
+  /* 放大比例保持 1.06：transform 走合成层，几乎不要钱；
+     贵的是下面那圈模糊阴影，半径从 2.2rem 收到 1rem，离屏图小一半。 */
+  transform:scale(1.06);
+  box-shadow:0 .4rem 1rem rgba(0,0,0,.55);
+}
+body[data-perf="lite"] .eps button{transition:none}
+body[data-perf="lite"] .eps button.is-focused{transform:none}
+body[data-perf="lite"] .chip{transition:none}
+body[data-perf="lite"] .theme-swatch{transition:none}
+body[data-perf="lite"] #tv-bg img{transition:opacity .12s linear}

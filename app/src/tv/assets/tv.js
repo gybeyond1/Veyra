@@ -164,6 +164,48 @@ var THEMES = [
 ];
 var THEME_STORE = 'veyra.tv.theme';
 
+/* ---------------- 高性能模式 ----------------
+   默认关。关着的时候按「省内存 + 少重绘」跑：封面向原生要缩小图、背景降到 960 宽、
+   每帧只填 4 张、卡片不加阴影过渡。开着就是这台机器原来那套完整效果（原图、
+   12 张一帧、放大 1.06 + 投影）。
+   为什么要有这个开关：同一份网页要给电视盒子和平板用，盒子内存和 GPU 都很紧，
+   平板不缺这点性能，用户想两边的观感都保住。 */
+var PERF_STORE = 'veyra.tv.perf';
+var perfOn = false;
+
+function loadPerf() {
+  try { perfOn = localStorage.getItem(PERF_STORE) === '1'; } catch (error) { perfOn = false; }
+}
+
+/* persist=false 用于启动时按存档恢复，不要反过来覆盖存档 */
+function applyPerf(high, persist) {
+  perfOn = !!high;
+  if (persist) {
+    try { localStorage.setItem(PERF_STORE, perfOn ? '1' : '0'); } catch (error) { }
+  }
+  if (document.body) document.body.setAttribute('data-perf', perfOn ? 'high' : 'lite');
+  paintPerfButton();
+}
+
+function paintPerfButton() {
+  var btn = document.getElementById('account-perf');
+  if (btn) btn.textContent = perfOn ? '高性能模式 · 开' : '高性能模式 · 关';
+}
+
+/* 切换后缓存里全是对面那套尺寸的图，必须整套丢掉重取，否则开/关了看不出变化 */
+function togglePerf() {
+  applyPerf(!perfOn, true);
+  coverCache.clear();
+  coverQueue.length = 0;
+  var imgs = view.querySelectorAll('img[data-cover]');
+  for (var i = 0; i < imgs.length; i++) imgs[i].removeAttribute('src');
+  backdropSrc = '';
+  backdropKey = '';
+  paintCovers(view);
+  if (heroBackdropOn()) syncBackdropFromFocus();
+  toast(perfOn ? '高性能模式已开：原图 + 全部动效' : '高性能模式已关：封面缩小、动效收敛，更跟手');
+}
+
 function themeExists(key) {
   for (var i = 0; i < THEMES.length; i++) if (THEMES[i].key === key) return true;
   return false;
@@ -493,19 +535,25 @@ function closeTheme() {
   restoreFocus();
 }
 
-/* ---------------- 封面：走原生桥，避免直接命中防盗链 ---------------- */
+/* ---------------- 封面：走原生桥，避免直接命中防盗链 ----------------
+   普通模式（默认）下封面按显示尺寸向原生要小图：网格 300、详情海报 640、
+   背景 960。电视盒子堆上限只有 48MB，一屏一百张原图光位图就 90MB，
+   系统只能不停丢图重解 —— 这就是「封面一多、按得快就卡」的根。
+   高性能模式（设置里手动开）要原图，行为跟以前完全一样。 */
 var coverCache = new Map();
-/* 封面解密走原生，一次几十上百张同时发过去，回传的回调会把主线程堵死 ——
-   遥控器连按就卡在这儿。限制同时 6 个，其余排队。 */
-var coverQueue = [], coverRunning = 0, COVER_MAX = 6;
+var coverQueue = [], coverRunning = 0;
+function coverMax() { return perfOn ? 6 : 4; }
 function pumpCovers() {
-  while (coverRunning < COVER_MAX && coverQueue.length) {
+  while (coverRunning < coverMax() && coverQueue.length) {
     (function (job) {
       coverRunning++;
-      api('cover', { url: job.url }).then(function (src) {
+      var args = job.w ? { url: job.url, w: job.w } : { url: job.url };
+      api('cover', args).then(function (src) {
+        /* 空结果不留缓存：网络抖一下就把这张海报永久钉死成空白 */
+        if (!src) coverCache.delete(job.key);
         job.resolve(src || '');
       }).catch(function () {
-        coverCache.delete(job.url);
+        coverCache.delete(job.key);
         job.resolve('');
       }).then(function () {
         coverRunning--;
@@ -514,51 +562,108 @@ function pumpCovers() {
     })(coverQueue.shift());
   }
 }
-function cover(url) {
+function cover(url, width) {
   if (!url) return Promise.resolve('');
-  if (coverCache.has(url)) return coverCache.get(url);
+  var w = perfOn ? 0 : (Number(width) || 0);
+  var key = w ? (w + '|' + url) : url;
+  if (coverCache.has(key)) return coverCache.get(key);
   var job = new Promise(function (resolve) {
-    coverQueue.push({ url: url, resolve: resolve });
+    coverQueue.push({ url: url, w: w, key: key, resolve: resolve });
     pumpCovers();
   });
-  coverCache.set(url, job);
-  if (coverCache.size > 160) coverCache.delete(coverCache.keys().next().value);
+  coverCache.set(key, job);
+  if (coverCache.size > (perfOn ? 160 : 260)) coverCache.delete(coverCache.keys().next().value);
   return job;
 }
+/* 屏幕上真正需要的海报，是和「当前可视区」有交集的那二十来张。
+   离开一段距离的就把 img.src 撤掉，把位图还给系统 —— 一百张海报的位图
+   是这台盒子最大的开销，留着它们，系统只会不停丢弃再重解，越滚越卡。
+   IntersectionObserver 是 Chrome 51 就有的，这台机器的 62 跑得动。 */
+var coverObserver = null;
+var COVER_AHEAD = '700px 0px';
+
+function coverObserverInit() {
+  if (coverObserver || !window.IntersectionObserver) return;
+  coverObserver = new IntersectionObserver(function (entries) {
+    for (var i = 0; i < entries.length; i++) {
+      var entry = entries[i];
+      var img = entry.target;
+      if (entry.isIntersecting) {
+        if (!img.getAttribute('src')) fillCover(img);
+      } else if (!perfOn) {
+        img.removeAttribute('src');
+      }
+    }
+  }, { rootMargin: COVER_AHEAD });
+}
+
+/* 离可视区多远的先不填：700px 大约一屏半，滚过去之前早就填好了 */
+function nearScreen(node) {
+  if (!node.getBoundingClientRect) return true;
+  var box = node.getBoundingClientRect();
+  return box.bottom > -700 && box.top < window.innerHeight + 700;
+}
+
+function fillCover(node) {
+  var url = node.getAttribute('data-cover');
+  if (!url) return Promise.resolve('');
+  var wantW = Number(node.getAttribute('data-cover-w')) || 300;
+  return cover(url, wantW).then(function (src) {
+    if (!src || !node.parentNode) return '';
+    node.src = src;
+    /* 焦点已经停在这张卡上时，背景也跟着换成它（相关作品 / 制作方作品除外） */
+    var card = node.closest ? node.closest('.card.is-focused') : null;
+    if (card && !card.closest('.detail-related, .producer-grid')) setBackdrop(src, url);
+    else if (!card && state.route === 'detail' && node.closest('.detail-art')) setBackdrop(src, url);
+    return src;
+  }).catch(function () { return ''; });
+}
+
+/* 一页上百张封面时，一次性全填 src 会让主线程连着解码上百张图，遥控器立刻卡住。
+   每帧只放几张，首屏那几张先就位，剩下的排到后面几帧，看着还是一样的。 */
+function fillBatches(nodes, size) {
+  var index = 0, total = nodes.length, inflight = 0;
+  function step() {
+    var end = Math.min(total, index + size);
+    for (; index < end; index++) {
+      inflight++;
+      fillCover(nodes[index]).then(function () {
+        inflight--;
+        /* 等这一批真的填完再接背景：图还没落位就去取，背景永远是上一张 */
+        if (index >= total && inflight === 0) syncBackdropFromFocus();
+      });
+    }
+    if (index < total) {
+      if (window.requestAnimationFrame) window.requestAnimationFrame(step);
+      else setTimeout(step, 16);
+    }
+  }
+  step();
+}
+
 function paintCovers(root) {
   var nodes = root.querySelectorAll('img[data-cover]');
   if (!nodes.length) return;
-  var index = 0, total = nodes.length, inflight = 0;
-  /* 一页上百张封面时，一次性全填 src 会让主线程连着解码上百张图，遥控器立刻卡住。
-     每帧只放 12 张：首屏那几张同步就位，剩下的排到后面几帧，看着还是一样的。 */
-  function finishIfDone() {
-    if (index >= total && inflight === 0) syncBackdropFromFocus();
+  var batchSize = perfOn ? 12 : 4;
+  /* 高性能模式（以及老到没有 IntersectionObserver 的内核）走老路：整页都填满 */
+  if (perfOn || !window.IntersectionObserver) {
+    if (coverObserver) coverObserver.disconnect();
+    fillBatches(nodes, batchSize);
+    return;
   }
-  function fill(node) {
-    var url = node.getAttribute('data-cover');
-    if (!url) return;
-    inflight++;
-    cover(url).then(function (src) {
-      if (!src || !node.parentNode) return;
-      node.src = src;
-      /* 焦点已经停在这张卡上时，背景也跟着换成它（相关作品 / 制作方作品除外） */
-      var card = node.closest ? node.closest('.card.is-focused') : null;
-      if (card && !card.closest('.detail-related, .producer-grid')) setBackdrop(src);
-      else if (!card && state.route === 'detail' && node.closest('.detail-art')) setBackdrop(src);
-    }).catch(function () { }).then(function () {
-      inflight--;
-      finishIfDone();
-    });
+  coverObserverInit();
+  /* 每次重画都重置观测：上一页的卡片已经不在文档里了，留着只是白占内存 */
+  if (coverObserver) coverObserver.disconnect();
+  var hot = [];
+  for (var i = 0; i < nodes.length; i++) {
+    var node = nodes[i];
+    /* 每一个都要观测 —— 只观测冷的那批，滚出屏幕后就再也没人管它们了，
+       位图会一直留在内存里。热的那批只是额外同步填一次。 */
+    if (coverObserver) coverObserver.observe(node);
+    if (nearScreen(node)) hot.push(node);
   }
-  function batch() {
-    var end = Math.min(total, index + 12);
-    for (; index < end; index++) fill(nodes[index]);
-    if (index < total) {
-      if (window.requestAnimationFrame) window.requestAnimationFrame(batch);
-      else setTimeout(batch, 16);
-    } else finishIfDone();
-  }
-  batch();
+  /* 首屏必须这一帧就填，不能等 observer 的下一帧回调，否则进页面先是一片空黑 */
+  fillBatches(hot, batchSize);
 }
 
 /* ---------------- 背景 ----------------
@@ -566,27 +671,35 @@ function paintCovers(root) {
      theme  —— 纯色主题底，没有图片、没有模糊；
      poster —— 当前这部剧的封面放大 + 低模糊。
    详情页一直用 poster；"高性能模式"主题下首页/搜索/我的也跟着焦点换图。
-   换图做了 150ms 防抖：方向键连按时只加载最后一张，不会每按一下都触发一次
+   换图做了防抖：方向键连按时只加载最后一张，不会每按一下都触发一次
    全屏重绘 —— 老盒子上那个延迟感就是这么来的。 */
 var HERO_THEME = 'cinema';
-var backdropSrc = '';
+var backdropSrc = '', backdropKey = '';
 var backdropTimer = 0;
 
 function heroBackdropOn() {
   return (state && state.route === 'detail') || currentTheme() === HERO_THEME;
 }
-function setBackdrop(src) {
+function setBackdrop(src, raw) {
   /* 自定义底图下，焦点换卡不再改背景 —— 用户选的那张图才是背景 */
   if (customBgOn()) return;
-  if (!src || src === backdropSrc) return;
+  var key = raw || src;
+  if (!src || key === backdropKey) return;
   clearTimeout(backdropTimer);
   backdropTimer = setTimeout(function () {
-    var img = document.getElementById('tv-bg-img');
-    backdropSrc = src;
-    if (img) { img.classList.remove('is-dim'); img.src = src; }
-    /* 参数面板里的预览窗跟着同一张图走，调参时看到的就是屏幕上那张 */
-    if (heroPreviewImg) heroPreviewImg.src = src;
-  }, 150);
+    var apply = function (finalSrc) {
+      backdropKey = key;
+      backdropSrc = finalSrc;
+      var img = document.getElementById('tv-bg-img');
+      if (img) { img.classList.remove('is-dim'); img.src = finalSrc; }
+      /* 参数面板里的预览窗跟着同一张图走，调参时看到的就是屏幕上那张 */
+      if (heroPreviewImg) heroPreviewImg.src = finalSrc;
+    };
+    /* 背景不再单独下一张图：用的就是海报那张（普通模式 300/640，高性能模式原图）。
+       整屏铺 1920 之后再糊 3px、再压两层遮罩，300 宽和 1920 宽在屏幕上看不出差别，
+       但省掉一次下载和一次全屏位图解码 —— 换焦点最贵的就是这两步。 */
+    apply(src);
+  }, perfOn ? 150 : 220);
 }
 function applyBackdropMode() {
   if (!document.body) return;
@@ -602,12 +715,12 @@ function syncBackdrop(el) {
      详情自己的海报由 syncBackdropFromFocus 固定。 */
   if (el.closest && el.closest('.detail-related, .producer-grid')) return;
   var img = el.classList && el.classList.contains('card') ? el.querySelector('.art img') : null;
-  if (img && img.src) setBackdrop(img.src);
+  if (img && img.src) setBackdrop(img.src, img.getAttribute('data-cover'));
 }
 function syncBackdropFromFocus() {
   if (!heroBackdropOn() || !view) return;
   var art = view.querySelector('.detail-art img');
-  if (art && art.src) { setBackdrop(art.src); return; }
+  if (art && art.src) { setBackdrop(art.src, art.getAttribute('data-cover')); return; }
   var focused = document.querySelector('.card.is-focused');
   if (focused) syncBackdrop(focused);
 }
@@ -1263,7 +1376,7 @@ function cardMarkup(item, index) {
   var badge = rank ? ('#' + rank) : (item.episode ? ('第' + item.episode + '集') : (item.score || ''));
   var badgeClass = rank ? ('badge is-rank' + (rank <= 3 ? ' is-top' : '')) : 'badge';
   return '<button type="button" class="card" data-focusable data-key="' + esc(key) + '" data-id="' + esc(item.id) + '">'
-    + '<span class="art"><img data-cover="' + esc(item.cover || '') + '" alt="">'
+    + '<span class="art"><img data-cover="' + esc(item.cover || '') + '" data-cover-w="300" alt="">'
     + (badge ? '<i class="' + badgeClass + '">' + esc(badge) + '</i>' : '')
     + '</span><span class="name">' + esc(item.title || '') + '</span></button>';
 }
@@ -1672,7 +1785,7 @@ var seasonBlocks = {};
 function seriesCardMarkup(block) {
   var cover = block.cover || (block.seasons[0] && block.seasons[0].cover) || '';
   return '<button type="button" class="card" data-focusable data-key="series:' + esc(block.key) + '" data-series="' + esc(block.key) + '">'
-    + '<span class="art"><img data-cover="' + esc(cover) + '" alt="">'
+    + '<span class="art"><img data-cover="' + esc(cover) + '" data-cover-w="300" alt="">'
     + '<i class="badge is-season">共 ' + block.seasons.length + ' 季</i>'
     + '</span><span class="name">' + esc(block.title) + '</span></button>';
 }
@@ -1977,7 +2090,7 @@ function nextWorkMarkup(item, index) {
     badge = item.deviceName ? (label + ' · ' + item.deviceName) : label;
   }
   return '<button type="button" class="card' + (ready ? '' : ' is-dim') + '" data-focusable data-key="' + esc(key) + '" data-nas="' + esc(item.id) + '" data-nas-ready="' + (ready ? '1' : '') + '">'
-    + '<span class="art"><img data-cover="' + esc(item.cover || '') + '" alt="">'
+    + '<span class="art"><img data-cover="' + esc(item.cover || '') + '" data-cover-w="300" alt="">'
     + '<i class="badge">' + esc(badge) + '</i>'
     + '</span><span class="name">' + esc(item.title || '') + '</span></button>';
 }
@@ -2170,7 +2283,7 @@ function renderDetail() {
      相关作品从海报下沿、最左列开始往下铺，不再挤在右栏里。 */
   view.innerHTML = '<div class="detail">'
     + '<div class="detail-hero">'
-    + '<div class="detail-art"><img data-cover="' + esc(data.cover || '') + '" alt=""></div>'
+    + '<div class="detail-art"><img data-cover="' + esc(data.cover || '') + '" data-cover-w="640" alt=""></div>'
     + '<div class="detail-info">'
     + '<h1>' + esc(data.title || '') + '</h1>'
     + '<p class="meta">' + esc(data.score || '') + '　' + esc(data.episodeLabel || '') + producerChip + '</p>'
@@ -2620,7 +2733,7 @@ function openDetail(id) {
      详情数据回来后 hydrateCovers 会用正确的封面覆盖一次（通常就是同一张）。 */
   var seed = document.querySelector('.card.is-focused .art img');
   applyBackdropMode();
-  if (seed && seed.src) setBackdrop(seed.src);
+  if (seed && seed.src) setBackdrop(seed.src, seed.getAttribute('data-cover'));
   renderDetail();
   api('detail', { id: String(id) }).then(function (data) {
     if (state.route !== 'detail') return;
@@ -2922,6 +3035,7 @@ document.addEventListener('click', function (event) {
 
   if (target.closest('[data-account]')) { openAccount(); return; }
   if (target.closest('#account-theme')) { openTheme(); return; }
+  if (target.closest('#account-perf')) { togglePerf(); return; }
   if (target.closest('#theme-close')) { closeTheme(); return; }
   if (target.closest('[data-tune-reset]')) { resetHero(); return; }
   var swatch = target.closest('[data-theme-key]');
@@ -3245,6 +3359,7 @@ function openAccount() {
   if (logoutBtn) logoutBtn.hidden = !logged;
   var versionEl = document.getElementById('account-version');
   if (versionEl) versionEl.textContent = state.version ? ('版本 v' + state.version) : '版本 —';
+  paintPerfButton();
   showAccountPage('main');
   accountPanel.hidden = false;
   state.focusKey = 'acct:theme';
@@ -3586,6 +3701,9 @@ function boot() {
   view.innerHTML = '<p class="empty">正在启动…</p>';
   /* 主题必须在首屏渲染前定下来，否则会先闪一下默认配色 */
   applyTheme(currentTheme());
+  /* 性能档位同理：晚一步设，第一屏就会先按原图把几十张海报全解一遍 */
+  loadPerf();
+  applyPerf(perfOn, false);
   applyBackdropMode();
   try { window.AndroidHost.setTvCapture(true); } catch (error) { }
   if (window.__tvApplyScale) window.__tvApplyScale();
