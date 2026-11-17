@@ -50,13 +50,53 @@ final class HongguoSearch {
         if (keyword.isEmpty()) return new JSONObject().put("items", new JSONArray()).put("nextPage", JSONObject.NULL);
         if (keyword.length() > 80) throw new IllegalArgumentException("搜索词过长");
         try {
-            JSONObject app = HongguoApi.search(keyword, 1);
+            JSONObject app = searchAll(keyword);
             JSONArray items = app.optJSONArray("items");
             if (items != null && items.length() > 0) return app;
         } catch (Exception error) {
             android.util.Log.w("Veyra", "App 搜索失败，改用官网：" + error);
         }
         return apiSearch(keyword, sequelLookup);
+    }
+
+    /**
+     * 翻页取全量。
+     *
+     * 以前只发第 1 页（count=20），所以「聚宝仙盆」这种有 16 季 + 一堆同名前缀剧的词
+     * 只能回来前 20 条，后面的季永远看不到。这里按 offset 一页页往上翻，直到接口说
+     * 没有下一页或者这一页没带来新条目（防止服务端忽略 offset 造成死循环）。
+     */
+    private JSONObject searchAll(String keyword) throws Exception {
+        final int MAX_PAGES = 6;
+        JSONArray all = new JSONArray();
+        Set<String> seen = new HashSet<>();
+        Exception failure = null;
+        for (int page = 1; page <= MAX_PAGES; page++) {
+            JSONObject one;
+            try {
+                one = HongguoApi.search(keyword, page);
+            } catch (Exception error) {
+                failure = error;
+                break;
+            }
+            JSONArray rows = one.optJSONArray("items");
+            int added = 0;
+            for (int i = 0; rows != null && i < rows.length(); i++) {
+                JSONObject item = rows.optJSONObject(i);
+                String id = item == null ? "" : item.optString("id");
+                if (id.isEmpty() || !seen.add(id)) continue;
+                all.put(item);
+                added++;
+            }
+            /* has_more 不一定在响应里（缺了就是 false），只用它翻页会永远停在第一页。
+               改成「这一页拿满了 20 条就继续」；接口若忽略 offset 反复回同一批，
+               added == 0 会兜住，不会死循环。 */
+            int raw = Math.max(one.optInt("rawCount", 0), rows == null ? 0 : rows.length());
+            boolean more = !one.isNull("nextPage") || raw >= 20;
+            if (!more || added == 0) break;
+        }
+        if (all.length() == 0 && failure != null) throw failure;
+        return new JSONObject().put("items", all).put("nextPage", JSONObject.NULL);
     }
 
     /** 红果搜索 JSON API（hongguoduanju.com/api/search/result，网站搜索页实际接口，无签名要求）。 */

@@ -2419,52 +2419,104 @@ async function startRemoteTransfer(taskId, remoteId) {
 function renderSearch() {
   const filters = privateMode() ? [['all', '全部'], ['ai-duanju', '成人短剧'], ['ai-manju', '成人漫剧'], ['ai-huanlian', 'AI换脸'], ['ai-mogai', 'AI魔改']] : [['all', '全部'], ['short', '短剧'], ['comic', '漫剧']];
   const all = asArray(state.search?.items);
-  const items = state.filter === 'all' ? all : all.filter(item => {
+  const items = (state.filter === 'all' ? all : all.filter(item => {
     if (item.category) return item.category === state.filter;
     const title = String(item.title || '');
     if (state.filter === 'ai-huanlian') return /AI\s*换脸/.test(title);
     if (state.filter === 'ai-mogai') return /AI\s*魔改/.test(title);
     if (state.filter === 'ai-manju') return /漫剧/.test(title);
     return !/AI\s*(换脸|魔改)|漫剧/.test(title);
-  });
-  const { blocks, singles } = seriesGroups(items);
-  const cards = [...blocks.map(seriesBlock), ...singles.map(itemCard)].join('');
-  content.innerHTML = `<div class="search-page"><h1>搜索结果</h1><p>${esc(state.query)} · ${items.length} 部作品</p>${searchFeedback()}<div class="filter-row">${filters.map(([id, label]) => `<button type="button" data-filter="${id}" class="${state.filter === id ? 'active' : ''}">${label}</button>`).join('')}</div>
+  })).filter(item => !item.upcoming);
+  const entries = seriesGroups(items, state.query);
+  const cards = entries.map(entry => entry.kind === 'block' ? seriesBlock(entry) : itemCard(entry.item)).join('');
+  const seriesCount = entries.filter(entry => entry.kind === 'block').length;
+  content.innerHTML = `<div class="search-page"><h1>搜索结果</h1><p>${esc(state.query)} · ${items.length} 部作品${seriesCount ? ` · ${seriesCount} 个系列` : ''}</p>${searchFeedback()}<div class="filter-row">${filters.map(([id, label]) => `<button type="button" data-filter="${id}" class="${state.filter === id ? 'active' : ''}">${label}</button>`).join('')}</div>
     ${items.length ? `<div class="search-grid">${cards}</div>` : '<div class="empty-state">没有找到匹配的影片</div>'}</div>`;
   hydrateImages();
 }
 
-/** 按红果官方系列键（albumId=related_album_id）分组：同一 album 的剧合并为系列块，组内按官方季序号排序。 */
-function seriesGroups(items) {
+/**
+ * 搜索结果的系列归并。
+ *
+ * 分组键优先用官方系列键（albumId = related_album_id），没有就用「剧名本体」：
+ * 「聚宝仙盆之杂灵根才是真boss」「…第 2 季」「…第三季」剥掉季号和标点之后同名，
+ * 就是同一部剧。真人短剧的搜索响应经常两个字段都不给，只按 albumId 分的话
+ * 16 季会散成 16 张卡。
+ *
+ * 只有一季又没有季号的，算普通结果，不硬凑成「系列」。
+ */
+function seasonNumber(item) {
+  const direct = Number(item && item.seasonIndex) || 0;
+  if (direct > 0) return direct;
+  return relatedSeason(item) || 0;
+}
+
+/** 组间排序：名字以搜索词开头的（主剧 + 它的各季）→ 同 IP 的其他剧 → 其余相关。 */
+function titleRank(title, base) {
+  const body = relatedBase(title);
+  if (!base) return 1;
+  if (body === base) return -1;
+  if (body.startsWith(base)) return 0;
+  if (sameIpBase(base, body)) return 1;
+  return 2;
+}
+
+function seriesGroups(items, query) {
+  const base = relatedBase(query || '');
   const groups = new Map();
-  const singles = [];
-  for (const item of items) {
-    const aid = item.albumId;
-    if (aid && aid !== '0') {
-      if (!groups.has(aid)) groups.set(aid, []);
-      groups.get(aid).push(item);
-    } else singles.push(item);
+  const entries = [];
+  items = items.filter(item => !item.upcoming);
+  items.forEach((item, index) => {
+    const aid = String(item.albumId || '');
+    const body = relatedBase(item.title);
+    const key = aid && aid !== '0' ? 'a:' + aid : (body ? 't:' + body : '');
+    if (!key) { entries.push({ kind: 'single', item, index }); return; }
+    const group = groups.get(key);
+    if (group) group.members.push(item);
+    else groups.set(key, { key, members: [item], index });
+  });
+  for (const group of groups.values()) {
+    if (group.members.length < 2 && !seasonNumber(group.members[0])) {
+      entries.push({ kind: 'single', item: group.members[0], index: group.index });
+      continue;
+    }
+    /* 组里没标季号的那条，通常就是第 1 季（标题里省了「第一季」）；
+       不补这一步它会被当成「季号未知」排到 16 季最后面，组头也会顶着「第2季」。 */
+    const seasons = group.members.slice();
+    const ranked = new Map();
+    seasons.forEach(it => ranked.set(it, seasonNumber(it)));
+    if (![...ranked.values()].includes(1)) {
+      const first = seasons.find(it => !ranked.get(it));
+      if (first) ranked.set(first, 1);
+    }
+    seasons.sort((a, b) => (ranked.get(a) || 99) - (ranked.get(b) || 99));
+    const lead = seasons.find(it => ranked.get(it) === 1) || seasons[0];
+    entries.push({ kind: 'block', key: group.key, index: group.index,
+      title: lead?.title || '系列', cover: lead?.cover || '', seasons });
   }
-  const blocks = [];
-  for (const [aid, members] of groups) {
-    const seasons = members.slice().sort((a, b) => {
-      const sa = Number(a.seasonIndex) > 0 ? Number(a.seasonIndex) : 99;
-      const sb = Number(b.seasonIndex) > 0 ? Number(b.seasonIndex) : 99;
-      return sa - sb;
-    });
-    const lead = seasons.find(it => Number(it.seasonIndex) === 1) || seasons[0];
-    blocks.push({ aid, title: lead?.title || '系列', cover: lead?.cover || '', seasons });
-  }
-  blocks.sort((a, b) => String(a.title).localeCompare(String(b.title), 'zh'));
-  return { blocks, singles };
+  entries.sort((a, b) => titleRank(a.title || a.item?.title, base) - titleRank(b.title || b.item?.title, base) || a.index - b.index);
+  return entries;
+}
+
+/** 组头只留剧名：取到的那一季标题常带「第1季」，顶在组头上会像只有一季。 */
+function stripSeasonTitle(title) {
+  const text = String(title || '').replace(/\s*第\s*[0-9零〇一二两兩三四五六七八九十百]{1,3}\s*[季部]\s*$/, '').trim();
+  return text || String(title || '系列');
 }
 
 function seriesBlock(group) {
-  const head = esc(group.title || '系列');
-  return `<section class="series-block" data-album="${esc(group.aid)}">
+  const head = esc(stripSeasonTitle(group.title));
+  /* 组内标题统一写成「第N季」：整条剧名在每一张卡上重复两行，既挤又看不出是第几季。
+     同一季有 100 集版 / 341 集版时靠下面的集数区分。 */
+  const lead = group.seasons.find(it => seasonNumber(it) === 1) || group.seasons[0];
+  const cards = group.seasons.map((item, index) => {
+    const n = seasonNumber(item) || (item === lead ? 1 : index + 1);
+    return itemCard({ ...item, title: `第${n}季` });
+  }).join('');
+  return `<section class="series-block">
     <div class="series-head"><span class="poster loading small"><img data-cover="${esc(group.cover || '')}" alt=""></span>
-    <div class="series-meta"><h3>${head}</h3><span>官方系列 · ${group.seasons.length} 季</span></div></div>
-    <div class="series-row">${group.seasons.map(itemCard).join('')}</div></section>`;
+    <div class="series-meta"><h3>${head}</h3><span>共 ${group.seasons.length} 季</span></div></div>
+    <div class="series-row">${cards}</div></section>`;
 }
 
 function listingFooter() {

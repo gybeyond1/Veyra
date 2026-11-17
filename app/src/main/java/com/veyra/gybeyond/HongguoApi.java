@@ -115,6 +115,7 @@ final class HongguoApi {
 
         JSONArray cells = tab.optJSONArray("data");
         JSONArray items = new JSONArray();
+        int rawTotal = 0;
         LinkedHashSet<String> seen = new LinkedHashSet<>();
         String query = normalize(keyword);
         for (int i = 0; cells != null && i < cells.length(); i++) {
@@ -143,6 +144,7 @@ final class HongguoApi {
                 } else if (raw instanceof JSONObject) {
                     videos.add((JSONObject) raw);
                 }
+                rawTotal += videos.size();
                 for (JSONObject video : videos) {
                     String id = first(video, "series_id");
                     if (id.isEmpty()) id = row.optString("book_id");
@@ -160,6 +162,18 @@ final class HongguoApi {
                     if (!query.isEmpty() && !normalize(title).contains(query) && !isPinyin(query)) continue;
                     if (!seen.add(id)) continue;
                     int count = video.optInt("episode_cnt", 0);
+                    /* 预约/待上线（content_type 1007，或 disable_play）不可播，搜索里直接剔掉：
+                       用户要的是「聚宝仙盆之杂灵根才是真boss 的 16 季」，第 17 季是预约态。 */
+                    if (video.optInt("content_type", 0) == 1007 || video.optBoolean("disable_play", false)) continue;
+                    /* 官方系列键：同一 related_album_id 就是同一部剧，season_index 是官方季序号。
+                       搜索响应里不一定带，带上了前端就不必再按标题猜。 */
+                    long album = video.optLong("related_album_id", 0L);
+                    if (album == 0L) album = video.optLong("album_id", 0L);
+                    int seasonIndex = video.optInt("season_index", 0);
+                    String seasonTag = "";
+                    JSONObject tagInfo = video.optJSONObject("tag_info");
+                    if (tagInfo != null) seasonTag = tagInfo.optString("text", "");
+                    if (seasonTag.isEmpty() && seasonIndex > 0) seasonTag = "第" + seasonIndex + "季";
                     items.put(new JSONObject()
                             .put("id", id)
                             .put("title", title)
@@ -168,12 +182,18 @@ final class HongguoApi {
                             .put("episodeLabel", count > 0 ? "全 " + count + " 集" : video.optString("rec_text", ""))
                             .put("category", "short")
                             .put("vid", video.optString("vid", ""))
+                            .put("albumId", album > 0 ? String.valueOf(album) : "")
+                            .put("seasonIndex", seasonIndex)
+                            .put("season", seasonTag)
                             .put("tags", new JSONArray()));
                 }
             }
         }
         boolean more = tab.optBoolean("has_more", false);
-        return new JSONObject().put("items", items).put("nextPage", more ? page + 1 : JSONObject.NULL);
+        /* rawTotal 是过滤前这一页实际收到多少条：标题不匹配、预约态都会被剔掉，
+           items.length 可能远小于一页容量，调用方不能拿它判断有没有下一页。 */
+        return new JSONObject().put("items", items).put("nextPage", more ? page + 1 : JSONObject.NULL)
+                .put("rawCount", rawTotal);
     }
 
     // ---------------- 相关作品（其他季） ----------------
