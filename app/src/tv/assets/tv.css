@@ -249,7 +249,7 @@ body[data-backdrop="poster"] #tv-bg .veil{opacity:1}
 .tool.is-focused{background:var(--accent);color:var(--accent-ink)}
 /* 焦点环贴着按钮自己的圆角走；外面再套一层硬矩形的话，手指按上去特别明显 */
 .tool::after{
-  content:"";position:absolute;inset:-.26rem;border-radius:1.66rem;
+  content:"";position:absolute;left:-.26rem;right:-.26rem;top:-.26rem;bottom:-.26rem;border-radius:1.66rem;
   border:.24rem solid var(--focus);pointer-events:none;
   opacity:0;transition:opacity .12s linear;
 }
@@ -880,40 +880,41 @@ body[data-backdrop="custom"] #tv-bg{background:#0d1013}
 
 /* ---------------- 详情页：制作方 / 分组胶囊 / 相关作品（0.29.2） ---------------- */
 /* 制作方紧跟在「评分 共N集」后面，做成一颗可聚焦胶囊 */
-.detail .meta{display:flex;align-items:center;gap:1.4rem;flex-wrap:wrap}
+.detail .meta{display:flex;align-items:center;flex-wrap:wrap}
 /* 制作方按钮：原来是分类条的胶囊（.chip），和详情页的 .btn 一排并排时
    高度、圆角、字重全对不上，看着像从别的页面捡来的。现在统一走 .btn，
    只把尺寸收到和 meta 行一致。 */
 .detail .producer-btn{
-  height:4.4rem;line-height:4.4rem;padding:0 2rem;margin:0;
+  height:4.4rem;line-height:4.4rem;padding:0 2rem;margin:0 0 0 1.4rem;
   border-radius:2.2rem;font-size:1.8rem;
   background:rgba(255,255,255,.08);color:var(--chip-ink);
 }
 .detail .producer-btn.is-focused{color:var(--text);background:rgba(255,255,255,.16)}
 /* 分组不再排成一整行胶囊：收藏右边一颗选择器，点开才是分组列表 */
-.ep-select{display:inline-flex;align-items:center;gap:1.1rem;padding:0 2.2rem;margin-left:1.2rem}
+.ep-select{display:inline-flex;align-items:center;padding:0 2.2rem;margin-left:1.2rem}
 .ep-select .ep-caret{
+  margin-left:1.1rem;
   width:0;height:0;border-left:.8rem solid transparent;border-right:.8rem solid transparent;
   border-top:.9rem solid currentColor;opacity:.75;
 }
-.ep-layer{position:fixed;inset:0;z-index:60}
-.ep-pop{
-  position:absolute;display:flex;flex-direction:column;gap:.8rem;
-  padding:1.2rem;border-radius:1.4rem;background:var(--panel-strong,#15171a);
-  box-shadow:0 2.4rem 6rem rgba(0,0,0,.55);
-  max-height:52vh;overflow:auto;
+.ep-layer{position:fixed;left:0;right:0;top:0;bottom:0;z-index:60}
+/* 选集分组卡片：跟季列表同一套外观，一组一格，5 列铺开 */
+.ep-card{width:82rem}
+.season-grid.ep-card-grid{grid-template-columns:repeat(5,minmax(0,1fr))}
+.season-grid .ep-option{align-items:center;justify-content:center;height:6.4rem;padding:0 1rem}
+.ep-option strong{font-size:1.9rem;font-weight:700;white-space:nowrap}
+.ep-option.is-active{background:var(--accent);color:var(--accent-ink)}
+.ep-option.is-active strong{color:var(--accent-ink)}
+.ep-option.is-focused{
+  background:var(--accent);color:var(--accent-ink);
+  box-shadow:0 0 0 .4rem var(--halo),0 0 0 .8rem var(--focus);
 }
-.ep-option{
-  height:5rem;line-height:5rem;padding:0 2rem;border-radius:.9rem;text-align:left;
-  background:var(--chip-bg);color:var(--text);font-size:1.9rem;white-space:nowrap;
-}
-.ep-option.is-active{background:var(--accent);color:var(--accent-ink);font-weight:700}
-.ep-option.is-focused{box-shadow:0 0 0 .3rem var(--halo),0 0 0 .7rem var(--focus)}
+.ep-option.is-focused strong{color:var(--accent-ink)}
 .detail-related{margin-top:4.8rem}
 .detail-related .grid{grid-template-columns:repeat(8,minmax(0,1fr))}
 
 /* 制作方作品浮层：遥控器在网格里走，返回键收起 */
-.producer-layer{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;background:rgba(6,7,9,.72)}
+.producer-layer{position:fixed;left:0;right:0;top:0;bottom:0;z-index:60;display:flex;align-items:center;justify-content:center;background:rgba(6,7,9,.72)}
 .producer-panel{width:82vw;max-height:82vh;overflow:auto;padding:3.2rem 3.6rem;border-radius:1.6rem;background:var(--panel-strong,#15171a);box-shadow:0 3rem 8rem rgba(0,0,0,.5)}
 .producer-panel h2{font-size:3rem;margin:0 0 1rem}
 /* 面板本身也可能拿着焦点（作品还没回来的时候只有一个可停的地方）：

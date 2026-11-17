@@ -495,10 +495,32 @@ function closeTheme() {
 
 /* ---------------- 封面：走原生桥，避免直接命中防盗链 ---------------- */
 var coverCache = new Map();
+/* 封面解密走原生，一次几十上百张同时发过去，回传的回调会把主线程堵死 ——
+   遥控器连按就卡在这儿。限制同时 6 个，其余排队。 */
+var coverQueue = [], coverRunning = 0, COVER_MAX = 6;
+function pumpCovers() {
+  while (coverRunning < COVER_MAX && coverQueue.length) {
+    (function (job) {
+      coverRunning++;
+      api('cover', { url: job.url }).then(function (src) {
+        job.resolve(src || '');
+      }).catch(function () {
+        coverCache.delete(job.url);
+        job.resolve('');
+      }).then(function () {
+        coverRunning--;
+        pumpCovers();
+      });
+    })(coverQueue.shift());
+  }
+}
 function cover(url) {
   if (!url) return Promise.resolve('');
   if (coverCache.has(url)) return coverCache.get(url);
-  var job = api('cover', { url: url }).catch(function () { coverCache.delete(url); return ''; });
+  var job = new Promise(function (resolve) {
+    coverQueue.push({ url: url, resolve: resolve });
+    pumpCovers();
+  });
   coverCache.set(url, job);
   if (coverCache.size > 160) coverCache.delete(coverCache.keys().next().value);
   return job;
@@ -506,27 +528,37 @@ function cover(url) {
 function paintCovers(root) {
   var nodes = root.querySelectorAll('img[data-cover]');
   if (!nodes.length) return;
-  var pending = nodes.length;
-  function done() {
-    if (--pending > 0) return;
-    /* 图都到位了再决定首屏背景：这时第一张卡已经有 src */
-    syncBackdropFromFocus();
+  var index = 0, total = nodes.length, inflight = 0;
+  /* 一页上百张封面时，一次性全填 src 会让主线程连着解码上百张图，遥控器立刻卡住。
+     每帧只放 12 张：首屏那几张同步就位，剩下的排到后面几帧，看着还是一样的。 */
+  function finishIfDone() {
+    if (index >= total && inflight === 0) syncBackdropFromFocus();
   }
-  for (var i = 0; i < nodes.length; i++) {
-    (function (node) {
-      var url = node.getAttribute('data-cover');
-      if (!url) { done(); return; }
-      cover(url).then(function (src) {
-        if (!src || !node.parentNode) { done(); return; }
-        node.src = src;
-        /* 焦点已经停在这张卡上时，背景也跟着换成它（相关作品 / 制作方作品除外） */
-        var card = node.closest ? node.closest('.card.is-focused') : null;
-        if (card && !card.closest('.detail-related, .producer-grid')) setBackdrop(src);
-        else if (!card && state.route === 'detail' && node.closest('.detail-art')) setBackdrop(src);
-        done();
-      }).catch(done);
-    })(nodes[i]);
+  function fill(node) {
+    var url = node.getAttribute('data-cover');
+    if (!url) return;
+    inflight++;
+    cover(url).then(function (src) {
+      if (!src || !node.parentNode) return;
+      node.src = src;
+      /* 焦点已经停在这张卡上时，背景也跟着换成它（相关作品 / 制作方作品除外） */
+      var card = node.closest ? node.closest('.card.is-focused') : null;
+      if (card && !card.closest('.detail-related, .producer-grid')) setBackdrop(src);
+      else if (!card && state.route === 'detail' && node.closest('.detail-art')) setBackdrop(src);
+    }).catch(function () { }).then(function () {
+      inflight--;
+      finishIfDone();
+    });
   }
+  function batch() {
+    var end = Math.min(total, index + 12);
+    for (; index < end; index++) fill(nodes[index]);
+    if (index < total) {
+      if (window.requestAnimationFrame) window.requestAnimationFrame(batch);
+      else setTimeout(batch, 16);
+    } else finishIfDone();
+  }
+  batch();
 }
 
 /* ---------------- 背景 ----------------
@@ -635,6 +667,9 @@ function focusables() {
     if (!railOpen() && inRail(el)) continue;
     var box = el.getBoundingClientRect();
     if (box.width < 2 || box.height < 2) continue;
+    /* 把这一轮量到的位置留在节点上：pickNearest / exitToTopbar 直接拿来比，
+       不再对同一个元素反复 getBoundingClientRect（那是强制同步布局，卡片一多就卡） */
+    el.__box = box;
     out.push(el);
   }
   return out;
@@ -657,8 +692,14 @@ function wallRowHeight(el) {
   if (!grid) return 0;
   var cards = grid.querySelectorAll('.card');
   if (cards.length <= GRID_COLS) return 0;
+  /* 同一次按键里 focusScrollTop / exitToTopbar 会各问一次，卡片多时
+     offsetTop 也是强制布局。按「卡片数量」记一份，数量没变就直接给。 */
+  if (grid.__rowH !== undefined && grid.__rowN === cards.length) return grid.__rowH;
   var h = cards[GRID_COLS].offsetTop - cards[0].offsetTop;
-  return h > 40 ? h : 0;
+  h = h > 40 ? h : 0;
+  grid.__rowN = cards.length;
+  grid.__rowH = h;
+  return h;
 }
 
 /* 焦点该滚到哪：算一次，返回目标 scrollTop；不用动就返回 null。
@@ -741,6 +782,8 @@ function exitToTopbar(current) {
   var grid = card.closest('.grid');
   if (!grid) return null;
   if (!topbar) return null;
+  /* 详情页的顶栏是收起来的：相关作品那一墙按上不该去撞一个看不见的胶囊 */
+  if (document.body.classList.contains('route-detail')) return null;
   /* 只对页面上第一面墙生效：后面的分区块还是要能上下互达。
      注意不能拿 view.querySelector('.grid') 硬比 —— 我的页「收藏」「下载」
      只有一个网格，但结构各自包了一层，比错了就永远出不去。 */
@@ -760,37 +803,51 @@ function exitToTopbar(current) {
 
   var chips = topbar.querySelectorAll('.chip');
   var tools = topbar.querySelectorAll('.tool');
-  /* 第几列：同一排里比它靠左的有几张 */
   var cardBox = card.getBoundingClientRect();
-  var col = 0;
-  for (var j = 0; j < cards.length; j++) {
-    var c = cards[j];
-    if (Math.abs(c.offsetTop - card.offsetTop) > 4) continue;
-    if (c.getBoundingClientRect().left < cardBox.left - 4) col++;
+  /* 第一排是满的（一屏 8 列）：按列硬分派，前两列回最左的胶囊，
+     最后两列回右边那组图标 —— 这是电视遥控器上最不会按错的分区。
+     中间几列仍然就近落到顶栏，保证第一排随便哪一列按上都有反应。 */
+  var fullRow = cards.length > GRID_COLS;
+  if (fullRow) {
+    /* 前两列：0 → 热播榜 / 观看记录，1 → 真人榜 / 收藏（其余靠左右键走过去） */
+    var firstRowCount = 0;
+    for (var f = 0; f < cards.length; f++) {
+      if (Math.abs(cards[f].offsetTop - card.offsetTop) <= 4) firstRowCount++;
+    }
+    if (firstRowCount >= GRID_COLS) {
+      var col = 0;
+      for (var j = 0; j < cards.length; j++) {
+        if (Math.abs(cards[j].offsetTop - card.offsetTop) > 4) continue;
+        var jb = cards[j].__box || cards[j].getBoundingClientRect();
+        if (jb.left < cardBox.left - 4) col++;
+      }
+      /* 前四列分别对四个胶囊（首页四个榜 / 我的三个页签），
+         一键直达，不用进去再左右找 */
+      if (col <= 3 && chips.length) {
+        return chips[Math.min(col, chips.length - 1)];
+      } else if (col >= GRID_COLS - 2) {
+        if (!tools.length) return null;
+        /* 倒数第二列 → 最左边那颗图标（搜索），最后一列 → 最右边那颗（设置）；
+           中间那颗（我的）进了顶栏之后按左右就能到 */
+        return col >= GRID_COLS - 1 ? tools[tools.length - 1] : tools[0];
+      }
+    }
   }
-  /* 一行 GRID_COLS 张，按列硬性分派，不做「全墙就近」：
-     前两列 → 分类胶囊，最后一列 → 搜索/最近/设置，中间三列 → 不出去，正常翻上一排。
-     但整面墙只有一排时（收藏、下载通常就几张），上面本来就没有上一排，
-     中间几列也必须能回到页签 —— 否则遥控器按上完全没反应。 */
-  var singleRow = cards.length <= GRID_COLS || !wallRowHeight(card);
-  var pool = null;
-  if (singleRow) {
-    pool = [];
-    for (var a = 0; a < chips.length; a++) pool.push(chips[a]);
-    for (var b = 0; b < tools.length; b++) pool.push(tools[b]);
-  } else if (col <= 1 && chips.length) pool = chips;
-  else if (col >= GRID_COLS - 1 && tools.length) pool = tools;
-  else if (stage.scrollTop <= 1) pool = chips;
-  if (!pool || !pool.length) return null;
+  /* 一排不满（收藏 / 下载常常就几张）或落在中间几列：整行顶栏就近选，绝不空按 */
+  var pool = [];
+  for (var a = 0; a < chips.length; a++) pool.push(chips[a]);
+  for (var b = 0; b < tools.length; b++) pool.push(tools[b]);
+  if (!pool.length) return null;
   var cx = (cardBox.left + cardBox.right) / 2;
   var best = null, bestD = Infinity;
   for (var m = 0; m < pool.length; m++) {
-    var pb = pool[m].getBoundingClientRect();
+    var pb = pool[m].__box || pool[m].getBoundingClientRect();
     if (pb.width < 2) continue;
     var d = Math.abs((pb.left + pb.right) / 2 - cx);
     if (d < bestD) { bestD = d; best = pool[m]; }
   }
-  return best;
+  if (best) return best;
+  return chips.length ? chips[0] : null;
 }
 
 /* 浮层内部滚动：面板比屏幕高的时候（十几组分集、几十部制作方作品），
@@ -891,9 +948,18 @@ function resetMarquee(card) {
   name.removeAttribute('data-mq-text');
 }
 
+var mqDelay = 0;
+/* 遥按连按时不要每张卡都去量一次文本宽度（getComputedStyle + offsetWidth 都是强制布局）。
+   停稳 180ms 再决定这张卡的剧名要不要滚。 */
 function updateMarquee(prev, next) {
   if (prev !== next) resetMarquee(prev);
-  var name = next && next.querySelector ? next.querySelector('.name') : null;
+  if (mqDelay) { clearTimeout(mqDelay); mqDelay = 0; }
+  mqDelay = setTimeout(function () { mqDelay = 0; startMarquee(next); }, 180);
+}
+
+function startMarquee(next) {
+  if (!next || !document.body.contains(next)) return;
+  var name = next.querySelector ? next.querySelector('.name') : null;
   if (!name) return;
   /* 已经在滚就直接复用，重建会把位移归零，看起来就是闪一下从头开始 */
   if (name.getAttribute('data-mq-text') != null) return;
@@ -1080,7 +1146,7 @@ function pickNearest(current, all, direction, banded) {
        所以左右移动时把「顶栏内」和「顶栏外」彻底隔开：
        在顶栏里左右只走顶栏这一行，到头就停；按下才回内容区。 */
     if ((direction === 'left' || direction === 'right') && inTopbar(el) !== onBar) continue;
-    var box = el.getBoundingClientRect();
+    var box = el.__box || el.getBoundingClientRect();
     if (banded) {
       if ((direction === 'left' || direction === 'right') && !sameBand(from, box)) continue;
       if ((direction === 'up' || direction === 'down') && !sameColumn(from, box)) continue;
@@ -2167,46 +2233,28 @@ function openEpMenu() {
   var r = epRange();
   if (r.groups <= 1) return;
   closeEpMenu();
-  /* 下拉是 fixed 浮层，本该完全不碰页面滚动；老内核在插入 fixed 层时偶尔会
-     顺带挪一下 #stage，这里记一份原值，开完对回去。 */
+  /* 电视上不要贴边下拉：遥控器往下走几格，列表就顶出屏幕，人也看不见焦点框了。
+     统一做成居中卡片（跟季列表同一套外观），一组一个格子，一屏能看全。 */
   var keepScroll = stage.scrollTop;
   var trigger = view.querySelector('[data-ep-menu]');
-  var rect = trigger ? trigger.getBoundingClientRect() : { left: 60, bottom: 260, width: 200 };
-  var width = Math.max(Math.round(rect.width), 210);
   var items = '';
   for (var g = 0; g < r.groups; g++) {
     var from = g * EP_PAGE + 1;
     var to = Math.min(r.total, (g + 1) * EP_PAGE);
-    items += '<button type="button" class="ep-option' + (g === r.group ? ' is-active' : '')
-      + '" data-focusable data-key="epg:' + g + '" data-epgroup="' + g + '" role="menuitem">' + from + '-' + to + ' 集</button>';
+    items += '<button type="button" class="season-item ep-option' + (g === r.group ? ' is-active' : '')
+      + '" data-focusable data-key="epg:' + g + '" data-epgroup="' + g + '">'
+      + '<strong>' + from + '-' + to + ' 集</strong></button>';
   }
   var layer = document.createElement('div');
   layer.id = 'ep-menu';
-  layer.className = 'ep-layer';
-  layer.innerHTML = '<div class="ep-pop" role="menu">' + items + '</div>';
+  layer.className = 'season-layer';
+  layer.innerHTML = '<section class="season-pop ep-card" role="dialog" aria-modal="true">'
+    + '<h2>选集<span>共 ' + r.total + ' 集</span></h2>'
+    + '<div class="season-grid ep-card-grid">' + items + '</div></section>';
   document.body.appendChild(layer);
   epMenu = layer;
-  var pop = layer.querySelector('.ep-pop');
-  pop.style.minWidth = width + 'px';
-  pop.style.left = Math.max(16, Math.min(Math.round(rect.left), window.innerWidth - width - 24)) + 'px';
-  pop.style.top = Math.round(rect.bottom + 12) + 'px';
-  /* 一部剧几十上百集就是十几二十组：列表按原始高度排下去会直接顶出屏幕，
-     焦点走到下面那几组时人已经看不见框了 —— 「选了分组就失去焦点」。
-     这里量一次高度：下面放不下、上面更宽裕就翻到按钮上方，两种都限制在屏幕内滚动。 */
-  var vh = window.innerHeight || 1080;
-  var gap = 12, pad = 16;
-  var below = vh - Math.round(rect.bottom) - gap - pad;
-  var above = Math.round(rect.top) - gap - pad;
-  var natural = pop.offsetHeight;
-  var cap = Math.max(200, Math.round(vh * 0.66));
-  if (natural > below && above > below) {
-    pop.style.maxHeight = Math.min(cap, Math.max(200, above)) + 'px';
-    pop.style.top = Math.max(pad, Math.round(rect.top) - gap - Math.min(natural, above)) + 'px';
-  } else {
-    pop.style.maxHeight = Math.min(cap, Math.max(200, below)) + 'px';
-  }
   if (trigger) trigger.setAttribute('aria-expanded', 'true');
-  var active = pop.querySelector('.is-active') || pop.querySelector('[data-focusable]');
+  var active = layer.querySelector('.ep-option.is-active') || layer.querySelector('[data-focusable]');
   if (active) { state.focusKey = active.dataset.key; focusElement(active, false); }
   if (stage.scrollTop !== keepScroll) stage.scrollTop = keepScroll;
 }
