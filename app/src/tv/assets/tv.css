@@ -314,19 +314,17 @@ body.page-windowed #stage{overflow:hidden}
 }
 
 /* ---------------- 海报墙 ----------------
-   固定 6 列：不再用 auto-fill 猜列数（30rem 的下限在不同分辨率下会算出 4/5 列，
-   右边还会被切掉一截）。repeat(6, minmax(0,1fr)) 是硬约束 —— 一屏永远 6 张，
-   每张宽度正好是可用宽度的 1/6，绝不会溢出到右边界外面。
-   跟同屏另一个 TV 软件的密度对齐（一行 6 张，不截断）。 */
+   固定 8 列：不再用 auto-fill 猜列数（30rem 的下限在不同分辨率下会算出 4/5 列，
+   右边还会被切掉一截）。repeat(8, minmax(0,1fr)) 是硬约束 —— 一屏永远 8 张。
+   列数改动必须同步 tv.js 的 GRID_COLS，翻行和窗口高度都按那个数算。
+   列数从 6 加到 8 是因为六列时卡片太大，选中放大后把上一排剧名和下一排海报都压住了。 */
 .grid{
   display:grid;
-  grid-template-columns:repeat(6,minmax(0,1fr));
+  grid-template-columns:repeat(8,minmax(0,1fr));
   grid-column-gap:1.6rem;
-  /* 行距 1.6rem（原来 2.4rem）：一屏 1080 减去顶栏让位 16.5rem 之后，
-     两排卡（各 44.7rem）再加 2.4rem 的间距正好差 8px 装不下 ——
-     装不下的后果就是按一下下键整页要滚十几像素，第二排的槽位跟着漂。
-     收掉这 8px，两排完整落地，翻行才是干净的整行翻。 */
-  grid-row-gap:1.6rem;
+  /* 行距留 2rem：八列后卡片矮了，两排加间距仍然装得进 1080，多出来的一点
+     正好给选中放大（scale 1.06）留出上下余量，剧名不会贴到下一排海报。 */
+  grid-row-gap:2rem;
   width:100%;max-width:100%;
 }
 /* min-width:0 必须写：grid 的 1fr 等于 minmax(auto,1fr)，长剧名会把
@@ -373,10 +371,14 @@ body.page-windowed #stage{overflow:hidden}
    放大后海报下沿多吃掉约 2.6rem，剧名跟着下移 2.6rem，才不会贴着图底。 */
 .card.is-focused{z-index:8}
 .card.is-focused .art{
-  transform:scale(1.12);
-  box-shadow:0 1.1rem 3rem rgba(0,0,0,.55);
+  /* 1.06 而不是 1.12：八列之后卡片只有两百来像素宽，再放大一圈就会
+     顶到上一排的剧名、也会把自己的剧名压掉。焦点靠投影托起来就够了。 */
+  transform:scale(1.06);
+  box-shadow:0 .8rem 2.2rem rgba(0,0,0,.5);
 }
-.card.is-focused .name{transform:translateY(2.6rem)}
+/* 剧名不再跟着下移：放大 6% 的下沿正好落在 .name 的 margin-top 里，
+   位移反而会把它推到下一排海报顶上。 */
+.card.is-focused .name{transform:none}
 /* 标题超长：选中后跑马灯。
    外层 .name 负责裁剪；内层 .mq-track 用 inline-block（电视端老内核也稳），
    里面是三段：文本 / 固定宽度的空档 / 文本。空档用真实 span 占位，
@@ -879,7 +881,15 @@ body[data-backdrop="custom"] #tv-bg{background:#0d1013}
 /* ---------------- 详情页：制作方 / 分组胶囊 / 相关作品（0.29.2） ---------------- */
 /* 制作方紧跟在「评分 共N集」后面，做成一颗可聚焦胶囊 */
 .detail .meta{display:flex;align-items:center;gap:1.4rem;flex-wrap:wrap}
-.detail .producer-chip{height:4.2rem;line-height:4.2rem;padding:0 1.8rem;font-size:1.8rem}
+/* 制作方按钮：原来是分类条的胶囊（.chip），和详情页的 .btn 一排并排时
+   高度、圆角、字重全对不上，看着像从别的页面捡来的。现在统一走 .btn，
+   只把尺寸收到和 meta 行一致。 */
+.detail .producer-btn{
+  height:4.4rem;line-height:4.4rem;padding:0 2rem;margin:0;
+  border-radius:2.2rem;font-size:1.8rem;
+  background:rgba(255,255,255,.08);color:var(--chip-ink);
+}
+.detail .producer-btn.is-focused{color:var(--text);background:rgba(255,255,255,.16)}
 /* 分组不再排成一整行胶囊：收藏右边一颗选择器，点开才是分组列表 */
 .ep-select{display:inline-flex;align-items:center;gap:1.1rem;padding:0 2.2rem;margin-left:1.2rem}
 .ep-select .ep-caret{
@@ -900,13 +910,15 @@ body[data-backdrop="custom"] #tv-bg{background:#0d1013}
 .ep-option.is-active{background:var(--accent);color:var(--accent-ink);font-weight:700}
 .ep-option.is-focused{box-shadow:0 0 0 .3rem var(--halo),0 0 0 .7rem var(--focus)}
 .detail-related{margin-top:4.8rem}
-.detail-related .grid{grid-template-columns:repeat(6,minmax(0,1fr))}
+.detail-related .grid{grid-template-columns:repeat(8,minmax(0,1fr))}
 
 /* 制作方作品浮层：遥控器在网格里走，返回键收起 */
 .producer-layer{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;background:rgba(6,7,9,.72)}
 .producer-panel{width:82vw;max-height:82vh;overflow:auto;padding:3.2rem 3.6rem;border-radius:1.6rem;background:var(--panel-strong,#15171a);box-shadow:0 3rem 8rem rgba(0,0,0,.5)}
 .producer-panel h2{font-size:3rem;margin:0 0 1rem}
 .producer-status{font-size:1.9rem;color:var(--muted);margin:0 0 2.4rem}
+/* 制作方弹层是独立浮层，宽度只有主界面的一半多一点：8 列会把封面压到 100px，
+   这里保持 6 列。 */
 .producer-grid{grid-template-columns:repeat(6,minmax(0,1fr))}
 
 /* 系列卡角标：封面左下角写「共 N 季」，跟榜单名次角标同位置 */

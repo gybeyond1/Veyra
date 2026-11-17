@@ -478,6 +478,7 @@ final class HongguoApi {
             try { credits.putAll(credits(batch)); } catch (Exception ignored) { }
         }
         String target = normalize(name);
+        Set<String> seenTitle = new LinkedHashSet<>();
         for (int i = 0; i < rows.length(); i++) {
             JSONObject row = rows.optJSONObject(i);
             if (row == null) continue;
@@ -485,13 +486,16 @@ final class HongguoApi {
             if (credit == null) continue;
             String creditMedia = credit.optString("mediaId", "");
             String creditName = credit.optString("name", "");
-            boolean same = !mediaId.isEmpty() && mediaId.equals(creditMedia);
-            if (!same && (mediaId.isEmpty() || creditMedia.isEmpty())) {
-                same = !target.isEmpty() && target.equals(normalize(creditName));
-            }
-            if (!same) continue;
+            /* 署名必须是本人：站内搜索「陈柯文化」会连带推荐一堆同 IP、同题材的剧，
+               这些剧的 author 根本不是他。以前只在「media_id 缺失」时才比署名，
+               于是只要站点翻出来就认领，「不是他的也列在他名下」。
+               现在反过来：署名先过，media_id 两边都有时再要求相等。 */
+            String creditKey = normalize(creditName);
+            if (target.isEmpty() || creditKey.isEmpty()) continue;
+            if (!creditKey.equals(target) && !creditKey.contains(target)) continue;
+            if (!mediaId.isEmpty() && !creditMedia.isEmpty() && !mediaId.equals(creditMedia)) continue;
             String title = credit.optString("title", row.optString("title"));
-            if (title.isEmpty()) continue;
+            if (title.isEmpty() || !seenTitle.add(normalize(title))) continue;
             /* 封面优先用站内搜索的那张，再退回多详情：
                多详情给的是 p*-reading-sign.fqnovelpic.com/…~tplv-noop.heic?签名 这种
                带时效签名的 HEIC 原图，WebView 解不了码，只能显示灰块；站内搜索给的是

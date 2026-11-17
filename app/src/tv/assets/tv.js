@@ -34,6 +34,11 @@ function api(action, args) {
   });
 }
 
+/* 海报墙一行几张。必须和 tv.css 里 .grid 的 repeat() 一致：
+   翻行、窗口高度、上下换行都按这个数列算，改了一边不改另一边，
+   按上下键就会「跳到隔一排」或者滚出半行。 */
+var GRID_COLS = 8;
+
 /* ---------------- 状态 ---------------- */
 var state = {
   route: 'home',
@@ -514,9 +519,10 @@ function paintCovers(root) {
       cover(url).then(function (src) {
         if (!src || !node.parentNode) { done(); return; }
         node.src = src;
-        /* 焦点已经停在这张卡上时，背景也跟着换成它 */
+        /* 焦点已经停在这张卡上时，背景也跟着换成它（相关作品 / 制作方作品除外） */
         var card = node.closest ? node.closest('.card.is-focused') : null;
-        if (card || (state.route === 'detail' && node.closest('.detail-art'))) setBackdrop(src);
+        if (card && !card.closest('.detail-related, .producer-grid')) setBackdrop(src);
+        else if (!card && state.route === 'detail' && node.closest('.detail-art')) setBackdrop(src);
         done();
       }).catch(done);
     })(nodes[i]);
@@ -559,6 +565,10 @@ function applyBackdropMode() {
 }
 function syncBackdrop(el) {
   if (!heroBackdropOn() || !el) return;
+  /* 详情页里的相关作品 / 制作方作品不换背景：背景是「当前这部剧」的身份，
+     在下面几排横着走一圈，整页底色跟着变，看着像进了另一部剧。
+     详情自己的海报由 syncBackdropFromFocus 固定。 */
+  if (el.closest && el.closest('.detail-related, .producer-grid')) return;
   var img = el.classList && el.classList.contains('card') ? el.querySelector('.art img') : null;
   if (img && img.src) setBackdrop(img.src);
 }
@@ -634,8 +644,8 @@ function wallRowHeight(el) {
   var grid = el && el.closest ? el.closest('.grid') : null;
   if (!grid) return 0;
   var cards = grid.querySelectorAll('.card');
-  if (cards.length <= 6) return 0;
-  var h = cards[6].offsetTop - cards[0].offsetTop;
+  if (cards.length <= GRID_COLS) return 0;
+  var h = cards[GRID_COLS].offsetTop - cards[0].offsetTop;
   return h > 40 ? h : 0;
 }
 
@@ -658,6 +668,10 @@ function focusScrollTop(el, dir, prev) {
   var cur = stage.scrollTop;
   var safeBottom = stageBox.bottom - 2;
   var box = el.getBoundingClientRect();
+  /* 刚被 innerHTML 重画出来的节点，在老内核上这一帧还量到 0×0。拿 0 去算
+     「滚到可见」，算出来的目标会一路贴到页底 —— 详情页里就是「点个选集分组，
+     页面直接跳到相关作品」。这一帧先不动，下一帧焦点会自己落位。 */
+  if (box.width < 2 && box.height < 2) return null;
   if (inTopbar(el)) return box.bottom > safeBottom ? cur + (box.bottom - safeBottom) : null;
   var safeTop = stageBox.top + (contentTopInset() || 8);
 
@@ -729,18 +743,18 @@ function exitToTopbar(current) {
     if (Math.abs(c.offsetTop - card.offsetTop) > 4) continue;
     if (c.getBoundingClientRect().left < cardBox.left - 4) col++;
   }
-  /* 一行 6 张，按列硬性分派，不做「全墙就近」：
+  /* 一行 GRID_COLS 张，按列硬性分派，不做「全墙就近」：
      前两列 → 分类胶囊，最后一列 → 搜索/最近/设置，中间三列 → 不出去，正常翻上一排。
      但整面墙只有一排时（收藏、下载通常就几张），上面本来就没有上一排，
      中间几列也必须能回到页签 —— 否则遥控器按上完全没反应。 */
-  var singleRow = cards.length <= 6 || !wallRowHeight(card);
+  var singleRow = cards.length <= GRID_COLS || !wallRowHeight(card);
   var pool = null;
   if (singleRow) {
     pool = [];
     for (var a = 0; a < chips.length; a++) pool.push(chips[a]);
     for (var b = 0; b < tools.length; b++) pool.push(tools[b]);
   } else if (col <= 1 && chips.length) pool = chips;
-  else if (col >= 5 && tools.length) pool = tools;
+  else if (col >= GRID_COLS - 1 && tools.length) pool = tools;
   else if (stage.scrollTop <= 1) pool = chips;
   if (!pool || !pool.length) return null;
   var cx = (cardBox.left + cardBox.right) / 2;
@@ -879,6 +893,13 @@ function restoreFocus() {
       if (all[i].dataset.key === state.focusKey) { target = all[i]; break; }
     }
   }
+  /* 记录丢了（例如刚重画的集数块）时的兜底：详情页先回播放按钮，
+     不能落到 .card —— 详情页的 .card 全是「相关作品」，一落上去整页就滚到底。 */
+  if (!target && state.route === 'detail') {
+    target = view.querySelector('.detail-actions [data-focusable]')
+      || view.querySelector('[data-ep-menu]')
+      || view.querySelector('.detail-eps [data-focusable]');
+  }
   /* 侧栏收起后没有「首页图标」可以停：没有记录就落在第一张海报上，
      别落在分类条 —— 分类条在标题下面，选中它会把页面往下带一截 */
   if (!target) target = view.querySelector('.card') || all[0];
@@ -969,14 +990,14 @@ function stepToRow(el, direction) {
   var grid = el.closest('.grid');
   if (!grid || !grid.classList.contains('is-window')) return false;
   var cards = grid.querySelectorAll('.card');
-  if (cards.length <= 6) return false;
+  if (cards.length <= GRID_COLS) return false;
   var card = el.closest('.card') || el;
   var idx = Array.prototype.indexOf.call(cards, card);
   if (idx < 0) return false;
-  var target = idx + (direction === 'down' ? 6 : -6);
+  var target = idx + (direction === 'down' ? GRID_COLS : -GRID_COLS);
   if (target < 0) return false;              /* 第一排再往上：交回常规逻辑（分类条/页签） */
   if (target >= cards.length) {
-    if (idx >= cards.length - 6) {
+    if (idx >= cards.length - GRID_COLS) {
       /* 已经在最后一行：窗口模式把 #stage 锁死了，以前这里直接 return true，
          于是「滚到底自动续页」永远不会触发 —— 一页就 18 张，翻三排到头。
          现在按一下就主动要下一页，焦点等新行插进来再跟过去。 */
@@ -1210,11 +1231,11 @@ var layoutRetry = 0;
 function settleWindow(grid) {
   if (!grid || !grid.classList.contains('is-window')) return;
   var cards = grid.querySelectorAll('.card');
-  if (cards.length <= 6) return;
-  var rowH = cards[6].offsetTop - cards[0].offsetTop;
+  if (cards.length <= GRID_COLS) return;
+  var rowH = cards[GRID_COLS].offsetTop - cards[0].offsetTop;
   if (rowH < 40) return;
   var h = parseFloat(grid.style.height) || grid.getBoundingClientRect().height;
-  var peek = grid.getBoundingClientRect().bottom - cards[6].getBoundingClientRect().top;
+  var peek = grid.getBoundingClientRect().bottom - cards[GRID_COLS].getBoundingClientRect().top;
   var fix = Math.round(rowH * FIRST_ROW_PORTION - peek);
   if (Math.abs(fix) >= 1) {
     var next = Math.max(140, h + fix);
@@ -1242,8 +1263,8 @@ function alignGridScroll(el) {
   var card = el.closest ? el.closest('.card') : null;
   if (!card || !grid.contains(card)) return;
   var cards = grid.querySelectorAll('.card');
-  if (cards.length <= 6) return;
-  var rowH = cards[6].offsetTop - cards[0].offsetTop;
+  if (cards.length <= GRID_COLS) return;
+  var rowH = cards[GRID_COLS].offsetTop - cards[0].offsetTop;
   if (rowH < 40) return;
   var row = Math.round((card.offsetTop - cards[0].offsetTop) / rowH);
   var target = row * rowH;
@@ -1955,7 +1976,7 @@ function renderDetail() {
 
   var producer = state.detailProducer;
   var producerChip = producer && producer.name
-    ? '<button type="button" class="chip producer-chip" data-focusable data-key="producer" data-producer="1">制作方 · ' + esc(producer.name) + '</button>'
+    ? '<button type="button" class="btn producer-btn" data-focusable data-key="producer" data-producer="1">制作方 · ' + esc(producer.name) + '</button>'
     : '';
 
   var related = sortRelatedTv(list(state.detailRelated), data.title || '');
@@ -2072,11 +2093,22 @@ function closeEpMenu(keepFocus) {
 function paintEpisodeBlock(focusFirst) {
   var r = epRange();
   var block = view.querySelector('[data-eps-block]');
+  /* 旧的焦点框在被替换的节点上，不先摘掉，重画后就剩一个「看不见的焦点」 */
+  var stale = block && block.querySelector('.is-focused');
+  if (stale) stale.classList.remove('is-focused');
   if (block) block.innerHTML = epsBlockHtml();
   var label = view.querySelector('[data-ep-label]');
   if (label) label.textContent = (r.start + 1) + '-' + r.end + ' 集';
-  var first = block && block.querySelector('[data-focusable]');
-  if (first && focusFirst) { state.focusKey = first.dataset.key; focusElement(first, true); }
+  if (!focusFirst) return;
+  /* 等一帧再落焦点：重画当帧量到的盒子是 0×0，直接聚焦等于没聚焦，
+     后面的方向键就从这个「空气焦点」算邻居，一路算到相关作品去。 */
+  var land = function () {
+    var first = block && block.querySelector('[data-focusable]');
+    if (!first) return;
+    state.focusKey = first.dataset.key;
+    focusElement(first, true);
+  };
+  if (window.requestAnimationFrame) window.requestAnimationFrame(land); else land();
 }
 
 /* 详情页附加信息（制作方 / 相关作品）：接口慢，回来再补画一次，不挡主详情 */
@@ -2170,31 +2202,38 @@ function sortRelatedTv(items, currentTitle) {
 
 /* ---------------- 制作方作品（遥控器可点） ---------------- */
 
-/* 同系列各季 = 制作方作品的确定项。搜索是按标题匹配的，署名命中很稀疏，
-   只给搜索结果就会「16 季只剩 9 部」；手机上已经是并集，电视端照着做。 */
-function producerSeasonRows(currentId) {
-  var key = String(currentId || '');
-  var title = (state.detail && String(state.detail.id) === key && state.detail.title) || '';
-  var base = relatedBase(title);
-  var rows = [];
-  var source = list(state.detailRelated);
-  for (var i = 0; i < source.length; i++) {
-    var item = source[i];
-    if (!item || !item.id || String(item.id) === key) continue;
-    var season = seasonNumberOf(item);
-    if (!season && !(base && relatedBase(item.title) === base)) continue;
-    var label = [season ? ('第' + season + '季') : '', item.episodeLabel || ''].filter(Boolean).join(' · ');
-    rows.push({ id: item.id, title: item.title, cover: item.cover,
-      episodeLabel: label, seasonIndex: season });
-  }
-  return rows;
+/* 一张都不硬铺：归属由后端逐条核对 author（必要时再核 media_id）。
+   以前这里先把「相关作品里的同系列」铺上，可相关作品本身混着「灵界篇」
+   「凡人修仙…聚宝仙鼎」这类同 IP 不同名的剧，于是面板标题写着 A，
+   底下却列着几十部别人的剧。季号只用来排序。 */
+function producerRowOf(item) {
+  var season = seasonNumberOf({ title: item.title });
+  var label = [season ? ('第' + season + '季') : '', item.episodeLabel || ''].filter(Boolean).join(' · ');
+  return { id: item.id, title: item.title, cover: item.cover,
+    episodeLabel: label || item.episodeLabel || '', seasonIndex: season };
 }
 
-function producerRowsSort(a, b) {
-  var na = Number(a.seasonIndex) || 0, nb = Number(b.seasonIndex) || 0;
-  if (na && nb && na !== nb) return na - nb;
-  if (na && !nb) return -1;
-  if (!na && nb) return 1;
+/* 这组作品里占大头的那条系列：红果第一季的标题通常不带「第一季」，
+   只有知道主系列是谁，才能把那条无季号的当第 1 季排到最前。 */
+function producerAnchorBase(rows) {
+  var tally = { }, best = '', count = 0;
+  for (var i = 0; i < rows.length; i++) {
+    var base = relatedBase(rows[i].title);
+    if (!base) continue;
+    tally[base] = (tally[base] || 0) + 1;
+  }
+  for (var key in tally) if (tally.hasOwnProperty(key) && tally[key] > count) { best = key; count = tally[key]; }
+  return count >= 2 ? best : '';
+}
+
+function producerRowsSort(a, b, anchor) {
+  var rankOf = function (item) {
+    var season = Number(item.seasonIndex) || 0;
+    if (season) return season;
+    return anchor && relatedBase(item.title) === anchor ? 1 : 999;
+  };
+  var ra = rankOf(a), rb = rankOf(b);
+  if (ra !== rb) return ra - rb;
   return String(a.title || '').localeCompare(String(b.title || ''), 'zh');
 }
 
@@ -2205,13 +2244,14 @@ function openProducerPanel() {
   var layer = document.createElement('div');
   layer.id = 'producer';
   layer.className = 'producer-layer';
-  layer.innerHTML = '<section class="producer-panel" role="dialog" aria-modal="true">'
+  layer.innerHTML = '<section class="producer-panel" role="dialog" aria-modal="true" data-focusable data-key="producer-panel">'
     + '<h2>制作方 · ' + esc(producer.name) + '</h2>'
     + '<p class="producer-status" data-producer-status>正在检索作品…</p>'
     + '<div class="grid producer-grid" data-producer-grid></div>'
     + '</section>';
   document.body.appendChild(layer);
   producerPanel = layer;
+  var panel = layer.querySelector('.producer-panel');
   var grid = layer.querySelector('[data-producer-grid]');
   var status = layer.querySelector('[data-producer-status]');
   var current = String((state.detail && state.detail.id) || '');
@@ -2224,34 +2264,40 @@ function openProducerPanel() {
       var id = String((item && item.id) || '');
       if (!id || seen[id]) continue;
       seen[id] = true;
-      rows.push(item);
+      rows.push(producerRowOf(item));
       added++;
     }
     return added;
   };
+  /* 打开就把焦点收进面板：留在背后的「制作方」按钮上，按 OK 会再开一次，
+     按方向键则会跑到相关作品去 —— 真机上就是「按了没反应、焦点不见了」。 */
+  var focusPanel = function () {
+    if (!panel || !document.body.contains(panel)) return;
+    state.focusKey = 'producer-panel';
+    focusElement(panel, false);
+  };
+  focusPanel();
   var paint = function (moveFocus) {
-    rows.sort(producerRowsSort);
+    var anchor = producerAnchorBase(rows);
+    rows.sort(function (a, b) { return producerRowsSort(a, b, anchor); });
     grid.innerHTML = rows.map(function (item, index) { return cardMarkup(item, index); }).join('');
     paintCovers(grid);
-    /* 只在第一次铺（或原本焦点就在这块网格里）时抢焦点：
-       补数据回来时用户可能已经在别处按方向键了，不能把焦点拽回第一张。 */
     if (!moveFocus) return;
     var first = grid.querySelector('[data-focusable]');
     if (first) { state.focusKey = first.dataset.key; focusElement(first, false); }
+    else focusPanel();
   };
-  var seeded = addRows(producerSeasonRows(current)) > 0;
-  if (seeded) paint(true);
   api('producer-works', { name: producer.name, mediaId: producer.mediaId || '', page: 1 }).then(function (data) {
     addRows(list(data && data.items));
     if (!rows.length) {
       status.textContent = '平台没有收录这位制作方的其他作品';
       return;
     }
-    status.textContent = '已确认 ' + rows.length + ' 部作品 · 以平台当前检索结果为准';
-    paint(!seeded);
+    status.textContent = '平台署名一致的 ' + rows.length + ' 部作品';
+    paint(true);
   }).catch(function () {
-    status.textContent = rows.length ? '已确认 ' + rows.length + ' 部作品 · 更多作品暂时无法读取' : '作品暂时无法读取';
-    if (rows.length) paint();
+    status.textContent = rows.length ? '平台署名一致的 ' + rows.length + ' 部作品 · 更多暂时读不到' : '作品暂时无法读取';
+    if (rows.length) paint(true);
   });
 }
 

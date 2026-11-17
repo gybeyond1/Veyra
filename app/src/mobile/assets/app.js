@@ -2887,12 +2887,12 @@ function relatedCard(item) {
 }
 
 /*
- * 制作方作品弹窗：先把「同系列各季」当成确定项铺上，再按名字搜候选、逐条核对 media_id 补进去。
- * 同名制作方很多，所以数量以「已确认」为准，不吹成完整作品集。
+ * 制作方作品弹窗：只认后端「署名对得上」的那批。
  *
- * 以前两条路只走了一条：搜不到才退回顾同系列，搜得到就只显示搜到的那几部。
- * 于是「聚宝仙盆」16 季经常只列 9 部，缺的季明明就在相关作品里。
- * 现在改成并集，按季号排（第 1 季打头），缺的季不再靠「加载更多」碰运气。
+ * 以前这里先把「同系列各季」当确定项铺上，再并搜索命中 —— 但同系列是从相关作品
+ * 拿的，相关作品里本来就有「灵界篇」「凡人修仙…聚宝仙鼎」这些同 IP 不同名的剧，
+ * 它们其实不归这位制作方。结果面板上写着「陈柯文化」却列了四十多部别人的剧。
+ * 现在一张都不硬铺：后端逐条核对 author（必要时再核 media_id），前端只负责排版。
  */
 function closeProducerPanel() {
   const overlay = producerOverlay;
@@ -2902,33 +2902,33 @@ function closeProducerPanel() {
   return Boolean(overlay);
 }
 
-/** 当前剧的同系列各季（来自详情的相关作品），当制作方作品的确定项。 */
-function producerSeasonRows(currentId) {
-  const key = String(currentId || '');
-  const cache = detailExtrasCache.get(key) || detailExtrasCache.get(currentId);
-  const title = (state.detail && String(state.detail.id) === key ? state.detail.title : '') || '';
-  const base = relatedBase(title);
-  return asArray(cache && cache.related)
-    .filter(item => item && item.id && String(item.id) !== key)
-    .filter(item => {
-      const season = seasonNumber(item);
-      if (season > 0) return true;
-      return Boolean(base) && relatedBase(item.title) === base;
-    })
-    .map(item => {
-      const season = seasonNumber(item);
-      /* 第二行给「第N季 · 共N集」：只写集数看不出是第几季，只写季号又少了集数 */
-      const label = [season ? `第${season}季` : '', item.episodeLabel || ''].filter(Boolean).join(' · ');
-      return { id: item.id, title: item.title, cover: item.cover, episodeLabel: label, seasonIndex: season };
-    });
+/**
+ * 制作方作品里占大头的那条系列（按标题根名数出现次数）。
+ * 红果的第一季通常不带「第一季」，标题就是光秃秃的剧名 —— 只有知道这组的主系列是谁，
+ * 才能把那条无季号的当成第 1 季排到最前，而不是沉到列表末尾。
+ */
+function producerAnchorBase(rows) {
+  const tally = new Map();
+  for (const row of rows) {
+    const base = relatedBase(row.title);
+    if (!base) continue;
+    tally.set(base, (tally.get(base) || 0) + 1);
+  }
+  let best = '', count = 0;
+  for (const [base, n] of tally) if (n > count) { best = base; count = n; }
+  return count >= 2 ? best : '';
 }
 
-function producerRowSort(a, b) {
-  const na = Number(a.seasonIndex) || 0;
-  const nb = Number(b.seasonIndex) || 0;
-  if (na && nb && na !== nb) return na - nb;
-  if (na && !nb) return -1;
-  if (!na && nb) return 1;
+/** 季号只用于排序（第 1 季打头），不代表归属：归属由后端核对。 */
+function producerRowSort(a, b, anchor) {
+  const rank = item => {
+    const season = Number(item.seasonIndex) || 0;
+    if (season) return season;
+    /* 没有季号、又是主系列的那条 = 第 1 季 */
+    return anchor && relatedBase(item.title) === anchor ? 1 : 999;
+  };
+  const ra = rank(a), rb = rank(b);
+  if (ra !== rb) return ra - rb;
   return String(a.title || '').localeCompare(String(b.title || ''), 'zh');
 }
 
@@ -2953,7 +2953,7 @@ function openProducerPanel(name, mediaId, currentId) {
   const status = overlay.querySelector('.producer-status');
   const more = overlay.querySelector('.producer-more');
   let page = 1, hasMore = true, busy = false, emptyPages = 0;
-  /* 已确认的集合：同系列各季先占位，搜索命中再并进来，按 id 去重 */
+  /* 只装后端核对过的条目，按 id 去重；季号只拿来排序 */
   const seen = new Set([String(currentId || '')]);
   const rows = [];
   const addRows = incoming => {
@@ -2962,18 +2962,19 @@ function openProducerPanel(name, mediaId, currentId) {
       const id = String((item && item.id) || '');
       if (!id || seen.has(id)) continue;
       seen.add(id);
-      rows.push(item);
+      const season = seasonNumber({ title: item.title });
+      const label = [season ? `第${season}季` : '', item.episodeLabel || ''].filter(Boolean).join(' · ');
+      rows.push({ ...item, seasonIndex: season, episodeLabel: label || item.episodeLabel || '' });
       added += 1;
     }
     return added;
   };
   const paintRows = () => {
-    rows.sort(producerRowSort);
+    const anchor = producerAnchorBase(rows);
+    rows.sort((a, b) => producerRowSort(a, b, anchor));
     list.innerHTML = rows.map(producerItemHtml).join('');
     paintCoversIn(list);
   };
-  addRows(producerSeasonRows(currentId));
-  if (rows.length) paintRows();
   overlay.addEventListener('click', event => {
     /* 点面板以外的地方（也就是那层遮罩）自己收回 */
     if (event.target === overlay) { closeProducerPanel(); return; }
@@ -2998,13 +2999,13 @@ function openProducerPanel(name, mediaId, currentId) {
       hasMore = Boolean(data.hasMore) && emptyPages < 2;
       page += 1;
       if (rows.length) {
-        status.textContent = `已确认 ${rows.length} 部作品 · 以平台当前检索结果为准`;
+        status.textContent = `平台署名一致的 ${rows.length} 部作品`;
       } else {
         status.textContent = '平台没有收录这位制作方的其他作品';
       }
       more.hidden = !hasMore || !rows.length;
     } catch (error) {
-      status.textContent = rows.length ? `已确认 ${rows.length} 部作品 · 更多作品暂时无法读取` : '作品暂时无法读取';
+      status.textContent = rows.length ? `平台署名一致的 ${rows.length} 部作品 · 更多暂时读不到` : '作品暂时无法读取';
       more.textContent = '重试';
       more.hidden = false;
       hasMore = false;
