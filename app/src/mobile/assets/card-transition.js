@@ -45,20 +45,11 @@
       Object.assign(this, options);
       this.phase = 'ready';
       this.reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-      this.onTouchStart = event => this.touchStart(event);
-      this.onTouchMove = event => this.touchMove(event);
-      this.onTouchEnd = event => this.touchEnd(event);
-      this.onTouchCancel = () => { if (this.touch?.dragging) this.cancel(); this.touch = null; };
       this.onClick = event => {
-        if (performance.now() < (this.suppressClickUntil || 0) ||
-            (this.phase !== 'opened' && !event.target.closest('[data-back]'))) {
+        if (this.phase !== 'opened' && !event.target.closest('[data-back]')) {
           event.preventDefault(); event.stopImmediatePropagation();
         }
       };
-      this.app.addEventListener('touchstart', this.onTouchStart, { passive: true, capture: true });
-      this.app.addEventListener('touchmove', this.onTouchMove, { passive: false, capture: true });
-      this.app.addEventListener('touchend', this.onTouchEnd, { passive: true, capture: true });
-      this.app.addEventListener('touchcancel', this.onTouchCancel, { passive: true, capture: true });
       this.app.addEventListener('click', this.onClick, true);
     }
 
@@ -273,45 +264,11 @@
       this.flush(); this.settle(this.small, true);
     }
 
-    touchStart(event) {
-      if (this.phase !== 'opened' || event.touches.length !== 1 ||
-          event.target.closest('button,input,.detail-description,#auth-overlay,#confirm-overlay,#update-overlay,#unlock-overlay,#download-overlay,.producer-overlay,#age-gate') || !this.isDetail()) return;
-      const point = event.touches[0];
-      const bounds = this.app.getBoundingClientRect();
-      const statusInset = parseFloat(getComputedStyle(this.app).getPropertyValue('--status-bar-height')) || 0;
-      // Leave the system's status/navigation gestures and side back gestures to Android.
-      if (point.clientX < 24 || point.clientX > bounds.right - 24 ||
-          point.clientY < bounds.top + statusInset + 24 || point.clientY > bounds.bottom - 24) return;
-      this.touch = { x: point.clientX, y: point.clientY, lastY: point.clientY, at: event.timeStamp, velocity: 0, dragging: false };
-    }
-
-    touchMove(event) {
-      const touch = this.touch;
-      if (!touch || event.touches.length !== 1) return;
-      const point = event.touches[0];
-      const dx = point.clientX - touch.x, dy = point.clientY - touch.y;
-      if (!touch.dragging) {
-        if (this.scroll.scrollTop > 1) { touch.x = point.clientX; touch.y = point.clientY; return; }
-        if (dy <= 10 || dy <= Math.abs(dx) * 1.2) return;
-        if (!this.begin()) return;
-        touch.dragging = true;
-      }
-      if (event.cancelable) event.preventDefault();
-      const elapsed = event.timeStamp - touch.at;
-      if (elapsed > 0) touch.velocity = (point.clientY - touch.lastY) / elapsed;
-      touch.at = event.timeStamp; touch.lastY = point.clientY;
-      touch.distance = Math.max(0, dy);
-      this.drag(dx * .4, touch.distance, touch.distance / (this.height * .55));
-    }
-
-    touchEnd(event) {
-      const touch = this.touch; this.touch = null;
-      if (!touch?.dragging) return;
-      this.suppressClickUntil = performance.now() + 400;
-      const velocity = event.timeStamp - touch.at < 100 ? touch.velocity : 0;
-      if (touch.distance > this.height * .14 || (touch.distance > 35 && velocity > .65)) this.close();
-      else this.cancel();
-    }
+    /* 详情页不接管任何触摸手势：不支持下拉关闭。
+       返回只有两条路——系统返回键/侧滑返回（走 app.js 的 hgBack → detailCard.close()
+       或 detailCard.begin() 的预测性返回预览），以及页面自己的返回逻辑。
+       之前那套「滑到顶部继续往下拉就缩小卡片退出」的手势已删除：手指在内容区滑动、
+       惯性滑到顶后还没抬手，剩余位移会被当成下拉，直接把详情页收掉。 */
 
     cleanup() {
       this.source.element.style.visibility = this.sourceVisibility || '';
@@ -322,11 +279,7 @@
     }
 
     dispose() {
-      this.stop(); this.cleanup(); this.touch = null; this.phase = 'disposed';
-      this.app.removeEventListener('touchstart', this.onTouchStart, true);
-      this.app.removeEventListener('touchmove', this.onTouchMove, true);
-      this.app.removeEventListener('touchend', this.onTouchEnd, true);
-      this.app.removeEventListener('touchcancel', this.onTouchCancel, true);
+      this.stop(); this.cleanup(); this.phase = 'disposed';
       this.app.removeEventListener('click', this.onClick, true);
     }
   }
