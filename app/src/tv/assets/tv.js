@@ -905,7 +905,9 @@ function exitToTopbar(current) {
   for (var i = 0; i < grids.length; i++) {
     if (grids[i].querySelector('.card')) { firstGrid = grids[i]; break; }
   }
-  if (firstGrid !== grid) return null;
+  /* 首页 / 我的只有一个海报区：再退一步也认。别的路由（详情相关作品、搜索结果
+     后面的分区块）不放开，否则按上会从页面中段直接窜到顶栏。 */
+  if (firstGrid !== grid && state.route !== 'home' && state.route !== 'library') return null;
 
   var cards = grid.querySelectorAll('.card');
   if (!cards.length) return null;
