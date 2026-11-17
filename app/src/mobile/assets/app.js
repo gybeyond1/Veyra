@@ -85,6 +85,8 @@ let predictiveSourceNode;
 let predictiveFrame;
 let pendingPredictiveProgress = 0;
 let detailCard;
+/* 制作方作品弹窗：托管在这里，返回键 / 点遮罩都要能关掉它 */
+let producerOverlay = null;
 const coverRequests = new Map();
 let bannerChanging = false;
 let bannerTimer;
@@ -1853,26 +1855,38 @@ function relatedCard(item) {
  * 制作方作品弹窗：先给已知的（当前剧），再按名字搜候选，逐条核对 media_id。
  * 同名制作方很多，所以数量以「已确认」为准，不吹成完整作品集。
  */
+function closeProducerPanel() {
+  if (!producerOverlay) return false;
+  producerOverlay.remove();
+  producerOverlay = null;
+  updateBackEnabled();
+  return true;
+}
+
 function openProducerPanel(name, mediaId, currentId) {
+  closeProducerPanel();
   const overlay = document.createElement('div');
   overlay.className = 'producer-overlay';
-  overlay.innerHTML = `<section class="producer-panel" role="dialog" aria-modal="true">
-    <header><h2>制作方 · ${esc(name)}</h2><button type="button" class="producer-close" data-producer-close="1">关闭</button></header>
+  /* 右上角不再留关闭键：点遮罩、按返回都能收 */
+  overlay.innerHTML = `<section class="producer-panel" role="dialog" aria-modal="true" aria-label="制作方 ${esc(name)}">
+    <header><h2>制作方 · ${esc(name)}</h2></header>
     <p class="producer-status">正在检索作品…</p>
     <div class="producer-list"></div>
     <button type="button" class="producer-more" hidden>加载更多</button></section>`;
   document.body.appendChild(overlay);
+  producerOverlay = overlay;
+  updateBackEnabled();
   const list = overlay.querySelector('.producer-list');
   const status = overlay.querySelector('.producer-status');
   const more = overlay.querySelector('.producer-more');
   let page = 1, hasMore = true, busy = false;
-  const close = () => { overlay.remove(); };
   overlay.addEventListener('click', event => {
-    if (event.target === overlay || event.target.closest('[data-producer-close]')) { close(); return; }
+    /* 点面板以外的地方（也就是那层遮罩）自己收回 */
+    if (event.target === overlay) { closeProducerPanel(); return; }
     const card = event.target.closest('[data-producer-id]');
     if (card && card.dataset.producerId && card.dataset.producerId !== currentId) {
-      close();
       goDetail(card.dataset.producerId, card);
+      closeProducerPanel();
     }
   });
   const load = async () => {
@@ -1998,7 +2012,7 @@ function restoreScreen(snapshot) {
 
 function updateBackEnabled() {
   const modalOpen = [unlockOverlay, authOverlay, confirmOverlay, updateOverlay, downloadOverlay].some(overlay => !overlay.hidden);
-  window.AndroidHost?.setBackEnabled(modalOpen || !isRootColumn());
+  window.AndroidHost?.setBackEnabled(modalOpen || Boolean(producerOverlay) || !isRootColumn());
 }
 
 function setRoute(route) {
@@ -2540,6 +2554,8 @@ function returnFromDetail() {
 }
 
 window.hgBack = () => {
+  /* 制作方作品弹窗盖在详情页之上：返回先收它，不能把底下的详情一起退掉 */
+  if (producerOverlay) return closeProducerPanel();
   if (window.__veyraAppearanceBack && window.__veyraAppearanceBack()) return true;
   if (window.__veyraAccountBack && window.__veyraAccountBack()) return true;
   if (window.__veyraProxyBack && window.__veyraProxyBack()) return true;

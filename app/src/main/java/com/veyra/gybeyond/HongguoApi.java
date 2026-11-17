@@ -291,6 +291,8 @@ final class HongguoApi {
                         .put("id", id)
                         .put("title", title)
                         .put("cover", coverOf(video).isEmpty() ? coverOf(row) : coverOf(video))
+                        .put("mediaId", first(video, "media_id", "mediaId").isEmpty()
+                                ? first(row, "media_id", "mediaId") : first(video, "media_id", "mediaId"))
                         .put("season", season)
                         .put("seasonIndex", index)
                         .put("upcoming", upcoming)
@@ -428,10 +430,14 @@ final class HongguoApi {
             if (!same) continue;
             String title = credit.optString("title", row.optString("title"));
             if (title.isEmpty()) continue;
-            /* 多详情里 thumb_url 经常是空的：credit 的 cover 字段永远存在（可能是空串），
-               optString(key, 默认值) 因此永远拿不到默认值 —— 以前制作方作品全是灰块的根因。 */
-            String cover = coverOf(credit);
-            if (cover.isEmpty()) cover = coverOf(row);
+            /* 封面优先用站内搜索的那张，再退回多详情：
+               多详情给的是 p*-reading-sign.fqnovelpic.com/…~tplv-noop.heic?签名 这种
+               带时效签名的 HEIC 原图，WebView 解不了码，只能显示灰块；站内搜索给的是
+               p*-novel.byteimg.com/…~tplv-shrink:640:0.image，就是网站列表上那张 JPEG。
+               以前这里反过来（先 credit 后 row），于是「真人剧点制作方全是灰块、
+               漫剧因为 credit 没匹配上反而落到了 row 上」—— 两种题材两套结果。 */
+            String cover = coverOf(row);
+            if (cover.isEmpty()) cover = coverOf(credit);
             out.put(new JSONObject()
                     .put("id", row.optString("id"))
                     .put("title", title)
@@ -739,10 +745,10 @@ final class HongguoApi {
         if (object == null) return "";
         String[] names = {"cover", "series_cover", "cover_url", "series_cover_url",
                 "thumb_url", "horizontal_cover", "poster", "image", "cover_uri", "thumb_uri"};
+        List<String> found = new ArrayList<>();
         for (String name : names) {
-            Object raw = object.opt(name);
-            String value = rawUrl(raw);
-            if (!value.isEmpty()) return value;
+            String value = rawUrl(object.opt(name));
+            if (!value.isEmpty()) found.add(value);
         }
         /* 有的接口把封面做成 {url_list:[...]} / ["..."]，再往里兜一层 */
         for (String name : names) {
@@ -750,13 +756,40 @@ final class HongguoApi {
             if (raw instanceof JSONObject) {
                 String value = rawUrl(((JSONObject) raw).opt("url_list"));
                 if (value.isEmpty()) value = rawUrl(((JSONObject) raw).opt("uri"));
-                if (!value.isEmpty()) return value;
+                if (!value.isEmpty()) found.add(value);
             } else if (raw instanceof JSONArray) {
                 String value = rawUrl(((JSONArray) raw).opt(0));
-                if (!value.isEmpty()) return value;
+                if (!value.isEmpty()) found.add(value);
             }
         }
+        for (String value : found) {
+            String cover = normalizeCover(value);
+            /* 一张都转不成 JPEG 的 HEIC 别拿去当封面：WebView 解不了，只会留个灰块，
+               不如继续看下一个候选字段。 */
+            if (!cover.isEmpty() && !cover.contains(".heic")) return cover;
+        }
         return "";
+    }
+
+    /**
+     * 把 HEIC 原图地址换成网站列表在用的 JPEG 模板。
+     *
+     * 多详情接口给的封面是 p3-reading-sign.fqnovelpic.com/novel-pic/<hash>~tplv-noop.heic?lk3s=…
+     * &x-signature=…：带时效签名的 HEIC，既解不了码、签名过期还会 403。
+     * 同一张图在站内列表里用的是 p3-novel.byteimg.com/novel-pic/<hash>~tplv-shrink:640:0.image，
+     * 换域名 + 换模板即可拿到 JPEG（已实测 200 image/jpeg）。换不动就原样返回。
+     */
+    static String normalizeCover(String url) {
+        if (url == null || url.isEmpty()) return "";
+        java.util.regex.Matcher sign = java.util.regex.Pattern
+                .compile("^https://(p\\d+)-reading-sign\\.fqnovelpic\\.com(/.*)$")
+                .matcher(url);
+        if (!sign.matches()) return url;
+        String path = sign.group(2);
+        int cut = path.indexOf('?');
+        if (cut >= 0) path = path.substring(0, cut);
+        path = path.replaceAll("~tplv-[^/]*$", "~tplv-shrink:640:0.image");
+        return "https://" + sign.group(1) + "-novel.byteimg.com" + path;
     }
 
     /** 字段可能是字符串，也可能是 {uri/url/url_list} 或数组，统一取一个能用的 https 地址。 */

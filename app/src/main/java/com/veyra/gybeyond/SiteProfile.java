@@ -186,6 +186,17 @@ final class SiteProfile {
         }
         JSONArray hosts = object("cover").getJSONArray("allowedHosts");
         for (int i = 0; i < hosts.length(); i++) if (host.equalsIgnoreCase(hosts.getString(i))) return uri.toString();
+        /* 红果图床按分片散在 p1…p29-novel.byteimg.com 上，逐个列白名单永远漏。
+           这里再放行一类后缀（形如 -novel.byteimg.com），只认整段后缀，
+           不会把 evil-novel.byteimg.com.attacker.tld 放进来。 */
+        JSONArray suffixes = object("cover").optJSONArray("allowedSuffixes");
+        String lower = host.toLowerCase(java.util.Locale.ROOT);
+        for (int i = 0; suffixes != null && i < suffixes.length(); i++) {
+            String suffix = suffixes.optString(i, "").toLowerCase(java.util.Locale.ROOT);
+            if (suffix.length() > 1 && lower.endsWith(suffix) && lower.length() > suffix.length()) {
+                return uri.toString();
+            }
+        }
         throw new IllegalArgumentException("无效封面域名");
     }
     boolean patchHeader(byte[] data) throws Exception {

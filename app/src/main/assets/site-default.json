@@ -137,6 +137,10 @@
    "p6-novel-sign.byteimg.com",
    "p9-novel-sign.byteimg.com"
   ],
+  "allowedSuffixes": [
+   "-novel.byteimg.com",
+   "-novel-sign.byteimg.com"
+  ],
   "hostRewrites": {},
   "mode": "aes-cbc",
   "transformation": "AES/CBC/NoPadding",
