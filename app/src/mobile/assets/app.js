@@ -64,6 +64,21 @@ contentReady = api('content-status').then(status => {
   state.privateUnlocked = Boolean(status.unlocked);
   // 启动即拉取黄果网络通道（避免重启后 state.proxyMode 未初始化导致下载误判手机直连）
   try { api('get-proxy-mode').then(v => { state.proxyMode = Number(v) || 3; }).catch(() => {}); } catch (ignore) {}
+  // 私密模式还要知道当前选的是哪个内容源：黄果走原生四级分类，其余源按自己的分类来
+  if (privateMode()) {
+    try {
+      api('private-site').then(value => {
+        if (!value || !value.id) return;
+        privateSite = { id: value.id, name: value.name || value.id };
+        if (!siteIsHuangguo()) {
+          /* 分类页可能在源信息回来之前就已经按黄果画好了：补一次重绘 */
+          loadSiteCats().then(() => {
+            if (state.route === 'category') renderCategory(state.compactHeld);
+          }).catch(() => {});
+        }
+      }).catch(() => {});
+    } catch (ignore) {}
+  }
   document.title = 'Veyra';
   if (!privateMode()) {
     categoryIds.adult = ['short']; categoryIds.ai = ['comic'];
@@ -89,6 +104,13 @@ let pendingPredictiveProgress = 0;
 let detailCard;
 /* 制作方作品弹窗：托管在这里，返回键 / 点遮罩都要能关掉它 */
 let producerOverlay = null;
+/* 私密模式的内容源：huangguo 之外是剧果 / 帝果 / 黄豆 / 黄果 AI / 黄果旧版，
+   以及后端下发的接口型源。切换后原生会立刻重绑仓库，这里只需清前端缓存重拉。 */
+let privateSite = { id: 'huangguo', name: '黄果' };
+let siteCats = [];   // 非黄果源自己的分类（由该源的 tags 下发，id 直接当 category 用）
+const siteIsHuangguo = () => privateSite.id === 'huangguo';
+const siteDisplayName = () => (privateMode() ? (siteIsHuangguo() ? '黄果' : privateSite.name || privateSite.id) : '红果');
+const plainSite = () => privateMode() && !siteIsHuangguo();
 const coverRequests = new Map();
 let bannerChanging = false;
 let bannerTimer;
@@ -792,8 +814,14 @@ function categoryId() { return categoryIds[state.tab][state.sub[state.tab]]; }
 function compactMarkup() {
   if (!privateMode()) return '';
   const adult = state.tab === 'adult';
-  const tabs = privateMode() ? (adult ? ['成人短剧', '成人漫剧'] : ['AI换脸', 'AI魔改']) : [adult ? '短剧' : '漫剧'];
-  return `<strong>${privateMode() ? (adult ? '成人剧场' : 'AI专区') : (adult ? '短剧' : '漫剧')}</strong><div class="compact-tabs" role="tablist">${tabs.map((name, index) => `<button type="button" role="tab" aria-selected="${index === state.sub[state.tab]}" data-sub="${index}" class="${index === state.sub[state.tab] ? 'selected' : ''}">${name}</button>`).join('')}</div>`;
+  /* 剧果 / 帝果这类接口型源没有黄果那套「成人短剧/成人漫剧」分级，
+     收缩条只报源名 + 当前分类，避免上面顶着一排点不动的假页签。 */
+  if (plainSite()) {
+    const name = siteCats[state.sub[state.tab]]?.name || '全部';
+    return `<strong>${esc(siteDisplayName())}</strong><span class="compact-site-cat">${esc(name)}</span>`;
+  }
+  const tabs = adult ? ['成人短剧', '成人漫剧'] : ['AI换脸', 'AI魔改'];
+  return `<strong>${adult ? '成人剧场' : 'AI专区'}</strong><div class="compact-tabs" role="tablist">${tabs.map((name, index) => `<button type="button" role="tab" aria-selected="${index === state.sub[state.tab]}" data-sub="${index}" class="${index === state.sub[state.tab] ? 'selected' : ''}">${name}</button>`).join('')}</div>`;
 }
 function updateCompact() {
   const eligible = privateMode() && state.route === 'category';
@@ -810,18 +838,28 @@ scroll.addEventListener('scroll', updateCompact, { passive: true });
 function renderCategory(keepCompact = false) {
   categoryObserver?.disconnect();
   const adult = state.tab === 'adult';
-  const tabs = privateMode() ? (adult ? ['成人短剧', '成人漫剧'] : ['AI换脸', 'AI魔改']) : [adult ? '短剧' : '漫剧'];
+  const plain = plainSite();
+  const tabs = plain
+    ? (siteCats.length ? siteCats.map(row => row.name) : ['全部'])
+    : (privateMode() ? (adult ? ['成人短剧', '成人漫剧'] : ['AI换脸', 'AI魔改']) : [adult ? '短剧' : '漫剧']);
+  if (state.sub[state.tab] >= tabs.length) state.sub[state.tab] = 0;
   const items = asArray(state.category?.items);
   const lead = items[0] || null;
   const slides = privateMode() ? [] : items.slice(0, 5);
   const banner = Math.min(state.categoryBanner, Math.max(0, slides.length - 1));
   state.categoryBanner = banner;
   const spotlight = !privateMode() && slides.length ? `<div class="hero category-spotlight category-carousel">${categorySlide(slides[banner], banner, slides.length)}</div><div class="hero-dots">${slides.map((_, index) => `<i class="${index === banner ? 'active' : ''}" data-slide="${index}"></i>`).join('')}</div>` : lead ? `<div class="category-spotlight"><img data-cover="${esc(lead.cover)}" alt=""><div class="category-spotlight-copy"><h2>${esc(lead.title)}</h2><button type="button" data-open-id="${esc(lead.id)}">查看作品 ${icon('arrow')}</button></div></div>` : '';
-  const switcher = privateMode() ? `<div class="segmented" role="tablist">${tabs.map((name, index) => `<button type="button" role="tab" data-sub="${index}" aria-selected="${index === state.sub[state.tab]}" class="${index === state.sub[state.tab] ? 'selected' : ''}">${name}</button>`).join('')}</div>` : '';
-  content.innerHTML = `<div class="category-page"><div class="category-head"><h1>${privateMode() ? (adult ? '成人剧场' : 'AI专区') : (adult ? '短剧' : '漫剧')}</h1><p>${privateMode() ? (adult ? '短剧与漫剧，走进不同的人生。' : '换脸与魔改，探索影像新可能。') : (adult ? '真人演的看了不烧心' : '探索热门漫剧。')}</p></div>
+  /* 黄果：两级页签（成人剧场/AI 专区）；其它源：分类数量不定，用横滑胶囊行，跟搜索页的类型条一致 */
+  const switcher = plain
+    ? `<div class="filter-row category-site-cats" role="tablist">${tabs.map((name, index) => `<button type="button" role="tab" data-sub="${index}" aria-selected="${index === state.sub[state.tab]}" class="${index === state.sub[state.tab] ? 'active' : ''}">${name}</button>`).join('')}</div>`
+    : privateMode() ? `<div class="segmented" role="tablist">${tabs.map((name, index) => `<button type="button" role="tab" data-sub="${index}" aria-selected="${index === state.sub[state.tab]}" class="${index === state.sub[state.tab] ? 'selected' : ''}">${name}</button>`).join('')}</div>` : '';
+  const heading = plain ? siteDisplayName() : (privateMode() ? (adult ? '成人剧场' : 'AI专区') : (adult ? '短剧' : '漫剧'));
+  const subtitle = plain ? `内容源：${siteDisplayName()}` : (privateMode() ? (adult ? '短剧与漫剧，走进不同的人生。' : '换脸与魔改，探索影像新可能。') : (adult ? '真人演的看了不烧心' : '探索热门漫剧。'));
+  const sectionTitle = plain ? (tabs[state.sub[state.tab]] || '全部') : `${tabs[state.sub[state.tab]]}作品`;
+  content.innerHTML = `<div class="category-page"><div class="category-head"><h1>${esc(heading)}</h1><p>${esc(subtitle)}</p></div>
     ${switcher}
     ${spotlight}
-    <section class="category-section"><div class="section-heading"><h2>${tabs[state.sub[state.tab]]}作品</h2><span class="category-count">已显示 ${items.length} 部</span></div>
+    <section class="category-section"><div class="section-heading"><h2>${esc(sectionTitle)}</h2><span class="category-count">已显示 ${items.length} 部</span></div>
     <div class="search-grid category-grid">${items.map(itemCard).join('')}</div><div class="category-footer">${categoryFooter()}</div></section></div>`;
   compact.innerHTML = compactMarkup();
   scroll.scrollTop = keepCompact ? 150 : 0;
@@ -1353,6 +1391,7 @@ function renderSettings() {
     ${window.renderAppearance ? window.renderAppearance() : ''}
     <section><button type="button" class="settings-link" data-account-management="1"><span><strong>账号管理</strong><small>${state.account.loggedIn ? esc(state.account.username) : '登录或注册账号'}</small></span>${icon('arrow')}</button></section>
     <section><button type="button" class="settings-link" data-proxy-open><span><strong>黄果网络通道</strong><small data-proxy-summary>${esc(proxySummaryText())}</small></span>${icon('arrow')}</button></section>
+    ${privateMode() ? `<section><button type="button" class="settings-link" data-source-open><span><strong>内容源</strong><small>${esc(siteDisplayName())}</small></span>${icon('arrow')}</button></section>` : ''}
     <section><button type="button" class="settings-link" data-about-open><span><strong>关于 Veyra</strong><small>项目地址 · GPL-3.0 开源</small></span>${icon('arrow')}</button></section></div>`;
   if (window.bindAppearance) window.bindAppearance();
   api('hot-update-status').then(window.hgHotUpdateStatus).catch(() => {});
@@ -1507,8 +1546,9 @@ var proxyPop = null;
 function buildProxyPopHtml() {
   return `<div class="appearance-pop account-pop proxy-pop" role="dialog" aria-modal="true" aria-labelledby="proxy-title">
     <div class="appearance-head"><h2 id="proxy-title">黄果网络通道</h2><button type="button" class="appearance-close" data-proxy-close aria-label="关闭">✕</button></div>
-    <p class="appearance-note">仅黄果/私密模式生效，红果永远直连不受影响；选择后立即生效，无需重启。</p>
+    <p class="appearance-note">仅私密模式生效（黄果 / 剧果 / 帝果等共用这套通道），红果永远直连不受影响；选择后立即生效，无需重启。</p>
     <div class="settings-storage">${privateMode() ? '<button type="button" data-return-public>返回红果（公开模式）</button>' : '<button type="button" data-enter-private>进入私密模式</button>'}</div>
+    ${privateMode() ? `<button type="button" class="settings-link proxy-source-link" data-source-open><span><strong>内容源</strong><small>${esc(siteDisplayName())}</small></span>${icon('arrow')}</button>` : ''}
     <div class="proxy-test-row">
       <input id="proxy-address" class="settings-input" type="text" placeholder="代理地址 host:port，如 192.168.31.108:7893" value="${esc(state.proxy || '')}" autocomplete="off" aria-label="黄果代理地址">
       <button type="button" id="proxy-test" class="proxy-test-btn">检测</button>
@@ -1578,6 +1618,108 @@ function closeProxyPop() {
 window.__veyraProxyBack = () => { if (proxyPop && !proxyPop.hidden) { closeProxyPop(); return true; } return false; };
 window.__veyraProxyOpen = () => !!(proxyPop && !proxyPop.hidden);
 
+/* ---------------- 私密模式：内容源切换 ----------------
+   原生 private-sites 会把「端侧能自己解析的源」排在前面，再补后端下发的接口型源。
+   黄果本身不在该清单里（它走 SiteProfile / 原生仓库），这里补在第一行。 */
+async function loadSiteCats() {
+  if (!plainSite()) { siteCats = []; resetCategoryIds(); return; }
+  try {
+    const data = await api('tags');
+    siteCats = asArray(data?.items)
+      .map(row => ({ id: String(row.slug || row.id || ''), name: String(row.name || row.slug || '') }))
+      .filter(row => row.id && row.name);
+  } catch { siteCats = []; }
+  resetCategoryIds();
+}
+function resetCategoryIds() {
+  if (!privateMode()) { categoryIds.adult = ['short']; categoryIds.ai = ['comic']; return; }
+  if (siteIsHuangguo()) { categoryIds.adult = ['ai-duanju', 'ai-manju']; categoryIds.ai = ['ai-huanlian', 'ai-mogai']; return; }
+  const ids = siteCats.length ? siteCats.map(row => row.id) : [''];
+  categoryIds.adult = ids;
+  categoryIds.ai = ids;
+}
+function sourceRowsHtml(sources) {
+  const rows = [{ id: 'huangguo', name: '黄果', description: '官方源 · 视频 / AI / 旧版' }];
+  for (const row of sources || []) {
+    if (!row || !row.id || row.id === 'huangguo') continue;
+    rows.push({ id: row.id, name: row.name || row.id, description: row.description || '' });
+  }
+  return rows.map(row => {
+    const active = row.id === privateSite.id;
+    return `<button type="button" class="source-row${active ? ' is-active' : ''}" data-pick-site="${esc(row.id)}" data-site-name="${esc(row.name)}">
+      <span><strong>${esc(row.name)}</strong><small>${esc(row.description)}</small></span>
+      <i class="source-check" aria-hidden="true">${active ? '✓' : ''}</i></button>`;
+  }).join('');
+}
+var sourcePop = null;
+function buildSourcePopHtml() {
+  return `<div class="appearance-pop account-pop source-pop" role="dialog" aria-modal="true" aria-labelledby="source-title">
+    <div class="appearance-head"><h2 id="source-title">内容源</h2><button type="button" class="appearance-close" data-source-close aria-label="关闭">✕</button></div>
+    <p class="appearance-note">仅私密模式生效；切换后首页、分类、搜索、详情立刻改用新源，无需重启。</p>
+    <div class="source-list" id="source-list">${sourceRowsHtml([])}</div>
+  </div>`;
+}
+function ensureSourcePop() {
+  if (sourcePop && document.body.contains(sourcePop)) return sourcePop;
+  sourcePop = document.createElement('div');
+  sourcePop.className = 'appearance-scrim';
+  sourcePop.hidden = true;
+  sourcePop.addEventListener('click', event => {
+    if (event.target === sourcePop || event.target.closest('[data-source-close]')) closeSourcePop();
+  });
+  document.body.appendChild(sourcePop);
+  return sourcePop;
+}
+function openSourcePop() {
+  if (!privateMode()) { toast('进入私密模式后才能切换内容源', true); return; }
+  closeProxyPop();
+  ensureSourcePop();
+  sourcePop.innerHTML = buildSourcePopHtml();
+  sourcePop.hidden = false;
+  document.body.classList.add('appearance-open');
+  api('private-sites').then(data => {
+    const list = document.getElementById('source-list');
+    if (list) list.innerHTML = sourceRowsHtml(asArray(data?.sources));
+  }).catch(() => {
+    const list = document.getElementById('source-list');
+    if (list) list.innerHTML = sourceRowsHtml([]) + '<p class="appearance-note">暂时拉不到可选源清单，仅能使用黄果。</p>';
+  });
+}
+function closeSourcePop() {
+  if (!sourcePop || sourcePop.hidden) return;
+  sourcePop.hidden = true;
+  document.body.classList.remove('appearance-open');
+}
+window.__veyraSourceBack = () => { if (sourcePop && !sourcePop.hidden) { closeSourcePop(); return true; } return false; };
+window.__veyraSourceOpen = () => !!(sourcePop && !sourcePop.hidden);
+
+let siteSwitching = false;
+async function pickPrivateSite(id, name) {
+  if (!id || siteSwitching) return;
+  if (id === privateSite.id) { closeSourcePop(); return; }
+  siteSwitching = true;
+  try {
+    const result = await api('private-site', { id, name: name || id });
+    privateSite = { id: (result && result.id) || id, name: (result && result.name) || name || id };
+    closeSourcePop();
+    // 原生已经 rebindContent + clearCache，这里把前端这一层的缓存也一并作废：
+    // 首页 / 分类 / 搜索 / 详情 / 返回快照 / 滑动页缓存，任何一处留着都会先闪一下上一个源的内容。
+    state.home = null; state.category = null; state.categoryItems = []; state.categoryBanner = 0;
+    state.search = null; state.detail = null; state.sourceItem = null; state.tags = null; state.library = null;
+    state.sub = { adult: 0, ai: 0 }; state.epGroup = 0;
+    for (const key of Object.keys(screenSnapshots)) delete screenSnapshots[key];
+    try { swipePageCache.clear(); } catch (ignore) {}
+    siteCats = [];
+    await loadSiteCats();
+    toast(`已切换到 ${siteDisplayName()}`);
+    goHome();
+  } catch (error) {
+    toast(error.message || '切换内容源失败', true);
+  } finally {
+    siteSwitching = false;
+  }
+}
+
 /* 关于页里的设备一行：排查「电视上却是手机界面」这类问题时，
  * 先要确认页面到底把自己认成了什么。这里把判定依据（原生报的形态、机型、
  * 触摸点数、WebView 版本、视口尺寸、资源包版本）都摊开写出来，
@@ -1633,7 +1775,10 @@ window.__veyraAboutOpen = () => !!(aboutPop && !aboutPop.hidden);
 
 
 function renderSearch() {
-  const filters = privateMode() ? [['all', '全部'], ['ai-duanju', '成人短剧'], ['ai-manju', '成人漫剧'], ['ai-huanlian', 'AI换脸'], ['ai-mogai', 'AI魔改']] : [['all', '全部'], ['short', '短剧'], ['comic', '漫剧']];
+  /* 接口型源的分类是它自己下发的名字，过滤条跟着源走；黄果/红果保持原有固定几档 */
+  const filters = plainSite()
+    ? [['all', '全部'], ...siteCats.map(row => [row.name, row.name])]
+    : privateMode() ? [['all', '全部'], ['ai-duanju', '成人短剧'], ['ai-manju', '成人漫剧'], ['ai-huanlian', 'AI换脸'], ['ai-mogai', 'AI魔改']] : [['all', '全部'], ['short', '短剧'], ['comic', '漫剧']];
   const all = asArray(state.search?.items);
   const items = state.filter === 'all' ? all : all.filter(item => {
     if (item.category) return item.category === state.filter;
@@ -2083,7 +2228,7 @@ window.hgPredictiveBackStart = fromRight => {
   clearPredictivePreview();
   /* 制作方弹窗盖在详情页上：手势不该带动下面页面，松手只收弹窗 */
   if (producerOverlay) return false;
-  if (!downloadOverlay.hidden || (window.__veyraAppearanceOpen && window.__veyraAppearanceOpen()) || (window.__veyraAccountOpen && window.__veyraAccountOpen()) || (window.__veyraProxyOpen && window.__veyraProxyOpen()) || (window.__veyraAboutOpen && window.__veyraAboutOpen())) return false;
+  if (!downloadOverlay.hidden || (window.__veyraAppearanceOpen && window.__veyraAppearanceOpen()) || (window.__veyraAccountOpen && window.__veyraAccountOpen()) || (window.__veyraProxyOpen && window.__veyraProxyOpen()) || (window.__veyraSourceOpen && window.__veyraSourceOpen()) || (window.__veyraAboutOpen && window.__veyraAboutOpen())) return false;
   if (state.route === 'detail' && detailCard && authOverlay.hidden && confirmOverlay.hidden && updateOverlay.hidden && unlockOverlay.hidden) {
     detailCard.fromRight = fromRight;
     return detailCard.begin();
@@ -2163,6 +2308,7 @@ window.hgPredictiveBackCommit = () => {
   if (window.__veyraAppearanceBack && window.__veyraAppearanceBack()) return true;
   if (window.__veyraAccountBack && window.__veyraAccountBack()) return true;
   if (window.__veyraProxyBack && window.__veyraProxyBack()) return true;
+  if (window.__veyraSourceBack && window.__veyraSourceBack()) return true;
   if (window.__veyraAboutBack && window.__veyraAboutBack()) return true;
   /* 详情里跳进来的另一部剧：直接退回上一部，别走 close 动画缩到列表卡片上 */
   if (state.route === 'detail' && state.detailStack.length) { clearPredictivePreview(); restoreDetailFromStack(); return true; }
@@ -2612,6 +2758,7 @@ window.hgBack = () => {
   if (window.__veyraAppearanceBack && window.__veyraAppearanceBack()) return true;
   if (window.__veyraAccountBack && window.__veyraAccountBack()) return true;
   if (window.__veyraProxyBack && window.__veyraProxyBack()) return true;
+  if (window.__veyraSourceBack && window.__veyraSourceBack()) return true;
   if (window.__veyraAboutBack && window.__veyraAboutBack()) return true;
   if (!downloadOverlay.hidden) { hideDownloadSheet(); return true; }
   if (!unlockOverlay.hidden) { closeUnlock(); return true; }
@@ -3489,6 +3636,9 @@ document.addEventListener('click', async event => {
   if (event.target.closest('[data-apply-resources]')) { api('apply-hot-update').catch(error => toast(error.message, true)); return; }
   if (event.target.closest('[data-account-management]')) { openAccountPop(); return; }
   if (event.target.closest('[data-proxy-open]')) { openProxyPop(); return; }
+  if (event.target.closest('[data-source-open]')) { openSourcePop(); return; }
+  const siteRow = event.target.closest('[data-pick-site]');
+  if (siteRow) { pickPrivateSite(siteRow.dataset.pickSite, siteRow.dataset.siteName); return; }
   if (event.target.closest('[data-about-open]')) { openAboutPop(); return; }
   const openUrl = event.target.closest('[data-open-url]');
   if (openUrl) {
