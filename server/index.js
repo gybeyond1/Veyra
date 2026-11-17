@@ -745,7 +745,7 @@ function kindOf(type, body) {
 const MEDIA_PATH_RE = /\.(m3u8|ts|mp4|m4s|flv|key|jpg|jpeg|png|webp|gif|avif)(\?|#|$)|(?:hls|vod|live|media|segment|index)\//i;
 // isPrivateHost 的实现搬到 ssrf-guard.js：原来的前缀表漏了 192.168/16、CGNAT 和整个 IPv6，
 // 而且只判断字符串，域名解析到 127.0.0.1 照样能过。
-app.get('/api/huangguo-proxy', async (req, res) => {
+const huangguoProxy = async (req, res) => {
   const target = String(req.query.url || '');
   console.log('[proxy]', new Date().toISOString(), 'REQ', (req.headers['user-agent'] || '').slice(0, 24), target.slice(0, 120));
   let parsed;
@@ -869,7 +869,10 @@ app.get('/api/huangguo-proxy', async (req, res) => {
     });
   };
   attempt(target, false);
-});
+};
+// GET 兼容旧客户端；POST 用于 2026-11 起的播放取址接口（/episodes/:ep/playback）
+app.get('/api/huangguo-proxy', huangguoProxy);
+app.post('/api/huangguo-proxy', huangguoProxy);
 
 // 私密模式多源网关（剧果 / 野果 / 帝果 / 禁果短剧 / 黄果视频 / 黄果 AI / 黄果旧版）。
 // 解析集中在这里，四端只传「哪个源、哪一页」，播放走 /api/sources/stream 令牌地址。
