@@ -1856,11 +1856,11 @@ function relatedCard(item) {
  * 同名制作方很多，所以数量以「已确认」为准，不吹成完整作品集。
  */
 function closeProducerPanel() {
-  if (!producerOverlay) return false;
-  producerOverlay.remove();
+  const overlay = producerOverlay;
   producerOverlay = null;
+  if (overlay && overlay.isConnected) overlay.remove();
   updateBackEnabled();
-  return true;
+  return Boolean(overlay);
 }
 
 function openProducerPanel(name, mediaId, currentId) {
@@ -1885,8 +1885,9 @@ function openProducerPanel(name, mediaId, currentId) {
     if (event.target === overlay) { closeProducerPanel(); return; }
     const card = event.target.closest('[data-producer-id]');
     if (card && card.dataset.producerId && card.dataset.producerId !== currentId) {
-      goDetail(card.dataset.producerId, card);
+      const nextId = card.dataset.producerId;
       closeProducerPanel();
+      goDetail(nextId);
     }
   });
   const load = async () => {
@@ -2078,6 +2079,8 @@ function clearPredictivePreview() {
 
 window.hgPredictiveBackStart = fromRight => {
   clearPredictivePreview();
+  /* 制作方弹窗盖在详情页上：手势不该带动下面页面，松手只收弹窗 */
+  if (producerOverlay) return false;
   if (!downloadOverlay.hidden || (window.__veyraAppearanceOpen && window.__veyraAppearanceOpen()) || (window.__veyraAccountOpen && window.__veyraAccountOpen()) || (window.__veyraProxyOpen && window.__veyraProxyOpen()) || (window.__veyraAboutOpen && window.__veyraAboutOpen())) return false;
   if (state.route === 'detail' && detailCard && authOverlay.hidden && confirmOverlay.hidden && updateOverlay.hidden && unlockOverlay.hidden) {
     detailCard.fromRight = fromRight;
@@ -2151,6 +2154,9 @@ window.hgPredictiveBackCancel = () => {
 };
 
 window.hgPredictiveBackCommit = () => {
+  /* 宿主在 targetSdk 36 上走的就是这个函数（不是 hgBack）：弹窗必须在这里先被拦下，
+     否则 detailCard.close() 会把底下的详情页一起退掉，而弹窗还留在屏幕上。 */
+  if (producerOverlay) return closeProducerPanel();
   if (!downloadOverlay.hidden) { hideDownloadSheet(); return true; }
   if (window.__veyraAppearanceBack && window.__veyraAppearanceBack()) return true;
   if (window.__veyraAccountBack && window.__veyraAccountBack()) return true;
