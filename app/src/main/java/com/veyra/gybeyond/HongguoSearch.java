@@ -8,12 +8,17 @@ import okhttp3.Response;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.Future;
 
 /** Public website search covers both supported content kinds in one request. */
 final class HongguoSearch {
+    private static final int SITE_MAX_PAGES = 10;
+    private static final int APP_MAX_PAGES = 4;
     private static final java.util.concurrent.ExecutorService POOL = java.util.concurrent.Executors.newFixedThreadPool(6);
     private final OkHttpClient http;
     private final HongguoAppApi appApi;
@@ -40,77 +45,106 @@ final class HongguoSearch {
     JSONObject search(String keyword) throws Exception { return search(keyword, false); }
 
     /**
-     * 搜索主路径：走 App 的 search/tab 接口，一次请求拿到全量结果（含第二三四季全集版）。
+     * 搜索主路径：站点接口翻页 + App 接口补充，合并去重。
      *
-     * 以前是「13 次联想 + 10 次第N季变体 + 每个结果补详情」，三轮串行等，慢在请求数上；
-     * App 接口本身就把这些工作做完了。官网接口留作兜底，只在 App 接口空结果时发一次。
+     * 只用 App 接口（tab_type=11 短剧）搜「聚宝仙盆」只有 5 部：那一格只放短剧，
+     * 而同名的漫剧（genre 205）全在别的 tab 里，界面上一部都看不到。
+     * 站点接口一次给短剧和漫剧，还有 totalPages 可以老实翻页，所以以它为主。
      */
     JSONObject search(String keyword, boolean sequelLookup) throws Exception {
         keyword = keyword.trim();
         if (keyword.isEmpty()) return new JSONObject().put("items", new JSONArray()).put("nextPage", JSONObject.NULL);
         if (keyword.length() > 80) throw new IllegalArgumentException("搜索词过长");
+        JSONArray merged = new JSONArray();
+        Set<String> seen = new HashSet<>();
+        Exception failure = null;
+        /* 站点接口按页给 10 条、有 totalPages，而且短剧（203）和漫剧（205）在同一个结果里；
+           App 接口只吃 tab_type=11 的短剧 tab，搜「聚宝仙盆」只回 5 部就是这么来的。
+           两个都跑，站点为主、App 补充，按 series_id 去重。 */
         try {
-            JSONObject app = searchAll(keyword);
-            JSONArray items = app.optJSONArray("items");
-            if (items != null && items.length() > 0) return app;
+            collectSite(keyword, merged, seen);
         } catch (Exception error) {
-            android.util.Log.w("Veyra", "App 搜索失败，改用官网：" + error);
+            failure = error;
+            android.util.Log.w("Veyra", "站点搜索失败：" + error);
         }
-        return apiSearch(keyword, sequelLookup);
+        try {
+            collectApp(keyword, merged, seen);
+        } catch (Exception error) {
+            if (failure == null) failure = error;
+            android.util.Log.w("Veyra", "App 搜索失败：" + error);
+        }
+        if (merged.length() == 0 && failure != null) throw failure;
+        return new JSONObject().put("items", merged).put("nextPage", JSONObject.NULL);
+    }
+
+    /** 站点搜索一页；totalPages / hasMore 都在响应里，可以老实翻页。 */
+    private JSONObject sitePage(String query, int page) throws Exception {
+        Request request = new Request.Builder()
+                .url("https://hongguoduanju.com/api/search/result?query=" + Signer.Companion.encode(query)
+                        + "&page=" + page + "&page_size=20")
+                .header("User-Agent", "Mozilla/5.0")
+                .header("Referer", "https://hongguoduanju.com/")
+                .header("Accept", "application/json").build();
+        try (Response response = http.newCall(request).execute()) {
+            if (!response.isSuccessful() || response.body() == null) throw new IOException("搜索暂时无法连接，请重试");
+            return new JSONObject(response.body().string());
+        }
     }
 
     /**
-     * 翻页取全量。
-     *
-     * 以前只发第 1 页（count=20），所以「聚宝仙盆」这种有 16 季 + 一堆同名前缀剧的词
-     * 只能回来前 20 条，后面的季永远看不到。这里按 offset 一页页往上翻，直到接口说
-     * 没有下一页或者这一页没带来新条目（防止服务端忽略 offset 造成死循环）。
+     * 站点搜索：先拿第 1 页读出 totalPages，再把剩下几页并行拉回来。
+     * 结果是模糊匹配（搜「聚宝仙盆」会掺进「持械入宋」这类），
+     * 所以页数上限按「够把标题匹配的都翻出来」定，不追到第 21 页。
      */
-    private JSONObject searchAll(String keyword) throws Exception {
-        final int MAX_PAGES = 6;
-        JSONArray all = new JSONArray();
-        Set<String> seen = new HashSet<>();
-        Exception failure = null;
-        for (int page = 1; page <= MAX_PAGES; page++) {
-            JSONObject one;
-            try {
-                one = HongguoApi.search(keyword, page);
-            } catch (Exception error) {
-                failure = error;
-                break;
+    private void collectSite(String query, JSONArray out, Set<String> seen) throws Exception {
+        JSONObject first = sitePage(query, 1);
+        int pages = Math.min(Math.max(1, first.optInt("totalPages", 1)), SITE_MAX_PAGES);
+        List<JSONObject> responses = new ArrayList<>();
+        responses.add(first);
+        if (pages > 1) {
+            List<Future<JSONObject>> futures = new ArrayList<>();
+            for (int page = 2; page <= pages; page++) {
+                final int target = page;
+                futures.add(POOL.submit(new java.util.concurrent.Callable<JSONObject>() {
+                    @Override public JSONObject call() throws Exception { return sitePage(query, target); }
+                }));
             }
+            for (Future<JSONObject> future : futures) {
+                try { responses.add(future.get()); } catch (Exception ignored) { }
+            }
+        }
+        for (JSONObject response : responses) {
+            try { merge(parse(response, query, false), out, seen); } catch (Exception ignored) { }
+        }
+    }
+
+    /** App 接口：只吃短剧 tab，页数少，纯补充站点漏掉的条目。 */
+    private void collectApp(String keyword, JSONArray out, Set<String> seen) throws Exception {
+        for (int page = 1; page <= APP_MAX_PAGES; page++) {
+            JSONObject one = HongguoApi.search(keyword, page);
             JSONArray rows = one.optJSONArray("items");
             int added = 0;
             for (int i = 0; rows != null && i < rows.length(); i++) {
                 JSONObject item = rows.optJSONObject(i);
                 String id = item == null ? "" : item.optString("id");
                 if (id.isEmpty() || !seen.add(id)) continue;
-                all.put(item);
+                out.put(item);
                 added++;
             }
-            /* has_more 不一定在响应里（缺了就是 false），只用它翻页会永远停在第一页。
-               改成「这一页拿满了 20 条就继续」；接口若忽略 offset 反复回同一批，
-               added == 0 会兜住，不会死循环。 */
-            int raw = Math.max(one.optInt("rawCount", 0), rows == null ? 0 : rows.length());
-            boolean more = !one.isNull("nextPage") || raw >= 20;
-            if (!more || added == 0) break;
+            /* 接口忽略 offset 时会反复回同一批，added == 0 兜住，不会空转。 */
+            if (one.optInt("rawCount", 0) <= 0 || added == 0) break;
         }
-        if (all.length() == 0 && failure != null) throw failure;
-        return new JSONObject().put("items", all).put("nextPage", JSONObject.NULL);
     }
 
-    /** 红果搜索 JSON API（hongguoduanju.com/api/search/result，网站搜索页实际接口，无签名要求）。 */
-    private JSONObject apiSearch(String query, boolean sequelLookup) throws Exception {
-        Request rq = new Request.Builder()
-                .url("https://hongguoduanju.com/api/search/result?query=" + Signer.Companion.encode(query) + "&page=1&page_size=20")
-                .header("User-Agent", "Mozilla/5.0")
-                .header("Referer", "https://hongguoduanju.com/")
-                .header("Accept", "application/json").build();
-        try (Response resp = http.newCall(rq).execute()) {
-            if (!resp.isSuccessful() || resp.body() == null) throw new IOException("搜索暂时无法连接，请重试");
-            return parse(new JSONObject(resp.body().string()), query, sequelLookup);
+    private static void merge(JSONObject page, JSONArray out, Set<String> seen) {
+        JSONArray items = page.optJSONArray("items");
+        for (int i = 0; items != null && i < items.length(); i++) {
+            JSONObject item = items.optJSONObject(i);
+            String id = item == null ? "" : item.optString("id");
+            if (!id.isEmpty() && seen.add(id)) out.put(item);
         }
     }
+
     private static final String[] CN_NUM = { "一", "二", "三", "四", "五", "六", "七", "八", "九", "十" };
 
     /** 联想接口查询集：宽词 + 主体第 + 主体季 + 各"第N季" + 冒号"：第N季"（N=1..10）。

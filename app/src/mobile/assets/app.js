@@ -2475,6 +2475,24 @@ function seriesGroups(items, query) {
     if (group) group.members.push(item);
     else groups.set(key, { key, members: [item], index });
   });
+  /* 「聚宝仙盆」这种标题正好等于搜索词本体、又没有季号的条目，通常就是同 IP 那一族的
+     第 1 季：它自己成一组只有一张卡，而「…之杂灵根才是真boss」有 16 季，两边都留着
+     就会出现「第一季一张卡、二到十六季另一块」。并进入口最多、且同前缀的那一族。 */
+  const familyKey = base ? 't:' + base : '';
+  const main = familyKey ? groups.get(familyKey) : null;
+  if (main && main.members.length === 1 && !seasonNumber(main.members[0])) {
+    let target = null;
+    for (const [key, group] of groups) {
+      if (key === familyKey || key.indexOf('t:') !== 0) continue;
+      if (key.slice(2).indexOf(base) !== 0) continue;
+      if (!target || group.members.length > target.members.length) target = group;
+    }
+    if (target && target.members.length >= 2) {
+      target.members.unshift(main.members[0]);
+      target.head = main.members[0].title;
+      groups.delete(familyKey);
+    }
+  }
   for (const group of groups.values()) {
     if (group.members.length < 2 && !seasonNumber(group.members[0])) {
       entries.push({ kind: 'single', item: group.members[0], index: group.index });
@@ -2489,10 +2507,13 @@ function seriesGroups(items, query) {
       const first = seasons.find(it => !ranked.get(it));
       if (first) ranked.set(first, 1);
     }
+    /* 剩下没季号的（子系列自己那部「第 1 季」）夹在第 1 季和第 2 季之间，
+       不然它会掉到第 16 季后面去。 */
+    seasons.forEach(it => { if (!ranked.get(it)) ranked.set(it, 1.5); });
     seasons.sort((a, b) => (ranked.get(a) || 99) - (ranked.get(b) || 99));
     const lead = seasons.find(it => ranked.get(it) === 1) || seasons[0];
     entries.push({ kind: 'block', key: group.key, index: group.index,
-      title: lead?.title || '系列', cover: lead?.cover || '', seasons });
+      title: group.head || lead?.title || '系列', cover: lead?.cover || '', seasons });
   }
   entries.sort((a, b) => titleRank(a.title || a.item?.title, base) - titleRank(b.title || b.item?.title, base) || a.index - b.index);
   return entries;
@@ -2505,13 +2526,19 @@ function stripSeasonTitle(title) {
 }
 
 function seriesBlock(group) {
-  const head = esc(stripSeasonTitle(group.title));
+  const rawHead = stripSeasonTitle(group.title);
+  const head = esc(rawHead);
   /* 组内标题统一写成「第N季」：整条剧名在每一张卡上重复两行，既挤又看不出是第几季。
      同一季有 100 集版 / 341 集版时靠下面的集数区分。 */
   const lead = group.seasons.find(it => seasonNumber(it) === 1) || group.seasons[0];
   const cards = group.seasons.map((item, index) => {
-    const n = seasonNumber(item) || (item === lead ? 1 : index + 1);
-    return itemCard({ ...item, title: `第${n}季` });
+    const n = seasonNumber(item) || (item === lead ? 1 : 0);
+    if (n) return itemCard({ ...item, title: `第${n}季` });
+    /* 组里有两条都没标季号（主剧 + 子系列自己的第 1 季）时，第二条不该再叫「第1季」，
+       用去掉组头之后的剩余部分当名字。 */
+    const text = String(item.title || '');
+    const rest = text.indexOf(rawHead) === 0 ? text.slice(rawHead.length).replace(/^[\s·:：,，\-—_]+/, '') : text;
+    return itemCard({ ...item, title: rest || `第${index + 1}季` });
   }).join('');
   return `<section class="series-block">
     <div class="series-head"><span class="poster loading small"><img data-cover="${esc(group.cover || '')}" alt=""></span>
