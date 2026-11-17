@@ -55,7 +55,9 @@ const state = {
   listing: null, tags: null, tagsReturn: null, listingReturn: null, settingsReturn: null,
   libraryTab: 'history', libraryQuery: '', accountReturn: null, account: { loggedIn: false },
   sourceGroup: '', sourceQueue: [], previous: null, compactHeld: false,
-  epGroup: 0, epPickerOpen: false, detailProducer: null
+  epGroup: 0, epPickerOpen: false, detailProducer: null,
+  /* 详情页里再点进另一部剧：A→B 时把 A 压栈，返回逐级退回，不回到列表 */
+  detailStack: []
 };
 contentReady = api('content-status').then(status => {
   contentSource = status.source || 'hongguo';
@@ -1887,7 +1889,7 @@ function openProducerPanel(name, mediaId, currentId) {
     if (card && card.dataset.producerId && card.dataset.producerId !== currentId) {
       const nextId = card.dataset.producerId;
       closeProducerPanel();
-      goDetail(nextId);
+      goDetail(nextId, null, { id: nextId, title: card.dataset.producerTitle || '', cover: card.dataset.producerCover || '' });
     }
   });
   const load = async () => {
@@ -1933,7 +1935,7 @@ function openProducerPanel(name, mediaId, currentId) {
 }
 
 function producerItemHtml(item) {
-  return `<button class="producer-item" type="button" data-producer-id="${esc(item.id)}">
+  return `<button class="producer-item" type="button" data-producer-id="${esc(item.id)}" data-producer-title="${esc(item.title || '')}" data-producer-cover="${esc(item.cover || '')}">
     <span class="producer-poster loading"><img data-cover="${esc(item.cover || '')}" alt=""></span>
     <span class="producer-copy"><strong>${esc(item.title || '')}</strong><em>${esc(item.episodeLabel || '查看详情')}</em></span></button>`;
 }
@@ -2020,7 +2022,7 @@ function setRoute(route) {
   stopBannerAuto();
   resumeBingeIfReturned(route);   // 详情返回首页 → 自动回到刷剧模式同一部剧（须在 state.route 更新前判断）
   if (route !== 'downloads') stopDownloadsTimer();
-  if (state.route === 'detail' && route !== 'detail') { detailCard?.dispose(); detailCard = null; }
+  if (state.route === 'detail' && route !== 'detail') { detailCard?.dispose(); detailCard = null; state.detailStack.length = 0; }
   const libraryArea = ['library', 'settings', 'account-management'].includes(route);
   if (state.route === 'library' && route !== 'library') searchInput.value = '';
   state.route = route;
@@ -2162,6 +2164,8 @@ window.hgPredictiveBackCommit = () => {
   if (window.__veyraAccountBack && window.__veyraAccountBack()) return true;
   if (window.__veyraProxyBack && window.__veyraProxyBack()) return true;
   if (window.__veyraAboutBack && window.__veyraAboutBack()) return true;
+  /* 详情里跳进来的另一部剧：直接退回上一部，别走 close 动画缩到列表卡片上 */
+  if (state.route === 'detail' && state.detailStack.length) { clearPredictivePreview(); restoreDetailFromStack(); return true; }
   if (state.route === 'detail' && detailCard && downloadOverlay.hidden && authOverlay.hidden && confirmOverlay.hidden && updateOverlay.hidden && unlockOverlay.hidden) {
     detailCard.close(); return true;
   }
@@ -2480,7 +2484,7 @@ function sourceItem(id) {
   const candidates = [state.listing?.items, state.home?.featured, state.home?.homepageRecommend, state.home?.homepageNewest, state.home?.recommend?.items, state.home?.newest?.items, state.category?.items, state.search?.items, state.library?.bookmarks, state.library?.progress].flatMap(asArray);
   return candidates.find(item => item.id === id) || { id, title: `剧集 ${id}` };
 }
-async function goDetail(id, trigger) {
+async function goDetail(id, trigger, seed) {
   if (state.route === 'detail' && state.sourceItem?.id === id) {
     // Retry in place; preserve the original source card and return destination.
     state.detailLoading = true; renderDetail();
@@ -2490,18 +2494,34 @@ async function goDetail(id, trigger) {
     return;
   }
   const token = ++routeToken;
-  const entrySource = bannerChanging && trigger?.closest('.hero') ? null : HGCardTransition.capture(trigger);
+  /* 从详情 A 点进详情 B（制作方作品、相关作品）：把 A 整个压栈，返回键原样退回 A。
+     这里绝不能碰 state.previous —— 它记的是「最初从哪个列表页点进来的」，一旦被覆盖成
+     route:'detail'，返回就会走 detailCard.close()：先缩回列表卡片、再跳回详情，
+     而且转场对象停在 closed 状态后，它的捕获器会把整页的点击全部吞掉（按钮按下没反应）。 */
+  const fromDetail = state.route === 'detail';
+  if (fromDetail) {
+    state.detailStack.push({
+      detail: state.detail, sourceItem: state.sourceItem, sourceGroup: state.sourceGroup,
+      sourceQueue: [...state.sourceQueue], scrollTop: scroll.scrollTop, bookmarked: state.bookmarked
+    });
+    /* 转场层只服务「列表 → 详情」那一次，详情之间互跳时它已无意义 */
+    detailCard?.dispose();
+    detailCard = null;
+  }
+  const entrySource = fromDetail || (bannerChanging && trigger?.closest('.hero')) ? null : HGCardTransition.capture(trigger);
   rememberScreen();
-  state.previous = {
-    route: state.route, tab: state.tab, sub: state.sub[state.tab], query: state.query,
-    filter: state.filter, scrollTop: scroll.scrollTop, compactHeld: state.compactHeld,
-    horizontalScroll: [...content.querySelectorAll('.film-row,.filter-row,.home-tag-scroll')].map(row => row.scrollLeft),
-    pageNode: content.firstElementChild
-  };
+  if (!fromDetail) {
+    state.previous = {
+      route: state.route, tab: state.tab, sub: state.sub[state.tab], query: state.query,
+      filter: state.filter, scrollTop: scroll.scrollTop, compactHeld: state.compactHeld,
+      horizontalScroll: [...content.querySelectorAll('.film-row,.filter-row,.home-tag-scroll')].map(row => row.scrollLeft),
+      pageNode: content.firstElementChild
+    };
+  }
   if (state.route === 'listing' && state.listing) state.listing.refreshing = false;
   listingObserver?.disconnect();
   categoryObserver?.disconnect();
-  state.sourceItem = sourceItem(id);
+  state.sourceItem = seed || sourceItem(id);
   state.sourceGroup = state.route === 'category' ? categoryId() : state.sourceItem.category || '';
   const aiGroup = state.sourceGroup === 'ai-huanlian' || state.sourceGroup === 'ai-mogai';
   const candidates = state.route === 'category' ? asArray(state.category?.items) : state.route === 'search' ? asArray(state.search?.items) : state.route === 'listing' ? asArray(state.listing?.items) :
@@ -2530,6 +2550,33 @@ async function goDetail(id, trigger) {
   api('bookmark-state', { id }).then(saved => { if (token === routeToken) { state.bookmarked = saved; if (state.detail) renderDetail(); } }).catch(() => {});
   try { const fresh = await refreshing; if (token === routeToken) { state.detail = fresh; state.detailLoading = false; renderDetail(); } }
   catch (error) { if (!hasDetailData && token === routeToken) { state.detailLoading = false; renderError(error, 'detail'); } }
+}
+
+/* 详情栈回退：把上一部剧的内容原样放回来，不退出详情、不重新走转场 */
+function restoreDetailFromStack() {
+  const snapshot = state.detailStack.pop();
+  if (!snapshot) return false;
+  ++routeToken;   // 让还在飞的 detail 请求作废，避免 B 的数据盖回 A
+  state.detail = snapshot.detail;
+  state.detailLoading = false;
+  state.sourceItem = snapshot.sourceItem;
+  state.sourceGroup = snapshot.sourceGroup;
+  state.sourceQueue = snapshot.sourceQueue || [];
+  state.bookmarked = Boolean(snapshot.bookmarked);
+  state.epGroup = 0; state.epPickerOpen = false; state.detailProducer = null;
+  renderDetail();
+  scroll.scrollTop = snapshot.scrollTop || 0;
+  updateCompact();
+  /* 压栈时那部剧还没加载完（用户点得快）：先按已有的画出来，再补一次完整数据 */
+  if (!asArray(state.detail?.episodes).length) {
+    const token = routeToken;
+    api('detail', { id: state.detail?.id }).then(fresh => {
+      if (token !== routeToken || state.sourceItem?.id !== fresh?.id) return;
+      state.detail = fresh; state.detailLoading = false; renderDetail();
+      scroll.scrollTop = snapshot.scrollTop || 0;
+    }).catch(() => {});
+  }
+  return true;
 }
 
 function returnFromDetail() {
@@ -2575,7 +2622,7 @@ window.hgBack = () => {
   if (state.route === 'campaign') { restoreScreen(state.campaignReturn); return true; }
   if (state.route === 'account-management') { restoreScreen(state.accountReturn); return true; }
   if (state.route === 'settings') { restoreScreen(state.settingsReturn); return true; }
-  if (state.route === 'detail') { if (detailCard) detailCard.close(); else returnFromDetail(); return true; }
+  if (state.route === 'detail') { if (restoreDetailFromStack()) return true; if (detailCard) detailCard.close(); else returnFromDetail(); return true; }
   if (state.route === 'listing' && state.listing?.kind === 'tag-list') { restoreScreen(state.listingReturn); return true; }
   if (state.route === 'tags') { restoreScreen(state.tagsReturn); return true; }
   if (state.route === 'listing') { goHome(); return true; }
