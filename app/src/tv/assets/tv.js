@@ -919,45 +919,49 @@ function exitToTopbar(current) {
   var idx = Array.prototype.indexOf.call(cards, card);
   if (idx < 0) return null;
 
-  /* 这一排上面还有没有「露在顶栏下面」的一排。
-     之前这里比的是 offsetTop 最小（整面墙的第一排）——往下翻几页之后，
-     用户看着屏幕最上面那一排按上，却要一路翻回墙的开头才出得去，
-     实际手感就是「回不到顶栏」。现在按屏幕上还剩什么判：
-     上面那排已经整排滚过顶栏下沿了，这一下按上就该回顶栏。
-     只看前一行（最多 GRID_COLS 张），不遍历整面墙的 offsetTop。 */
+  /* 先把这一排的列号数出来（只看邻近的两排，不扫整面墙的 offsetTop） */
+  var col = 0;
+  var rowCount = 0;
+  var lo = Math.max(0, idx - GRID_COLS + 1);
+  var hi = Math.min(cards.length - 1, idx + GRID_COLS - 1);
+  for (var f = lo; f <= hi; f++) {
+    if (Math.abs(cards[f].offsetTop - card.offsetTop) > 4) continue;
+    rowCount++;
+    var jb = cards[f].__box || cards[f].getBoundingClientRect();
+    if (jb.left < cardBox.left - 4) col++;
+  }
+
+  /* 上面那一排还在屏幕上露着（下沿在顶栏下沿之下）：先回上一排，跟以前一样逐行。
+     整排都滚出屏幕了，才轮到判断「这一下是不是该回顶栏」。 */
   var visTop = stage.getBoundingClientRect().top + (contentTopInset() || 0);
+  var aboveAny = 0;
+  var aboveVisible = 0;
   for (var p = Math.max(0, idx - GRID_COLS); p < idx; p++) {
     var pb = cards[p].__box || cards[p].getBoundingClientRect();
     if (pb.width < 2) continue;
-    if (pb.bottom > visTop + 4 && pb.bottom <= cardBox.top + 6) return null;
+    if (pb.bottom > cardBox.top + 6) continue;
+    aboveAny++;
+    if (pb.bottom > visTop + 4) aboveVisible++;
   }
+  if (aboveVisible > 0) return null;
+
+  /* 这一排算「屏幕上第一排」，但它上面还有内容（说明是往下翻过页了）：
+     左两列回分类，右两列回搜索 / 我的 / 设置，中间四列照常往上翻一页。
+     以前不分列、整排都跳顶栏，结果往下翻几页就再也翻不回前面几页。 */
+  if (aboveAny > 0 && !(col <= 1 || col >= GRID_COLS - 2)) return null;
 
   /* 这一排是满的（一屏 8 列）：按列硬分派，前四列回最左的胶囊，
      最后两列回右边那组图标 —— 这是电视遥控器上最不会按错的分区。
-     中间几列仍然就近落到顶栏，保证随便哪一排的哪一列按上都有反应。 */
+     中间几列仍然就近落到顶栏，保证第一排随便哪一列按上都有反应。 */
   var fullRow = cards.length > GRID_COLS;
-  if (fullRow) {
-    var firstRowCount = 0;
-    var col = 0;
-    var lo = Math.max(0, idx - GRID_COLS + 1);
-    var hi = Math.min(cards.length - 1, idx + GRID_COLS - 1);
-    for (var f = lo; f <= hi; f++) {
-      if (Math.abs(cards[f].offsetTop - card.offsetTop) > 4) continue;
-      firstRowCount++;
-      var jb = cards[f].__box || cards[f].getBoundingClientRect();
-      if (jb.left < cardBox.left - 4) col++;
-    }
-    if (firstRowCount >= GRID_COLS) {
-      /* 前四列分别对四个胶囊（首页四个榜 / 我的三个页签），
-         一键直达，不用进去再左右找 */
-      if (col <= 3 && chips.length) {
-        return chips[Math.min(col, chips.length - 1)];
-      } else if (col >= GRID_COLS - 2) {
-        if (!tools.length) return null;
-        /* 倒数第二列 → 最左边那颗图标（搜索），最后一列 → 最右边那颗（设置）；
-           中间那颗（我的）进了顶栏之后按左右就能到 */
-        return col >= GRID_COLS - 1 ? tools[tools.length - 1] : tools[0];
-      }
+  if (fullRow && rowCount >= GRID_COLS) {
+    if (col <= 3 && chips.length) {
+      return chips[Math.min(col, chips.length - 1)];
+    } else if (col >= GRID_COLS - 2) {
+      if (!tools.length) return null;
+      /* 倒数第二列 → 最左边那颗图标（搜索），最后一列 → 最右边那颗（设置）；
+         中间那颗（我的）进了顶栏之后按左右就能到 */
+      return col >= GRID_COLS - 1 ? tools[tools.length - 1] : tools[0];
     }
   }
   /* 一排不满（收藏 / 下载常常就几张）或落在中间几列：整行顶栏就近选，绝不空按 */
