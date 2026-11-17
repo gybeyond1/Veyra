@@ -29,6 +29,9 @@ final class BingeEngine {
 
     void start(JSONArray items, int startIndex, String source) { }
 
+    /** 手机端用来给剧单续池；电视没有刷剧入口，空着即可。 */
+    void append(JSONArray more) { }
+
     void exit() { }
 
     void onResume() { }
