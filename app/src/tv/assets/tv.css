@@ -916,6 +916,9 @@ body[data-backdrop="custom"] #tv-bg{background:#0d1013}
 .producer-layer{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;background:rgba(6,7,9,.72)}
 .producer-panel{width:82vw;max-height:82vh;overflow:auto;padding:3.2rem 3.6rem;border-radius:1.6rem;background:var(--panel-strong,#15171a);box-shadow:0 3rem 8rem rgba(0,0,0,.5)}
 .producer-panel h2{font-size:3rem;margin:0 0 1rem}
+/* 面板本身也可能拿着焦点（作品还没回来的时候只有一个可停的地方）：
+   没有描边的话，按下 OK 屏幕上什么反应都没有，看着就是「卡死了」 */
+.producer-panel.is-focused{box-shadow:0 3rem 8rem rgba(0,0,0,.5),0 0 0 .4rem var(--focus)}
 .producer-status{font-size:1.9rem;color:var(--muted);margin:0 0 2.4rem}
 /* 制作方弹层是独立浮层，宽度只有主界面的一半多一点：8 列会把封面压到 100px，
    这里保持 6 列。 */

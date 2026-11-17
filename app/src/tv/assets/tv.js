@@ -596,18 +596,30 @@ function closeRail() {
 
 /* 有浮层盖着时，焦点只在浮层里转，别跑到背后的卡片上 */
 function activeOverlay() {
+  /* 变量还指着节点、节点却已经不在文档里（浮层被别人顺手摘掉），
+     这时候把整个文档的焦点范围收窄到这个空壳上，focusables() 会一个都取不到，
+     遥控器就彻底没反应了。所以先确认它还挂在文档上。 */
+  var alive = function (el) {
+    if (!el) return null;
+    if (document.body && document.body.contains(el)) return el;
+    return null;
+  };
+  /* 顺手把指着空壳的变量清掉：不清的话别的分支（点遮罩关闭、返回键）还会拿它做判断 */
+  if (epMenu && !alive(epMenu)) epMenu = null;
+  if (seasonPanel && !alive(seasonPanel)) seasonPanel = null;
+  if (producerPanel && !alive(producerPanel)) producerPanel = null;
   /* 动态码浮窗优先级最高：它开着的时候背后就是整页海报，
      不锁住的话上下左右会直接选到浮窗后面的剧集封面上。 */
-  if (epMenu) return epMenu;
-  if (seasonPanel) return seasonPanel;
-  if (producerPanel) return producerPanel;
-  if (otpPanel && !otpPanel.hidden) return otpPanel;
-  if (sourcePanel && !sourcePanel.hidden) return sourcePanel;
-  if (proxyPanel && !proxyPanel.hidden) return proxyPanel;
-  if (themePanel && !themePanel.hidden) return themePanel;
-  if (updateLayer && !updateLayer.hidden) return updateLayer;
-  if (loginLayer && !loginLayer.hidden) return loginLayer;
-  if (accountPanel && !accountPanel.hidden) return accountPanel;
+  if (alive(epMenu)) return epMenu;
+  if (alive(seasonPanel)) return seasonPanel;
+  if (alive(producerPanel)) return producerPanel;
+  if (otpPanel && !otpPanel.hidden && alive(otpPanel)) return otpPanel;
+  if (sourcePanel && !sourcePanel.hidden && alive(sourcePanel)) return sourcePanel;
+  if (proxyPanel && !proxyPanel.hidden && alive(proxyPanel)) return proxyPanel;
+  if (themePanel && !themePanel.hidden && alive(themePanel)) return themePanel;
+  if (updateLayer && !updateLayer.hidden && alive(updateLayer)) return updateLayer;
+  if (loginLayer && !loginLayer.hidden && alive(loginLayer)) return loginLayer;
+  if (accountPanel && !accountPanel.hidden && alive(accountPanel)) return accountPanel;
   return null;
 }
 
@@ -664,6 +676,15 @@ function wallRowHeight(el) {
    按槽位算没有这两种毛病：差的那几像素不会累积，因为每一下都是重新对槽。 */
 function focusScrollTop(el, dir, prev) {
   if (!el || !el.getBoundingClientRect) return null;
+  /* 浮层里（选集下拉、制作方、季列表）的元素是 fixed 定位：滚 #stage 既不能让它们
+     动一下，又会把背后的详情页整页甩走 —— 「点开选集分组，页面自己跑到相关作品」
+     就是这么来的。浮层内部要不要滚，由 scrollInOverlay 单独处理。 */
+  var overlay = activeOverlay();
+  if (overlay && overlay.contains(el)) return null;
+  /* 不在文档里 / 还没参与布局：量出来的是 0 或者上一次的位置，
+     拿它算「滚到可见」就是一路滚到页底。详情页里正好落在相关作品那一段。 */
+  if (!document.body || !document.body.contains(el)) return null;
+  if (el.offsetParent === null && el.getClientRects && !el.getClientRects().length) return null;
   var stageBox = stage.getBoundingClientRect();
   var cur = stage.scrollTop;
   var safeBottom = stageBox.bottom - 2;
@@ -703,6 +724,10 @@ function focusScrollTop(el, dir, prev) {
   var delta = 0;
   if (box.top < safeTop) delta = box.top - safeTop;                    /* 负数：内容下移 */
   else if (box.bottom > safeBottom) delta = box.bottom - safeBottom;   /* 正数：内容上移 */
+  /* 一次最多滚一屏。超出这个量说明盒子坐标是坏的（重排中间态），
+     宁可这一次不动，也不能把整页甩到最下面去。 */
+  var cap = Math.max(240, stageBox.height);
+  if (delta > cap || delta < -cap) return null;
   return delta ? cur + delta : null;
 }
 
@@ -768,13 +793,33 @@ function exitToTopbar(current) {
   return best;
 }
 
+/* 浮层内部滚动：面板比屏幕高的时候（十几组分集、几十部制作方作品），
+   焦点走到下面那几行，得把面板自己滚起来。滚 #stage 没用 —— 那只会把
+   背后的页面拖走，面板和焦点都不动。 */
+function scrollInOverlay(el) {
+  var overlay = activeOverlay();
+  if (!overlay || !overlay.contains(el)) return;
+  var box = overlay.querySelector('.ep-pop, .producer-panel, .season-pop');
+  if (!box) return;
+  var eb = el.getBoundingClientRect();
+  var bb = box.getBoundingClientRect();
+  var pad = 12;
+  if (eb.top < bb.top + pad) box.scrollTop -= (bb.top + pad - eb.top);
+  else if (eb.bottom > bb.bottom - pad) box.scrollTop += (eb.bottom - (bb.bottom - pad));
+}
+
 function focusElement(el, remember, dir) {
   if (!el) return;
+  /* 已经脱离文档的节点（重画时被换掉的旧按钮）身上加 .is-focused，
+     屏幕上什么都不会出现，而 document.querySelector('.is-focused') 又找不到它，
+     下一按方向键就判成「没有焦点」。这种焦点一开始就别落。 */
+  if (!document.body || !document.body.contains(el)) return;
   var current = document.querySelector('.is-focused');
   if (current && current !== el) current.classList.remove('is-focused');
   el.classList.add('is-focused');
   updateMarquee(current, el);
   alignGridScroll(el);
+  scrollInOverlay(el);
   var scrollTo = focusScrollTop(el, dir, current);
   /* 只写这一次 scrollTop，不调 el.focus()。
      el.focus() 会带上内核自己的「把元素滚进视野」，老内核还不认 preventScroll；
@@ -1060,7 +1105,23 @@ function move(direction) {
   var all = focusables();
   if (!all.length) return;
   var current = document.querySelector('.is-focused');
-  if (!current || all.indexOf(current) < 0) { focusElement(all[0]); return; }
+  /* 焦点框留在了一个已经被换掉 / 收起来的节点上：这次按键先负责把焦点找回来，
+     原地落位就完事。不能顺势落到 all[0] —— 详情页的第一张卡是相关作品，
+     一按方向键整页就跳下去，成了「焦点彻底没了」。 */
+  if (current && all.indexOf(current) < 0) current = null;
+  if (!current) {
+    for (var i = 0; i < all.length; i++) {
+      if (state.focusKey && all[i].dataset && all[i].dataset.key === state.focusKey) { current = all[i]; break; }
+    }
+    if (!current && state.route === 'detail') {
+      current = view.querySelector('.detail-actions [data-focusable]')
+        || view.querySelector('[data-ep-menu]')
+        || view.querySelector('.detail-eps [data-focusable]');
+    }
+    if (current) { focusElement(current, false); return; }
+    focusElement(all[0]);
+    return;
+  }
 
   var onRail = inRail(current);
   if (onRail) {
@@ -1956,6 +2017,62 @@ function resumePlan() {
   return { episode: ep, restart: false };
 }
 
+function playButtonText() {
+  var resume = resumePlan();
+  if (state.detailLoading) return '正在加载…';
+  return resume ? ('继续播放 · 第' + resume.episode + '集') : '立即播放';
+}
+
+function resumeLineText() {
+  var resume = resumePlan();
+  if (!resume) return '';
+  if (resume.restart) return '第 ' + state.detailProgress.episode + ' 集已看完，接着看第 ' + resume.episode + ' 集';
+  return '上次看到第 ' + resume.episode + ' 集 · ' + clock(state.detailProgress.position);
+}
+
+function restartBtnHtml() {
+  return '<button type="button" class="btn icon-only" data-focusable data-key="restart" data-restart="1" aria-label="从头播放" title="从头播放">'
+    + '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V1L7 6l5 5V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z"/></svg></button>';
+}
+
+/* 「继续播放」和收藏状态是详情打开后才慢慢回来的：只改这两处文字 / 节点，
+   不整页重画。整页重画会把已经选好的分组、滚动位置、焦点一起打回原点 ——
+   「正在选集数分组，进度回来了，页面自己跳走」就是这一下造成的。 */
+function paintDetailStatus() {
+  if (state.route !== 'detail' || !state.detail) return;
+  var btn = view.querySelector('[data-play]');
+  if (btn) {
+    var text = playButtonText();
+    if (btn.textContent !== text) btn.textContent = text;
+    if (state.detailLoading) btn.setAttribute('disabled', 'disabled');
+    else btn.removeAttribute('disabled');
+  }
+  var info = view.querySelector('.detail-info');
+  if (!info) return;
+  var line = resumeLineText();
+  var old = info.querySelector('.resume-line');
+  if (old) {
+    if (line) old.textContent = line;
+    else if (old.parentNode) old.parentNode.removeChild(old);
+  } else if (line) {
+    var desc = info.querySelector('.desc');
+    if (desc) desc.insertAdjacentHTML('afterend', '<p class="resume-line">' + esc(line) + '</p>');
+  }
+  var actions = info.querySelector('.detail-actions');
+  var restart = actions && actions.querySelector('[data-restart]');
+  if (line && !restart && actions) {
+    var play = actions.querySelector('[data-play]');
+    if (play) play.insertAdjacentHTML('afterend', restartBtnHtml());
+  } else if (!line && restart && restart.parentNode) {
+    restart.parentNode.removeChild(restart);
+  }
+  var mark = view.querySelector('[data-bookmark]');
+  if (mark) {
+    var label = state.detail.bookmarked ? '已收藏' : '收藏';
+    if (mark.textContent !== label) mark.textContent = label;
+  }
+}
+
 function renderDetail() {
   resetFirstScreen();
   /* 详情页不放顶栏：那儿的视觉主体是海报，胶囊和按钮会压在封面上。
@@ -1974,19 +2091,13 @@ function renderDetail() {
   var data = state.detail;
   loadDetailExtras(String(data.id || ''), data.title || '');
 
-  var producer = state.detailProducer;
-  var producerChip = producer && producer.name
-    ? '<button type="button" class="btn producer-btn" data-focusable data-key="producer" data-producer="1">制作方 · ' + esc(producer.name) + '</button>'
-    : '';
+  var producerChip = producerChipHtml();
 
-  var related = sortRelatedTv(list(state.detailRelated), data.title || '');
-  var relatedHtml = related.length
-    ? '<section class="detail-related"><h2 class="eps-title">相关作品<span>同系列排前面</span></h2><div class="grid">'
-      + related.map(function (item, index) { return cardMarkup(item, index); }).join('') + '</div></section>'
-    : '';
+  var relatedHtml = relatedBlockHtml();
 
   var resume = resumePlan();
-  var playText = state.detailLoading ? '正在加载…' : (resume ? ('继续播放 · 第' + resume.episode + '集') : '立即播放');
+  var playText = playButtonText();
+  var resumeLine = resumeLineText();
 
   /* 结构：上半区 = 海报 + 信息（两列，等高），下半区 = 相关作品通栏。
      集数网格放进信息列里用 margin-top:auto 顶到底，底边和海报底边齐平；
@@ -1997,13 +2108,11 @@ function renderDetail() {
     + '<div class="detail-info">'
     + '<h1>' + esc(data.title || '') + '</h1>'
     + '<p class="meta">' + esc(data.score || '') + '　' + esc(data.episodeLabel || '') + producerChip + '</p>'
-    + (resume && !resume.restart ? '<p class="resume-line">上次看到第 ' + resume.episode + ' 集 · ' + clock(state.detailProgress.position) + '</p>' : '')
-    + (resume && resume.restart ? '<p class="resume-line">第 ' + state.detailProgress.episode + ' 集已看完，接着看第 ' + resume.episode + ' 集</p>' : '')
+    + (resumeLine ? '<p class="resume-line">' + esc(resumeLine) + '</p>' : '')
     + '<p class="desc">' + esc(data.description || '') + '</p>'
     + '<div class="actions detail-actions">'
     + '<button type="button" class="btn primary" data-focusable data-key="play" data-play="1"' + (state.detailLoading ? ' disabled' : '') + '>' + playText + '</button>'
-    + (resume ? '<button type="button" class="btn icon-only" data-focusable data-key="restart" data-restart="1" aria-label="从头播放" title="从头播放">'
-      + '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V1L7 6l5 5V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z"/></svg></button>' : '')
+    + (resume ? restartBtnHtml() : '')
     + '<button type="button" class="btn" data-focusable data-key="bookmark" data-bookmark="1">' + (data.bookmarked ? '已收藏' : '收藏') + '</button>'
     + epTriggerHtml()
     + '</div>'
@@ -2030,13 +2139,17 @@ function epRange() {
   return { episodes: episodes, total: total, groups: groups, group: gi, start: start, end: Math.min(total, start + EP_PAGE) };
 }
 
+function epButtonHtml(number) {
+  return '<button type="button" data-focusable data-key="ep:' + number + '" data-episode="' + number + '">' + number + '</button>';
+}
+
 function epsBlockHtml() {
   var r = epRange();
   if (!r.total) return '';
   var html = '<h2 class="eps-title">选集<span>' + (r.start + 1) + '-' + r.end + ' / 共 ' + r.total + ' 集</span></h2><div class="eps">';
   for (var i = r.start; i < r.end; i++) {
     var number = r.episodes[i].number || (i + 1);
-    html += '<button type="button" data-focusable data-key="ep:' + number + '" data-episode="' + number + '">' + number + '</button>';
+    html += epButtonHtml(number);
   }
   return html + '</div>';
 }
@@ -2054,6 +2167,9 @@ function openEpMenu() {
   var r = epRange();
   if (r.groups <= 1) return;
   closeEpMenu();
+  /* 下拉是 fixed 浮层，本该完全不碰页面滚动；老内核在插入 fixed 层时偶尔会
+     顺带挪一下 #stage，这里记一份原值，开完对回去。 */
+  var keepScroll = stage.scrollTop;
   var trigger = view.querySelector('[data-ep-menu]');
   var rect = trigger ? trigger.getBoundingClientRect() : { left: 60, bottom: 260, width: 200 };
   var width = Math.max(Math.round(rect.width), 210);
@@ -2074,9 +2190,25 @@ function openEpMenu() {
   pop.style.minWidth = width + 'px';
   pop.style.left = Math.max(16, Math.min(Math.round(rect.left), window.innerWidth - width - 24)) + 'px';
   pop.style.top = Math.round(rect.bottom + 12) + 'px';
+  /* 一部剧几十上百集就是十几二十组：列表按原始高度排下去会直接顶出屏幕，
+     焦点走到下面那几组时人已经看不见框了 —— 「选了分组就失去焦点」。
+     这里量一次高度：下面放不下、上面更宽裕就翻到按钮上方，两种都限制在屏幕内滚动。 */
+  var vh = window.innerHeight || 1080;
+  var gap = 12, pad = 16;
+  var below = vh - Math.round(rect.bottom) - gap - pad;
+  var above = Math.round(rect.top) - gap - pad;
+  var natural = pop.offsetHeight;
+  var cap = Math.max(200, Math.round(vh * 0.66));
+  if (natural > below && above > below) {
+    pop.style.maxHeight = Math.min(cap, Math.max(200, above)) + 'px';
+    pop.style.top = Math.max(pad, Math.round(rect.top) - gap - Math.min(natural, above)) + 'px';
+  } else {
+    pop.style.maxHeight = Math.min(cap, Math.max(200, below)) + 'px';
+  }
   if (trigger) trigger.setAttribute('aria-expanded', 'true');
   var active = pop.querySelector('.is-active') || pop.querySelector('[data-focusable]');
   if (active) { state.focusKey = active.dataset.key; focusElement(active, false); }
+  if (stage.scrollTop !== keepScroll) stage.scrollTop = keepScroll;
 }
 
 function closeEpMenu(keepFocus) {
@@ -2087,28 +2219,111 @@ function closeEpMenu(keepFocus) {
     trigger.setAttribute('aria-expanded', 'false');
     if (!keepFocus) { state.focusKey = 'ep-select'; focusElement(trigger, false); }
   }
+  /* 选完分组要马上落到新一组的第一集：先把 key 记上。
+     万一后面落焦点的动作被打断，下一次渲染 / 下一次按键也还能按 key 找回来。 */
+  if (keepFocus) {
+    var r = epRange();
+    if (r.total) state.focusKey = 'ep:' + (r.start + 1);
+  }
 }
 
-/* 换了分组只重画集数块，不整页重排 —— 整页重画会让海报和背景闪一下。 */
+/* 换分组：就地改按钮上的集号，不重建节点。
+   以前是 block.innerHTML = epsBlockHtml()：这一下等于把 20 个按钮全换掉，
+   紧接着在下一帧给新节点落焦点。重画的那一帧在老内核上量到的盒子是 0×0，
+   焦点要么没落上，要么落在已经脱离文档的旧节点上 —— 屏幕上就是「按了确定，
+   焦点没了，页面自己跑到下面相关作品」。节点一直留着，就没有这个时差。 */
 function paintEpisodeBlock(focusFirst) {
   var r = epRange();
   var block = view.querySelector('[data-eps-block]');
-  /* 旧的焦点框在被替换的节点上，不先摘掉，重画后就剩一个「看不见的焦点」 */
-  var stale = block && block.querySelector('.is-focused');
-  if (stale) stale.classList.remove('is-focused');
-  if (block) block.innerHTML = epsBlockHtml();
+  if (!block) return;
+  var title = block.querySelector('.eps-title span');
+  if (title) title.textContent = (r.start + 1) + '-' + r.end + ' / 共 ' + r.total + ' 集';
+  var box = block.querySelector('.eps');
+  if (!box) {
+    block.innerHTML = epsBlockHtml();
+    box = block.querySelector('.eps');
+  }
+  if (!box) return;
+  var need = Math.max(0, r.end - r.start);
+  var btns = box.querySelectorAll('[data-focusable]');
+  /* 先补齐 / 裁掉尾巴（最后一组可能不满 20 个），再逐个改集号 */
+  if (btns.length < need) {
+    var extra = '';
+    for (var e = btns.length; e < need; e++) extra += epButtonHtml(r.start + e + 1);
+    box.insertAdjacentHTML('beforeend', extra);
+    btns = box.querySelectorAll('[data-focusable]');
+  }
+  while (btns.length > need) {
+    box.removeChild(btns[btns.length - 1]);
+    btns = box.querySelectorAll('[data-focusable]');
+  }
+  var first = null;
+  for (var i = 0; i < need; i++) {
+    var ep = r.episodes[r.start + i] || {};
+    var n = ep.number || (r.start + i + 1);
+    var btn = btns[i];
+    btn.setAttribute('data-key', 'ep:' + n);
+    btn.setAttribute('data-episode', String(n));
+    if (btn.textContent !== String(n)) btn.textContent = n;
+    btn.classList.remove('is-focused');
+    if (i === 0) first = btn;
+  }
   var label = view.querySelector('[data-ep-label]');
   if (label) label.textContent = (r.start + 1) + '-' + r.end + ' 集';
-  if (!focusFirst) return;
-  /* 等一帧再落焦点：重画当帧量到的盒子是 0×0，直接聚焦等于没聚焦，
-     后面的方向键就从这个「空气焦点」算邻居，一路算到相关作品去。 */
-  var land = function () {
-    var first = block && block.querySelector('[data-focusable]');
-    if (!first) return;
-    state.focusKey = first.dataset.key;
-    focusElement(first, true);
-  };
-  if (window.requestAnimationFrame) window.requestAnimationFrame(land); else land();
+  if (!focusFirst || !first) return;
+  /* 节点有布局、坐标是现成的，直接落焦点，不用等下一帧 */
+  state.focusKey = first.dataset.key;
+  focusElement(first, true);
+}
+
+/* 制作方按钮 / 相关作品块：详情页第一次画和后来补画共用同一份 HTML，
+   两边各写一遍迟早会走样。 */
+function producerChipHtml() {
+  var producer = state.detailProducer;
+  if (!producer || !producer.name) return '';
+  return '<button type="button" class="btn producer-btn" data-focusable data-key="producer" data-producer="1">制作方 · ' + esc(producer.name) + '</button>';
+}
+
+function relatedBlockHtml() {
+  var data = state.detail || {};
+  var related = sortRelatedTv(list(state.detailRelated), data.title || '');
+  if (!related.length) return '';
+  return '<section class="detail-related"><h2 class="eps-title">相关作品<span>同系列排前面</span></h2><div class="grid">'
+    + related.map(function (item, index) { return cardMarkup(item, index); }).join('') + '</div></section>';
+}
+
+/* 制作方 / 相关作品晚到：只补画这两块，绝不整页重画。
+   以前这里直接 renderDetail()：view.innerHTML 一换，正在按的选集分组按钮、
+   已经落好的焦点全跟着没了，老内核还要重排一次，屏幕上就是「点一下确定，
+   页面自己跳到下面相关作品、焦点也不见了」。 */
+function paintDetailExtras() {
+  if (state.route !== 'detail' || !state.detail) return;
+  var meta = view.querySelector('.detail-info .meta');
+  if (meta) {
+    var chip = meta.querySelector('[data-producer]');
+    var producer = state.detailProducer;
+    if (producer && producer.name) {
+      if (chip) chip.textContent = '制作方 · ' + producer.name;
+      else meta.insertAdjacentHTML('beforeend', producerChipHtml());
+    } else if (chip && chip.parentNode) {
+      chip.parentNode.removeChild(chip);
+    }
+  }
+  var wrap = view.querySelector('.detail');
+  if (!wrap) return;
+  var old = wrap.querySelector('.detail-related');
+  /* 焦点正好在相关作品里（遥控器已经在下面逛）才恢复，别把集数上的焦点抢走 */
+  var grabFocus = !!(old && old.querySelector('.is-focused'));
+  var keepKey = state.focusKey;
+  var html = relatedBlockHtml();
+  if (old) {
+    if (html) old.outerHTML = html;
+    else if (old.parentNode) old.parentNode.removeChild(old);
+  } else if (html) {
+    wrap.insertAdjacentHTML('beforeend', html);
+  }
+  paintCovers(wrap);
+  if (grabFocus) { state.focusKey = keepKey; restoreFocus(); }
 }
 
 /* 详情页附加信息（制作方 / 相关作品）：接口慢，回来再补画一次，不挡主详情 */
@@ -2120,12 +2335,12 @@ function loadDetailExtras(id, title) {
   api('producer', { id: id }).then(function (res) {
     if (String((state.detail && state.detail.id) || '') !== id) return;
     state.detailProducer = res && res.name ? res : null;
-    if (state.route === 'detail') renderDetail();
+    paintDetailExtras();
   }).catch(function () { });
   api('related', { id: id, title: title || '' }).then(function (res) {
     if (String((state.detail && state.detail.id) || '') !== id) return;
     state.detailRelated = list(res && res.items);
-    if (state.route === 'detail') renderDetail();
+    paintDetailExtras();
   }).catch(function () { });
 }
 
@@ -2283,6 +2498,10 @@ function openProducerPanel() {
     grid.innerHTML = rows.map(function (item, index) { return cardMarkup(item, index); }).join('');
     paintCovers(grid);
     if (!moveFocus) return;
+    /* 数据是在用户已经按键之后才回来的：只要焦点还在面板里（通常是面板本身），
+       才把焦点交给第一张作品；已经从面板里出去了就别抢。 */
+    var focused = document.querySelector('.is-focused');
+    if (focused && focused !== panel && !panel.contains(focused)) return;
     var first = grid.querySelector('[data-focusable]');
     if (first) { state.focusKey = first.dataset.key; focusElement(first, false); }
     else focusPanel();
@@ -2364,7 +2583,7 @@ function openDetail(id) {
   }).then(function (saved) {
     if (state.route === 'detail' && state.detail) {
       state.detail.bookmarked = !!saved;
-      renderDetail();
+      paintDetailStatus();
     }
   }).catch(function (error) {
     state.detailLoading = false;
@@ -2377,7 +2596,7 @@ function openDetail(id) {
   api('latest-progress', { id: wanted }).then(function (progress) {
     if (state.route !== 'detail') return;
     state.detailProgress = progress || null;
-    if (state.detail && String(state.detail.id) === wanted) renderDetail();
+    if (state.detail && String(state.detail.id) === wanted) paintDetailStatus();
   }).catch(function () { });
 }
 
@@ -2438,7 +2657,7 @@ function toggleBookmark() {
   var next = !data.bookmarked;
   api('bookmark', { id: String(data.id), saved: next }).then(function () {
     data.bookmarked = next;
-    renderDetail();
+    paintDetailStatus();
     toast(next ? '已收藏' : '已取消收藏');
   }).catch(function (error) { toast(error.message || '操作失败', true); });
 }
@@ -2583,7 +2802,7 @@ document.addEventListener('click', function (event) {
   if (seriesCard) { openSeasonMenu(seriesCard.getAttribute('data-series')); return; }
   var epToggle = target.closest('[data-ep-menu]');
   if (epToggle) { epMenu ? closeEpMenu() : openEpMenu(); return; }
-  if (producerPanel && target.id === 'producer') { closeProducerPanel(); return; }
+  if (producerPanel && target.id === 'producer') { closeProducerPanel(); state.focusKey = 'producer'; restoreFocus(); return; }
   var producerBtn = target.closest('[data-producer]');
   if (producerBtn) { openProducerPanel(); return; }
   if (accountPanel && !accountPanel.hidden && target.id === 'account') { closeAccount(); return; }
@@ -3293,13 +3512,13 @@ window.hgResume = function () {
       if (state.route !== 'detail' || !state.detail || String(state.detail.id) !== id) return;
       var before = JSON.stringify(state.detailProgress || null);
       state.detailProgress = progress || null;
-      if (JSON.stringify(state.detailProgress) !== before) renderDetail();
+      if (JSON.stringify(state.detailProgress) !== before) paintDetailStatus();
     }).catch(function () { });
     api('bookmark-state', { id: id }).then(function (saved) {
       if (state.route !== 'detail' || !state.detail || String(state.detail.id) !== id) return;
       if (!!state.detail.bookmarked === !!saved) return;
       state.detail.bookmarked = !!saved;
-      renderDetail();
+      paintDetailStatus();
     }).catch(function () { });
   }
   if (state.route === 'home' || state.route === 'library') loadLibrary();
