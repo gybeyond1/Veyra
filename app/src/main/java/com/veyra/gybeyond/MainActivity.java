@@ -1725,6 +1725,17 @@ public final class MainActivity extends Activity {
                 runOnUiThread(() -> startActivity(intent));
                 return true;
             }
+            case "binge-random": {
+                // 刷剧剧单：全库按题材随机取样。首页那两栏只有几十部，洗牌也刷不出新剧。
+                int want = Math.max(40, Math.min(600, args.optInt("count", 300)));
+                return repository.bingeRandom(want);
+            }
+            case "binge-append": {
+                // 取到新的一批后接到队尾，刷到头不用退出来再进
+                final JSONArray more = args.optJSONArray("items");
+                runOnUiThread(() -> { if (bingeEngine != null) bingeEngine.append(more); });
+                return true;
+            }
             case "binge-start": {
                 // 刷剧模式：做成首页 WebView 的一种形态；原生视频层（BingeEngine）垫在透明 WebView 后。
                 args.put("source", mode.active());

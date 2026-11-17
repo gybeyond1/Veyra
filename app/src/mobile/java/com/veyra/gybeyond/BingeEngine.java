@@ -246,6 +246,31 @@ public class BingeEngine {
         }
     }
 
+    /**
+     * 往队尾追加一批剧。
+     *
+     * 首页只有几十部，刷完就 exit —— 用户抱怨的「来来回回都是那几部」一半是这个原因。
+     * WebView 侧取到新的随机池后调这里接上，刷到头就能继续，不用退出去重进。
+     * 已经在队里的 id 会被跳过，避免同一部剧连着出现两次。
+     */
+    public void append(JSONArray more) {
+        if (!active || pool == null || more == null || more.length() == 0) return;
+        java.util.Set<String> known = new java.util.HashSet<>();
+        for (int i = 0; i < pool.length(); i++) {
+            JSONObject item = pool.optJSONObject(i);
+            if (item != null) known.add(item.optString("id"));
+        }
+        JSONArray merged = new JSONArray();
+        for (int i = 0; i < pool.length(); i++) merged.put(pool.optJSONObject(i));
+        for (int i = 0; i < more.length(); i++) {
+            JSONObject item = more.optJSONObject(i);
+            String id = item == null ? "" : item.optString("id");
+            if (id.isEmpty() || !known.add(id)) continue;
+            merged.put(item);
+        }
+        pool = merged;
+    }
+
     public void exit() {
         active = false;
         suspended = false;

@@ -5293,15 +5293,17 @@ function saveBingePref() {
       localStorage.removeItem(BINGE_STORE_KEY);
       return;
     }
+    /* 只存进度，不存剧单：池子 300 部，每滑一部就 stringify 一遍 30KB 会掉帧。
+       剧单在 BINGE_POOL_KEY 里，进入/续池时写一次就够。 */
     localStorage.setItem(BINGE_STORE_KEY, JSON.stringify({
-      on: true, source: contentSource, items: bingePayload.items, index: bingeCurrentIndex,
+      on: true, source: contentSource, index: bingeCurrentIndex,
     }));
   } catch (error) { }
 }
 function readBingePref() {
   try {
     const raw = JSON.parse(localStorage.getItem(BINGE_STORE_KEY) || 'null');
-    if (!raw || !raw.on || !Array.isArray(raw.items) || !raw.items.length) return null;
+    if (!raw || !raw.on) return null;
     if (raw.source && raw.source !== contentSource) return null;   // 内容源换了就别恢复
     return raw;
   } catch (error) { return null; }
@@ -5309,9 +5311,11 @@ function readBingePref() {
 
 function updateBingeChrome() {
   if (!bingeFab) return;
-  // 刷剧态无条件显示（否则退出按钮会跟着剧单一起消失）；传统态仍按首页池子决定
+  // 刷剧态无条件显示（否则退出按钮会跟着剧单一起消失）。
+  // 红果源的剧单来自全库随机取样，不再依赖首页有没有推荐位 —— 首页空着也能刷，
+  // 所以这颗按钮在红果源恒定显示。
   const show = !privateMode() && state.route === 'home'
-    && (state.binge || bingePoolItems().length > 0);
+    && (state.binge || contentSource === 'hongguo' || bingePoolItems().length > 0);
   bingeFab.hidden = !show;
   // 始终是首页那一个按钮、那一个图标：进刷剧只切「按下态」，不换图标、不换底色。
   const play = bingeFab.querySelector('.binge-fab-play');
@@ -5385,20 +5389,139 @@ function startBingeEngine() {
   });
 }
 
-function enterBingeFresh() {
-  if (privateMode() || state.route !== 'home') return;
-  const items = bingePoolItems();
-  if (!items.length) { toast('首页还没有推荐内容，稍后再试', true); return; }
-  // 洗牌后取一批：每次主动进入刷的是不同的随机剧（从记忆恢复时不动剧单）
+/* ================= 刷剧随机池 =================
+   以前的剧单只取首页那两栏（推荐位 + 最新），加起来几十部，洗牌只是换顺序 ——
+   刷两天全是熟脸，因为那两栏本身就是榜单排序的结果。红果全库上万部，
+   榜单只暴露最热的几百部，随机不可能在榜单里做出来。
+
+   现在从「分类页」取样：题材几十个、每个能翻到第 100 页、一页 20 部，
+   随机挑题材 + 随机页，跟榜单完全无关。原生侧 binge-random 就是干这个的。
+   站点源（黄果）没有这套分类页，退回原来的首页池子。 */
+const BINGE_POOL_KEY = 'veyra.binge.pool.v2';
+const BINGE_SEEN_KEY = 'veyra.binge.seen.v1';
+const BINGE_POOL_TTL = 8 * 60 * 1000;   // 池子 8 分钟内复用，别每次进都重新取
+
+function readBingeSeen() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(BINGE_SEEN_KEY) || '[]');
+    return Array.isArray(raw) ? raw.map(String) : [];
+  } catch (error) { return []; }
+}
+function rememberBingeSeen(ids) {
+  try {
+    const next = [...new Set([...ids.map(String), ...readBingeSeen()])].slice(0, 800);
+    localStorage.setItem(BINGE_SEEN_KEY, JSON.stringify(next));
+  } catch (error) { }
+}
+
+function storedBingePool() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(BINGE_POOL_KEY) || 'null');
+    if (!raw || !Array.isArray(raw.items) || !raw.items.length) return null;
+    if ((raw.source || 'hongguo') !== contentSource) return null;
+    return raw;
+  } catch (error) { return null; }
+}
+function cachedBingePool() {
+  const raw = storedBingePool();
+  if (!raw) return null;
+  if (Date.now() - (raw.at || 0) > BINGE_POOL_TTL) return null;
+  return raw.items;
+}
+function saveBingePool(items) {
+  try {
+    localStorage.setItem(BINGE_POOL_KEY, JSON.stringify({ at: Date.now(), source: contentSource, items }));
+  } catch (error) { }
+}
+
+/**
+ * 一批全库随机的剧；拿不到（离线、站点源、接口变了）就返回空，由调用方退回首页池子。
+ *
+ * 缓存里的那批也会过一遍「刷过的」记录：续池时如果原样返回同一批，
+ * 接上去的还是一模一样的剧，等于没续。
+ */
+async function fetchBingeRandom(count, fresh) {
+  if (contentSource !== 'hongguo' || !window.api) return [];
+  const seen = new Set(readBingeSeen());
+  const shape = list => asArray(list)
+    .filter(item => item && item.id && item.cover && !seen.has(String(item.id)))
+    .map(item => ({
+      id: String(item.id), title: item.title || '',
+      cover: item.cover || '', description: item.description || item.episodeLabel || '',
+    }));
+  if (!fresh) {
+    const cached = cachedBingePool();
+    if (cached) {
+      const kept = shape(cached);
+      if (kept.length) return kept;
+    }
+  }
+  const res = await api('binge-random', { count: count || 300 });
+  return shape(res && res.items);
+}
+
+/* 剩余不足这个数就补一批。阈值别太小：取一批要 1~2 秒，刷得快的人够滑过去。 */
+const BINGE_REFILL_AT = 30;
+let bingeRefilling = false;
+let bingeRefillAt = 0;
+
+/**
+ * 续池：快刷到头时取一批新的接到队尾。
+ *
+ * 一次给 300 部也会有刷完的时候（每部只看几秒的人不少），以前这里直接 exit，
+ * 用户就得退出去重进。现在静默补上，原生 append 去重，接得上看不出来。
+ */
+async function refillBingePool() {
+  if (bingeRefilling || contentSource !== 'hongguo' || !window.api) return;
+  if (!bingePayload || !Array.isArray(bingePayload.items)) return;
+  if (Date.now() - bingeRefillAt < 60000) return;   // 刚失败过，别每滑一部就再试
+  bingeRefilling = true;
+  try {
+    const more = await fetchBingeRandom(200, true);
+    if (!more.length) { bingeRefillAt = Date.now(); return; }
+    rememberBingeSeen(more.map(item => item.id));
+    bingePayload.items = bingePayload.items.concat(more);
+    saveBingePool(bingePayload.items);
+    await api('binge-append', { items: more }).catch(() => { });
+  } catch (error) {
+    bingeRefillAt = Date.now();
+  } finally {
+    bingeRefilling = false;
+  }
+}
+
+let bingeEntering = false;
+async function enterBingeFresh() {
+  if (privateMode() || state.route !== 'home' || bingeEntering) return;
+  const fallback = bingePoolItems();
+  if (!fallback.length && contentSource !== 'hongguo') {
+    toast('首页还没有推荐内容，稍后再试', true);
+    return;
+  }
+  bingeEntering = true;
+  // 取全库随机池要 1~2 秒（18 个分类页请求）。超过 350ms 还没回来就先说一声，
+  // 不然点了按钮没反应，像卡住。
+  const hint = setTimeout(() => toast('正在挑选剧集…', true), 350);
+  let items = [];
+  try { items = await fetchBingeRandom(300); } catch (error) { items = []; }
+  clearTimeout(hint);
+  bingeEntering = false;
+  if (!items.length) items = fallback;
+  if (!items.length) { toast('暂时拿不到剧集，稍后再试', true); return; }
+  // 洗牌：每次主动进入都是不同的顺序（从记忆恢复时不动剧单）
   const shuffled = items.slice();
   for (let i = shuffled.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
   }
-  bingePayload = { items: shuffled.slice(0, 40).map(item => ({
+  const pool = shuffled.map(item => ({
     id: String(item.id), title: item.title || '',
     cover: item.cover || '', description: item.description || item.episodeLabel || '',
-  })) };
+  }));
+  rememberBingeSeen(pool.map(item => item.id));
+  saveBingePool(pool);
+  // 整池交给原生：一部剧一集就 80 集，300 部够刷很久；刷完由 refillBingePool 续
+  bingePayload = { items: pool };
   bingeCurrentIndex = 0;
   bingeCurrentId = null;
   state.binge = true;
@@ -5418,10 +5541,12 @@ function exitBingeMode() {
 function restoreBingeFromStore() {
   if (state.binge || privateMode() || state.route !== 'home') return;
   const saved = readBingePref();
-  if (!saved) return;
-  bingePayload = { items: saved.items };
-  bingeCurrentIndex = Math.max(0, Math.min(saved.index || 0, saved.items.length - 1));
-  bingeCurrentId = saved.items[bingeCurrentIndex] ? saved.items[bingeCurrentIndex].id : null;
+  const stored = storedBingePool();
+  if (!saved || !stored) return;
+  const items = stored.items;
+  bingePayload = { items };
+  bingeCurrentIndex = Math.max(0, Math.min(saved.index || 0, items.length - 1));
+  bingeCurrentId = items[bingeCurrentIndex] ? items[bingeCurrentIndex].id : null;
   state.binge = true;
   syncBinge();
 }
@@ -5468,6 +5593,8 @@ window.hgBingeUpdate = (info) => {
   if (msgEl) msgEl.hidden = true;
   bingeCurrentId = info.id || null;
   if (typeof info.index === 'number') bingeCurrentIndex = info.index;
+  if (bingePayload && bingePayload.items
+    && bingePayload.items.length - bingeCurrentIndex <= BINGE_REFILL_AT) refillBingePool();
   updateBingePoster(info);
   const card = document.getElementById('binge-card');
   if (card) card.hidden = false;

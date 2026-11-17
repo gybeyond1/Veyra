@@ -28,6 +28,7 @@ final class HongguoRepository {
     private static final LruCache<String, Detail> details = new LruCache<>(32);
     private final HongguoGenres genres = new HongguoGenres(upstream.getHttp());
     private final HongguoSearch search = new HongguoSearch(upstream.getHttp());
+    private final HongguoRandomFeed randomFeed = new HongguoRandomFeed(upstream.getHttp());
 
     JSONObject tags() throws Exception { return genres.tags(); }
     JSONObject tagListing(String slug, int page) throws Exception { return genres.listing(slug, page); }
@@ -71,6 +72,8 @@ final class HongguoRepository {
                 .put("recommend", shorts).put("newest", comics);
     }
     JSONObject recommend(int page, boolean comics) throws Exception { return category(comics ? "comic" : "short", page); }
+    /** 刷剧随机池：全库按题材随机取样，和首页榜单没有关系。 */
+    JSONObject bingeRandom(int want) throws Exception { return randomFeed.sample(want); }
     JSONObject search(String keyword) throws Exception {
         return search.search(keyword);
     }

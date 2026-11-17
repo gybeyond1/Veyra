@@ -61,6 +61,14 @@ final class DualContentRepository {
         return hongguo.danmaku(id, episodeId, start, duration);
     }
 
+    /**
+     * 刷剧随机池：只有红果源有（从官网分类页随机取样）。私密模式下的黄果/接口型源
+     * 没有这套分类页，返回空结构，前端会退回首页那两栏。
+     */
+    JSONObject bingeRandom(int want) throws Exception {
+        if (privateMode()) return new JSONObject().put("items", new org.json.JSONArray());
+        return hongguo.bingeRandom(want);
+    }
     JSONObject tags() throws Exception {
         return privateMode() ? (local != null ? local.tags() : remote != null ? remote.tags() : huangguo.tags()) : hongguo.tags();
     }

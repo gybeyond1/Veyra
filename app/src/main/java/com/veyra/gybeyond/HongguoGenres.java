@@ -84,7 +84,9 @@ final class HongguoGenres {
         JSONObject pagination = section.getJSONObject("pagination");
         if (pagination.optInt("pageNum", page) != page) throw new IOException("类型分页未正确返回");
         int last = Math.min(100, pagination.optInt("totalPages", page));
-        return new JSONObject().put("items", items).put("contentType", type)
+        /* totalPages 一起带出去：刷剧随机池要随机跳页，光有 nextPage 只能一页页往下走，
+           跳到不存在的页会直接抛「分页未正确返回」。 */
+        return new JSONObject().put("items", items).put("contentType", type).put("totalPages", last)
                 .put("nextPage", items.length() > 0 && page < last ? page + 1 : JSONObject.NULL);
     }
 }
