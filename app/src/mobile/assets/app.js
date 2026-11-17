@@ -2435,11 +2435,67 @@ function renderSearch() {
   content.innerHTML = `<div class="search-page"><h1>搜索结果</h1><p>${esc(state.query)} · ${items.length} 部作品${seriesCount ? ` · ${seriesCount} 个系列` : ''}</p>${searchFeedback()}<div class="filter-row">${filters.map(([id, label]) => `<button type="button" data-filter="${id}" class="${state.filter === id ? 'active' : ''}">${label}</button>`).join('')}</div>
     ${items.length ? `<div class="search-grid">${cards}</div>` : '<div class="empty-state">没有找到匹配的影片</div>'}</div>`;
   hydrateImages();
+  scheduleSeriesFill(entries);
+}
+
+/**
+ * 系列缺季补齐：搜索结果里已经归好组的系列，如果季号中间断层（12 → 14），
+ * 就拿制作方当互补把缺的那一季找回来。
+ *
+ * 站内搜索是标题匹配，某一季偶尔就是不回（实测「聚宝仙盆」15 部里少第 13 季，
+ * 而制作方名下是有的）。这里只在「确实断层」且「组里有制作方」时才发请求，
+ * 一次搜索最多补两个系列，失败就当没发生 —— 搜索结果本身照常显示。
+ */
+let searchFillKey = '';
+function seriesHasGap(block) {
+  const numbers = block.seasons.map(seasonNumber).filter(n => n > 0).sort((a, b) => a - b);
+  if (numbers.length < 2) return false;
+  return numbers[numbers.length - 1] - numbers[0] + 1 > numbers.length;
+}
+
+async function scheduleSeriesFill(entries) {
+  if (privateMode() || !entries?.length) return;
+  const key = `${state.query}|${state.filter}`;
+  if (searchFillKey === key) return;
+  const targets = entries.filter(entry => entry.kind === 'block' && seriesHasGap(entry)).slice(0, 2);
+  if (!targets.length) { searchFillKey = key; return; }
+  searchFillKey = key;
+  const token = routeToken;
+  let added = 0;
+  for (const block of targets) {
+    if (token !== routeToken || state.route !== 'search') return;
+    const holder = block.seasons.find(it => it.author && it.mediaId) || block.seasons.find(it => it.author);
+    if (!holder) continue;
+    const base = relatedBase(block.title);
+    let data;
+    try { data = await api('producer-works', { name: holder.author, mediaId: holder.mediaId || '', page: 1 }); }
+    catch (error) { continue; }
+    const known = new Set(asArray(state.search?.items).map(it => String(it.id)));
+    if (!Array.isArray(state.search?.items)) continue;
+    /* 这一组已经有的季号：同一季偶尔会以另一个 id 再出现，别补成两张
+       （不同集数版本靠集数文案区分，季号重复就是重复） */
+    const hasSeason = new Set(block.seasons.map(it => seasonNumber(it)).filter(n => n > 0));
+    for (const row of asArray(data?.items)) {
+      if (!row || !row.id || known.has(String(row.id))) continue;
+      if (relatedBase(row.title) !== base) continue;
+      const season = seasonNumber(row);
+      if (season && hasSeason.has(season)) continue;
+      known.add(String(row.id));
+      if (season) hasSeason.add(season);
+      /* 补进来的条目只有剧名/封面：形态、系列键、季号都要从这一组继承，
+         否则它会掉进另一个分组，变成「单独一张卡」而不是这一族的第 13 季。 */
+      const anchor = block.seasons[0] || {};
+      state.search.items.push({ ...row, category: block.form, albumId: anchor.albumId || row.albumId || '',
+        seasonIndex: season || 0, mediaId: row.mediaId || holder.mediaId || '',
+        author: row.author || holder.author || '' });
+      added += 1;
+    }
+  }
+  if (added && token === routeToken && state.route === 'search') renderSearch();
 }
 
 /**
  * 搜索结果的系列归并。
- *
  * 三层判据，从硬到软：
  * 1) 形态隔离：真人短剧（genre 203 → category "short"）和漫剧（205 → "comic"）是两个池子。
  *    搜「聚宝仙盆」时，前者是 119 集的真人剧、后者是「之杂灵根才是真BOSS」16 季漫剧，
@@ -2831,8 +2887,12 @@ function relatedCard(item) {
 }
 
 /*
- * 制作方作品弹窗：先给已知的（当前剧），再按名字搜候选，逐条核对 media_id。
+ * 制作方作品弹窗：先把「同系列各季」当成确定项铺上，再按名字搜候选、逐条核对 media_id 补进去。
  * 同名制作方很多，所以数量以「已确认」为准，不吹成完整作品集。
+ *
+ * 以前两条路只走了一条：搜不到才退回顾同系列，搜得到就只显示搜到的那几部。
+ * 于是「聚宝仙盆」16 季经常只列 9 部，缺的季明明就在相关作品里。
+ * 现在改成并集，按季号排（第 1 季打头），缺的季不再靠「加载更多」碰运气。
  */
 function closeProducerPanel() {
   const overlay = producerOverlay;
@@ -2842,8 +2902,42 @@ function closeProducerPanel() {
   return Boolean(overlay);
 }
 
+/** 当前剧的同系列各季（来自详情的相关作品），当制作方作品的确定项。 */
+function producerSeasonRows(currentId) {
+  const key = String(currentId || '');
+  const cache = detailExtrasCache.get(key) || detailExtrasCache.get(currentId);
+  const title = (state.detail && String(state.detail.id) === key ? state.detail.title : '') || '';
+  const base = relatedBase(title);
+  return asArray(cache && cache.related)
+    .filter(item => item && item.id && String(item.id) !== key)
+    .filter(item => {
+      const season = seasonNumber(item);
+      if (season > 0) return true;
+      return Boolean(base) && relatedBase(item.title) === base;
+    })
+    .map(item => {
+      const season = seasonNumber(item);
+      /* 第二行给「第N季 · 共N集」：只写集数看不出是第几季，只写季号又少了集数 */
+      const label = [season ? `第${season}季` : '', item.episodeLabel || ''].filter(Boolean).join(' · ');
+      return { id: item.id, title: item.title, cover: item.cover, episodeLabel: label, seasonIndex: season };
+    });
+}
+
+function producerRowSort(a, b) {
+  const na = Number(a.seasonIndex) || 0;
+  const nb = Number(b.seasonIndex) || 0;
+  if (na && nb && na !== nb) return na - nb;
+  if (na && !nb) return -1;
+  if (!na && nb) return 1;
+  return String(a.title || '').localeCompare(String(b.title || ''), 'zh');
+}
+
 function openProducerPanel(name, mediaId, currentId) {
   closeProducerPanel();
+  /* 详情卡还在开场动画里就点制作方：先把卡片落位，别让两层动画抢同一块 transform */
+  if (detailCard && detailCard.full && (detailCard.phase === 'opening' || detailCard.phase === 'settling')) {
+    detailCard.settle(detailCard.full);
+  }
   const overlay = document.createElement('div');
   overlay.className = 'producer-overlay';
   /* 右上角不再留关闭键：点遮罩、按返回都能收 */
@@ -2858,7 +2952,28 @@ function openProducerPanel(name, mediaId, currentId) {
   const list = overlay.querySelector('.producer-list');
   const status = overlay.querySelector('.producer-status');
   const more = overlay.querySelector('.producer-more');
-  let page = 1, hasMore = true, busy = false;
+  let page = 1, hasMore = true, busy = false, emptyPages = 0;
+  /* 已确认的集合：同系列各季先占位，搜索命中再并进来，按 id 去重 */
+  const seen = new Set([String(currentId || '')]);
+  const rows = [];
+  const addRows = incoming => {
+    let added = 0;
+    for (const item of asArray(incoming)) {
+      const id = String((item && item.id) || '');
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      rows.push(item);
+      added += 1;
+    }
+    return added;
+  };
+  const paintRows = () => {
+    rows.sort(producerRowSort);
+    list.innerHTML = rows.map(producerItemHtml).join('');
+    paintCoversIn(list);
+  };
+  addRows(producerSeasonRows(currentId));
+  if (rows.length) paintRows();
   overlay.addEventListener('click', event => {
     /* 点面板以外的地方（也就是那层遮罩）自己收回 */
     if (event.target === overlay) { closeProducerPanel(); return; }
@@ -2875,31 +2990,21 @@ function openProducerPanel(name, mediaId, currentId) {
     more.textContent = '正在检索…';
     try {
       const data = await api('producer-works', { name, mediaId, page });
-      const items = asArray(data.items).filter(item => item.id && item.id !== currentId);
-      list.insertAdjacentHTML('beforeend', items.map(producerItemHtml).join(''));
-      paintCoversIn(list);
-      hasMore = Boolean(data.hasMore);
+      const added = addRows(asArray(data.items));
+      if (added) paintRows();
+      /* 这一页全是已见过的条目就再给一次机会：署名搜索的命中是稀疏的，
+         某一页恰好没有新作品很正常，连着两页没有才认定到底了。 */
+      emptyPages = added ? 0 : emptyPages + 1;
+      hasMore = Boolean(data.hasMore) && emptyPages < 2;
       page += 1;
-      const count = list.childElementCount;
-      if (count) {
-        status.textContent = `已确认 ${count} 部作品 · 以平台当前检索结果为准`;
+      if (rows.length) {
+        status.textContent = `已确认 ${rows.length} 部作品 · 以平台当前检索结果为准`;
       } else {
-        /* 平台按「剧名」检索，制作方是署名不是标题 —— 搜不到是常态。
-           退一步把同系列其他季摆出来，至少不是一块空白。 */
-        const seasons = sortRelated(asArray(detailExtrasCache.get(currentId)?.related))
-          .filter(item => (Number(item.seasonIndex) || 0) > 0 || item.season)
-          .filter(item => item.id && String(item.id) !== String(currentId));
-        list.insertAdjacentHTML('beforeend', seasons.map(item => producerItemHtml({
-          id: item.id, title: item.title, cover: item.cover, episodeLabel: item.season || item.episodeLabel
-        })).join(''));
-        paintCoversIn(list);
-        status.textContent = seasons.length
-          ? '平台检索不到该制作方的其他作品，先看同系列'
-          : '平台没有收录这位制作方的其他作品';
+        status.textContent = '平台没有收录这位制作方的其他作品';
       }
-      more.hidden = !hasMore || !list.childElementCount;
+      more.hidden = !hasMore || !rows.length;
     } catch (error) {
-      status.textContent = list.childElementCount ? `已确认 ${list.childElementCount} 部作品 · 更多作品暂时无法读取` : '作品暂时无法读取';
+      status.textContent = rows.length ? `已确认 ${rows.length} 部作品 · 更多作品暂时无法读取` : '作品暂时无法读取';
       more.textContent = '重试';
       more.hidden = false;
       hasMore = false;
@@ -3096,6 +3201,10 @@ function clearPredictivePreview() {
 
 window.hgPredictiveBackStart = fromRight => {
   clearPredictivePreview();
+  /* 制作方/季列表这类页面内浮层：这一下返回只关浮层，根本不会离开详情，
+     所以不能让详情卡进入「预测性返回」的拖拽态 —— 以前没拦，commit 分支
+     只关了浮层就 return，卡片永远停在缩小+左移的中间帧上，整个详情页错位。 */
+  if (producerOverlay) return false;
   if (!downloadOverlay.hidden || (window.__veyraAppearanceOpen && window.__veyraAppearanceOpen()) || (window.__veyraAccountOpen && window.__veyraAccountOpen()) || (window.__veyraProxyOpen && window.__veyraProxyOpen()) || (window.__veyraAboutOpen && window.__veyraAboutOpen()) || (window.__veyraRemoteOpen && window.__veyraRemoteOpen()) || (window.__veyraRemotePickOpen && window.__veyraRemotePickOpen())) return false;
   if (state.route === 'detail' && detailCard && authOverlay.hidden && confirmOverlay.hidden && updateOverlay.hidden && unlockOverlay.hidden) {
     detailCard.fromRight = fromRight;
@@ -3197,15 +3306,18 @@ window.hgPredictiveBackCancel = () => {
 
 window.hgPredictiveBackCommit = () => {
   /* 制作方弹窗排在最前：targetSdk 36 走的是这条 commit，它原先没有弹窗分支，
-     按返回会把底层详情页退掉、弹窗留在屏幕上。 */
-  if (producerOverlay) return closeProducerPanel();
-  if (!downloadOverlay.hidden) { hideDownloadSheet(); return true; }
-  if (window.__veyraAppearanceBack && window.__veyraAppearanceBack()) return true;
-  if (window.__veyraAccountBack && window.__veyraAccountBack()) return true;
-  if (window.__veyraProxyBack && window.__veyraProxyBack()) return true;
-  if (window.__veyraAboutBack && window.__veyraAboutBack()) return true;
-  if (window.__veyraRemoteBack && window.__veyraRemoteBack()) return true;
-  if (window.__veyraRemotePickBack && window.__veyraRemotePickBack()) return true;
+     按返回会把底层详情页退掉、弹窗留在屏幕上。
+     关浮层这一分支不离开详情，所以必须先把详情卡从拖拽态收回原位，
+     否则卡片停在上一次 predict 的中间帧上（页面缩小、左移、右边露底）。 */
+  if (producerOverlay) {
+    if (detailCard?.phase === 'dragging') detailCard.cancel();
+    closeProducerPanel();
+    return true;
+  }
+  if (!downloadOverlay.hidden || (window.__veyraAppearanceOpen && window.__veyraAppearanceOpen()) || (window.__veyraAccountOpen && window.__veyraAccountOpen()) || (window.__veyraProxyOpen && window.__veyraProxyOpen()) || (window.__veyraAboutOpen && window.__veyraAboutOpen()) || (window.__veyraRemoteOpen && window.__veyraRemoteOpen()) || (window.__veyraRemotePickOpen && window.__veyraRemotePickOpen())) {
+    if (detailCard?.phase === 'dragging') detailCard.cancel();
+    return window.hgBack();
+  }
   if (state.route === 'detail' && state.detailStack.length) { clearPredictivePreview(); restoreDetailFromStack(); return true; }
   if (state.route === 'detail' && detailCard && downloadOverlay.hidden && authOverlay.hidden && confirmOverlay.hidden && updateOverlay.hidden && unlockOverlay.hidden) {
     detailCard.close(); return true;
@@ -3655,7 +3767,11 @@ window.hgBack = () => {
   if (window.__veyraAboutBack && window.__veyraAboutBack()) return true;
   if (window.__veyraRemoteBack && window.__veyraRemoteBack()) return true;
   if (window.__veyraRemotePickBack && window.__veyraRemotePickBack()) return true;
-  if (producerOverlay) return closeProducerPanel();
+  if (producerOverlay) {
+    /* 同上：只关浮层，别把详情卡留在拖拽中间帧 */
+    if (detailCard?.phase === 'dragging') detailCard.cancel();
+    return closeProducerPanel();
+  }
   if (!downloadOverlay.hidden) { hideDownloadSheet(); return true; }
   if (!unlockOverlay.hidden) { closeUnlock(); return true; }
   if (!authOverlay.hidden) { if (state.account.loggedIn) hideAuth(); return true; }
@@ -4574,6 +4690,14 @@ function tapDock(button) {
 }
 
 document.addEventListener('click', async event => {
+  /* 选集的分档菜单（第 1-20 集 / 第 21-40 集）是常驻在页面里的下拉，不是浮层，
+     所以点页面别处不会自己收 —— 以前点「相关作品」「立即播放」时它还压在上面。
+     这里统一在别处点击时收起；延到本轮事件之后再重绘，当前这颗按钮节点还在，
+     下面的分支照常命中（点集数照样能播）。 */
+  if (state.epPickerOpen && !event.target.closest('.ep-picker')) {
+    state.epPickerOpen = false;
+    requestAnimationFrame(() => { if (!state.epPickerOpen) paintEpisodeSection(); });
+  }
   // 搜索浮层：历史词条 / 单条删除 / 清空
   const ssWord = event.target.closest('[data-ss-word]');
   if (ssWord) {
@@ -5125,6 +5249,13 @@ scroll.addEventListener('scroll', () => {
   if (!heroTouch) return;
   heroSuppressClickUntil = performance.now() + 600;
   heroTapSuppressed = true;
+}, { passive: true });
+/* 滚动时也把选集分档菜单收起来：它是跟着「选集」那一行走的绝对定位元素，
+   页面一滚就会跟内容错位，看起来像飘在半空。 */
+scroll.addEventListener('scroll', () => {
+  if (!state.epPickerOpen) return;
+  state.epPickerOpen = false;
+  paintEpisodeSection();
 }, { passive: true });
 
 api('app-version').then(version => {

@@ -16,6 +16,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -415,26 +417,66 @@ final class HongguoApi {
         throw new IOException("这部剧没有标注制作方");
     }
 
+    /** 制作方候选翻页：一「页」背后是窗口内的多个站点页并行拉，署名命中率才够。 */
+    private static final int PRODUCER_PAGE_WINDOW = 3;
+    private static final java.util.concurrent.ExecutorService PRODUCER_POOL =
+            java.util.concurrent.Executors.newFixedThreadPool(4);
+
     /**
      * 制作方作品：先用官网搜索拿候选，再逐条核对 media_id 相同才认。
      *
      * 注意候选不能按「标题含关键词」过滤 —— 制作方是署名，不是剧名，
      * 之前复用搜剧那条路径把候选全滤掉了，所以点开永远是空的。
      * 同名制作方很多，认领时必须核对署名（有 media_id 就比 id，没有才退回比名字）。
+     *
+     * 一次只读一个站点页时，署名命中是稀疏的：20 条候选里常常只有 6~9 条属于这个人，
+     * 一页作品要「加载更多」点好几次才凑齐，点开还老觉得「展示不全」。所以这里把
+     * 一「页」扩成窗口内 3 个站点页并行拉，候选从 20 条涨到 60 条再一起核对。
      */
     static JSONObject producerWorks(String name, String mediaId, int page) throws Exception {
-        JSONObject search = siteSearch(name, page, false);
-        JSONArray rows = search.optJSONArray("items");
+        int first = (Math.max(1, page) - 1) * PRODUCER_PAGE_WINDOW + 1;
+        List<Future<JSONObject>> futures = new ArrayList<>();
+        for (int i = 0; i < PRODUCER_PAGE_WINDOW; i++) {
+            final int target = first + i;
+            futures.add(PRODUCER_POOL.submit(new java.util.concurrent.Callable<JSONObject>() {
+                @Override public JSONObject call() throws Exception { return siteSearch(name, target, false); }
+            }));
+        }
+        List<JSONObject> pages = new ArrayList<>();
+        boolean more = false;
+        for (Future<JSONObject> future : futures) {
+            try {
+                JSONObject one = future.get(9, java.util.concurrent.TimeUnit.SECONDS);
+                if (one == null) continue;
+                pages.add(one);
+                more |= one.optBoolean("hasMore", false);
+            } catch (Exception ignored) { }
+        }
+        JSONArray rows = new JSONArray();
+        Set<String> ids = new LinkedHashSet<>();
+        for (JSONObject one : pages) {
+            JSONArray list = one.optJSONArray("items");
+            for (int i = 0; list != null && i < list.length(); i++) {
+                JSONObject row = list.optJSONObject(i);
+                String id = row == null ? "" : row.optString("id");
+                if (id.isEmpty() || !ids.add(id)) continue;
+                rows.put(row);
+            }
+        }
         JSONArray out = new JSONArray();
-        if (rows == null || rows.length() == 0) {
+        if (rows.length() == 0) {
             return new JSONObject().put("items", out).put("hasMore", false);
         }
-        List<String> ids = new ArrayList<>();
-        for (int i = 0; i < rows.length(); i++) {
-            JSONObject row = rows.optJSONObject(i);
-            if (row != null) ids.add(row.optString("id"));
+        List<String> wanted = new ArrayList<>(ids);
+        Map<String, JSONObject> credits = new LinkedHashMap<>();
+        /* 署名查询偶发超时：先整批取，缺的那几条再补一次。
+           以前缺了就 continue，于是同一部剧今天有、明天少，看着像「搜索不稳定」。 */
+        for (int round = 0; round < 2; round++) {
+            List<String> batch = new ArrayList<>();
+            for (String id : wanted) if (!credits.containsKey(id)) batch.add(id);
+            if (batch.isEmpty()) break;
+            try { credits.putAll(credits(batch)); } catch (Exception ignored) { }
         }
-        Map<String, JSONObject> credits = credits(ids);
         String target = normalize(name);
         for (int i = 0; i < rows.length(); i++) {
             JSONObject row = rows.optJSONObject(i);
@@ -464,7 +506,7 @@ final class HongguoApi {
                     .put("cover", cover)
                     .put("episodeLabel", credit.optString("episodeLabel", "")));
         }
-        return new JSONObject().put("items", out).put("hasMore", search.optBoolean("hasMore", false));
+        return new JSONObject().put("items", out).put("hasMore", more);
     }
 
     /** 批量取 author / media_id（接口一次最多 20 个）。 */

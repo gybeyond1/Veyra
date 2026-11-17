@@ -127,7 +127,9 @@ final class HongguoSearch {
         }
         for (int i = 0; i < futures.size(); i++) {
             JSONObject page;
-            try { page = futures.get(i).get(4, java.util.concurrent.TimeUnit.SECONDS); }
+            /* 制作方那条路现在一次覆盖 3 个站点页（署名命中稀疏，1 页常常只有个位数），
+               超时跟着放宽；补不齐也没关系，已经搜到的照常返回。 */
+            try { page = futures.get(i).get(7, java.util.concurrent.TimeUnit.SECONDS); }
             catch (Exception ignored) { continue; }
             if (page == null) continue;
             JSONObject sample = repByProducer.get(picked.get(i));

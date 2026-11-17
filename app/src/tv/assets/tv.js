@@ -1667,6 +1667,7 @@ function renderSearch() {
       } else cards += cardMarkup(entries[e].item, e);
     }
     html += cards ? ('<div class="grid">' + cards + '</div>') : '<p class="empty">没有找到匹配的影片</p>';
+    fillSeriesGapsTv(entries, query);
   }
   view.innerHTML = html;
   paintCovers(view);
@@ -1683,6 +1684,74 @@ function renderSearch() {
   }
   restoreFocus();
   applyPendingRestore();
+}
+
+/* 缺季补齐：组好的系列里季号中间断层（12 → 14）时，拿制作方把缺的那一季找回来。
+   站内搜索按标题匹配，某一季偶尔就是不回；手机端已经是这套，电视照抄。
+   只在真断层时发一次请求，失败不影响已显示的结果。 */
+var searchFillKeyTv = '';
+function tvSeriesHasGap(block) {
+  var numbers = [];
+  for (var i = 0; i < block.seasons.length; i++) {
+    var n = seasonNumberOf(block.seasons[i]);
+    if (n > 0) numbers.push(n);
+  }
+  if (numbers.length < 2) return false;
+  numbers.sort(function (a, b) { return a - b; });
+  return numbers[numbers.length - 1] - numbers[0] + 1 > numbers.length;
+}
+
+function fillSeriesGapsTv(entries, query) {
+  if (!entries || !entries.length) return;
+  var key = query + '|' + state.search.filter;
+  if (searchFillKeyTv === key) return;
+  var targets = [];
+  for (var i = 0; i < entries.length && targets.length < 2; i++) {
+    if (entries[i].kind === 'block' && tvSeriesHasGap(entries[i])) targets.push(entries[i]);
+  }
+  if (!targets.length) { searchFillKeyTv = key; return; }
+  searchFillKeyTv = key;
+  var pending = targets.length;
+  var added = 0;
+  var done = function () {
+    pending--;
+    if (pending > 0) return;
+    if (added && state.route === 'search' && state.search.query === query) renderSearch();
+  };
+  targets.forEach(function (block) {
+    var holder = null;
+    for (var k = 0; k < block.seasons.length; k++) {
+      if (block.seasons[k].author) { holder = block.seasons[k]; break; }
+    }
+    if (!holder) { done(); return; }
+    var base = relatedBase(block.title);
+    api('producer-works', { name: holder.author, mediaId: holder.mediaId || '', page: 1 }).then(function (data) {
+      var rows = list(data && data.items);
+      var known = {};
+      var hasSeason = {};
+      for (var j = 0; j < state.search.items.length; j++) known[String(state.search.items[j].id)] = true;
+      for (var s = 0; s < block.seasons.length; s++) {
+        var sn = seasonNumberOf(block.seasons[s]);
+        if (sn > 0) hasSeason[sn] = true;
+      }
+      for (var r = 0; r < rows.length; r++) {
+        var row = rows[r];
+        if (!row || !row.id || known[String(row.id)]) continue;
+        if (relatedBase(row.title) !== base) continue;
+        var rowSeason = seasonNumberOf(row);
+        if (rowSeason && hasSeason[rowSeason]) continue;
+        known[String(row.id)] = true;
+        if (rowSeason) hasSeason[rowSeason] = true;
+        /* 补的条目只有剧名/封面：系列键和季号从这一组继承，否则会掉进另一个分组 */
+        var anchor = block.seasons[0] || {};
+        state.search.items.push({ id: row.id, title: row.title, cover: row.cover, episodeLabel: row.episodeLabel,
+          category: block.form, albumId: anchor.albumId || row.albumId || '', seasonIndex: rowSeason || 0,
+          mediaId: row.mediaId || holder.mediaId || '', author: holder.author });
+        added++;
+      }
+      done();
+    }).catch(function () { done(); });
+  });
 }
 
 /* 搜索结果落地：电视端搜索一次要按半天遥控器，下次开机还留着上次那批结果 */
@@ -2100,6 +2169,35 @@ function sortRelatedTv(items, currentTitle) {
 }
 
 /* ---------------- 制作方作品（遥控器可点） ---------------- */
+
+/* 同系列各季 = 制作方作品的确定项。搜索是按标题匹配的，署名命中很稀疏，
+   只给搜索结果就会「16 季只剩 9 部」；手机上已经是并集，电视端照着做。 */
+function producerSeasonRows(currentId) {
+  var key = String(currentId || '');
+  var title = (state.detail && String(state.detail.id) === key && state.detail.title) || '';
+  var base = relatedBase(title);
+  var rows = [];
+  var source = list(state.detailRelated);
+  for (var i = 0; i < source.length; i++) {
+    var item = source[i];
+    if (!item || !item.id || String(item.id) === key) continue;
+    var season = seasonNumberOf(item);
+    if (!season && !(base && relatedBase(item.title) === base)) continue;
+    var label = [season ? ('第' + season + '季') : '', item.episodeLabel || ''].filter(Boolean).join(' · ');
+    rows.push({ id: item.id, title: item.title, cover: item.cover,
+      episodeLabel: label, seasonIndex: season });
+  }
+  return rows;
+}
+
+function producerRowsSort(a, b) {
+  var na = Number(a.seasonIndex) || 0, nb = Number(b.seasonIndex) || 0;
+  if (na && nb && na !== nb) return na - nb;
+  if (na && !nb) return -1;
+  if (!na && nb) return 1;
+  return String(a.title || '').localeCompare(String(b.title || ''), 'zh');
+}
+
 function openProducerPanel() {
   var producer = state.detailProducer;
   if (!producer || !producer.name) return;
@@ -2117,23 +2215,43 @@ function openProducerPanel() {
   var grid = layer.querySelector('[data-producer-grid]');
   var status = layer.querySelector('[data-producer-status]');
   var current = String((state.detail && state.detail.id) || '');
-  api('producer-works', { name: producer.name, mediaId: producer.mediaId || '', page: 1 }).then(function (data) {
-    var items = list(data && data.items).filter(function (item) { return item && item.id && String(item.id) !== current; });
-    if (!items.length) {
-      /* 平台按剧名检索，制作方是署名 —— 搜不到就退回同系列，别给一块空白 */
-      items = sortRelatedTv(list(state.detailRelated), (state.detail && state.detail.title) || '').filter(function (item) {
-        return (Number(item.seasonIndex) || 0) > 0 || item.season;
-      });
-      status.textContent = items.length ? '平台检索不到该制作方的其他作品，先看同系列' : '平台没有收录这位制作方的其他作品';
-    } else {
-      status.textContent = '已确认 ' + items.length + ' 部作品 · 以平台当前检索结果为准';
+  var seen = { }; seen[current] = true;
+  var rows = [];
+  var addRows = function (incoming) {
+    var added = 0;
+    for (var i = 0; i < incoming.length; i++) {
+      var item = incoming[i];
+      var id = String((item && item.id) || '');
+      if (!id || seen[id]) continue;
+      seen[id] = true;
+      rows.push(item);
+      added++;
     }
-    grid.innerHTML = items.map(function (item, index) { return cardMarkup(item, index); }).join('');
+    return added;
+  };
+  var paint = function (moveFocus) {
+    rows.sort(producerRowsSort);
+    grid.innerHTML = rows.map(function (item, index) { return cardMarkup(item, index); }).join('');
     paintCovers(grid);
+    /* 只在第一次铺（或原本焦点就在这块网格里）时抢焦点：
+       补数据回来时用户可能已经在别处按方向键了，不能把焦点拽回第一张。 */
+    if (!moveFocus) return;
     var first = grid.querySelector('[data-focusable]');
     if (first) { state.focusKey = first.dataset.key; focusElement(first, false); }
+  };
+  var seeded = addRows(producerSeasonRows(current)) > 0;
+  if (seeded) paint(true);
+  api('producer-works', { name: producer.name, mediaId: producer.mediaId || '', page: 1 }).then(function (data) {
+    addRows(list(data && data.items));
+    if (!rows.length) {
+      status.textContent = '平台没有收录这位制作方的其他作品';
+      return;
+    }
+    status.textContent = '已确认 ' + rows.length + ' 部作品 · 以平台当前检索结果为准';
+    paint(!seeded);
   }).catch(function () {
-    status.textContent = '作品暂时无法读取';
+    status.textContent = rows.length ? '已确认 ' + rows.length + ' 部作品 · 更多作品暂时无法读取' : '作品暂时无法读取';
+    if (rows.length) paint();
   });
 }
 
