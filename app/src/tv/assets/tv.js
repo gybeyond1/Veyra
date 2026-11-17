@@ -909,31 +909,43 @@ function exitToTopbar(current) {
 
   var cards = grid.querySelectorAll('.card');
   if (!cards.length) return null;
-  /* 是不是这面墙的第一排：比 offsetTop，不依赖「一行几张」 */
-  var minTop = Infinity;
-  for (var t = 0; t < cards.length; t++) minTop = Math.min(minTop, cards[t].offsetTop);
-  if (Math.abs(card.offsetTop - minTop) > 4) return null;
 
   var chips = topbar.querySelectorAll('.chip');
   var tools = topbar.querySelectorAll('.tool');
-  var cardBox = card.getBoundingClientRect();
-  /* 第一排是满的（一屏 8 列）：按列硬分派，前两列回最左的胶囊，
+  var cardBox = card.__box || card.getBoundingClientRect();
+  if (cardBox.width < 2) cardBox = card.getBoundingClientRect();
+  var idx = Array.prototype.indexOf.call(cards, card);
+  if (idx < 0) return null;
+
+  /* 这一排上面还有没有「露在顶栏下面」的一排。
+     之前这里比的是 offsetTop 最小（整面墙的第一排）——往下翻几页之后，
+     用户看着屏幕最上面那一排按上，却要一路翻回墙的开头才出得去，
+     实际手感就是「回不到顶栏」。现在按屏幕上还剩什么判：
+     上面那排已经整排滚过顶栏下沿了，这一下按上就该回顶栏。
+     只看前一行（最多 GRID_COLS 张），不遍历整面墙的 offsetTop。 */
+  var visTop = stage.getBoundingClientRect().top + (contentTopInset() || 0);
+  for (var p = Math.max(0, idx - GRID_COLS); p < idx; p++) {
+    var pb = cards[p].__box || cards[p].getBoundingClientRect();
+    if (pb.width < 2) continue;
+    if (pb.bottom > visTop + 4 && pb.bottom <= cardBox.top + 6) return null;
+  }
+
+  /* 这一排是满的（一屏 8 列）：按列硬分派，前四列回最左的胶囊，
      最后两列回右边那组图标 —— 这是电视遥控器上最不会按错的分区。
-     中间几列仍然就近落到顶栏，保证第一排随便哪一列按上都有反应。 */
+     中间几列仍然就近落到顶栏，保证随便哪一排的哪一列按上都有反应。 */
   var fullRow = cards.length > GRID_COLS;
   if (fullRow) {
-    /* 前两列：0 → 热播榜 / 观看记录，1 → 真人榜 / 收藏（其余靠左右键走过去） */
     var firstRowCount = 0;
-    for (var f = 0; f < cards.length; f++) {
-      if (Math.abs(cards[f].offsetTop - card.offsetTop) <= 4) firstRowCount++;
+    var col = 0;
+    var lo = Math.max(0, idx - GRID_COLS + 1);
+    var hi = Math.min(cards.length - 1, idx + GRID_COLS - 1);
+    for (var f = lo; f <= hi; f++) {
+      if (Math.abs(cards[f].offsetTop - card.offsetTop) > 4) continue;
+      firstRowCount++;
+      var jb = cards[f].__box || cards[f].getBoundingClientRect();
+      if (jb.left < cardBox.left - 4) col++;
     }
     if (firstRowCount >= GRID_COLS) {
-      var col = 0;
-      for (var j = 0; j < cards.length; j++) {
-        if (Math.abs(cards[j].offsetTop - card.offsetTop) > 4) continue;
-        var jb = cards[j].__box || cards[j].getBoundingClientRect();
-        if (jb.left < cardBox.left - 4) col++;
-      }
       /* 前四列分别对四个胶囊（首页四个榜 / 我的三个页签），
          一键直达，不用进去再左右找 */
       if (col <= 3 && chips.length) {
@@ -954,9 +966,9 @@ function exitToTopbar(current) {
   var cx = (cardBox.left + cardBox.right) / 2;
   var best = null, bestD = Infinity;
   for (var m = 0; m < pool.length; m++) {
-    var pb = pool[m].__box || pool[m].getBoundingClientRect();
-    if (pb.width < 2) continue;
-    var d = Math.abs((pb.left + pb.right) / 2 - cx);
+    var tb = pool[m].__box || pool[m].getBoundingClientRect();
+    if (tb.width < 2) continue;
+    var d = Math.abs((tb.left + tb.right) / 2 - cx);
     if (d < bestD) { bestD = d; best = pool[m]; }
   }
   if (best) return best;
