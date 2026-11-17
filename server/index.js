@@ -762,7 +762,10 @@ app.get('/api/huangguo-proxy', async (req, res) => {
   // 域名解析校验：解析到 127.0.0.1 / 192.168.x 的域名同样拒绝
   try { await assertPublicUrl(target); }
   catch (error) { return res.status(403).json({ error: error.message }); }
-  const cached = cacheGet(target);
+  // 播放取址接口 2026-11 起改成 POST /api/videos/:id/episodes/:ep/playback（body 为空 JSON）。
+  // 客户端带 method=POST 来，这里原样转发；GET 保持老行为。
+  const upstreamMethod = String(req.query.method || 'GET').toUpperCase() === 'POST' ? 'POST' : 'GET';
+  const cached = upstreamMethod === 'GET' ? cacheGet(target) : null;
   if (cached) {
     console.log('[proxy]', new Date().toISOString(), 'HIT', cached.type, target.slice(0, 90));
     let cbody = cached.body;
@@ -780,6 +783,8 @@ app.get('/api/huangguo-proxy', async (req, res) => {
     'Accept': '*/*',
   };
   headers['Referer'] = req.query.ref ? String(req.query.ref) : `${parsed.protocol}//${parsed.hostname}/`;
+  if (upstreamMethod === 'POST' && !String(headers['Content-Type'] || '').toLowerCase().includes('json'))
+    headers['Content-Type'] = 'application/json';
   // https 握手失败自动降级 http 重试（部分 CDN 如 tp1.drleao.cn 的 https 端口不稳，源站 m3u8 内引用其子 m3u8/分片）
   const attempt = (u, retriedHttp) => {
     // curl globbing 安全：源站分片文件名可能含未编码的 ()[]{}，curl 会按 glob 解析报 error 3
@@ -787,6 +792,7 @@ app.get('/api/huangguo-proxy', async (req, res) => {
     proxyFetch.requestThroughProxy(u, backendProxy, {
       headers, timeout: 25_000, maxBytes: 50 * 1024 * 1024, redirects: 5,
       guard: assertPublicUrl,   // 每一跳重定向都要过公网校验，否则 302 到内网就绕过去了
+      method: upstreamMethod, body: upstreamMethod === 'POST' ? (req.body || {}) : null,
     }, (err, result) => {
       if (err) {
         console.log('[proxy]', new Date().toISOString(), 'ERR', (err.message || '').slice(0, 120), u.slice(0, 90));

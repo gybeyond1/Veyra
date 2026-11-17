@@ -73,10 +73,17 @@ function connectViaProxy(proxy, host, port, done) {
 // 让它 302 到 http://192.168.1.1/，前面所有 host 校验就白做了。现在每一跳都过 opts.guard
 // （一般是 ssrf-guard 的 assertPublicUrl），跳数仍受 opts.redirects 限制。
 function requestThroughProxy(targetUrl, proxyUrl, opts, done) {
-  const { headers = {}, timeout = 25000, maxBytes = 5 * 1024 * 1024, redirects = 5, guard } = opts || {};
+  const { headers = {}, timeout = 25000, maxBytes = 5 * 1024 * 1024, redirects = 5, guard,
+    method = 'GET', body = null } = opts || {};
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'veyra-curl-'));
   const bodyFile = path.join(dir, 'body');
   const headerFile = path.join(dir, 'headers');
+  const payloadFile = path.join(dir, 'payload');
+  // 播放取址接口要求 POST + JSON body；重定向后不重发（和浏览器一致）
+  const upperMethod = String(method || 'GET').toUpperCase();
+  const hasPayload = body !== null && body !== undefined;
+  if (hasPayload) fs.writeFileSync(payloadFile, typeof body === 'string' ? body : JSON.stringify(body));
+  let firstHop = true;
   let current = String(targetUrl || '');
   let hops = 0;
 
@@ -93,6 +100,11 @@ function requestThroughProxy(targetUrl, proxyUrl, opts, done) {
     for (const [k, v] of Object.entries(headers)) {
       if (v !== undefined && v !== null) args.push('-H', `${k}: ${v}`);
     }
+    if (upperMethod !== 'GET' && firstHop) {
+      args.push('-X', upperMethod);
+      if (hasPayload) args.push('--data-binary', '@' + payloadFile);
+    }
+    firstHop = false;
     // 不带 -L：自己跟，才能逐跳校验。%{redirect_url} 给出 3xx 的绝对 Location
     args.push('-o', bodyFile, '-D', headerFile, '-w', '%{http_code}\n%{content_type}\n%{redirect_url}', current);
     execFile('curl', args, { maxBuffer: 16 * 1024 * 1024, timeout: timeout + 5000 }, (err, stdout, stderr) => {

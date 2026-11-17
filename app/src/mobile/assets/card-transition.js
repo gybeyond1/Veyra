@@ -275,7 +275,7 @@
 
     touchStart(event) {
       if (this.phase !== 'opened' || event.touches.length !== 1 ||
-          event.target.closest('button,input,.detail-description,#auth-overlay,#confirm-overlay,#update-overlay') || !this.isDetail()) return;
+          event.target.closest('button,input,.detail-description,#auth-overlay,#confirm-overlay,#update-overlay,#unlock-overlay,#download-overlay,.producer-overlay,#age-gate') || !this.isDetail()) return;
       const point = event.touches[0];
       const bounds = this.app.getBoundingClientRect();
       const statusInset = parseFloat(getComputedStyle(this.app).getPropertyValue('--status-bar-height')) || 0;

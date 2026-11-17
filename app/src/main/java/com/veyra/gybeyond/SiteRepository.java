@@ -84,25 +84,34 @@ final class SiteRepository {
      *   走后端 → 全部经后端转发；仅直连/仅代理 → 只用该通道，失败即报错。无自动判定。
      */
     private byte[] fetch(String url) throws Exception {
+        return fetch(url, "GET", null);
+    }
+
+    /** method 为 POST 时 body 必须是合法 JSON（站点播放接口要求 Content-Type: application/json）。 */
+    private byte[] fetch(String url, String method, String body) throws Exception {
         int mode = ProxySettings.mode(appContext);
-        if (mode == ProxySettings.MODE_BACKEND) return fetchViaBackend(url);
-        if (mode == ProxySettings.MODE_DIRECT) return fetchDirect(url);
+        if (mode == ProxySettings.MODE_BACKEND) return fetchViaBackend(url, method, body);
+        if (mode == ProxySettings.MODE_DIRECT) return openAndRead(url, null, CHANNEL_TIMEOUT_MS, method, body);
         if (proxyAddress.isEmpty()) throw new IOException("未配置代理地址");
-        return fetchViaProxy(url);
+        return openAndRead(url, proxy(proxyAddress), CHANNEL_TIMEOUT_MS, method, body);
     }
 
     /** 直连通道：系统默认网络栈（VPN/全局代理自然生效），4s 判定超时。 */
     private byte[] fetchDirect(String url) throws Exception {
-        return openAndRead(url, null, CHANNEL_TIMEOUT_MS);
+        return openAndRead(url, null, CHANNEL_TIMEOUT_MS, "GET", null);
     }
 
     /** 代理通道：走设置里配置的代理地址。 */
     private byte[] fetchViaProxy(String url) throws Exception {
         if (proxyAddress.isEmpty()) throw new IOException("未配置代理地址");
-        return openAndRead(url, proxy(proxyAddress), CHANNEL_TIMEOUT_MS);
+        return openAndRead(url, proxy(proxyAddress), CHANNEL_TIMEOUT_MS, "GET", null);
     }
 
     private byte[] openAndRead(String url, Proxy proxy, int timeout) throws Exception {
+        return openAndRead(url, proxy, timeout, "GET", null);
+    }
+
+    private byte[] openAndRead(String url, Proxy proxy, int timeout, String method, String body) throws Exception {
         URL parsed;
         try {
             parsed = new URL(url);
@@ -121,6 +130,15 @@ final class SiteRepository {
             connection.setRequestProperty(key, headers.getString(key).replace("{origin}", profile.origin()));
         }
         connection.setUseCaches(false);
+        boolean post = "POST".equals(method);
+        if (post) {
+            connection.setRequestMethod("POST");
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Content-Type", "application/json");
+            byte[] payload = (body == null ? "{}" : body).getBytes(StandardCharsets.UTF_8);
+            connection.setFixedLengthStreamingMode(payload.length);
+            try (java.io.OutputStream output = connection.getOutputStream()) { output.write(payload); }
+        }
         try {
             int status = connection.getResponseCode();
             // 跟随重定向后 connection 指向最终地址；黄果换域名靠这个跟上
@@ -143,10 +161,25 @@ final class SiteRepository {
 
     /** 后端通道：经自建后端 /api/huangguo-proxy 转发（后端侧可配代理；白名单限黄果域名；m3u8 分片自动重写）。 */
     private byte[] fetchViaBackend(String url) throws Exception {
+        return fetchViaBackend(url, "GET", null);
+    }
+
+    /**
+     * 播放取址接口（2026-11 起）必须 POST，后端旧版只认 GET。
+     * 这里带 method=POST 交给后端转发；后端未升级会 4xx，调用方据此回退旧 GET 接口。
+     */
+    private byte[] fetchViaBackend(String url, String method, String body) throws Exception {
         String base = ServerConfig.get(appContext);
         if (base.isEmpty()) throw new IOException("未配置后端地址，无法走后端转发");
-        String endpoint = base + "api/huangguo-proxy?url=" + java.net.URLEncoder.encode(url, "UTF-8");
-        okhttp3.Request request = new okhttp3.Request.Builder().url(endpoint).build();
+        boolean post = "POST".equals(method);
+        String endpoint = base + "api/huangguo-proxy?url=" + java.net.URLEncoder.encode(url, "UTF-8")
+                + (post ? "&method=POST" : "");
+        okhttp3.Request.Builder builder = new okhttp3.Request.Builder().url(endpoint);
+        if (post) {
+            builder.post(okhttp3.RequestBody.create((body == null ? "{}" : body),
+                    okhttp3.MediaType.parse("application/json; charset=utf-8")));
+        }
+        okhttp3.Request request = builder.build();
         try (okhttp3.Response response = backendClient.newCall(request).execute()) {
             if (!response.isSuccessful() || response.body() == null)
                 throw new IOException("后端转发失败（HTTP " + response.code() + "）");
@@ -644,6 +677,21 @@ final class SiteRepository {
             if (!seenEpisodes.add(number)) continue;
             episodes.put(new JSONObject().put("number", number).put("url", channelizedUrl(profile.origin() + href)));
         }
+        /* 站点 2026-11 改版后，详情页里的选集链接只剩「上一集/下一集」附近几条，
+           完整集数只在 videoInitialData.trackingEpisodes 里（键是集号）。
+           链接数明显少于 trackingEpisodes 时按它补齐，否则详情页只显示三五集。 */
+        JSONObject tracking = data.optJSONObject("trackingEpisodes");
+        if (tracking != null && tracking.length() > episodes.length()) {
+            for (java.util.Iterator<String> keys = tracking.keys(); keys.hasNext();) {
+                String key = keys.next();
+                int number;
+                try { number = Integer.parseInt(key.trim()); } catch (NumberFormatException ignored) { continue; }
+                if (number < 1 || !seenEpisodes.add(number)) continue;
+                String path = number == 1 ? "/video/" + id + "/" : "/video/" + id + "/ep-" + number + "/";
+                episodes.put(new JSONObject().put("number", number)
+                        .put("url", channelizedUrl(profile.origin() + path)));
+            }
+        }
         if (episodes.length() == 0 && node != null) {
             // AI 换脸/魔改等无选集链接的作品：videoInitialData 直接给出 epPlaySrcs（集数→m3u8），按集数生成选集
             try {
@@ -725,13 +773,47 @@ final class SiteRepository {
      * 新版详情页的播放地址在这个接口里，返回 { data: { video_url, title, ... } }。
      * 同样走当前通道：仅直连/仅代理自己取，走后端则交后端代取。
      */
+    /**
+     * 播放地址。站点 2026-11 又改了一次：
+     *   旧：GET  /api/videos/:id/play?ep=N          → data.video_url（现在恒为空）
+     *   新：POST /api/videos/:id/episodes/:ep/playback → data.streams.main（真实 m3u8）
+     * 先走新接口，失败再回退旧接口，兼容站点回滚/后端未升级。
+     */
     private JSONObject playAddress(String id, int number) throws Exception {
+        Exception failure = null;
+        try {
+            String path = "/api/videos/" + id + "/episodes/" + number + "/playback";
+            byte[] body = fetch(profile.origin() + path, "POST", "{}");
+            if (body.length > 0) {
+                JSONObject envelope = new JSONObject(new String(body, StandardCharsets.UTF_8));
+                JSONObject data = envelope.optJSONObject("data");
+                if (data != null) {
+                    JSONObject streams = data.optJSONObject("streams");
+                    String main = streams == null ? "" : streams.optString("main").trim();
+                    if (!main.isEmpty()) {
+                        if (data.optString("title").trim().isEmpty()) {
+                            String pageTitle = data.optString("page_h1").trim();
+                            if (!pageTitle.isEmpty()) data.put("title", pageTitle);
+                        }
+                        data.put("video_url", main);
+                        return data;
+                    }
+                }
+            }
+        } catch (Exception error) {
+            failure = error;
+        }
         String path = profile.route("playApi", "id", id, "episode", String.valueOf(number));
         byte[] body = fetch(profile.origin() + path);
-        if (body.length == 0) throw new IllegalStateException("播放接口返回空");
+        if (body.length == 0) {
+            if (failure != null) throw failure;
+            throw new IllegalStateException("播放接口返回空");
+        }
         JSONObject envelope = new JSONObject(new String(body, StandardCharsets.UTF_8));
         JSONObject data = envelope.optJSONObject("data");
         if (data == null) throw new IllegalStateException("播放接口没有返回数据");
+        if (data.optString("video_url").trim().isEmpty() && failure == null)
+            throw new IllegalStateException("播放接口没有给出地址");
         return data;
     }
 
