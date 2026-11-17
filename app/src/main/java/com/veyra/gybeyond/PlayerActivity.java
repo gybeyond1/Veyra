@@ -188,8 +188,6 @@ public final class PlayerActivity extends Activity {
     private boolean danmakuHinted;
     private LinearLayout titleBar;
     private LinearLayout controls;
-    private LinearLayout buttonsRow;
-    private LinearLayout buttonRow2;
     private FrameLayout miniProgress;
     private View miniProgressFill;
     private float miniProgressFraction;
@@ -782,9 +780,8 @@ public final class PlayerActivity extends Activity {
         timeText = label("0:00 / 0:00", 11, Color.WHITE);
         controls.addView(timeline, new LinearLayout.LayoutParams(-1, dp(37)));
         LinearLayout buttons = new LinearLayout(this);
-        buttonsRow = buttons;
         buttons.setGravity(Gravity.CENTER_VERTICAL);
-        buttons.setPadding(dp(7), 0, dp(7), 0);
+        buttons.setPadding(dp(5), 0, dp(5), 0);
         GradientDrawable remote = background(0xF2292720, 12);
         remote.setStroke(dp(1), 0xFF796D53);
         buttons.setBackground(remote);
@@ -792,15 +789,15 @@ public final class PlayerActivity extends Activity {
         playButton = icon(R.drawable.player_play, "播放或暂停");
         playButton.setBackgroundColor(Color.TRANSPARENT);
         playButton.setOnClickListener(v -> { if (player != null) player.setPlayWhenReady(!player.getPlayWhenReady()); revealControls(); });
-        buttons.addView(playButton, new LinearLayout.LayoutParams(dp(38), dp(38)));
+        buttons.addView(playButton, flexLp());
         ImageButton next = icon(R.drawable.player_next, "下一集");
         next.setBackgroundColor(Color.TRANSPARENT);
         next.setOnClickListener(v -> { Selection item = adjacent(1); if (item != null) animateSwitch(item, 1); else toast("已经是最后一集"); });
-        LinearLayout.LayoutParams nextParams = new LinearLayout.LayoutParams(dp(38), dp(38));
-        nextParams.leftMargin = dp(3);
+        LinearLayout.LayoutParams nextParams = flexLp();
+        nextParams.leftMargin = dp(1);
         buttons.addView(next, nextParams);
-        LinearLayout.LayoutParams timeParams = new LinearLayout.LayoutParams(dp(77), dp(38));
-        timeParams.leftMargin = dp(4);
+        LinearLayout.LayoutParams timeParams = new LinearLayout.LayoutParams(dp(54), dp(38));
+        timeParams.leftMargin = dp(2);
         timeText.setTextSize(10);
         timeText.setGravity(Gravity.CENTER);
         buttons.addView(timeText, timeParams);
@@ -841,25 +838,20 @@ public final class PlayerActivity extends Activity {
             @Override public void onStopTrackingTouch(SeekBar bar) { revealControls(); }
         });
         buttons.addView(volumeSeek, new LinearLayout.LayoutParams(dp(68), dp(38)));
-        castButton = icon(R.drawable.player_cast, "投到电视");
-        castButton.setBackgroundColor(Color.TRANSPARENT);
-        castButton.setOnClickListener(v -> { showCastDevices(); revealControls(); });
-        buttons.addView(castButton, new LinearLayout.LayoutParams(dp(36), dp(38)));
-        fullscreenButton = icon(R.drawable.player_fullscreen, "全屏");
-        fullscreenButton.setBackgroundColor(Color.TRANSPARENT);
-        fullscreenButton.setOnClickListener(v -> setFullscreenMode(!fullscreenMode));
-        buttons.addView(fullscreenButton, new LinearLayout.LayoutParams(dp(36), dp(38)));
+        /* 竖屏也只排一排：选集 / 倍速 / 收藏 / 弹幕 / 评论 紧跟时间，投屏和全屏收在右端。
+           以前拆两排是因为 360dp 宽按死尺寸加起来 430dp 放不下；现在图标按钮改成
+           弹性宽度（weight=1），窄屏自动均分收窄，不会再被挤出屏幕，也不用第二排。 */
+        episodeTrigger = label("选集", 13, 0xFFF5D782);
+        episodeTrigger.setGravity(Gravity.CENTER);
+        episodeTrigger.setBackgroundColor(Color.TRANSPARENT);
+        episodeTrigger.setOnClickListener(v -> showEpisodes());
+        buttons.addView(episodeTrigger, new LinearLayout.LayoutParams(dp(40), dp(38)));
         speedTrigger = label("1×", 12, 0xFFF5D782);
         speedTrigger.setGravity(Gravity.CENTER);
         speedTrigger.setBackgroundColor(Color.TRANSPARENT);
         speedTrigger.setContentDescription("播放倍速");
         speedTrigger.setOnClickListener(v -> showSpeedPanel());
-        buttons.addView(speedTrigger, new LinearLayout.LayoutParams(dp(46), dp(38)));
-        episodeTrigger = label("选集", 13, 0xFFF5D782);
-        episodeTrigger.setGravity(Gravity.CENTER);
-        episodeTrigger.setBackgroundColor(Color.TRANSPARENT);
-        episodeTrigger.setOnClickListener(v -> showEpisodes());
-        buttons.addView(episodeTrigger, new LinearLayout.LayoutParams(dp(49), dp(38)));
+        buttons.addView(speedTrigger, new LinearLayout.LayoutParams(dp(34), dp(38)));
         bookmarkButton = icon(R.drawable.player_bookmark, "收藏作品");
         bookmarkButton.setBackgroundColor(Color.TRANSPARENT);
         bookmarkButton.setOnClickListener(v -> {
@@ -876,32 +868,32 @@ public final class PlayerActivity extends Activity {
             } catch (Exception error) { toast("收藏未保存，请重试"); }
             revealControls();
         });
-        buttons.addView(bookmarkButton, new LinearLayout.LayoutParams(dp(36), dp(38)));
+        buttons.addView(bookmarkButton, flexLp());
         if (!tvMode) {
             danmakuButton = icon(R.drawable.player_danmaku, "弹幕设置");
             danmakuButton.setBackgroundColor(Color.TRANSPARENT);
             danmakuButton.setOnClickListener(v -> { showDanmakuPanel(); revealControls(); });
-            buttons.addView(danmakuButton, new LinearLayout.LayoutParams(dp(34), dp(38)));
+            buttons.addView(danmakuButton, flexLp());
             commentButton = icon(R.drawable.player_comment, "本集评论");
             commentButton.setBackgroundColor(Color.TRANSPARENT);
             commentButton.setOnClickListener(v -> toggleComments());
-            buttons.addView(commentButton, new LinearLayout.LayoutParams(dp(34), dp(38)));
+            buttons.addView(commentButton, flexLp());
         }
-        controls.addView(buttons, new LinearLayout.LayoutParams(-2, dp(52)));
-        /* 竖屏第二排：选集 / 倍速 / 收藏 / 弹幕 / 评论。
-           全塞进第一排的话，360dp 宽的手机加起来 430dp，右边两颗按钮直接被切掉。 */
-        buttonRow2 = new LinearLayout(this);
-        buttonRow2.setGravity(Gravity.CENTER_VERTICAL);
-        buttonRow2.setPadding(dp(7), 0, dp(7), 0);
-        GradientDrawable remote2 = background(0xF2292720, 12);
-        remote2.setStroke(dp(1), 0xFF796D53);
-        buttonRow2.setBackground(remote2);
-        buttonRow2.setElevation(dp(12));
-        buttonRow2.setVisibility(View.GONE);
-        LinearLayout.LayoutParams row2Params = new LinearLayout.LayoutParams(-2, dp(46));
-        row2Params.topMargin = dp(6);
-        row2Params.gravity = Gravity.CENTER_HORIZONTAL;
-        controls.addView(buttonRow2, row2Params);
+        castButton = icon(R.drawable.player_cast, "投到电视");
+        castButton.setBackgroundColor(Color.TRANSPARENT);
+        castButton.setOnClickListener(v -> { showCastDevices(); revealControls(); });
+        buttons.addView(castButton, flexLp());
+        fullscreenButton = icon(R.drawable.player_fullscreen, "全屏");
+        fullscreenButton.setBackgroundColor(Color.TRANSPARENT);
+        fullscreenButton.setOnClickListener(v -> setFullscreenMode(!fullscreenMode));
+        buttons.addView(fullscreenButton, flexLp());
+        /* 一排要塞十个控件：图标位统一收到弹性槽里，内边距压到 2dp，
+           让 24dp 的图标尽量占满槽位，窄屏也不会把右边两颗挤出屏幕。 */
+        for (int i = 0; i < buttons.getChildCount(); i++) {
+            View child = buttons.getChildAt(i);
+            if (child instanceof ImageButton) child.setPadding(dp(2), dp(2), dp(2), dp(2));
+        }
+        controls.addView(buttons, new LinearLayout.LayoutParams(-1, dp(52)));
         root.addView(controls, new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM));
         // 电视端整条控件栏都不要：遥控器上左右是拖进度、确定是暂停，没有用鼠标去点按钮的场景
         if (tvMode) controls.setVisibility(View.GONE);
@@ -2300,37 +2292,21 @@ public final class PlayerActivity extends Activity {
         revealControls();
     }
 
-    /** 把控件在两条按钮排之间搬：竖屏两排，横屏一排。 */
-    private void reparent(LinearLayout target, View... views) {
-        if (target == null) return;
-        for (View view : views) {
-            if (view == null) continue;
-            ViewGroup parent = view.getParent() instanceof ViewGroup ? (ViewGroup) view.getParent() : null;
-            if (parent == target) continue;
-            LinearLayout.LayoutParams params = view.getLayoutParams() instanceof LinearLayout.LayoutParams
-                    ? (LinearLayout.LayoutParams) view.getLayoutParams() : new LinearLayout.LayoutParams(-2, dp(38));
-            if (parent != null) parent.removeView(view);
-            target.addView(view, params);
-        }
+    /** 图标按钮的弹性位：竖屏窄的时候一起收窄，横屏富余的时候一起摊开。 */
+    private LinearLayout.LayoutParams flexLp() {
+        return new LinearLayout.LayoutParams(0, dp(34), 1f);
     }
 
+    /** 竖屏、横屏都只有一排控件，这里只切横屏专属的进度/音量，不再搬动按钮。 */
     private void updateControlLayout() {
         boolean landscape = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
-        if (buttonRow2 != null) {
-            buttonRow2.setVisibility(landscape ? View.GONE : View.VISIBLE);
-            if (landscape) {
-                reparent(buttonsRow, speedTrigger, episodeTrigger, bookmarkButton, danmakuButton, commentButton);
-            } else {
-                reparent(buttonRow2, episodeTrigger, speedTrigger, bookmarkButton, danmakuButton, commentButton);
-            }
-        }
         if (landscapeSeek != null) landscapeSeek.setVisibility(landscape ? View.VISIBLE : View.GONE);
         if (volumeButton != null) volumeButton.setVisibility(landscape ? View.VISIBLE : View.GONE);
         if (volumeSeek != null) volumeSeek.setVisibility(landscape ? View.VISIBLE : View.GONE);
         if (seekBar != null) ((View) seekBar.getParent()).setVisibility(landscape ? View.GONE : View.VISIBLE);
         if (timeText != null) {
             LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) timeText.getLayoutParams();
-            params.width = dp(landscape ? 77 : 65);
+            params.width = dp(landscape ? 77 : 56);
             timeText.setLayoutParams(params);
         }
         updateTitleVisibility();

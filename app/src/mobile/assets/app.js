@@ -2614,19 +2614,80 @@ function paintProducerInline(id) {
 
 function renderDetailExtras(host, result, data) {
   if (!host) return;
-  const related = sortRelated(asArray(result.related));
+  /* 后端没标季号的，这里按标题把「第 N 季」补出来：排序生效也看得见 */
+  const related = sortRelated(asArray(result.related), data && data.title).map(item => {
+    const season = relatedSeason(item);
+    return season > 0 && !item.season ? { ...item, season: `第${season}季` } : item;
+  });
   if (!related.length) { host.innerHTML = ''; return; }
   host.innerHTML = `<section class="detail-section"><h2>相关作品</h2><div class="detail-related-grid">${related.map(relatedCard).join('')}</div></section>`;
   hydrateImages();
 }
 
-/** 同一部剧的其他季排前面（按季号），其余同 IP/推荐排后面。 */
-function sortRelated(items) {
-  const season = item => Number(item.seasonIndex) || 0;
-  const head = items.filter(item => season(item) > 0 || item.season);
-  const tail = items.filter(item => !(season(item) > 0 || item.season));
-  head.sort((a, b) => season(a) - season(b));
-  return [...head, ...tail];
+/*
+ * 相关作品排序：同一部剧的其他季 → 同 IP 的其他剧 → 平台推荐。
+ *
+ * 不能只信后端的 season / seasonIndex：真人短剧的相关作品常常既没有 season_index，
+ * 也没有「第 N 季」标签，全被当成普通推荐，排到哪算哪 —— 用户看到的就是「明明识别
+ * 得到第二季第三季，却没排在前面」。所以这里按标题本体判断同一部剧：去掉标点、
+ * 季号、「全 N 集」这类尾巴之后同名的，就是同一部。
+ */
+const CN_DIGITS = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
+
+function relatedBase(title) {
+  return String(title || '')
+    .replace(/[（(【[]?[全共]?\s*[0-9]{1,4}\s*集[)）】\]]?/g, '')
+    .replace(/第\s*[0-9一二三四五六七八九十百]{1,3}\s*[季部期篇]/g, '')
+    .replace(/season\s*[0-9]{1,2}/ig, '')
+    .replace(/[\s·・:：;；,，.。、!！?？\-—_|/\\"'“”‘’（）()《》【】\[\]…～]/g, '')
+    .toLowerCase();
+}
+
+/** 季号：优先用后端字段，没有再抠标题里的「第 N 季 / 第二部」。 */
+function relatedSeason(item) {
+  const fromField = Number(item && item.seasonIndex) || 0;
+  if (fromField > 0) return fromField;
+  const title = String((item && item.title) || '');
+  const digits = title.match(/第\s*([0-9]{1,2})\s*[季部期篇]/);
+  if (digits) return Number(digits[1]);
+  const chinese = title.match(/第\s*([一二三四五六七八九十]{1,3})\s*[季部期篇]/);
+  if (!chinese) return 0;
+  const text = chinese[1];
+  if (text === '十') return 10;
+  if (text.length === 1) return CN_DIGITS[text] || 0;
+  if (text[0] === '十') return 10 + (CN_DIGITS[text[1]] || 0);
+  if (text[1] === '十') return (CN_DIGITS[text[0]] || 0) * 10 + (CN_DIGITS[text[2]] || 0);
+  return 0;
+}
+
+/** 同 IP：一方包含另一方，或者开头一大段名字相同（衍生剧常这样）。 */
+function sameIpBase(a, b) {
+  if (!a || !b) return false;
+  if (a.includes(b) || b.includes(a)) return true;
+  const shorter = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < shorter && a[i] === b[i]) i++;
+  return i >= 4 && i >= shorter * .6;
+}
+
+function sortRelated(items, currentTitle) {
+  const base = relatedBase(currentTitle);
+  const rank = item => {
+    const other = relatedBase(item.title);
+    if (!other) return 2;
+    const sameWork = (base && other === base) ||
+      (relatedSeason(item) > 0 && base && sameIpBase(base, other));
+    if (sameWork) return 0;
+    return sameIpBase(base, other) ? 1 : 2;
+  };
+  return items
+    /* 同一部剧、又没有季号的条目 = 这部剧自己（不同 id 的同一部），别摆在第一位 */
+    .filter(item => !(base && relatedBase(item.title) === base && relatedSeason(item) === 0))
+    .map((item, index) => ({ item, index, rank: rank(item) }))
+    .sort((a, b) => a.rank - b.rank ||
+      (a.rank === 0 ? relatedSeason(a.item) - relatedSeason(b.item) : 0) ||
+      a.index - b.index)
+    .map(entry => entry.item);
 }
 
 function relatedCard(item) {
