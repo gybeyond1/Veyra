@@ -1012,46 +1012,61 @@ html[data-theme=dark] .remote-test-result.fail,html[data-theme=dark] .dl-remote-
    2) :is() 是 Chrome 88 才有的选择器，本文件里的 :is() 已全部展开成并集，
       并用 :not(#__vc) / :not(.__vc) 把特异性补回原值（这两个不匹配任何元素，只占权重）。
    这一段只在老内核生效，新内核整块丢弃。 */
-@supports not (color: color-mix(in srgb, red 50%, blue)) {
-  /* #app.binge 的 --dock 定义在元素上，compat.js 只管 <html>，这里退回实色 */
-  #app.binge { --dock: var(--surface) }
+/* 挂载点是 <html data-legacy>，由 compat.js 在检测到不支持 color-mix() 时打上。
+   不用 @supports not (color-mix) —— 87 对这个条件求值不可靠，上一版整块在真机上
+   一条都没生效（焦点框还在、头图遮罩仍是实色）。属性选择器没有这个问题，新内核
+   没有这个属性，整块不匹配。 */
 
-  /* 骨架屏：背景直接写了 color-mix，失效就整块透明，加载时看着是白屏 */
-  .swipe-skel .skeleton, .sk-list .skeleton { background: rgba(20, 28, 40, .07) }
-  html[data-theme="dark"] .swipe-skel .skeleton,
-  html[data-theme="dark"] .sk-list .skeleton { background: rgba(255, 255, 255, .08) }
+/* #app.binge 的 --dock 定义在元素上，compat.js 只管 <html>，这里退回实色 */
+html[data-legacy] #app.binge { --dock: var(--surface) }
 
-  /* 刷剧页简介卡、设置里站点选中态、开关轨道 */
-  .binge-detail { background: rgba(255, 255, 255, .46) }
-  html[data-theme="dark"] .binge-detail { background: rgba(26, 33, 43, .46) }
-  .site-option.is-active { background: var(--panel) }
-  .ap-switch { background: rgba(20, 28, 40, .2) }
-  html[data-theme="dark"] .ap-switch { background: rgba(255, 255, 255, .22) }
+/* 骨架屏：背景直接写了 color-mix，失效就整块透明，加载时看着是白屏 */
+html[data-legacy] .swipe-skel .skeleton,
+html[data-legacy] .sk-list .skeleton { background: rgba(20, 28, 40, .07) }
+html[data-legacy][data-theme="dark"] .swipe-skel .skeleton,
+html[data-legacy][data-theme="dark"] .sk-list .skeleton { background: rgba(255, 255, 255, .08) }
 
-  /* 详情页头图底部的过渡遮罩：整条是 color-mix 混出来的渐变，失效后标题和简介
-     直接压在剧照上，字看不清。老内核改用「实色 + mask 渐隐」，颜色跟着主题走。 */
-  .detail-art:after {
-    background: var(--bg);
-    -webkit-mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0) 26%, #000 78%);
-    mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0) 26%, #000 78%);
-  }
+/* 刷剧页简介卡、设置里站点选中态、开关轨道 */
+html[data-legacy] .binge-detail { background: rgba(255, 255, 255, .46) }
+html[data-legacy][data-theme="dark"] .binge-detail { background: rgba(26, 33, 43, .46) }
+html[data-legacy] .site-option.is-active { background: var(--panel) }
+html[data-legacy] .ap-switch { background: rgba(20, 28, 40, .2) }
+html[data-legacy][data-theme="dark"] .ap-switch { background: rgba(255, 255, 255, .22) }
 
-  /* 详情页返回时 app.js 会把焦点还给刚点的那张卡。老内核的 :focus-visible
-     判定不区分触摸，回来就留一圈金色描边（看着像 TV 端的选中框），触屏下关掉。 */
-  @media (hover: none) and (pointer: coarse) {
-    button:focus-visible, input:not(.search-input):focus-visible { outline: none }
-  }
+/* 详情页头图：原遮罩是 color-mix 调出来的四段渐变（透明 → bg55% → bg88% → bg）。
+   老内核里不能用「实色 + mask」代替：实色取的是 --bg，而页面底是 --mat-page
+   （--bg 上还叠了一层径向渐变），两者有色差，剧照下边缘就成了一道突兀的横线。
+   改成让剧照自己淡出 —— 透出来的是页面底色本身，也不会有色差。
+   alpha 曲线按原渐变反算：0.26 处 1，0.48 处 0.45，0.66 处 0.12，0.82 处 0。 */
+html[data-legacy] .detail-art:after { display: none }
+/* 头图容器本身也不能留底色：--panel 和页面底 --mat-page 不同色，
+   剧照淡出后露出的如果是 panel 色，同样是一道色差线。 */
+html[data-legacy] .detail-art { background: transparent }
+html[data-legacy] .detail-art img {
+  -webkit-mask-image: linear-gradient(180deg, #000 26%, rgba(0, 0, 0, .45) 48%, rgba(0, 0, 0, .12) 66%, rgba(0, 0, 0, 0) 82%);
+  mask-image: linear-gradient(180deg, #000 26%, rgba(0, 0, 0, .45) 48%, rgba(0, 0, 0, .12) 66%, rgba(0, 0, 0, 0) 82%);
 }
+
+/* 焦点描边：app.js 会把焦点还给刚点过的卡片，87 的 :focus-visible 在触摸后仍判命中，
+   首页 / 相关作品就会留一圈 2px 金框（看着像 TV 端选中框）。老内核下按钮一律不画，
+   输入框保留 —— 那个描边是「正在输入」的提示，有用。 */
+html[data-legacy] button:focus-visible,
+html[data-legacy] a:focus-visible,
+html[data-legacy] [role="tab"]:focus-visible { outline: none }
+html[data-legacy] #dock button:focus-visible { outline: none }
 
 /* aspect-ratio 是 Chrome 88 才有的属性。搜索九宫格、详情相关作品、投屏二维码
-   都靠它撑比例，老内核里高度会塌成 0（图直接不见），这里用 padding 比例盒补上。 */
-@supports not (aspect-ratio: 1 / 1) {
-  .search-grid .poster,
-  .detail-related-card .poster { height: 0; padding-bottom: 134.2% }
-  .search-grid .poster img,
-  .detail-related-card .poster img { position: absolute; inset: 0; width: 100%; height: 100% }
-  .search-grid .poster.fallback,
-  .detail-related-card .poster.fallback { height: 150px; padding-bottom: 0 }
-  .relay-qr { position: relative; height: 0; padding-bottom: 100% }
-  .relay-qr svg { position: absolute; inset: 0 }
+   都靠它撑比例，老内核里高度会塌成 0（图直接不见），这里用 padding 比例盒补上。
+   注意 inset 简写是 87 才加的，这里统一写 top/left/right/bottom 更保险。 */
+html[data-legacy] .search-grid .poster,
+html[data-legacy] .detail-related-card .poster { height: 0; padding-bottom: 134.2% }
+html[data-legacy] .search-grid .poster img,
+html[data-legacy] .detail-related-card .poster img { position: absolute; top: 0; left: 0; width: 100%; height: 100% }
+html[data-legacy] .search-grid .poster .poster-letter,
+html[data-legacy] .detail-related-card .poster .poster-letter {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: grid; place-items: center
 }
+html[data-legacy] .search-grid .poster.fallback,
+html[data-legacy] .detail-related-card .poster.fallback { height: 150px; padding-bottom: 0 }
+html[data-legacy] .relay-qr { position: relative; height: 0; padding-bottom: 100% }
+html[data-legacy] .relay-qr svg { position: absolute; top: 0; left: 0; width: 100%; height: 100% }

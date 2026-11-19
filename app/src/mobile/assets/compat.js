@@ -21,6 +21,11 @@
   window.__veyraCompat = { colorMix: supported };
   if (supported) return;
 
+  /* 给 <html> 打个记号，CSS 里所有老内核兜底都挂在这个属性上。
+     不用 @supports not (color: color-mix(...)) 是因为 87 对这个条件的求值不可靠：
+     上一版整块兜底在真机上一条都没生效（焦点框还在、头图遮罩仍在用实色）。 */
+  root.setAttribute('data-legacy', '1');
+
   var NAMED = {
     transparent: [0, 0, 0, 0],
     none: null,
