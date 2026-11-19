@@ -19,7 +19,47 @@
     supported = false;
   }
   window.__veyraCompat = { colorMix: supported };
-  if (supported) return;
+
+  /* 头图遮罩的渐变要「同一个 --bg 色的不同透明度」。rgba() 没法从变量里取 rgb，
+     以前是靠 color-mix 现混的，87 算不出来 —— 那层就整条失效，剧照下沿露出硬边。
+     这里把 --bg resolve 成 "r,g,b" 写进 --vc-bg-rgb，CSS 用 rgba(var(--vc-bg-rgb), .55)。
+     新内核也写一次：app.css 里那条渐变已经不依赖 color-mix 了。 */
+  function publishBgRgb() {
+    try {
+      var probe = document.createElement('div');
+      probe.style.cssText = 'position:absolute;left:-9999px;top:0;width:0;height:0;overflow:hidden;color:var(--bg)';
+      (document.body || root).appendChild(probe);
+      var c = window.getComputedStyle(probe).color || '';
+      probe.parentNode.removeChild(probe);
+      var m = c.match(/rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/);
+      var r, g, b;
+      if (m) {
+        r = +m[1]; g = +m[2]; b = +m[3];
+      } else {
+        /* 新内核把 color-mix 的结果序列化成 color(srgb r g b)，分量是 0~1 */
+        m = c.match(/color\(\s*srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/);
+        if (!m) return;
+        r = +m[1] * 255; g = +m[2] * 255; b = +m[3] * 255;
+      }
+      root.style.setProperty('--vc-bg-rgb',
+        Math.round(r) + ',' + Math.round(g) + ',' + Math.round(b));
+    } catch (e) { }
+  }
+  publishBgRgb();
+
+  /* 换明暗/材质/配色要重算。老内核下面 run() 里也会调一次。 */
+  function watchBgRgb() {
+    try {
+      var t = 0;
+      var mo = new MutationObserver(function () {
+        clearTimeout(t);
+        t = setTimeout(publishBgRgb, 30);
+      });
+      mo.observe(root, { attributes: true, attributeFilter: ['data-theme', 'data-material', 'data-color'] });
+    } catch (e) { }
+  }
+
+  if (supported) { watchBgRgb(); return; }
 
   /* 给 <html> 打个记号，CSS 里所有老内核兜底都挂在这个属性上。
      不用 @supports not (color: color-mix(...)) 是因为 87 对这个条件的求值不可靠：
@@ -283,6 +323,7 @@
     }
     for (i = 0; i < names.length; i++) readVar(names[i], []);
     verify();
+    publishBgRgb();   /* --bg 这时候才是算好的 rgba，重新 resolve 一次 */
   }
 
   /* 保险：万一这个内核连「含未知函数的自定义属性」都读不出来（读到空串），
