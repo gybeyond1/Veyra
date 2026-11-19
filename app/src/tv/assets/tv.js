@@ -2951,6 +2951,9 @@ function openProducerPanel() {
 }
 
 function closeProducerPanel() {
+  /* 叠在上面的系列组一起收：只拆下面这层，组层就成了没有归属的孤层，
+     返回键也没有「上一页」可回。 */
+  closeRelatedGroup();
   if (producerPanel && producerPanel.parentNode) producerPanel.parentNode.removeChild(producerPanel);
   producerPanel = null;
 }
@@ -3187,8 +3190,11 @@ window.veyraTvKey = function (code) {
 window.hgBack = function () {
   if (epMenu) { closeEpMenu(); return true; }
   if (seasonPanel) { closeSeasonMenu(); restoreFocus(); return true; }
-  if (producerPanel) { closeProducerPanel(); state.focusKey = 'producer'; restoreFocus(); return true; }
+  /* 系列组是叠在制作方面板上面的一层：必须先收它。
+     原来先判制作方面板，按一次返回就把底下那层拆了、上面这层还挂在屏幕上，
+     焦点只能在组里乱跳（看着像「卡一下回到第一张封面」），再按一次就直接掉回详情页。 */
   if (relatedGroup) { closeRelatedGroup(); state.focusKey = groupReturnKey || 'producer'; restoreFocus(); return true; }
+  if (producerPanel) { closeProducerPanel(); state.focusKey = 'producer'; restoreFocus(); return true; }
   if (otpPanel && !otpPanel.hidden) {
     closeOtp();
     if (accountPanel) { accountPanel.hidden = false; showAccountPage('privacy'); }
