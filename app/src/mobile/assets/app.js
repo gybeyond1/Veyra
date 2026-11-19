@@ -2939,36 +2939,70 @@ function groupTitleOf(members) {
     .replace(/[（(【\[]?\s*第\s*[0-9一二三四五六七八九十]{1,3}\s*[季部期篇]\s*[)）】\]]?/g, '')
     .replace(/[（(【\[]?\s*[全共]?\s*[0-9]{1,4}\s*集\s*[)）】\]]?/g, '')
     .trim();
+  /* 基名不一致的杂牌组取公共前缀当组名（≥4 字才认） */
+  const bases = new Set();
+  let prefix = String((members[0] && members[0].title) || '');
+  for (const item of members) {
+    const key = relatedBase(item.title);
+    if (key) bases.add(key);
+    const text = String(item.title || '');
+    let n = 0;
+    while (n < prefix.length && n < text.length && prefix.charAt(n) === text.charAt(n)) n++;
+    prefix = prefix.slice(0, n);
+  }
+  prefix = prefix.replace(/[\s·・:：;；,，.。、!！?？\-—_|\\/"'“”‘’（）()《》【】\[\]…～]+$/, '').trim();
+  if (bases.size > 1 && prefix.length >= 4 && prefix.length < stripped.length) return prefix;
   return stripped || raw;
 }
 
 /* 组在前 → 同制作方单卡 → 其余推荐 */
+/* 两条能不能进同一组：彼此同一制作方；署名两边都没给时只容「去季号后标题相等」兜底。 */
+function mergeableRelated(a, b) {
+  if (sameCredit(a, b)) return true;
+  const x = creditOf(a), y = creditOf(b);
+  if (x.author || x.mediaId || y.author || y.mediaId) return false;
+  return relatedBase(a.title) === relatedBase(b.title);
+}
+
 function buildRelatedGroups(items, producer) {
   const used = new Set(), out = [];
   items.forEach((seed, i) => {
     if (used.has(i)) return;
     used.add(i);
     const members = [seed];
-    if (sameCredit(seed, producer)) {
-      for (let j = i + 1; j < items.length; j++) {
-        if (used.has(j)) continue;
-        if (!sameCredit(items[j], producer)) continue;
-        if (!sameSeriesTitle(seed.title, items[j].title)) continue;
-        used.add(j);
-        members.push(items[j]);
-      }
+    /* 判据是组内彼此同一制作方，不是都跟当前这部剧同一制作方 */
+    let near = sameCredit(seed, producer);
+    for (let j = i + 1; j < items.length; j++) {
+      if (used.has(j)) continue;
+      if (!mergeableRelated(items[j], seed)) continue;
+      if (!sameSeriesTitle(seed.title, items[j].title)) continue;
+      used.add(j);
+      members.push(items[j]);
+      if (!near && sameCredit(items[j], producer)) near = true;
     }
     if (members.length > 1) {
       members.sort((a, b) => relatedSeason(a) - relatedSeason(b));
+      /* 同名同季重复的去掉，否则「全 N 季」虚高；AI 真人版基名不同不受影响 */
+      const seen = new Set(), uniq = [];
+      for (const it of members) {
+        const key = relatedBase(it.title) + '|' + relatedSeason(it);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        uniq.push(it);
+      }
+      members.length = 0;
+      members.push(...uniq);
+    }
+    if (members.length > 1) {
       out.push({ group: true, title: groupTitleOf(members), count: members.length,
-        cover: (members[0] && members[0].cover) || '', items: members, order: i });
+        cover: (members[0] && members[0].cover) || '', items: members, order: i,
+        rank: near ? 0 : 1 });
     } else {
-      out.push({ group: false, item: seed, order: i, rank: sameCredit(seed, producer) ? 0 : 1 });
+      out.push({ group: false, item: members[0] || seed, order: i, rank: near ? 2 : 3 });
     }
   });
   out.sort((a, b) => {
-    if (a.group !== b.group) return a.group ? -1 : 1;
-    if (!a.group && a.rank !== b.rank) return a.rank - b.rank;
+    if (a.rank !== b.rank) return a.rank - b.rank;
     return a.order - b.order;
   });
   return out;

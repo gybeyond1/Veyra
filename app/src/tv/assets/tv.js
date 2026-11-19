@@ -2688,13 +2688,38 @@ function groupTitleOf(members) {
     .replace(/[（(【\[]?\s*第\s*[0-9一二三四五六七八九十]{1,3}\s*[季部期篇]\s*[)）】\]]?/g, '')
     .replace(/[（(【\[]?\s*[全共]?\s*[0-9]{1,4}\s*集\s*[)）】\]]?/g, '')
     .trim();
+  /* 靠「前 4 字相同」并进来的杂牌组：成员基名并不一致，拿第一条的完整标题当组名太长，
+     改取公共前缀（≥4 字才认），《聚宝仙盆：A》《聚宝仙盆：B》就归成「聚宝仙盆」。 */
+  var bases = {}, varied = false, prefix = String((members[0] && members[0].title) || '');
+  for (var i = 0; i < members.length; i++) {
+    var key = relatedBase(members[i].title);
+    if (!key) continue;
+    if (!bases[key]) { bases[key] = 1; if (Object.keys(bases).length > 1) varied = true; }
+    var text = String(members[i].title || ''), n = 0;
+    while (n < prefix.length && n < text.length && prefix.charAt(n) === text.charAt(n)) n++;
+    prefix = prefix.slice(0, n);
+  }
+  prefix = prefix.replace(/[\s·・:：;；,，.。、!！?？\-—_|\\/"'“”‘’（）()《》【】\[\]…～]+$/, '').trim();
+  if (varied && prefix.length >= 4 && prefix.length < stripped.length) return prefix;
   return stripped || raw;
 }
 
+/* 两条能不能进同一个卡片组。主判据是「彼此同一制作方」；
+   署名两边都没给时（接口没回 author / media_id），只允许「去掉季号后标题完全相等」兜底，
+   前 4 字相同不算 —— 那种情况没有制作方信息就不敢并，宁可散着。 */
+function mergeableTv(a, b) {
+  if (sameProducer(a, b)) return true;
+  var x = itemCredit(a), y = itemCredit(b);
+  if (x.author || x.mediaId || y.author || y.mediaId) return false;
+  return relatedBase(a.title) === relatedBase(b.title);
+}
+
 /* 把相关作品重排成「卡片组 + 单卡」：
-   1) 同一制作方 且 标题同源、凑够 2 部以上 → 一个卡片组，放最前面；
-   2) 同制作方但凑不成组的 → 单卡，排在组后面；
-   3) 其余平台推荐 → 保持接口原顺序垫底。 */
+   1) 彼此同一制作方 且 标题同源、凑够 2 部以上 → 一个卡片组；
+   2) 组里有当前这部剧的同制作方成员 → 排最前，其余制作的组排它后面；
+   3) 同制作方但凑不成组的 → 单卡，排在组后面；其余平台推荐垫底。
+   注意判据是「组内彼此同一制作方」，不是「都跟当前这部剧同一制作方」——
+   否则只有当前剧那一族能成组，别的制作方自己那几季全散着。 */
 function buildRelatedTv(items, producer) {
   var used = {}, out = [];
   for (var i = 0; i < items.length; i++) {
@@ -2702,29 +2727,40 @@ function buildRelatedTv(items, producer) {
     var seed = items[i];
     used[i] = true;
     var members = [seed];
-    if (sameProducer(seed, producer)) {
-      for (var j = i + 1; j < items.length; j++) {
-        if (used[j]) continue;
-        if (!sameProducer(items[j], producer)) continue;
-        if (!sameSeriesTitle(seed.title, items[j].title)) continue;
-        used[j] = true;
-        members.push(items[j]);
-      }
+    var near = sameProducer(seed, producer);
+    for (var j = i + 1; j < items.length; j++) {
+      if (used[j]) continue;
+      if (!mergeableTv(items[j], seed)) continue;
+      if (!sameSeriesTitle(seed.title, items[j].title)) continue;
+      used[j] = true;
+      members.push(items[j]);
+      if (!near && sameProducer(items[j], producer)) near = true;
     }
     if (members.length > 1) {
       members.sort(function (a, b) { return relatedSeason(a) - relatedSeason(b); });
+      /* 接口偶尔把同一季回两条（同名同季，封面都一样），不去重角标「全 N 季」就虚高。
+         键取「标题基名 + 季号」：AI 真人版基名不同，不会被当成重复吞掉。 */
+      var seen = {}, uniq = [];
+      for (var k = 0; k < members.length; k++) {
+        var dedup = relatedBase(members[k].title) + '|' + relatedSeason(members[k]);
+        if (seen[dedup]) continue;
+        seen[dedup] = true;
+        uniq.push(members[k]);
+      }
+      members = uniq;
+    }
+    if (members.length > 1) {
       out.push({
         group: true, title: groupTitleOf(members), count: members.length,
-        cover: (members[0] && members[0].cover) || '', items: members, order: i
+        cover: (members[0] && members[0].cover) || '', items: members, order: i,
+        rank: near ? 0 : 1
       });
     } else {
-      out.push({ group: false, item: seed, order: i,
-        rank: sameProducer(seed, producer) ? 0 : 1 });
+      out.push({ group: false, item: members[0] || seed, order: i, rank: near ? 2 : 3 });
     }
   }
   out.sort(function (a, b) {
-    if (a.group !== b.group) return a.group ? -1 : 1;
-    if (!a.group && a.rank !== b.rank) return a.rank - b.rank;
+    if (a.rank !== b.rank) return a.rank - b.rank;
     return a.order - b.order;
   });
   return out;
