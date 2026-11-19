@@ -699,13 +699,8 @@ public final class PlayerActivity extends Activity {
         LinearLayout top = new LinearLayout(this);
         titleBar = top;
         top.setGravity(Gravity.CENTER_VERTICAL);
-        top.setPadding(dp(4), dp(12), dp(16), dp(10));
-        // 电视端的返回靠遥控器返回键，标题栏里那颗按钮既用不上、又会被焦点框选中
-        if (!tvMode) {
-            ImageButton back = icon(R.drawable.player_back, "返回详情");
-            back.setOnClickListener(v -> handlePlayerBack());
-            top.addView(back, new LinearLayout.LayoutParams(dp(38), dp(38)));
-        }
+        /* 返回交给系统手势 / 返回键：标题栏里那颗按钮既不常用，又把标题挤得偏右 */
+        top.setPadding(dp(18), dp(12), dp(16), dp(10));
         title = label("", tvMode ? 21 : 16, Color.WHITE);
         title.setTypeface(null, Typeface.BOLD);
         title.setSingleLine(true);
@@ -1612,6 +1607,15 @@ public final class PlayerActivity extends Activity {
         for(int i=0;i<list.length();i++) if(list.optJSONObject(i).optInt("number")==number) return number;
         return list.length()>0?list.optJSONObject(0).optInt("number",1):1;
     }
+    /** 续作卡上按确定：直接播续作第一部（有历史进度就接着看）。 */
+    private void playFirstSequel() {
+        if (sequelCandidates == null || sequelCandidates.length() == 0) return;
+        JSONObject item = sequelCandidates.optJSONObject(0);
+        if (item == null) return;
+        hideSequelEnd();
+        openSequel(item);
+    }
+
     private void openSequel(JSONObject item) {
         if(openingSequel) return;
         openingSequel=true;
@@ -2328,7 +2332,8 @@ public final class PlayerActivity extends Activity {
             titleBar.setVisibility(tvInfoShown ? View.VISIBLE : View.INVISIBLE);
             return;
         }
-        titleBar.setVisibility(isLandscapeFullscreen() && !controlsShown ? View.INVISIBLE : View.VISIBLE);
+        /* 竖屏也一样：标题跟着控件走，控件收起时画面要干净 */
+        titleBar.setVisibility(controlsShown ? View.VISIBLE : View.INVISIBLE);
     }
 
     @Override public void onConfigurationChanged(Configuration configuration) {
@@ -2629,6 +2634,7 @@ public final class PlayerActivity extends Activity {
                 resetMiniTransform();
                 controls.setVisibility(View.INVISIBLE);
                 target.setAlpha(1);
+                miniProgress.setVisibility(View.GONE);
                 return;
             }
             controls.animate().alpha(0).setDuration(180).start();
@@ -2639,6 +2645,8 @@ public final class PlayerActivity extends Activity {
                         controls.setVisibility(View.INVISIBLE);
                         controls.setAlpha(1);
                         target.setAlpha(1);
+                        /* 收起后连那条细黄线也收掉：控件不在时画面上什么都不留 */
+                        miniProgress.setVisibility(View.GONE);
                     }).start();
         });
     }
@@ -2815,6 +2823,10 @@ public final class PlayerActivity extends Activity {
             item.setScaleY(on ? 1.05f : 1f);
         }
         if (tvBarItems.size() > 4) tvBarItems.get(4).setText("倍速 " + speedLabel(manualSpeed));
+        if (tvBarItems.size() > 5) {
+            boolean saved = currentId != null && store.hasBookmark(currentId);
+            tvBarItems.get(5).setText(saved ? "已收藏" : "收藏");
+        }
         if (tvBarItems.size() > 6) tvBarItems.get(6).setText(danmakuOn ? "弹幕" : "弹幕 关");
     }
 
@@ -2846,10 +2858,23 @@ public final class PlayerActivity extends Activity {
         tvInfoShown = true;
         handler.removeCallbacks(hideTvInfo);
         updateTitleVisibility();
+        armTvBarTimeout();
+    }
+
+    /* 控件条没人动就自己收：遥控器上按完一下常常就放在那儿，
+       一直挂着既挡画面、又让人以为是在选集面板里。 */
+    private final Runnable hideTvBarIdle = () -> {
+        if (tvMode && tvBarShown && tvEpPanel == null && danmakuPanel == null && commentPanel == null) hideTvBar();
+    };
+
+    private void armTvBarTimeout() {
+        handler.removeCallbacks(hideTvBarIdle);
+        if (tvBarShown) handler.postDelayed(hideTvBarIdle, 8000);
     }
 
     private void hideTvBar() {
         tvBarShown = false;
+        handler.removeCallbacks(hideTvBarIdle);
         if (tvBar != null) tvBar.setVisibility(View.GONE);
         if (miniProgress != null) miniProgress.setVisibility(View.GONE);
         if (centerToggle != null) centerToggle.setVisibility(View.GONE);
@@ -2860,6 +2885,7 @@ public final class PlayerActivity extends Activity {
     }
 
     private void tvBarAction(int index) {
+        armTvBarTimeout();
         switch (index) {
             case 0:
                 tvTogglePlay();
@@ -2902,6 +2928,7 @@ public final class PlayerActivity extends Activity {
     }
 
     private boolean tvBarKey(int code) {
+        armTvBarTimeout();
         if (code == android.view.KeyEvent.KEYCODE_DPAD_LEFT) {
             if (tvBarIndex > 0) { tvBarIndex--; paintTvBar(); }
         } else if (code == android.view.KeyEvent.KEYCODE_DPAD_RIGHT) {
@@ -3176,6 +3203,25 @@ public final class PlayerActivity extends Activity {
         int action = event.getAction();
 
         if (action == android.view.KeyEvent.ACTION_DOWN) {
+            /* 本季看完的续作卡：卡片里没有可聚焦的按钮，遥控器确定键原本落到下面的
+               「唤出控件条」，于是点了看着像没反应。这里直接接管：确定=播续作，返回=收卡。 */
+            if (sequelOverlay != null) {
+                if (code == android.view.KeyEvent.KEYCODE_BACK || code == android.view.KeyEvent.KEYCODE_ESCAPE) {
+                    hideSequelEnd();
+                    seasonEnded = false;
+                    return true;
+                }
+                if (code == android.view.KeyEvent.KEYCODE_DPAD_CENTER
+                        || code == android.view.KeyEvent.KEYCODE_ENTER
+                        || code == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER) {
+                    if (event.getRepeatCount() == 0) playFirstSequel();
+                    return true;
+                }
+                if (code == android.view.KeyEvent.KEYCODE_DPAD_UP || code == android.view.KeyEvent.KEYCODE_DPAD_DOWN
+                        || code == android.view.KeyEvent.KEYCODE_DPAD_LEFT || code == android.view.KeyEvent.KEYCODE_DPAD_RIGHT) {
+                    return true;   /* 别让方向键漏到背后的快进/切集 */
+                }
+            }
             /* 返回键必须排在面板前面：面板原来把 BACK 一起吃了，
                于是弹窗关不掉、人也退不出去。先收面板，再收控件条，都没有才走退出确认。 */
             if (code == android.view.KeyEvent.KEYCODE_BACK

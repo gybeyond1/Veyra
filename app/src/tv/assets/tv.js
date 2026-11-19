@@ -2793,7 +2793,7 @@ function openRelatedGroup(index, ns) {
   var layer = document.createElement('div');
   layer.id = 'related-group';
   layer.className = 'producer-layer';
-  layer.innerHTML = '<section class="producer-panel" role="dialog" aria-modal="true" data-focusable data-key="related-group-panel">'
+  layer.innerHTML = '<section class="producer-panel" role="dialog" aria-modal="true">'
     + '<h2>' + esc(block.title) + '<span class="group-count">全 ' + block.count + ' 季</span></h2>'
     + '<div class="grid producer-grid">'
     + block.items.map(function (item, i) { return cardMarkup(item, i); }).join('')
@@ -2801,9 +2801,10 @@ function openRelatedGroup(index, ns) {
   document.body.appendChild(layer);
   relatedGroup = layer;
   paintCovers(layer);
-  var panel = layer.querySelector('.producer-panel');
-  state.focusKey = 'related-group-panel';
-  focusElement(panel, false);
+  /* 打开就落第一张封面：落在整块面板上等于「选中了一大块」，按方向键没有参照物 */
+  var first = layer.querySelector('.grid [data-focusable]');
+  if (first) { state.focusKey = first.dataset.key; focusElement(first, false); }
+  else state.focusKey = '';
 }
 
 function closeRelatedGroup() {
@@ -2855,7 +2856,9 @@ function openProducerPanel() {
   var layer = document.createElement('div');
   layer.id = 'producer';
   layer.className = 'producer-layer';
-  layer.innerHTML = '<section class="producer-panel" role="dialog" aria-modal="true" data-focusable data-key="producer-panel">'
+  /* 面板本身不做焦点目标：遥控器选中整块面板既没有可执行的动作，
+     还会把「在封面之间左右移动」变成「选中了一大块」，方向键立刻失去参照。 */
+  layer.innerHTML = '<section class="producer-panel" role="dialog" aria-modal="true">'
     + '<h2>制作方 · ' + esc(producer.name) + '</h2>'
     + '<p class="producer-status" data-producer-status>正在检索作品…</p>'
     + '<div class="grid producer-grid" data-producer-grid></div>'
@@ -2892,10 +2895,10 @@ function openProducerPanel() {
   };
   /* 打开就把焦点收进面板：留在背后的「制作方」按钮上，按 OK 会再开一次，
      按方向键则会跑到相关作品去 —— 真机上就是「按了没反应、焦点不见了」。 */
+  /* 数据没回来之前不落焦点：面板不是焦点目标，第一张封面到了再交给它 */
   var focusPanel = function () {
     if (!panel || !document.body.contains(panel)) return;
-    state.focusKey = 'producer-panel';
-    focusElement(panel, false);
+    state.focusKey = '';
   };
   focusPanel();
   var paint = function (moveFocus) {
@@ -2916,7 +2919,7 @@ function openProducerPanel() {
     /* 数据是在用户已经按键之后才回来的：只要焦点还在面板里（通常是面板本身），
        才把焦点交给第一张作品；已经从面板里出去了就别抢。 */
     var focused = document.querySelector('.is-focused');
-    if (focused && focused !== panel && !panel.contains(focused)) return;
+    if (focused && !panel.contains(focused)) return;
     var first = grid.querySelector('[data-focusable]');
     if (first) { state.focusKey = first.dataset.key; focusElement(first, false); }
     else focusPanel();
