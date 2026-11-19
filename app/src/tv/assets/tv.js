@@ -754,10 +754,14 @@ function activeOverlay() {
   if (epMenu && !alive(epMenu)) epMenu = null;
   if (seasonPanel && !alive(seasonPanel)) seasonPanel = null;
   if (producerPanel && !alive(producerPanel)) producerPanel = null;
+  if (relatedGroup && !alive(relatedGroup)) relatedGroup = null;
   /* 动态码浮窗优先级最高：它开着的时候背后就是整页海报，
      不锁住的话上下左右会直接选到浮窗后面的剧集封面上。 */
   if (alive(epMenu)) return epMenu;
   if (alive(seasonPanel)) return seasonPanel;
+  /* 系列组层叠在制作方面板上面，得先认它：漏了这一层，方向键会穿透到
+     背后的详情页（上下滚的是整页，而不是这一层里的卡片）。 */
+  if (alive(relatedGroup)) return relatedGroup;
   if (alive(producerPanel)) return producerPanel;
   if (otpPanel && !otpPanel.hidden && alive(otpPanel)) return otpPanel;
   if (sourcePanel && !sourcePanel.hidden && alive(sourcePanel)) return sourcePanel;
@@ -2791,7 +2795,6 @@ function openRelatedGroup(index, ns) {
   layer.className = 'producer-layer';
   layer.innerHTML = '<section class="producer-panel" role="dialog" aria-modal="true" data-focusable data-key="related-group-panel">'
     + '<h2>' + esc(block.title) + '<span class="group-count">全 ' + block.count + ' 季</span></h2>'
-    + '<p class="producer-status">按季数排列，选一部进详情</p>'
     + '<div class="grid producer-grid">'
     + block.items.map(function (item, i) { return cardMarkup(item, i); }).join('')
     + '</div></section>';
@@ -2863,8 +2866,18 @@ function openProducerPanel() {
   var grid = layer.querySelector('[data-producer-grid]');
   var status = layer.querySelector('[data-producer-status]');
   var current = String((state.detail && state.detail.id) || '');
-  var seen = { }; seen[current] = true;
+  var seen = { };
   var rows = [];
+  /* 当前这一季必须留在组里。制作方作品是拿搜索捞候选的，经常恰好漏掉正在看的这一季，
+     少了它系列组就成了「全 15 季」，点进去第 16 季无处可寻。 */
+  if (current && state.detail) {
+    var self = producerRowOf({ id: current, title: state.detail.title || '', cover: state.detail.cover || '' });
+    var detailSeason = Number(state.detail.seasonIndex) || 0;
+    if (detailSeason) self.seasonIndex = detailSeason;
+    self.isCurrent = true;
+    rows.push(self);
+    seen[current] = true;
+  }
   var addRows = function (incoming) {
     var added = 0;
     for (var i = 0; i < incoming.length; i++) {
@@ -2911,13 +2924,13 @@ function openProducerPanel() {
   api('producer-works', { name: producer.name, mediaId: producer.mediaId || '', page: 1 }).then(function (data) {
     addRows(list(data && data.items));
     if (!rows.length) {
-      status.textContent = '平台没有收录这位制作方的其他作品';
+      status.textContent = '这家制作方暂时没有其他作品';
       return;
     }
-    status.textContent = '平台署名一致的 ' + rows.length + ' 部作品';
+    status.textContent = '共 ' + rows.length + ' 部';
     paint(true);
   }).catch(function () {
-    status.textContent = rows.length ? '平台署名一致的 ' + rows.length + ' 部作品 · 更多暂时读不到' : '作品暂时无法读取';
+    status.textContent = rows.length ? '共 ' + rows.length + ' 部 · 更多暂时读不到' : '作品暂时无法读取';
     if (rows.length) paint(true);
   });
 }
@@ -3325,14 +3338,19 @@ document.addEventListener('click', function (event) {
   var grp = target.closest('[data-grp]');
   if (grp) {
     var grpParts = String(grp.getAttribute('data-grp')).split(':');
-    if (producerPanel) closeProducerPanel();
+    /* 从制作方面板点开的组：面板留着当底，系列组叠在它上面。
+       关掉面板的话，返回时焦点要落回的那张组卡已经不存在了，等于焦点丢了。 */
     openRelatedGroup(Number(grpParts[1]), grpParts[0]);
     return;
   }
   var card = target.closest('[data-id]');
   if (card && card.dataset.id) {
-    if (producerPanel) closeProducerPanel();
+    var sameId = String((state.detail && state.detail.id) || '') === card.dataset.id;
+    var backKey = relatedGroup ? (groupReturnKey || 'producer') : 'producer';
     if (relatedGroup) closeRelatedGroup();
+    if (producerPanel) closeProducerPanel();
+    /* 点的是当前这一季：面板里留着它是为了别在组里缺席，点了就只收层 */
+    if (sameId) { state.focusKey = backKey; restoreFocus(); return; }
     openDetail(card.dataset.id);
     return;
   }

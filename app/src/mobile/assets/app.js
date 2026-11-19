@@ -3028,7 +3028,6 @@ function openGroupList(blocks, index) {
   overlay.className = 'producer-overlay';
   overlay.innerHTML = `<section class="producer-panel" role="dialog" aria-modal="true" aria-label="${esc(block.title)}">
     <header><h2>${esc(block.title)}<span class="group-count">全 ${block.count} 季</span></h2></header>
-    <p class="producer-status">按季数排列，点一部进详情</p>
     <div class="producer-list">${block.items.map(producerItemHtml).join('')}</div></section>`;
   document.body.appendChild(overlay);
   producerOverlay = overlay;
@@ -3090,7 +3089,8 @@ function producerRowSort(a, b, anchor) {
   return String(a.title || '').localeCompare(String(b.title || ''), 'zh');
 }
 
-function openProducerPanel(name, mediaId, currentId) {
+function openProducerPanel(name, mediaId, current) {
+  const currentId = String((current && current.id) || '');
   closeProducerPanel();
   /* 详情卡还在开场动画里就点制作方：先把卡片落位，别让两层动画抢同一块 transform */
   if (detailCard && detailCard.full && (detailCard.phase === 'opening' || detailCard.phase === 'settling')) {
@@ -3111,9 +3111,16 @@ function openProducerPanel(name, mediaId, currentId) {
   const status = overlay.querySelector('.producer-status');
   const more = overlay.querySelector('.producer-more');
   let page = 1, hasMore = true, busy = false, emptyPages = 0;
-  /* 只装后端核对过的条目，按 id 去重；季号只拿来排序 */
-  const seen = new Set([String(currentId || '')]);
+  /* 只装后端核对过的条目，按 id 去重；季号只拿来排序。
+     当前这一季要留在组里：制作方作品按搜索捞候选，常漏掉正在看的这季。 */
+  const seen = new Set();
   const rows = [];
+  if (currentId && current && current.title) {
+    const season = seasonNumber({ title: current.title });
+    rows.push({ ...current, seasonIndex: season, isCurrent: true,
+      episodeLabel: [season ? `第${season}季` : '', current.episodeLabel || ''].filter(Boolean).join(' · ') });
+    seen.add(currentId);
+  }
   const addRows = incoming => {
     let added = 0;
     for (const item of asArray(incoming)) {
@@ -3142,7 +3149,9 @@ function openProducerPanel(name, mediaId, currentId) {
     const groupCard = event.target.closest('[data-pg-group]');
     if (groupCard) { openGroupList(producerGroupBlocks, Number(groupCard.dataset.pgGroup)); return; }
     const card = event.target.closest('[data-producer-id]');
-    if (card && card.dataset.producerId && card.dataset.producerId !== currentId) {
+    if (card && card.dataset.producerId) {
+      /* 点的是当前这一季：面板里留着它是为了别在组里缺席，点了就只收面板 */
+      if (card.dataset.producerId === currentId) { closeProducerPanel(); return; }
       const nextId = card.dataset.producerId;
       closeProducerPanel();
       goDetail(nextId, null, { id: nextId, title: card.dataset.producerTitle || '', cover: card.dataset.producerCover || '' });
@@ -3162,13 +3171,13 @@ function openProducerPanel(name, mediaId, currentId) {
       hasMore = Boolean(data.hasMore) && emptyPages < 2;
       page += 1;
       if (rows.length) {
-        status.textContent = `平台署名一致的 ${rows.length} 部作品`;
+        status.textContent = `共 ${rows.length} 部`;
       } else {
-        status.textContent = '平台没有收录这位制作方的其他作品';
+        status.textContent = '这家制作方暂时没有其他作品';
       }
       more.hidden = !hasMore || !rows.length;
     } catch (error) {
-      status.textContent = rows.length ? `平台署名一致的 ${rows.length} 部作品 · 更多暂时读不到` : '作品暂时无法读取';
+      status.textContent = rows.length ? `共 ${rows.length} 部 · 更多暂时读不到` : '作品暂时无法读取';
       more.textContent = '重试';
       more.hidden = false;
       hasMore = false;
@@ -5258,7 +5267,7 @@ function refreshCurrentDownloads() {
   const producerOpen = event.target.closest('[data-producer-open]');
   if (producerOpen) {
     const producer = state.detailProducer;
-    if (producer && producer.name) openProducerPanel(producer.name, producer.mediaId || '', state.detail?.id || '');
+    if (producer && producer.name) openProducerPanel(producer.name, producer.mediaId || '', state.detail || null);
     return;
   }
   const episode = event.target.closest('[data-episode]');
