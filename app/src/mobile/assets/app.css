@@ -79,12 +79,20 @@ button,a,input,[role=tab]{-webkit-tap-highlight-color:transparent}button{transit
 .card-transition-page{position:relative;min-height:100%}
 .card-transition-page .detail-art{background:transparent}
 .card-transition-page .detail-art img,.card-transition-page .detail-copy h1{visibility:hidden}
+.card-transition-page .detail-art img{opacity:0}
 .card-transition-page .detail-art:after{display:none}
 .card-transition-page .detail-copy{z-index:2}
 .card-transition-page .detail-back{z-index:4}
-.card-transition-photo{position:absolute;left:0;top:0;z-index:1;overflow:hidden;transform-origin:0 0;pointer-events:none}
-.card-transition-photo img{max-width:none;transform-origin:0 0}
-.card-transition-photo:after{content:"";position:absolute;left:0;right:0;top:calc(var(--card-photo-height,385px) - var(--detail-art-height));height:var(--detail-art-height);background:linear-gradient(0deg,var(--bg),transparent 45%);opacity:var(--card-shade,0)}
+.card-transition-photo{position:absolute;left:0;top:0;z-index:1;transform-origin:0 0;pointer-events:none}
+/* 裁切框就是剧照在屏幕上的那块矩形，alpha 遮罩挂在它身上，百分比正好对应剧照高度。
+   跟 .detail-art img 同一条曲线、同一种做法，只有一层，不存在两层对不齐。
+   以前是 photo 自己 clipPath 裁 + 再盖一层 var(--bg) 渐变，两个边界在 2.75/3.25 这类
+   非整数 DPR 下吸附到不同设备像素，交界处就露出一行剧照像素 = 那条横线。 */
+.card-transition-fade{position:absolute;left:0;top:0;overflow:hidden;-webkit-mask-image:linear-gradient(180deg,#000 0%,#000 26%,rgba(0,0,0,.45) 48%,rgba(0,0,0,.12) 66%,rgba(0,0,0,0) 82%);mask-image:linear-gradient(180deg,#000 0%,#000 26%,rgba(0,0,0,.45) 48%,rgba(0,0,0,.12) 66%,rgba(0,0,0,0) 82%);-webkit-mask-size:100% 100%;mask-size:100% 100%;-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat}
+.card-transition-fade img{position:absolute;left:0;top:0;max-width:none;transform-origin:0 0}
+/* 落地交叉淡出：替身剧照与真实剧照位置重合，一淡出一淡入，中间不露底色 */
+.card-transition-surface.is-revealing .card-transition-photo{opacity:0;transition:opacity .22s linear}
+.card-transition-surface.is-revealing .card-transition-page .detail-art img{visibility:visible;opacity:1;transition:opacity .22s linear}
 .card-transition-title{position:absolute;left:0;top:0;z-index:3;transform-origin:0 0;line-height:1.16;font-weight:700;pointer-events:none}
 
 .card-transition-extras{position:absolute;left:0;top:0;z-index:5;pointer-events:none}

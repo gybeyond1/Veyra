@@ -44,6 +44,7 @@
     constructor(options) {
       Object.assign(this, options);
       this.phase = 'ready';
+      this.revealing = false;
       this.reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
       this.onClick = event => {
         if (this.phase !== 'opened' && !event.target.closest('[data-back]')) {
@@ -55,6 +56,7 @@
 
     prepare(opening) {
       this.returning = !opening;
+      this.revealing = false;
       const origin = this.app.getBoundingClientRect();
       this.width = origin.width; this.height = origin.height;
       this.full = { x: 0, y: 0, w: this.width, h: this.height, radius: 0, shape: 1, contentScale: 1 };
@@ -115,13 +117,17 @@
       this.back = clone.querySelector('.detail-back');
       const photo = document.createElement('div');
       photo.className = 'card-transition-photo';
-      photo.style.width = `${this.width}px`; photo.style.height = `${this.height}px`;
+      /* 剧照淡出改成 alpha 遮罩，挂在「刚好等于剧照区域」的裁切框上，和详情页 .detail-art img
+         同一套做法。之前这里是给 photo 加 clipPath + 一层 var(--bg) 渐变覆盖，
+         两者在非整数 DPR 下各自吸附像素，交界处会露出一行剧照像素 —— 就是那条横线。 */
+      const fade = document.createElement('div');
+      fade.className = 'card-transition-fade';
       const image = document.createElement('img');
       image.alt = ''; image.src = this.source.image;
       image.hidden = !this.source.image;
       image.style.width = `${this.width}px`;
       image.style.height = `${this.width * this.source.imageHeight / this.source.imageWidth}px`;
-      photo.appendChild(image); body.appendChild(photo);
+      fade.appendChild(image); photo.appendChild(fade); body.appendChild(photo);
       const label = document.createElement('div');
       label.className = 'card-transition-title';
       label.textContent = title?.textContent || this.source.titleText;
@@ -140,7 +146,7 @@
       }
       body.appendChild(extras); this.extras = extras;
       this.stage = stage; this.surface = surface; this.body = body;
-      this.photo = photo; this.image = image; this.label = label;
+      this.photo = photo; this.fade = fade; this.image = image; this.label = label;
       this.app.classList.add('card-transition-active');
       this.lastShape = null;
       this.current = opening ? { ...this.small } : { ...this.full };
@@ -174,7 +180,8 @@
         w: this.source.art.w, h: this.source.art.h };
       const art = interpolate(sourceArt, this.targetArt, p);
       this.photo.style.transform = `translate3d(${art.x}px,${art.y}px,0)`;
-      this.photo.style.clipPath = `inset(0 ${Math.max(0, this.width - art.w)}px ${Math.max(0, this.height - art.h)}px 0)`;
+      this.fade.style.width = `${art.w}px`;
+      this.fade.style.height = `${art.h}px`;
       // Uniform image scale + moving crop, rather than stretching a portrait into a landscape.
       const imageHeight = this.width * this.source.imageHeight / this.source.imageWidth;
       const scale = Math.max(art.w / this.width, art.h / imageHeight);
@@ -182,8 +189,6 @@
       const py = mix(this.source.imagePosition[1] || .5, .25, p);
       this.image.style.transform = `translate3d(${(art.w - this.width * scale) * px}px,${(art.h - imageHeight * scale) * py}px,0) scale(${scale})`;
       this.photo.style.opacity = String(this.source.image ? this.hasTargetArt ? 1 : 1 - p : 0);
-      this.photo.style.setProperty('--card-shade', String(p));
-      this.photo.style.setProperty('--card-photo-height', `${art.h}px`);
       const start = this.source.title ? { x: this.source.title.x - this.source.bounds.x, y: this.source.title.y - this.source.bounds.y,
         w: this.source.title.w, h: this.source.title.h } : this.targetTitle;
       const title = interpolate(start, this.targetTitle, p);
@@ -206,15 +211,53 @@
       const start = { ...this.current };
       const finish = () => {
         this.spring = null;
-        this.cleanup();
-        this.phase = closing ? 'closed' : 'opened';
-        if (closing) this.onClose();
+        if (closing) {
+          this.cleanup();
+          this.phase = 'closed';
+          this.onClose();
+          return;
+        }
+        this.reveal();
       };
       if (this.reduced) { finish(); return; }
       this.spring = FlipToolkit.spring({
         config: { stiffness: closing ? 360 : 300, damping: 34, overshootClamping: true },
         onUpdate: p => this.draw(interpolate(start, target, clamp(p))), onComplete: finish
       });
+    }
+
+    /* 落地那一刻不要硬切：转场层的替身剧照淡出，真实详情页的剧照淡入，
+       两张图位置逐像素重合，交叉的 220ms 里没有任何底色露出来。
+       真实剧照还没解码完就先等它（最多 420ms），否则淡到最后会闪一下空白。 */
+    reveal() {
+      if (!this.surface || this.revealing) return;
+      this.revealing = true;
+      this.phase = 'opened';
+      this.surface.style.pointerEvents = 'none';
+      const ghost = this.surface.querySelector('.card-transition-page .detail-art img');
+      if (ghost && !ghost.getAttribute('src') && this.source.image) ghost.src = this.source.image;
+      const begin = () => {
+        if (!this.surface || !this.revealing) return;
+        this.surface.classList.add('is-revealing');
+        this.label.style.transition = 'opacity .2s linear';
+        this.label.style.opacity = '0';
+        this.revealTimer = setTimeout(() => this.cleanup(), 260);
+      };
+      const live = this.content.querySelector('.detail-art img');
+      if (live && !(live.complete && live.naturalWidth > 0)) {
+        let fired = false;
+        const go = () => {
+          if (fired) return;
+          fired = true; clearTimeout(guard);
+          begin();
+        };
+        const guard = setTimeout(go, 420);
+        this.revealGuard = guard;
+        live.addEventListener('load', go, { once: true });
+        live.addEventListener('error', go, { once: true });
+        return;
+      }
+      begin();
     }
 
     open() {
@@ -225,6 +268,7 @@
 
     begin() {
       if (['closing', 'closed', 'disposed'].includes(this.phase)) return false;
+      this.unreveal();
       if (!this.surface) this.prepare(false);
       this.returning = true;
       this.stop(); this.phase = 'dragging'; this.dragBase = { ...this.current };
@@ -259,6 +303,7 @@
     cancel() { this.flush(); if (this.surface) this.settle(this.full); }
     close() {
       if (this.phase === 'closing') return;
+      this.unreveal();
       if (!this.surface) this.prepare(false);
       this.returning = true;
       this.flush(); this.settle(this.small, true);
@@ -270,7 +315,23 @@
        之前那套「滑到顶部继续往下拉就缩小卡片退出」的手势已删除：手指在内容区滑动、
        惯性滑到顶后还没抬手，剩余位移会被当成下拉，直接把详情页收掉。 */
 
+    /* 落地的交叉淡出还没走完用户就按了返回：把转场层恢复成「替身剧照可见」的样子再缩回去 */
+    unreveal() {
+      if (!this.revealing) return;
+      this.revealing = false;
+      clearTimeout(this.revealTimer); this.revealTimer = null;
+      clearTimeout(this.revealGuard); this.revealGuard = null;
+      if (this.surface) {
+        this.surface.classList.remove('is-revealing');
+        this.surface.style.pointerEvents = '';
+      }
+      if (this.label) { this.label.style.transition = ''; this.label.style.opacity = '1'; }
+    }
+
     cleanup() {
+      clearTimeout(this.revealTimer); this.revealTimer = null;
+      clearTimeout(this.revealGuard); this.revealGuard = null;
+      this.revealing = false;
       this.source.element.style.visibility = this.sourceVisibility || '';
       if (this.stage?.contains(this.snapshot.pageNode)) this.snapshot.pageNode.remove();
       this.stage?.remove(); this.surface?.remove(); this.shadow?.remove();
