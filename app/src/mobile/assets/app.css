@@ -1027,6 +1027,20 @@ html[data-theme=dark] .remote-test-result.fail,html[data-theme=dark] .dl-remote-
   .site-option.is-active { background: var(--panel) }
   .ap-switch { background: rgba(20, 28, 40, .2) }
   html[data-theme="dark"] .ap-switch { background: rgba(255, 255, 255, .22) }
+
+  /* 详情页头图底部的过渡遮罩：整条是 color-mix 混出来的渐变，失效后标题和简介
+     直接压在剧照上，字看不清。老内核改用「实色 + mask 渐隐」，颜色跟着主题走。 */
+  .detail-art:after {
+    background: var(--bg);
+    -webkit-mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0) 26%, #000 78%);
+    mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0) 26%, #000 78%);
+  }
+
+  /* 详情页返回时 app.js 会把焦点还给刚点的那张卡。老内核的 :focus-visible
+     判定不区分触摸，回来就留一圈金色描边（看着像 TV 端的选中框），触屏下关掉。 */
+  @media (hover: none) and (pointer: coarse) {
+    button:focus-visible, input:not(.search-input):focus-visible { outline: none }
+  }
 }
 
 /* aspect-ratio 是 Chrome 88 才有的属性。搜索九宫格、详情相关作品、投屏二维码
