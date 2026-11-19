@@ -653,14 +653,17 @@ function paintCovers(root) {
     return;
   }
   coverObserverInit();
-  /* 每次重画都重置观测：上一页的卡片已经不在文档里了，留着只是白占内存 */
+  /* 每次重画都重置观测：上一页的卡片已经不在文档里了，留着只是白占内存。
+     重挂的时候要挂「整个文档」，不只是这次传进来的 root ——
+     从下一部剧返回时，恢复是连着的两次调用（先整页、再叠在上面的制作方/系列组），
+     第二次只 observe 自己那批，第一次那批就再也没人补图，屏幕上一片空白。 */
   if (coverObserver) coverObserver.disconnect();
+  var every = document.querySelectorAll('img[data-cover]');
+  for (var j = 0; j < every.length; j++) if (coverObserver) coverObserver.observe(every[j]);
   var hot = [];
   for (var i = 0; i < nodes.length; i++) {
     var node = nodes[i];
-    /* 每一个都要观测 —— 只观测冷的那批，滚出屏幕后就再也没人管它们了，
-       位图会一直留在内存里。热的那批只是额外同步填一次。 */
-    if (coverObserver) coverObserver.observe(node);
+    /* 这一批同步填；观测已经在上面对整个文档统一做过了 */
     if (nearScreen(node)) hot.push(node);
   }
   /* 首屏必须这一帧就填，不能等 observer 的下一帧回调，否则进页面先是一片空黑 */
@@ -783,6 +786,9 @@ function focusables() {
     /* 收起的侧栏还占着布局尺寸，但视觉上在屏幕外：不排除的话
        内容区按左会「选中」一个看不见的图标 */
     if (!railOpen() && inRail(el)) continue;
+    /* 从详情页点进另一部剧时，上一页的制作方/系列组只是藏起来（visibility），
+       位置还在屏幕上：不排除的话方向键会「选中」一张看不见的卡。 */
+    if (el.closest && el.closest('[data-parked]')) continue;
     var box = el.getBoundingClientRect();
     if (box.width < 2 || box.height < 2) continue;
     /* 把这一轮量到的位置留在节点上：pickNearest / exitToTopbar 直接拿来比，
@@ -3036,10 +3042,21 @@ function dropOverlayNodes(overlay) {
 
 /* 浮层先藏着，不摘：返回时要原样露出来。
    变量置空是必须的 —— activeOverlay() 认的是变量，藏着却还认它，
-   新的一页就会把焦点全锁在看不见的那层里。 */
+   新的一页就会把焦点全锁在看不见的那层里。
+   藏法必须是 visibility 而不是 display:none：display:none 的元素没有几何，
+   封面的 IntersectionObserver 会判成「离开视口」把 img.src 摘掉释放位图，
+   返回时那几张卡就是空白；visibility:hidden 保留几何，位图一直留着。 */
 function parkDetailOverlays() {
-  if (relatedGroup) { relatedGroup.style.display = 'none'; relatedGroup = null; }
-  if (producerPanel) { producerPanel.style.display = 'none'; producerPanel = null; }
+  var mark = function (layer) {
+    layer.style.visibility = 'hidden';
+    /* 遥控器扫焦点时会按几何位置找邻居，藏着但还占位置的卡片会被选中；
+       打个标记，focusables() 直接跳过这一层。 */
+    layer.setAttribute('data-parked', '1');
+    var lit = layer.querySelector('.is-focused');
+    if (lit) lit.classList.remove('is-focused');
+  };
+  if (relatedGroup) { mark(relatedGroup); relatedGroup = null; }
+  if (producerPanel) { mark(producerPanel); producerPanel = null; }
 }
 
 /* 真正离开详情（回首页 / 进播放器 / 开新剧）：藏着的那几层没用了，连节点一起扔掉 */
@@ -3063,23 +3080,28 @@ function popReturningDetail() {
   state.detailLoading = false;
   document.body.classList.add('route-detail');
   view.innerHTML = snap.html;
-  paintCovers(view);
-  stage.scrollTop = snap.scrollTop;
+  stage.scrollTop = snap.scrollTop || 0;
   if (snap.overlay) {
     if (snap.overlay.producer) {
+      snap.overlay.producer.style.visibility = '';
       snap.overlay.producer.style.display = '';
+      snap.overlay.producer.removeAttribute('data-parked');
       producerPanel = snap.overlay.producer;
     }
     if (snap.overlay.group) {
+      snap.overlay.group.style.visibility = '';
       snap.overlay.group.style.display = '';
+      snap.overlay.group.removeAttribute('data-parked');
       relatedGroup = snap.overlay.group;
       groupReturnKey = snap.overlay.returnKey || 'producer';
-      paintCovers(snap.overlay.group);
     }
     state.focusKey = snap.overlay.group ? snap.overlay.groupKey : 'producer';
   } else {
     state.focusKey = snap.focusKey;
   }
+  /* 整页 + 两层浮层一次补完：分成几次调用会互相重置观察器，
+     先调那次观察的封面就没人管了（返回后卡片一片空白就是这么来的）。 */
+  paintCovers(document.body);
   /* 焦点按 data-key 在「当前生效的那一层」里找：浮层恢复后 focusables() 只扫浮层，
      找不到就落层里第一张，绝不能落到背后详情页的海报上。 */
   var all = focusables();
