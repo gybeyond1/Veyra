@@ -2988,9 +2988,118 @@ function applyPendingRestore() {
   stage.scrollTop = pending.scrollTop;
 }
 
+/* ---------------- 详情页里的「下一层」 ----------------
+   详情页点制作方 / 系列组 / 相关作品，进的是另一部剧的详情。以前这种跳转
+   不记录来路（route 一直是 detail，detailFrom 还是最初那一页的「首页」），
+   按返回就直接掉回首页，中间那两层全丢了。
+   现在把当前这页整块存起来（DOM 快照 + 状态 + 还开着的浮层），返回时原地铺回：
+   不重新走一遍接口，也不会闪一下白，焦点还停在原来那张卡上。 */
+var detailTicket = 0;      /* 在途的详情请求凭这个作废，避免上一页的数据写进这一页 */
+var detailBack = [];       /* 详情返回栈，最多留 6 层 */
+
+function keepReturningDetail() {
+  if (state.route !== 'detail' || !state.detail) return;
+  var overlay = null;
+  if (producerPanel || relatedGroup) {
+    overlay = {
+      producer: producerPanel || null,
+      group: relatedGroup || null,
+      returnKey: groupReturnKey || 'producer',
+      groupKey: relatedGroup ? state.focusKey : ''
+    };
+  }
+  detailBack.push({
+    html: view.innerHTML,
+    scrollTop: stage.scrollTop,
+    focusKey: state.focusKey,
+    detailFrom: state.detailFrom,
+    detail: state.detail,
+    progress: state.detailProgress,
+    producer: state.detailProducer,
+    related: state.detailRelated,
+    groups: state.detailGroups,
+    extrasId: state.detailExtrasId,
+    epGroup: state.epGroup,
+    overlay: overlay
+  });
+  if (detailBack.length > 6) {
+    var dropped = detailBack.shift();
+    dropOverlayNodes(dropped && dropped.overlay);
+  }
+}
+
+function dropOverlayNodes(overlay) {
+  if (!overlay) return;
+  if (overlay.producer && overlay.producer.parentNode) overlay.producer.parentNode.removeChild(overlay.producer);
+  if (overlay.group && overlay.group.parentNode) overlay.group.parentNode.removeChild(overlay.group);
+}
+
+/* 浮层先藏着，不摘：返回时要原样露出来。
+   变量置空是必须的 —— activeOverlay() 认的是变量，藏着却还认它，
+   新的一页就会把焦点全锁在看不见的那层里。 */
+function parkDetailOverlays() {
+  if (relatedGroup) { relatedGroup.style.display = 'none'; relatedGroup = null; }
+  if (producerPanel) { producerPanel.style.display = 'none'; producerPanel = null; }
+}
+
+/* 真正离开详情（回首页 / 进播放器 / 开新剧）：藏着的那几层没用了，连节点一起扔掉 */
+function dropDetailBack() {
+  while (detailBack.length) dropOverlayNodes(detailBack.pop().overlay);
+}
+
+function popReturningDetail() {
+  var snap = detailBack.pop();
+  if (!snap) return false;
+  detailTicket++;            /* 刚离开那一页的接口回调就此作废 */
+  state.route = 'detail';
+  state.detailFrom = snap.detailFrom;
+  state.detail = snap.detail;
+  state.detailProgress = snap.progress;
+  state.detailProducer = snap.producer;
+  state.detailRelated = snap.related;
+  state.detailGroups = snap.groups;
+  state.detailExtrasId = snap.extrasId;
+  state.epGroup = snap.epGroup;
+  state.detailLoading = false;
+  document.body.classList.add('route-detail');
+  view.innerHTML = snap.html;
+  paintCovers(view);
+  stage.scrollTop = snap.scrollTop;
+  if (snap.overlay) {
+    if (snap.overlay.producer) {
+      snap.overlay.producer.style.display = '';
+      producerPanel = snap.overlay.producer;
+    }
+    if (snap.overlay.group) {
+      snap.overlay.group.style.display = '';
+      relatedGroup = snap.overlay.group;
+      groupReturnKey = snap.overlay.returnKey || 'producer';
+      paintCovers(snap.overlay.group);
+    }
+    state.focusKey = snap.overlay.group ? snap.overlay.groupKey : 'producer';
+  } else {
+    state.focusKey = snap.focusKey;
+  }
+  /* 焦点按 data-key 在「当前生效的那一层」里找：浮层恢复后 focusables() 只扫浮层，
+     找不到就落层里第一张，绝不能落到背后详情页的海报上。 */
+  var all = focusables();
+  var target = null;
+  for (var i = 0; i < all.length; i++) {
+    if (all[i].dataset.key === state.focusKey) { target = all[i]; break; }
+  }
+  if (!target && all.length) target = all[0];
+  if (target) focusElement(target, false);
+  else restoreFocus();
+  /* 浮层开着时不动背景：那层的封面不是本剧的，跟着换会把整页底图换错 */
+  if (!snap.overlay) syncBackdropFromFocus();
+  return true;
+}
+
 function openDetail(id) {
   if (id == null) return;
-  if (state.route !== 'detail') { state.detailFrom = state.route; rememberRoute(); }
+  var ticket = ++detailTicket;
+  var wanted = String(id);
+  if (state.route !== 'detail') { state.detailFrom = state.route; rememberRoute(); dropDetailBack(); }
   state.route = 'detail';
   state.detail = null;
   state.detailProgress = null;
@@ -3008,27 +3117,30 @@ function openDetail(id) {
   applyBackdropMode();
   if (seed && seed.src) setBackdrop(seed.src, seed.getAttribute('data-cover'));
   renderDetail();
-  api('detail', { id: String(id) }).then(function (data) {
-    if (state.route !== 'detail') return;
+  api('detail', { id: wanted }).then(function (data) {
+    /* 这一页已经被换掉了（在下一页按了返回、快照都铺回来了），
+       迟到的详情不许再整页重画一次 —— 否则返回键看着像没生效。 */
+    if (ticket !== detailTicket || state.route !== 'detail') return;
     state.detail = data;
     state.detailLoading = false;
     renderDetail();
-    return api('bookmark-state', { id: String(id) }).catch(function () { return false; });
+    return api('bookmark-state', { id: wanted }).catch(function () { return false; });
   }).then(function (saved) {
-    if (state.route === 'detail' && state.detail) {
+    if (ticket !== detailTicket || state.route !== 'detail') return;
+    if (state.detail) {
       state.detail.bookmarked = !!saved;
       paintDetailStatus();
     }
   }).catch(function (error) {
+    if (ticket !== detailTicket || state.route !== 'detail') return;
     state.detailLoading = false;
     view.innerHTML = '<p class="empty">打开失败：' + esc(error.message || '网络异常') + '</p>';
   });
   /* 上次看到哪集哪一秒：拿到来就把按钮换成「继续播放」。
      注意以前这里要求 state.detail 已经到货，本地进度通常比详情接口先回来，
      结果进度被直接丢掉 —— 电视端详情页因此永远显示「立即播放」。 */
-  var wanted = String(id);
   api('latest-progress', { id: wanted }).then(function (progress) {
-    if (state.route !== 'detail') return;
+    if (ticket !== detailTicket || state.route !== 'detail') return;
     state.detailProgress = progress || null;
     if (state.detail && String(state.detail.id) === wanted) paintDetailStatus();
   }).catch(function () { });
@@ -3065,6 +3177,9 @@ window.hgTvCast = function (cmd) {
   if (themePanel) themePanel.hidden = true;
   if (accountPanel) accountPanel.hidden = true;
   state.detailFrom = state.route === 'detail' ? state.detailFrom : 'home';
+  /* 手机推过来的是「新开一页」：栈里旧的详情层不再有来路 */
+  detailTicket++;
+  dropDetailBack();
   state.route = 'detail';
   state.detail = null;
   state.detailProgress = null;
@@ -3112,6 +3227,10 @@ function setActiveNav(tab) {
 function go(tab, restore) {
   if (tab === 'adult' || tab === 'category') tab = 'home';   /* 剧场已并进首页 */
   closeRail();
+  /* 换页了：详情返回栈里那几层再也回不去，藏着的浮层节点一并扔掉，
+     在途的详情请求也作废（否则晚到一帧就把新页面重画回详情）。 */
+  detailTicket++;
+  dropDetailBack();
   document.body.classList.remove('route-detail');   /* 离开详情：顶栏重新出现 */
   resetFirstScreen();   /* 首页/我的才需要顶部留白，切页先复位 */
   var mem = (restore && state.memory[tab]) ? state.memory[tab] : null;
@@ -3221,6 +3340,9 @@ window.hgBack = function () {
   /* 侧栏是临时呼出的：开着的时候先按返回 = 收回去，不是退页面 */
   if (railOpen()) { leaveRail(); return true; }
   if (state.route === 'detail') {
+    /* 从详情页浮层点进来的另一部剧：先退回到上一层那一页，
+       而不是一路跳回首页（那两层全丢）。 */
+    if (popReturningDetail()) return true;
     var back = state.detailFrom || 'home';
     state.route = back;
     state.focusKey = '';
@@ -3244,6 +3366,11 @@ document.addEventListener('click', function (event) {
   if (seasonPick) {
     var seasonId = seasonPick.getAttribute('data-season-id');
     closeSeasonMenu();
+    /* 在另一季的详情页里换季，同样是「下一层」：返回要回到刚才那一季 */
+    if (seasonId && state.route === 'detail' && String((state.detail && state.detail.id) || '') !== String(seasonId)) {
+      keepReturningDetail();
+      parkDetailOverlays();
+    }
     if (seasonId) openDetail(seasonId);
     return;
   }
@@ -3379,10 +3506,21 @@ document.addEventListener('click', function (event) {
   if (card && card.dataset.id) {
     var sameId = String((state.detail && state.detail.id) || '') === card.dataset.id;
     var backKey = relatedGroup ? (groupReturnKey || 'producer') : 'producer';
-    if (relatedGroup) closeRelatedGroup();
-    if (producerPanel) closeProducerPanel();
-    /* 点的是当前这一季：面板里留着它是为了别在组里缺席，点了就只收层 */
-    if (sameId) { state.focusKey = backKey; restoreFocus(); return; }
+    if (sameId) {
+      if (relatedGroup) closeRelatedGroup();
+      if (producerPanel) closeProducerPanel();
+      /* 点的是当前这一季：面板里留着它是为了别在组里缺席，点了就只收层 */
+      state.focusKey = backKey; restoreFocus(); return;
+    }
+    if (state.route === 'detail') {
+      /* 详情页里再点开另一部（相关作品 / 系列组 / 制作方作品）：这是往下走一层，
+         不是新开一页。当前这页连同浮层一起存进返回栈，返回时原样铺回来。 */
+      keepReturningDetail();
+      parkDetailOverlays();
+    } else {
+      if (relatedGroup) closeRelatedGroup();
+      if (producerPanel) closeProducerPanel();
+    }
     openDetail(card.dataset.id);
     return;
   }
