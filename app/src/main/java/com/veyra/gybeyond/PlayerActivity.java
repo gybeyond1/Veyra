@@ -294,6 +294,8 @@ public final class PlayerActivity extends Activity {
     };
     private boolean episodesOpen;
     private int sourceRetryCount;
+    /* 取址偶发空正文（站方对连续取流短时限流）：自动重试的次数，切集时归零 */
+    private int sourceAutoRetry;
     private boolean fullscreenMode;
     private boolean videoLandscape;
     private int navigationInsetBottom;
@@ -1872,8 +1874,23 @@ public final class PlayerActivity extends Activity {
                     player.setPlayWhenReady(foreground);
                 });
             } catch (Exception error) {
+                final String why = error.getMessage() == null ? "" : error.getMessage();
+                /* 空正文/超时是站方短时限流，不是这一集坏了：同一部剧切一集再切回来就能播。
+                   续作自动起播正好撞在这个窗口上（上一季刚播完、前面刚连续取过流），
+                   所以第一次失败不弹错，隔一秒自己再取一次。 */
+                final boolean flaky = why.contains("空正文") || why.contains("超时") || why.contains("timeout");
                 runOnUiThread(() -> {
                     if (token != loadToken || destroyed || isFinishing()) return;
+                    if (flaky && sourceAutoRetry < 2) {
+                        int attempt = ++sourceAutoRetry;
+                        loading.setVisibility(View.VISIBLE);
+                        message.setVisibility(View.GONE);
+                        handler.postDelayed(() -> {
+                            if (token != loadToken || destroyed || isFinishing()) return;
+                            loadSelection();
+                        }, 1200L * attempt);
+                        return;
+                    }
                     loading.setVisibility(View.GONE);
                     message.setText("加载失败: " + error.getMessage() + "\n点击重试");
                     message.setVisibility(View.VISIBLE);
@@ -2066,6 +2083,7 @@ public final class PlayerActivity extends Activity {
 
     private void switchTo(Selection selection) {
         switching = false;
+        sourceAutoRetry = 0;
         mediaLayer.animate().cancel();
         incoming.animate().cancel();
         closeSpeedPanel();

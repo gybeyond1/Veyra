@@ -107,7 +107,15 @@ final class HongguoDirect {
         } catch (Exception error) {
             errors.add(describe(error));
         }
-        /* 空正文多半是这台匿名身份被判重/风控，换一台再试一次。 */
+        /* 空正文多半是这台匿名身份被判重/风控，换一台再试一次。
+           两台设备背靠背发等于同一瞬间两次取流，反而更容易一起被判重，
+           所以中间留 400ms —— 续作自动起播时这段间隔往往就是成败之差。 */
+        try {
+            Thread.sleep(400L);
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            throw new IOException("取址被取消");
+        }
         try {
             Device fresh = register();
             StreamInfo info = fetchModel(vid, fresh);

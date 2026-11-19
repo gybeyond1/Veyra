@@ -1315,7 +1315,9 @@ function move(direction) {
     for (var i = 0; i < all.length; i++) {
       if (state.focusKey && all[i].dataset && all[i].dataset.key === state.focusKey) { current = all[i]; break; }
     }
-    if (!current && state.route === 'detail') {
+    /* 浮层开着的时候，兜底绝不能去翻背后详情页的按钮：
+       焦点一旦跳出去，浮层里的卡片就再也选不到，按确定还是「继续播放」。 */
+    if (!current && !activeOverlay() && state.route === 'detail') {
       current = view.querySelector('.detail-actions [data-focusable]')
         || view.querySelector('[data-ep-menu]')
         || view.querySelector('.detail-eps [data-focusable]');
@@ -2901,7 +2903,7 @@ function openProducerPanel() {
     state.focusKey = '';
   };
   focusPanel();
-  var paint = function (moveFocus) {
+  var paint = function (moveFocus, keepKey) {
     var anchor = producerAnchorBase(rows);
     rows.sort(function (a, b) { return producerRowsSort(a, b, anchor); });
     /* 这一整页本来就是同一位制作方，所以只剩标题这一把尺子：
@@ -2916,14 +2918,24 @@ function openProducerPanel() {
     }).join('');
     paintCovers(grid);
     if (!moveFocus) return;
-    /* 数据是在用户已经按键之后才回来的：只要焦点还在面板里（通常是面板本身），
-       才把焦点交给第一张作品；已经从面板里出去了就别抢。 */
-    var focused = document.querySelector('.is-focused');
-    if (focused && !panel.contains(focused)) return;
-    var first = grid.querySelector('[data-focusable]');
-    if (first) { state.focusKey = first.dataset.key; focusElement(first, false); }
-    else focusPanel();
+    if (!panel || !document.body.contains(panel)) return;
+    /* 重画会换掉节点，焦点框留在旧节点上就等于消失了：按 key 找回同一张卡，
+       找不回（组卡变单卡之类）就落第一张。
+       这里不再判断「焦点是否已经在面板外」—— 面板是模态层，焦点本来就该被拉进来；
+       以前那一道拦截让焦点永远留在背后的详情页，遥控器按确定就是继续播放。 */
+    var target = null;
+    if (keepKey) {
+      var nodes = grid.querySelectorAll('[data-focusable]');
+      for (var i = 0; i < nodes.length; i++) {
+        if (nodes[i].dataset.key === keepKey) { target = nodes[i]; break; }
+      }
+    }
+    if (!target) target = grid.querySelector('[data-focusable]');
+    if (target) { state.focusKey = target.dataset.key; focusElement(target, false); }
   };
+  /* 先把手上这一条（当前季）画出来并落焦点：等接口回来这几百毫秒里面板是空的，
+     焦点还留在背后的播放按钮上，按一下确定就继续播放了。 */
+  paint(true);
   api('producer-works', { name: producer.name, mediaId: producer.mediaId || '', page: 1 }).then(function (data) {
     addRows(list(data && data.items));
     if (!rows.length) {
@@ -2931,10 +2943,10 @@ function openProducerPanel() {
       return;
     }
     status.textContent = '共 ' + rows.length + ' 部';
-    paint(true);
+    paint(true, state.focusKey);
   }).catch(function () {
     status.textContent = rows.length ? '共 ' + rows.length + ' 部 · 更多暂时读不到' : '作品暂时无法读取';
-    if (rows.length) paint(true);
+    if (rows.length) paint(true, state.focusKey);
   });
 }
 
@@ -3132,6 +3144,17 @@ window.veyraTvKey = function (code) {
   var focused = document.querySelector('.is-focused');
   var typing = document.activeElement && document.activeElement.tagName === 'INPUT';
   if (typing) return;   /* 输入中把按键交还给系统 IME */
+
+  /* 浮层开着、焦点却还停在背后的详情页（面板刚打开的那几百毫秒，层里一张卡都没有）：
+     这一下按键必须先把焦点收回层里，不能落到背后的播放按钮上 ——
+     否则按确定就是「继续播放」，看着像面板没打开。 */
+  var overlay = activeOverlay();
+  if (overlay && (!focused || !overlay.contains(focused))) {
+    var inLayer = focusables();
+    if (!inLayer.length) return;   /* 层里还在加载：这一次按键直接吃掉 */
+    focusElement(inLayer[0], false);
+    return;
+  }
 
   /* 参数行上左右 = 调值（不是移焦点）。长按会连发，正好用来快速拖到底。
      上下仍然走 move()，所以「一行行翻、左右微调」是同一套手感。 */
