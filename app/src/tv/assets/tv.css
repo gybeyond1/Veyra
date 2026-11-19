@@ -358,6 +358,9 @@ body.page-windowed #stage{overflow:hidden}
 /* 榜单名次：#1~#3 描金，其余深灰，和评分角标同一位置，不额外占地方 */
 .card .art .badge.is-rank{color:#ccd5df}
 .card .art .badge.is-rank.is-top{background:linear-gradient(180deg,#ffd76a,#eda21a);color:#2b1d04}
+/* 卡片组：「全 N 季」用同一枚角标，描金区分于名次/评分 */
+.card.is-group .art .badge.is-group{background:linear-gradient(180deg,#ffd76a,#eda21a);color:#2b1d04}
+.producer-panel h2 .group-count{margin-left:1.2rem;font-size:1.9rem;font-weight:600;color:#9aa3ad}
 .card .name{
   display:block;width:100%;margin-top:1.3rem;
   font-size:1.95rem;line-height:1.4;color:var(--text);

@@ -2806,8 +2806,13 @@ function renderDetailExtras(host, result, data) {
     const season = relatedSeason(item);
     return season > 0 && !item.season ? { ...item, season: `第${season}季` } : item;
   });
-  if (!related.length) { host.innerHTML = ''; return; }
-  host.innerHTML = `<section class="detail-section"><h2>相关作品</h2><div class="detail-related-grid">${related.map(relatedCard).join('')}</div></section>`;
+  if (!related.length) { detailRelatedGroups = []; host.innerHTML = ''; return; }
+  /* 制作方 × 标题两把尺子一起量：同制作方且标题同源的聚成卡片组放在最前，
+     同制作方的单卡其次，其余平台推荐维持原顺序。 */
+  detailRelatedGroups = buildRelatedGroups(related, result.producer);
+  host.innerHTML = `<section class="detail-section"><h2>相关作品</h2><div class="detail-related-grid">${
+    detailRelatedGroups.map((block, index) => block.group ? relatedGroupCard(block, index) : relatedCard(block.item)).join('')
+  }</div></section>`;
   hydrateImages();
 }
 
@@ -2884,6 +2889,125 @@ function relatedCard(item) {
     <span class="poster loading"><span class="poster-letter">${esc(letter)}</span><img data-cover="${esc(item.cover || '')}" alt=""></span>
     <span class="film-title">${esc(item.title || '')}</span>
     <span class="film-info">${esc(label)}${item.upcoming ? ' · 待上线' : ''}</span></button>`;
+}
+
+/* ---------------- 相关作品：制作方 × 标题 双向筛选后分组 ---------------- */
+
+/* 署名归一：同一家制作方常写成「某某文化」「某某文化传媒有限公司」，
+   不削掉尾巴，同一家永远对不上，卡片组也就永远聚不起来。 */
+function creditFlatten(name) {
+  const text = String(name || '').replace(/[\s·・:：;；,，.。、!！?？\-—_|/\\"'“”‘’（）()《》【】\[\]…～]/g, '');
+  return text.replace(/(有限责任公司|股份有限公司|有限公司|文化传媒|影视传媒|传媒|影视|文化|工作室)$/g, '').toLowerCase();
+}
+
+function creditOf(item) {
+  return {
+    author: String((item && (item.author || item.producer || item.name)) || ''),
+    mediaId: String((item && item.mediaId) || '')
+  };
+}
+
+/* 同一个制作方：两边都有 media_id 就严格比 ID，缺一边退回比署名。 */
+function sameCredit(a, b) {
+  const x = creditOf(a), y = creditOf(b);
+  if (x.mediaId && y.mediaId) return x.mediaId === y.mediaId;
+  const ka = creditFlatten(x.author), kb = creditFlatten(y.author);
+  if (!ka || !kb) return false;
+  return ka === kb || ka.includes(kb) || kb.includes(ka);
+}
+
+/* 标题是不是同一部：去季号后主体相同，或前 4 个字完全一样。 */
+function sameSeriesTitle(a, b) {
+  const ka = relatedBase(a), kb = relatedBase(b);
+  if (!ka || !kb) return false;
+  if (ka === kb) return true;
+  const shorter = Math.min(ka.length, kb.length);
+  let i = 0;
+  while (i < shorter && ka[i] === kb[i]) i++;
+  return i >= 4;
+}
+
+/* 组名取季号最小那条（无季号=第1季），把季号/集数尾巴削掉。 */
+function groupTitleOf(members) {
+  let best = null, bestSeason = 999;
+  for (const item of members) {
+    const season = relatedSeason(item);
+    if (season < bestSeason) { bestSeason = season; best = item; }
+  }
+  const raw = String((best && best.title) || '');
+  const stripped = raw
+    .replace(/[（(【\[]?\s*第\s*[0-9一二三四五六七八九十]{1,3}\s*[季部期篇]\s*[)）】\]]?/g, '')
+    .replace(/[（(【\[]?\s*[全共]?\s*[0-9]{1,4}\s*集\s*[)）】\]]?/g, '')
+    .trim();
+  return stripped || raw;
+}
+
+/* 组在前 → 同制作方单卡 → 其余推荐 */
+function buildRelatedGroups(items, producer) {
+  const used = new Set(), out = [];
+  items.forEach((seed, i) => {
+    if (used.has(i)) return;
+    used.add(i);
+    const members = [seed];
+    if (sameCredit(seed, producer)) {
+      for (let j = i + 1; j < items.length; j++) {
+        if (used.has(j)) continue;
+        if (!sameCredit(items[j], producer)) continue;
+        if (!sameSeriesTitle(seed.title, items[j].title)) continue;
+        used.add(j);
+        members.push(items[j]);
+      }
+    }
+    if (members.length > 1) {
+      members.sort((a, b) => relatedSeason(a) - relatedSeason(b));
+      out.push({ group: true, title: groupTitleOf(members), count: members.length,
+        cover: (members[0] && members[0].cover) || '', items: members, order: i });
+    } else {
+      out.push({ group: false, item: seed, order: i, rank: sameCredit(seed, producer) ? 0 : 1 });
+    }
+  });
+  out.sort((a, b) => {
+    if (a.group !== b.group) return a.group ? -1 : 1;
+    if (!a.group && a.rank !== b.rank) return a.rank - b.rank;
+    return a.order - b.order;
+  });
+  return out;
+}
+
+let detailRelatedGroups = [];
+let producerGroupBlocks = [];
+
+function relatedGroupCard(block, index) {
+  const letter = String(block.title || '剧').slice(0, 1);
+  return `<button class="film-card detail-related-card" type="button" data-related-group="${index}" aria-label="查看${esc(block.title || '')}系列">
+    <span class="poster loading"><span class="poster-letter">${esc(letter)}</span><img data-cover="${esc(block.cover || '')}" alt=""><i class="group-badge">全 ${block.count} 季</i></span>
+    <span class="film-title">${esc(block.title || '')}</span>
+    <span class="film-info">${block.count} 部 · 点开看全部</span></button>`;
+}
+
+/** 一层列表：卡片组和制作方分组都用它，block 由调用方给。 */
+function openGroupList(blocks, index) {
+  const block = blocks && blocks[index];
+  if (!block || !block.group) return;
+  closeProducerPanel();
+  const overlay = document.createElement('div');
+  overlay.className = 'producer-overlay';
+  overlay.innerHTML = `<section class="producer-panel" role="dialog" aria-modal="true" aria-label="${esc(block.title)}">
+    <header><h2>${esc(block.title)}<span class="group-count">全 ${block.count} 季</span></h2></header>
+    <p class="producer-status">按季数排列，点一部进详情</p>
+    <div class="producer-list">${block.items.map(producerItemHtml).join('')}</div></section>`;
+  document.body.appendChild(overlay);
+  producerOverlay = overlay;
+  updateBackEnabled();
+  paintCoversIn(overlay);
+  overlay.addEventListener('click', event => {
+    if (event.target === overlay) { closeProducerPanel(); return; }
+    const card = event.target.closest('[data-producer-id]');
+    if (!card || !card.dataset.producerId) return;
+    const id = card.dataset.producerId;
+    closeProducerPanel();
+    goDetail(id, null, { id, title: card.dataset.producerTitle || '', cover: card.dataset.producerCover || '' });
+  });
 }
 
 /*
@@ -2972,12 +3096,17 @@ function openProducerPanel(name, mediaId, currentId) {
   const paintRows = () => {
     const anchor = producerAnchorBase(rows);
     rows.sort((a, b) => producerRowSort(a, b, anchor));
-    list.innerHTML = rows.map(producerItemHtml).join('');
+    /* 这一页本来就是同一位制作方，只剩标题这一把尺子：同源的合并成卡片组 */
+    for (const row of rows) { row.author = name; row.mediaId = mediaId || ''; }
+    producerGroupBlocks = buildRelatedGroups(rows, { name, mediaId });
+    list.innerHTML = producerGroupBlocks.map((block, index) => block.group ? producerGroupCard(block, index) : producerItemHtml(block.item)).join('');
     paintCoversIn(list);
   };
   overlay.addEventListener('click', event => {
     /* 点面板以外的地方（也就是那层遮罩）自己收回 */
     if (event.target === overlay) { closeProducerPanel(); return; }
+    const groupCard = event.target.closest('[data-pg-group]');
+    if (groupCard) { openGroupList(producerGroupBlocks, Number(groupCard.dataset.pgGroup)); return; }
     const card = event.target.closest('[data-producer-id]');
     if (card && card.dataset.producerId && card.dataset.producerId !== currentId) {
       const nextId = card.dataset.producerId;
@@ -3015,6 +3144,12 @@ function openProducerPanel(name, mediaId, currentId) {
   };
   more.addEventListener('click', () => { hasMore = true; load(); });
   load();
+}
+
+function producerGroupCard(block, index) {
+  return `<button class="producer-item" type="button" data-pg-group="${index}">
+    <span class="producer-poster loading"><img data-cover="${esc(block.cover || '')}" alt=""></span>
+    <span class="producer-copy"><strong>${esc(block.title || '')}</strong><em>全 ${block.count} 季 · 点开看全部</em></span></button>`;
 }
 
 function producerItemHtml(item) {
@@ -5059,6 +5194,11 @@ function refreshCurrentDownloads() {
   if (tagChoice) { goTag(tagChoice.dataset.tagSlug, tagChoice.dataset.tagName); return; }
   const sub = event.target.closest('[data-sub]');
   if (sub) { goCategory(state.tab, Number(sub.dataset.sub), !!sub.closest('#compact-category')); return; }
+  const relatedGroupCardEl = event.target.closest('[data-related-group]');
+  if (relatedGroupCardEl) {
+    openGroupList(detailRelatedGroups, Number(relatedGroupCardEl.dataset.relatedGroup));
+    return;
+  }
   const card = event.target.closest('[data-open-id]');
   if (card?.dataset.openId) {
     if (heroTapGuard(card)) return;

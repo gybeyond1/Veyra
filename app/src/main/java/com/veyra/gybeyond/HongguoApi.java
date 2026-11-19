@@ -249,7 +249,50 @@ final class HongguoApi {
         if (items.length() == 0 && failure != null) {
             throw new IOException(failure.getMessage() == null ? "相关作品接口暂不可用" : failure.getMessage());
         }
+        attachCredits(items);
         return sortSeasons(items, seriesId);
+    }
+
+    /**
+     * 给相关作品补署名（author / media_id）。
+     *
+     * 相关作品格只给剧名和封面，没有署名 —— 而电视端要把「同一制作方」的作品挑出来
+     * 跟「标题同源」的作品一起卡片组，没有署名就只能按名字猜，准不了。
+     * 详情接口支持 book_id 逗号批量（一次最多 20 个），所以整块补一次就够，不逐部发。
+     * 失败静默：补不上署名只是不分组，不能让整块相关作品跟着失败。
+     */
+    private static void attachCredits(JSONArray items) {
+        if (items == null || items.length() == 0) return;
+        List<String> ids = new ArrayList<>();
+        for (int i = 0; i < items.length(); i++) {
+            JSONObject item = items.optJSONObject(i);
+            if (item == null) continue;
+            String id = item.optString("id", "");
+            if (id.matches("[0-9]{1,30}")) ids.add(id);
+        }
+        if (ids.isEmpty()) return;
+        Map<String, JSONObject> credits;
+        try {
+            credits = credits(ids);
+        } catch (Exception ignored) {
+            return;
+        }
+        for (int i = 0; i < items.length(); i++) {
+            JSONObject item = items.optJSONObject(i);
+            if (item == null) continue;
+            JSONObject credit = credits.get(item.optString("id", ""));
+            if (credit == null) continue;
+            try {
+                String author = credit.optString("name", "").trim();
+                if (!author.isEmpty()) item.put("author", author);
+                String media = credit.optString("mediaId", "");
+                if (item.optString("mediaId", "").isEmpty() && !media.isEmpty()) item.put("mediaId", media);
+                if (item.optString("episodeLabel", "").isEmpty()) {
+                    String label = credit.optString("episodeLabel", "");
+                    if (!label.isEmpty()) item.put("episodeLabel", label);
+                }
+            } catch (Exception ignored) { }
+        }
     }
 
     /** 打「详情页更多相关」计划接口，多个域名轮流试。 */

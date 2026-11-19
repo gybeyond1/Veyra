@@ -62,6 +62,7 @@ var state = {
   detailExtrasId: '',   /* 制作方 / 相关作品按剧只拉一次 */
   detailProducer: null,
   detailRelated: [],
+  detailGroups: [],     /* 相关作品按「制作方 × 标题」分组后的结果，组卡点开靠它取成员 */
   account: { loggedIn: false },
   version: '',
   update: null,         /* 检查更新查到的可更新版本 */
@@ -1571,9 +1572,10 @@ function readFeedCache(id) {
     return data;
   } catch (error) { return null; }
 }
-function writeFeedCache(id, items, nextPage) {
+function writeFeedCache(id, items, nextPage, pending, pendingNext) {
   try {
-    localStorage.setItem(feedCacheKey(id), JSON.stringify({ at: Date.now(), items: list(items).slice(0, 80), nextPage: nextPage || null }));
+    localStorage.setItem(feedCacheKey(id), JSON.stringify({ at: Date.now(), items: list(items).slice(0, 80),
+      nextPage: nextPage || null, pending: pending || null, pendingNext: pendingNext || null }));
   } catch (error) { /* 配额满了就放弃缓存，不影响播放 */ }
 }
 function feedSignature(items) {
@@ -1591,7 +1593,8 @@ function loadFeed(id, reset, focusChip) {
     var cached = readFeedCache(target);
     if (cached) {
       // 有缓存：先把它当当前内容渲染出来，loading 仍然为真（底部会显示还在拉）
-      state.feed = { id: target, items: cached.items, nextPage: cached.nextPage || null, loading: true, error: false };
+      state.feed = { id: target, items: cached.items, nextPage: cached.nextPage || null, loading: true, error: false,
+        pending: cached.pending || null, pendingNext: cached.pendingNext || null };
     } else {
       state.feed = null;
     }
@@ -1600,18 +1603,52 @@ function loadFeed(id, reset, focusChip) {
   } else if (state.feed && (state.feed.loading || !state.feed.nextPage)) {
     return;
   }
+  /* 首屏为了凑满 3 行先借了第 2 页的几张：剩下的尾巴已经在本机，别再发一次请求 */
+  if (!reset && !switched && state.feed && state.feed.pending && state.feed.pending.length) {
+    var tail = state.feed.pending;
+    state.feed.pending = [];
+    state.feed.nextPage = state.feed.pendingNext || null;
+    state.feed.pendingNext = null;
+    state.feed.items = state.feed.items.concat(tail);
+    appendFeed(tail);
+    return;
+  }
   var pageNo = state.feed && state.feed.nextPage ? state.feed.nextPage : 1;
   var token = ++feedToken;
   if (state.feed) state.feed.loading = true;
-  api('category', { id: target, page: pageNo }).then(function (data) {
+  /* 一页只有 20 条，8 列 × 3 行的首屏会空出 4 个位置，要滚到底才补上 —— 屏幕上就是半行缺口。
+     首屏把第 2 页并着拉（两个请求同时走，首屏等待不变长），一次铺满 24 张；
+     多出来的存进 pending，翻页时先用本地的，不重复请求也不重复显示。 */
+  var mainReq = api('category', { id: target, page: pageNo });
+  var spareReq = pageNo === 1
+    ? api('category', { id: target, page: 2 }).catch(function () { return null; })
+    : null;
+  var ready = spareReq
+    ? Promise.all([mainReq, spareReq])
+    : mainReq.then(function (one) { return [one, null]; });
+  ready.then(function (pair) {
+    var data = pair[0], spare = pair[1];
     if (token !== feedToken || state.route !== 'home') return;
     var incoming = list(data && data.items);
     var nextPage = data && data.nextPage ? data.nextPage : null;
+    var pending = null, pendingNext = null;
+    var want = GRID_COLS * 3;
+    if (pageNo === 1 && spare && incoming.length && incoming.length < want) {
+      var more = list(spare.items);
+      var take = Math.min(want - incoming.length, more.length);
+      if (take > 0) {
+        incoming = incoming.concat(more.slice(0, take));
+        pending = more.slice(take);
+        pendingNext = spare.nextPage || null;
+        nextPage = 2;
+      }
+    }
     if (!state.feed || pageNo === 1) {
       var before = feedSignature(state.feed && state.feed.items);
       var after = feedSignature(incoming);
-      state.feed = { id: target, items: incoming, nextPage: nextPage, loading: false, error: false };
-      writeFeedCache(target, incoming, nextPage);
+      state.feed = { id: target, items: incoming, nextPage: nextPage, loading: false, error: false,
+        pending: pending, pendingNext: pendingNext };
+      writeFeedCache(target, incoming, nextPage, pending, pendingNext);
       // 和缓存一模一样就别重绘：重绘会让遥控器焦点闪一下
       if (before !== after) renderHome();
     } else {
@@ -2467,8 +2504,15 @@ function relatedBlockHtml() {
   var data = state.detail || {};
   var related = sortRelatedTv(list(state.detailRelated), data.title || '');
   if (!related.length) return '';
-  return '<section class="detail-related"><h2 class="eps-title">相关作品<span>同系列排前面</span></h2><div class="grid">'
-    + related.map(function (item, index) { return cardMarkup(item, index); }).join('') + '</div></section>';
+  /* 制作方 × 标题两把尺子一起量：同制作方且标题同源的聚成卡片组，同制作方的单卡往前挪，
+     其余平台推荐维持原顺序。制作方还没回来时先按单卡铺，回来后 paintDetailExtras 会重画一次。 */
+  var blocks = buildRelatedTv(related, state.detailProducer);
+  state.detailGroups = blocks;
+  var cards = blocks.map(function (block, index) {
+    return block.group ? groupCardMarkup(block, index, 'related') : cardMarkup(block.item, index);
+  }).join('');
+  return '<section class="detail-related"><h2 class="eps-title">相关作品</h2><div class="grid">'
+    + cards + '</div></section>';
 }
 
 /* 制作方 / 相关作品晚到：只补画这两块，绝不整页重画。
@@ -2594,6 +2638,140 @@ function sortRelatedTv(items, currentTitle) {
   return rows.map(function (row) { return row.item; });
 }
 
+/* ---------------- 相关作品：制作方 × 标题 双向筛选后分组 ---------------- */
+
+/* 署名归一：红果里同一家制作方常写成「某某文化」「某某文化传媒有限公司」，
+   不削掉这些尾巴，同一家永远对不上、卡片组也就永远聚不起来。 */
+function creditFlatten(name) {
+  var text = String(name || '').replace(/[\s·・:：;；,，.。、!！?？\-—_|/\\"'“”‘’（）()《》【】\[\]…～]/g, '');
+  return text.replace(/(有限责任公司|股份有限公司|有限公司|文化传媒|影视传媒|传媒|影视|文化|工作室)$/g, '').toLowerCase();
+}
+
+function itemCredit(item) {
+  return {
+    author: String((item && (item.author || item.producer || item.name)) || ''),
+    mediaId: String((item && item.mediaId) || '')
+  };
+}
+
+/* 同一个制作方：两边都有 media_id 就严格比 ID（平台给的身份，最准），
+   缺一边才退回比署名。两边都拿不到就当不确定，不认。 */
+function sameProducer(a, b) {
+  var x = itemCredit(a), y = itemCredit(b);
+  if (x.mediaId && y.mediaId) return x.mediaId === y.mediaId;
+  var ka = creditFlatten(x.author), kb = creditFlatten(y.author);
+  if (!ka || !kb) return false;
+  return ka === kb || ka.indexOf(kb) >= 0 || kb.indexOf(ka) >= 0;
+}
+
+/* 标题是不是同一部：去掉「第N季 / 全N集」后主体相同，或前 4 个字完全一样。
+   前一条管《测试》《测试第二季》，后一条管《凡人百世书》和《凡人百世书之百世入道》。 */
+function sameSeriesTitle(a, b) {
+  var ka = relatedBase(a), kb = relatedBase(b);
+  if (!ka || !kb) return false;
+  if (ka === kb) return true;
+  var shorter = Math.min(ka.length, kb.length), i = 0;
+  while (i < shorter && ka.charAt(i) === kb.charAt(i)) i++;
+  return i >= 4;
+}
+
+/* 卡片组标题：取组里季号最小的那条（没写季号的就是第 1 季），把季号/集数后缀削掉。
+   《测试第一季》《测试第二季》→「测试」；《测试》《测试第二季》→ 取无季号那条「测试」。 */
+function groupTitleOf(members) {
+  var best = null, bestSeason = 999;
+  for (var i = 0; i < members.length; i++) {
+    var season = relatedSeason(members[i]);
+    if (season < bestSeason) { bestSeason = season; best = members[i]; }
+  }
+  var raw = String((best && best.title) || '');
+  var stripped = raw
+    .replace(/[（(【\[]?\s*第\s*[0-9一二三四五六七八九十]{1,3}\s*[季部期篇]\s*[)）】\]]?/g, '')
+    .replace(/[（(【\[]?\s*[全共]?\s*[0-9]{1,4}\s*集\s*[)）】\]]?/g, '')
+    .trim();
+  return stripped || raw;
+}
+
+/* 把相关作品重排成「卡片组 + 单卡」：
+   1) 同一制作方 且 标题同源、凑够 2 部以上 → 一个卡片组，放最前面；
+   2) 同制作方但凑不成组的 → 单卡，排在组后面；
+   3) 其余平台推荐 → 保持接口原顺序垫底。 */
+function buildRelatedTv(items, producer) {
+  var used = {}, out = [];
+  for (var i = 0; i < items.length; i++) {
+    if (used[i]) continue;
+    var seed = items[i];
+    used[i] = true;
+    var members = [seed];
+    if (sameProducer(seed, producer)) {
+      for (var j = i + 1; j < items.length; j++) {
+        if (used[j]) continue;
+        if (!sameProducer(items[j], producer)) continue;
+        if (!sameSeriesTitle(seed.title, items[j].title)) continue;
+        used[j] = true;
+        members.push(items[j]);
+      }
+    }
+    if (members.length > 1) {
+      members.sort(function (a, b) { return relatedSeason(a) - relatedSeason(b); });
+      out.push({
+        group: true, title: groupTitleOf(members), count: members.length,
+        cover: (members[0] && members[0].cover) || '', items: members, order: i
+      });
+    } else {
+      out.push({ group: false, item: seed, order: i,
+        rank: sameProducer(seed, producer) ? 0 : 1 });
+    }
+  }
+  out.sort(function (a, b) {
+    if (a.group !== b.group) return a.group ? -1 : 1;
+    if (!a.group && a.rank !== b.rank) return a.rank - b.rank;
+    return a.order - b.order;
+  });
+  return out;
+}
+
+function groupCardMarkup(block, index, ns) {
+  var key = (ns === 'producer' ? 'pgrp:' : 'grp:') + index;
+  return '<button type="button" class="card is-group" data-focusable data-key="' + key + '" data-grp="' + ns + ':' + index + '">'
+    + '<span class="art"><img data-cover="' + esc(block.cover || '') + '" data-cover-w="300" alt="">'
+    + '<i class="badge is-group">全 ' + block.count + ' 季</i></span>'
+    + '<span class="name">' + esc(block.title || '') + '</span></button>';
+}
+
+/* 卡片组里那几部：点开一层列表，逐部进详情。样式沿用制作方面板。
+   相关作品和制作方面板都用这一层，ns 只决定成员从哪份分组结果里取。 */
+var relatedGroup = null;
+var producerGroups = [];
+var groupReturnKey = '';
+
+function openRelatedGroup(index, ns) {
+  var blocks = ns === 'producer' ? producerGroups : (state.detailGroups || []);
+  var block = blocks[index];
+  if (!block || !block.group) return;
+  closeRelatedGroup();
+  groupReturnKey = state.focusKey;
+  var layer = document.createElement('div');
+  layer.id = 'related-group';
+  layer.className = 'producer-layer';
+  layer.innerHTML = '<section class="producer-panel" role="dialog" aria-modal="true" data-focusable data-key="related-group-panel">'
+    + '<h2>' + esc(block.title) + '<span class="group-count">全 ' + block.count + ' 季</span></h2>'
+    + '<p class="producer-status">按季数排列，选一部进详情</p>'
+    + '<div class="grid producer-grid">'
+    + block.items.map(function (item, i) { return cardMarkup(item, i); }).join('')
+    + '</div></section>';
+  document.body.appendChild(layer);
+  relatedGroup = layer;
+  paintCovers(layer);
+  var panel = layer.querySelector('.producer-panel');
+  state.focusKey = 'related-group-panel';
+  focusElement(panel, false);
+}
+
+function closeRelatedGroup() {
+  if (relatedGroup && relatedGroup.parentNode) relatedGroup.parentNode.removeChild(relatedGroup);
+  relatedGroup = null;
+}
+
 /* ---------------- 制作方作品（遥控器可点） ---------------- */
 
 /* 一张都不硬铺：归属由后端逐条核对 author（必要时再核 media_id）。
@@ -2674,7 +2852,16 @@ function openProducerPanel() {
   var paint = function (moveFocus) {
     var anchor = producerAnchorBase(rows);
     rows.sort(function (a, b) { return producerRowsSort(a, b, anchor); });
-    grid.innerHTML = rows.map(function (item, index) { return cardMarkup(item, index); }).join('');
+    /* 这一整页本来就是同一位制作方，所以只剩标题这一把尺子：
+       标题同源的聚成卡片组，凑不成组的单卡按季数排。 */
+    for (var r = 0; r < rows.length; r++) {
+      rows[r].author = producer.name;
+      rows[r].mediaId = producer.mediaId || '';
+    }
+    producerGroups = buildRelatedTv(rows, producer);
+    grid.innerHTML = producerGroups.map(function (block, index) {
+      return block.group ? groupCardMarkup(block, index, 'producer') : cardMarkup(block.item, index);
+    }).join('');
     paintCovers(grid);
     if (!moveFocus) return;
     /* 数据是在用户已经按键之后才回来的：只要焦点还在面板里（通常是面板本身），
@@ -2745,6 +2932,7 @@ function openDetail(id) {
   state.detailExtrasId = '';
   state.detailProducer = null;
   state.detailRelated = [];
+  state.detailGroups = [];
   state.focusKey = 'play';
   stage.scrollTop = 0;
   /* 刚点进来的那张卡片，封面早就解密好了 —— 先铺上，别让背景空着等详情接口。
@@ -2925,6 +3113,7 @@ window.hgBack = function () {
   if (epMenu) { closeEpMenu(); return true; }
   if (seasonPanel) { closeSeasonMenu(); restoreFocus(); return true; }
   if (producerPanel) { closeProducerPanel(); state.focusKey = 'producer'; restoreFocus(); return true; }
+  if (relatedGroup) { closeRelatedGroup(); state.focusKey = groupReturnKey || 'producer'; restoreFocus(); return true; }
   if (otpPanel && !otpPanel.hidden) {
     closeOtp();
     if (accountPanel) { accountPanel.hidden = false; showAccountPage('privacy'); }
@@ -2982,6 +3171,7 @@ document.addEventListener('click', function (event) {
   var epToggle = target.closest('[data-ep-menu]');
   if (epToggle) { epMenu ? closeEpMenu() : openEpMenu(); return; }
   if (producerPanel && target.id === 'producer') { closeProducerPanel(); state.focusKey = 'producer'; restoreFocus(); return; }
+  if (relatedGroup && target.id === 'related-group') { closeRelatedGroup(); state.focusKey = groupReturnKey || 'producer'; restoreFocus(); return; }
   var producerBtn = target.closest('[data-producer]');
   if (producerBtn) { openProducerPanel(); return; }
   if (accountPanel && !accountPanel.hidden && target.id === 'account') { closeAccount(); return; }
@@ -3095,8 +3285,21 @@ document.addEventListener('click', function (event) {
 
   if (target.closest('#login-retry')) { showLoginQr(); return; }
 
+  /* 卡片组：先展开这一组，不直接进详情 */
+  var grp = target.closest('[data-grp]');
+  if (grp) {
+    var grpParts = String(grp.getAttribute('data-grp')).split(':');
+    if (producerPanel) closeProducerPanel();
+    openRelatedGroup(Number(grpParts[1]), grpParts[0]);
+    return;
+  }
   var card = target.closest('[data-id]');
-  if (card && card.dataset.id) { if (producerPanel) closeProducerPanel(); openDetail(card.dataset.id); return; }
+  if (card && card.dataset.id) {
+    if (producerPanel) closeProducerPanel();
+    if (relatedGroup) closeRelatedGroup();
+    openDetail(card.dataset.id);
+    return;
+  }
 });
 
 /* ---------------- 登录 ---------------- */
