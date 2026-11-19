@@ -12,6 +12,10 @@
   <!-- 平板版式走视口断点（≥600px 四列 / ≥960px 铺满），不依赖任何设备判定。 -->
   <link rel="stylesheet" href="device-layout.css">
   <link rel="stylesheet" href="relay-input.css">
+  <!-- 老内核兼容层：WebView ≤ 87 没有 color-mix()，主题变量会整条失效
+       （背景透明、登录层浮在首页上）。这段在样式表之后同步执行，
+       把当前生效的 color-mix 变量算成 rgba 写回 <html>。新内核直接跳过。 -->
+  <script src="compat.js"></script>
   <!-- 冷启动记忆：上次退出时停在刷剧页 → 在 app.js 还没跑起来之前就把首页内容藏掉、
        垫上上次那部剧的海报。否则第一帧是传统首页（骨架 → 内容），等首页数据回来
        再跳刷剧页 —— 看着就是「闪一下传统首页」。撤掉的时机在 app.js 里
