@@ -79,6 +79,10 @@ final class HongguoDirect {
             .readTimeout(10, TimeUnit.SECONDS)
             .callTimeout(16, TimeUnit.SECONDS)
             .build();
+    /** 激活检查只是「让设备看起来被用过」，不能拖慢注册。 */
+    private static final OkHttpClient QUICK = HTTP.newBuilder()
+            .callTimeout(2, TimeUnit.SECONDS)
+            .build();
 
     private HongguoDirect() { }
 
@@ -362,7 +366,76 @@ final class HongguoDirect {
         String deviceId = responseId(json, "device_id");
         String iid = responseId(json, "install_id");
         if (deviceId.isEmpty() || iid.isEmpty()) throw new IOException("设备注册未返回有效身份");
-        return new Device(deviceId, iid, cdid);
+        Device device = new Device(deviceId, iid, cdid);
+        activate(device);
+        return device;
+    }
+
+    /**
+     * 注册完补一次 app_alert_check。
+     *
+     * 上游看到的行为是「这台设备注册完就直奔 player 接口」，中间没有任何正常客户端
+     * 会有的动作，判起来非常容易。hongguoTV 的注册流程里一直有这一步（1 秒预算、
+     * 失败不影响注册），Veyra 之前没有 —— 补上，让设备至少走完一次激活。
+     * 接口吃不下就静默跳过，绝不因为这一步拖慢或阻断取址。
+     */
+    private static void activate(Device device) {
+        try {
+            long now = System.currentTimeMillis();
+            StringBuilder query = new StringBuilder();
+            append(query, "tt_data", "a");
+            append(query, "os_api", "29");
+            append(query, "device_type", "PGT-AN10");
+            append(query, "ssmix", "a");
+            append(query, "manifest_version_code", "73932");
+            append(query, "dpi", "520");
+            append(query, "version_name", VERSION_NAME);
+            append(query, "ts", String.valueOf(now / 1000));
+            append(query, "cpu_support64", "true");
+            append(query, "app_type", "normal");
+            append(query, "appTheme", "light");
+            append(query, "ac", "wifi");
+            append(query, "host_abi", "arm64-v8a");
+            append(query, "update_version_code", "73932");
+            append(query, "channel", "update_64");
+            append(query, "_rticket", String.valueOf(now));
+            append(query, "device_platform", "android");
+            append(query, "version_code", "73932");
+            append(query, "cdid", device.cdid);
+            append(query, "os", "android");
+            append(query, "is_android_pad", "0");
+            append(query, "package", "com.phoenix.read");
+            append(query, "resolution", "1280*2772");
+            append(query, "os_version", "12");
+            append(query, "language", "zh");
+            append(query, "device_brand", "Redmi");
+            append(query, "need_personal_recommend", "1");
+            append(query, "aid", "8662");
+            append(query, "minor_status", "0");
+            append(query, "app_name", "novel");
+            append(query, "mcc_mnc", "46000");
+            append(query, "device_id", device.deviceId);
+            append(query, "iid", device.iid);
+            Request request = new Request.Builder()
+                    .url("https://ichannel.snssdk.com/service/2/app_alert_check/?" + query)
+                    .header("content-type", "application/octet-stream;tt-data=a")
+                    .header("log-encode-type", "gzip")
+                    .header("x-ss-req-ticket", String.valueOf(now))
+                    .header("sdk-version", "2")
+                    .header("passport-sdk-version", "73932")
+                    .header("user-agent", REGISTER_UA)
+                    .build();
+            try (Response response = QUICK.newCall(request).execute()) {
+                if (response.body() != null) response.body().close();
+            }
+        } catch (Throwable ignored) {
+            // 激活只是让设备更像真机，失败不影响后面取址
+        }
+    }
+
+    private static void append(StringBuilder query, String key, String value) {
+        if (query.length() > 0) query.append('&');
+        query.append(key).append('=').append(value);
     }
 
     /** 注册响应没有 code 字段：缺省视为成功，只有显式非 0 才算被拒。 */
