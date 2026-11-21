@@ -124,8 +124,19 @@ final class DownloadManager {
                         .put("percent", percent).put("detail", detail)
                         .put("nasTaskId", nasTaskId).put("keepRaw", keepRaw)
                         .put("remoteId", remoteId)
+                        .put("pulled", pulledIndexes())
                         .put("output", output).put("error", error).put("debug", debug).put("createdAt", createdAt);
             } catch (Exception e) { return new JSONObject(); }
+        }
+
+        /** 转发模式：已经从 NAS 拉到本机的真实集号（前端据此跳过已拉的分集，不必重拉）。 */
+        JSONArray pulledIndexes() {
+            JSONArray arr = new JSONArray();
+            for (int i = 0; i < episodes.length(); i++) {
+                JSONObject ep = episodes.optJSONObject(i);
+                if (ep != null && ep.optBoolean("pulled", false)) arr.put(ep.optInt("index", i + 1));
+            }
+            return arr;
         }
     }
 
@@ -849,13 +860,19 @@ final class DownloadManager {
         }
     }
 
-    /** 转发模式（proxyMode=3）：创建"NAS 下载→手机拉取"任务。文件由 forwardPull 逐集写入
-     *  downloads/<id>/epNNN.mp4，拉满自动置 ready，可直接走 merge() 合并导出。 */
-    JSONObject forwardPrepare(String title, int count, String nasTaskId) throws Exception {
-        if (title == null || title.trim().isEmpty() || count <= 0) throw new IllegalArgumentException("参数无效");
+    /** 转发模式（proxyMode=3）：创建"NAS 下载转码→手机流式拉取"任务。文件由 forwardPulled 逐集写入
+     *  downloads/<id>/epNNN.mp4，拉满自动置 ready，可直接走 merge() 合并导出。
+     *  @param episodeIndexes NAS 任务上的真实集号（只下 16/19/21 时就是这三个，不能从 1 数到 N） */
+    JSONObject forwardPrepare(String title, JSONArray episodeIndexes, String nasTaskId) throws Exception {
+        if (title == null || title.trim().isEmpty() || episodeIndexes == null || episodeIndexes.length() == 0)
+            throw new IllegalArgumentException("参数无效");
         String id = "fwd-" + Long.toHexString(System.currentTimeMillis());
         JSONArray eps = new JSONArray();
-        for (int i = 0; i < count; i++) eps.put(new JSONObject().put("index", i + 1));
+        for (int i = 0; i < episodeIndexes.length(); i++) {
+            int seq = episodeIndexes.optInt(i, 0);
+            if (seq > 0) eps.put(new JSONObject().put("index", seq));
+        }
+        if (eps.length() == 0) throw new IllegalArgumentException("参数无效");
         Task t = new Task(id, "huangguo", title, eps);
         t.status = "pulling";
         t.detail = "等待 NAS 下载完成";
@@ -909,6 +926,64 @@ final class DownloadManager {
         found.detail = "已从 NAS 拉取完整成品";
         found.percent = 100;
         found.output = out.getAbsolutePath();
+        persist();
+        return found.snapshot();
+    }
+
+    private Task findTask(String id) {
+        synchronized (tasks) { for (Task t : tasks) if (t.id.equals(id)) return t; }
+        return null;
+    }
+
+    /** 转发模式：本集要落盘的目标文件（批次序号 batch 从 1 开始）。
+     *  下载由调用方流式写入，写完再调 forwardPulled 登记（避免整集几百 MB 进内存）。 */
+    File forwardEpisodeFile(String id, int batch) throws Exception {
+        Task found = findTask(id);
+        if (found == null) throw new IllegalStateException("任务不存在");
+        File dir = dlDir(id);
+        if (!dir.exists() && !dir.mkdirs()) throw new java.io.IOException("无法创建任务目录");
+        return new File(dir, String.format(Locale.US, "ep%03d.mp4", Math.max(1, batch)));
+    }
+
+    /** 转发模式：一集从 NAS 拉完，登记进度；全部拉满置 ready（前端随即调 merge 合并导出）。
+     *  @param batch 任务内批次序号（1..n），与 forwardEpisodeFile 写入的文件名对应
+     *  @param seq   NAS 上的真实集号，写回 episodes 供合并按集号排序 */
+    JSONObject forwardPulled(String id, int batch, int seq, File file, long bytes) throws Exception {
+        Task found = findTask(id);
+        if (found == null) throw new IllegalStateException("任务不存在");
+        if (file == null || !file.exists() || file.length() <= 0 || bytes <= 0)
+            throw new java.io.IOException("拉取内容为空");
+        JSONObject ep = found.episodes.optJSONObject(Math.max(0, batch - 1));
+        if (ep != null) {
+            ep.put("pulled", true).put("size", file.length());
+            if (seq > 0) ep.put("index", seq);
+        }
+        int n = found.episodes.length();
+        int pulled = 0;
+        for (int i = 0; i < n; i++) {
+            JSONObject e = found.episodes.optJSONObject(i);
+            if (e != null && e.optBoolean("pulled", false)) pulled++;
+        }
+        found.doneCount = pulled;
+        found.percent = 3 + Math.round(85f * pulled / Math.max(1, n));
+        found.detail = "已从 NAS 拉取 " + pulled + "/" + n + " 集";
+        if (pulled == n) {
+            found.status = "ready";
+            found.detail = "已拉取全部 " + n + " 集，可合并";
+            found.percent = 90;
+        }
+        persist();
+        return found.snapshot();
+    }
+
+    /** 转发模式：NAS 侧失败/取消，手机任务同步置失败（否则会永远停在"等待 NAS 下载"）。 */
+    JSONObject forwardFailed(String id, String error) throws Exception {
+        Task found = findTask(id);
+        if (found == null) throw new IllegalStateException("任务不存在");
+        if (!"pulling".equals(found.status)) return found.snapshot();
+        found.status = "failed";
+        found.error = error == null ? "NAS 下载失败" : error;
+        found.detail = found.error;
         persist();
         return found.snapshot();
     }
