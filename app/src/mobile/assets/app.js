@@ -5250,9 +5250,11 @@ document.addEventListener('click', async event => {
       if (kind !== 'nas') {
         // 取消 = 放弃这次下载：任务记录和已拉到的临时分集一起清掉。
         // 只置 canceled 的话列表里会永远留一条「已取消」，还带个点了没反应的取消按钮。
-        // 稍等一下再删，给正在跑的下载线程退出、释放文件句柄的时间。
+        // 用 discard 而不是 delete：delete 会按剧名清空 Download/Veyra/<剧名>/，
+        // 顺手把用户以前下好的同剧成片一起删掉。
+        // 稍等一下再清，给正在跑的下载线程退出、释放文件句柄的时间。
         setTimeout(() => {
-          api('download-delete', { id }).catch(() => {}).then(() => refreshCurrentDownloads());
+          api('download-discard', { id }).catch(() => {}).then(() => refreshCurrentDownloads());
         }, 800);
       } else {
         refreshCurrentDownloads();
