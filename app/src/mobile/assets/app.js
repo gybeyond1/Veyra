@@ -1383,8 +1383,9 @@ async function forwardTick() {
   try {
     const phone = asArray(await api('download-list'));
     if (!phone.some(t => t.status === 'pulling' && t.nasTaskId)) return;
-    let nasTasks = [];
-    try { const result = await api('nas-download-list'); nasTasks = asArray(result.tasks); } catch (ignore) { nasTasks = []; }
+    let nasTasks;
+    try { const result = await api('nas-download-list'); nasTasks = asArray(result.tasks); }
+    catch (ignore) { return; }   // 拿不到 NAS 列表不算「任务没了」，下一轮再说（否则断网 24 秒就被判失败）
     await processForwardTasks(phone, nasTasks);
   } catch (error) {
     console.log('[forward] tick 失败:', error && error.message);
