@@ -1393,6 +1393,8 @@ public final class MainActivity extends Activity {
             }
             case "download-cancel": DownloadManager.get(this).cancel(args.optString("id")); return new JSONObject().put("ok", true);
             case "download-delete": DownloadManager.get(this).delete(args.optString("id")); RemoteTransfer.get(this).forgetTask(args.optString("id")); return new JSONObject().put("ok", true);
+            /* 取消进行中的任务：只清记录与临时目录，不碰已导出的成片（delete 会按剧名清整个目录） */
+            case "download-discard": DownloadManager.get(this).discard(args.optString("id")); return new JSONObject().put("ok", true);
             case "download-retry": DownloadManager.get(this).retry(args.optString("id")); return new JSONObject().put("ok", true);
             case "download-merge": return DownloadManager.get(this).merge(args.optString("id"));
             case "download-forward-prepare": return DownloadManager.get(this).forwardPrepare(args.optString("title"), args.optJSONArray("episodes"), args.optString("nasTaskId"));
