@@ -634,6 +634,29 @@ final class DownloadManager {
         persist();
     }
 
+    /** 取消即放弃：移除任务记录 + 删本任务的临时目录，**不动**已导出的成片。
+     *  delete() 是按「删除已完成任务」写的 —— 会连 Download/Veyra/&lt;剧名&gt;/ 整个目录一起清，
+     *  取消一个还在跑的任务不能顺手把用户以前下好的同剧集删掉。 */
+    void discard(String id) {
+        File pub = null;
+        synchronized (tasks) {
+            java.util.Iterator<Task> it = tasks.iterator();
+            while (it.hasNext()) {
+                Task t = it.next();
+                if (!t.id.equals(id)) continue;
+                t.canceled = true;
+                t.status = "canceled";
+                it.remove();
+                pub = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Veyra/dl_" + t.id);
+                break;
+            }
+        }
+        if (pub != null && pub.exists()) deleteRecursive(pub);
+        File priv = new File(context.getFilesDir(), "downloads/" + id);
+        if (priv.exists()) deleteRecursive(priv);
+        persist();
+    }
+
     // ---- 执行 ----
     // 并发下载数：一次最多同时下载 N 集（与后端 worker 并发思路一致），跑完一集线程池自动接下一集
     private static final int DL_CONCURRENCY = 10;
