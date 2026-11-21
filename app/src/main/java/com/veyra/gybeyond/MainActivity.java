@@ -1413,6 +1413,8 @@ public final class MainActivity extends Activity {
             }
             /* NAS 任务每集是否已下载+转码完成：复用已有 nas-download-episodes（参数名 id）。 */
             case "download-forward-fail": return DownloadManager.get(this).forwardFailed(args.optString("id"), args.optString("error"));
+            /* NAS 已收工但有集永远拉不到：标记跳过，只合并已拉到的部分（否则任务永远停在拉取中） */
+            case "download-forward-partial": return DownloadManager.get(this).forwardPartial(args.optString("id"), args.optJSONArray("missing"));
             case "input-edit": setInputEditing(args.optBoolean("active")); return new JSONObject().put("ok", true);
             case "open-url": {
                 String url = args.optString("url");
