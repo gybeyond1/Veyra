@@ -1275,42 +1275,68 @@ function downloadTaskActive(task) {
 }
 
 // 转发模式（黄果 + 后端转发）：NAS 下载并逐集转 H.265，手机按集流式拉回 → 本地合并导出 → 删 NAS 原件。
-// 防重入：处理中置 forwardProcessing，避免 2s 轮询重复触发。
+// 防重入：处理中置 forwardProcessing，避免轮询重复触发。
 let forwardProcessing = false;
-async function processForwardTasks(phoneTasks, nasTasks) {
-  if (forwardProcessing) return;
-  const fwd = (phoneTasks || []).find(t => t.status === 'pulling' && t.nasTaskId);
-  if (!fwd) return;
-  const nas = (nasTasks || []).find(t => String(t.id) === String(fwd.nasTaskId));
-  if (!nas) return;   // NAS 任务刚提交、列表还没刷到：下一轮再说
-  if (nas.status === 'failed' || nas.status === 'canceled') {
-    forwardProcessing = true;
-    try { await api('download-forward-fail', { id: fwd.id, error: nas.error || 'NAS 下载失败' }); } catch (ignore) {}
-    finally { forwardProcessing = false; }
+let forwardMissingNas = 0;   // 连续查不到 NAS 任务的次数（刚提交/网络抖动给几次机会）
+
+async function forwardFail(fwd, error) {
+  forwardProcessing = true;
+  try { await api('download-forward-fail', { id: fwd.id, error }); } catch (ignore) {}
+  finally { forwardProcessing = false; }
+  refreshCurrentDownloads();
+}
+
+/** 收尾：可选的「标注拉不到的集」→ 删 NAS 原件 → 合并导出 */
+async function forwardMerge(fwd, skipSeqs) {
+  if (forwardProcessing) return false;
+  forwardProcessing = true;
+  try {
+    if (skipSeqs && skipSeqs.length) {
+      try { await api('download-forward-partial', { id: fwd.id, missing: skipSeqs }); } catch (ignore) {}
+    }
+    try { await api('nas-download-cancel', { id: fwd.nasTaskId }); } catch (ignore) {}   // 手机已有成品，NAS 原件删掉
+    await api('download-merge', { id: fwd.id });
+    return true;
+  } catch (error) {
+    toast(`合并失败：${error.message}`, true);
+    return false;
+  } finally {
+    forwardProcessing = false;
     refreshCurrentDownloads();
-    return;
+  }
+}
+
+async function processForwardTasks(phoneTasks, nasTasks) {
+  if (forwardProcessing) return 0;
+  const fwd = (phoneTasks || []).find(t => t.status === 'pulling' && t.nasTaskId);
+  if (!fwd) return 0;
+  const nas = (nasTasks || []).find(t => String(t.id) === String(fwd.nasTaskId));
+  if (!nas) {
+    // 以前一次查不到就干等，任务从此永远停在「NAS 下载中」。连续几次都没有才判任务被删。
+    if (++forwardMissingNas >= 6) { forwardMissingNas = 0; await forwardFail(fwd, 'NAS 任务不存在或已被删除'); }
+    return 0;
+  }
+  forwardMissingNas = 0;
+  if (nas.status === 'failed' || nas.status === 'canceled') {
+    await forwardFail(fwd, nas.error || 'NAS 下载失败');
+    return 0;
   }
   const eps = asArray(fwd.episodes);
-  if (!eps.length) return;
+  if (!eps.length) return 0;
+  const seqAt = i => Number(eps[i] && eps[i].index) || (i + 1);
   const pulled = new Set(asArray(fwd.pulled).map(Number));
   // 全部已在手机上（上次合并请求没发出去/失败了）：补触发一次合并即可
-  if (pulled.size >= eps.length) {
-    forwardProcessing = true;
-    try {
-      try { await api('nas-download-cancel', { id: fwd.nasTaskId }); } catch (ignore) {}
-      await api('download-merge', { id: fwd.id });
-    } catch (ignore) {} finally { forwardProcessing = false; }
-    return;
-  }
+  if (pulled.size >= eps.length) { await forwardMerge(fwd, null); return 0; }
+
   forwardProcessing = true;
   let fetched = 0;
+  let ready = new Set();
   try {
     // 后端只回复「已下载且已转码完成」的集（done）：转码中的集即使文件在也还是旧 H.264，不能拉
     const info = await api('nas-download-episodes', { id: fwd.nasTaskId });
-    const ready = new Set(asArray(info && info.episodes).filter(e => e && e.done).map(e => Number(e.index)));
-    if (!ready.size) return;
+    ready = new Set(asArray(info && info.episodes).filter(e => e && e.done).map(e => Number(e.index)));
     for (let i = 0; i < eps.length; i++) {
-      const seq = Number(eps[i] && eps[i].index) || (i + 1);
+      const seq = seqAt(i);
       if (!ready.has(seq) || pulled.has(seq)) continue;
       // index = 任务内批次序号（落盘 epNNN.mp4），episode = NAS 上的真实集号（拼文件地址）
       await api('download-forward-pull', { id: fwd.id, index: i + 1, episode: seq, nasTaskId: fwd.nasTaskId });
@@ -1322,14 +1348,55 @@ async function processForwardTasks(phoneTasks, nasTasks) {
   } finally {
     forwardProcessing = false;
   }
-  if (!fetched) return;
+
+  const remaining = eps.map((e, i) => seqAt(i)).filter(seq => !pulled.has(seq));
+  // NAS 已收工（ready/done）且剩下的集再也拉不到 → 收敛，别把任务永远钉在「NAS 下载中」
+  const nasSettled = nas.status === 'ready' || nas.status === 'done';
+  if (nasSettled && remaining.length && !remaining.some(seq => ready.has(seq))) {
+    if (pulled.size > 0) {
+      toast(`NAS 有 ${remaining.length} 集未完成，先合并已拉取的 ${pulled.size} 集`);
+      await forwardMerge(fwd, remaining);
+    } else {
+      await forwardFail(fwd, `NAS 端 ${eps.length} 集全部未完成，无一集可拉取`);
+    }
+    return fetched;
+  }
+  if (!fetched) return 0;
   if (pulled.size >= eps.length) {
     toast(`已从 NAS 拉取全部 ${eps.length} 集，开始合并`);
-    try { await api('nas-download-cancel', { id: fwd.nasTaskId }); } catch (ignore) {}   // 手机已有成品，NAS 原件删掉
-    try { await api('download-merge', { id: fwd.id }); } catch (error) { toast(`合并失败：${error.message}`, true); }
+    await forwardMerge(fwd, null);
+  } else {
+    refreshCurrentDownloads();
   }
-  refreshCurrentDownloads();
+  return fetched;
 }
+
+// 转发推进不能挂在「下载页渲染」上：页面切走、App 切后台时渲染路径不会跑，
+// 任务就永远停在「NAS 下载中」（去玩会儿手机回来，NAS 早下完了手机却不动）。
+// 独立 ticker 常驻推进，回前台再补一次；没有转发任务时不打扰 NAS。
+let forwardTicker = null;
+let forwardTickBusy = false;
+async function forwardTick() {
+  if (forwardTickBusy || forwardProcessing) return;
+  if (!state.account || !state.account.loggedIn) return;
+  forwardTickBusy = true;
+  try {
+    const phone = asArray(await api('download-list'));
+    if (!phone.some(t => t.status === 'pulling' && t.nasTaskId)) return;
+    let nasTasks = [];
+    try { const result = await api('nas-download-list'); nasTasks = asArray(result.tasks); } catch (ignore) { nasTasks = []; }
+    await processForwardTasks(phone, nasTasks);
+  } catch (error) {
+    console.log('[forward] tick 失败:', error && error.message);
+  } finally {
+    forwardTickBusy = false;
+  }
+}
+function ensureForwardTicker() {
+  if (forwardTicker) return;
+  forwardTicker = setInterval(() => { forwardTick(); }, 4000);
+}
+setTimeout(ensureForwardTicker, 5000);
 
 // 有进行中任务则维持 2s 轮询，全部终态则停止；避免反复 stop/start 重置定时器
 function syncDownloadsTimer(tasks) {
@@ -4029,6 +4096,9 @@ window.hgResume = () => {
   window.hgRefreshPendingResources?.();
   window.hgThemeRefresh?.();
   retryFailedImages(true);
+  // 回到前台立刻补一次转发推进（后台时定时器被系统节流/冻结，不补的话得等下一个 tick）
+  ensureForwardTicker();
+  forwardTick();
   if (state.route === 'library') goLibrary(state.libraryTab);
   if (state.route === 'home') refreshHomeHistory();
   if (state.route === 'detail' && state.detail) {
@@ -5172,10 +5242,21 @@ document.addEventListener('click', async event => {
     const kind = button.dataset.dlCancel, id = button.dataset.dlId;
     const nasId = button.dataset.dlNas || '';
     const action = kind === 'nas' ? 'nas-download-cancel' : 'download-cancel';
-    api(action, { id }).then(() => {
+    api(action, { id }).then(async () => {
       // 转发任务：NAS 侧也要一起停，否则后台继续下+转码，白占带宽和磁盘
-      if (nasId && kind !== 'nas') api('nas-download-cancel', { id: nasId }).catch(() => {});
-      toast('已取消任务'); removeDownloadRow(kind, id); refreshCurrentDownloads();
+      if (nasId && kind !== 'nas') { try { await api('nas-download-cancel', { id: nasId }); } catch (ignore) {} }
+      toast('已取消任务');
+      removeDownloadRow(kind, id);
+      if (kind !== 'nas') {
+        // 取消 = 放弃这次下载：任务记录和已拉到的临时分集一起清掉。
+        // 只置 canceled 的话列表里会永远留一条「已取消」，还带个点了没反应的取消按钮。
+        // 稍等一下再删，给正在跑的下载线程退出、释放文件句柄的时间。
+        setTimeout(() => {
+          api('download-delete', { id }).catch(() => {}).then(() => refreshCurrentDownloads());
+        }, 800);
+      } else {
+        refreshCurrentDownloads();
+      }
     }).catch(error => toast(error.message, true));
     return;
   }
