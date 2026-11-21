@@ -1274,33 +1274,61 @@ function downloadTaskActive(task) {
   return ['queued', 'downloading', 'merging', 'running', 'pulling'].includes(task && task.status);
 }
 
-// 转发模式（proxyMode=3）：NAS 下载完成后自动逐集拉到手机 → 合并 → 删除 NAS 原文件。
+// 转发模式（黄果 + 后端转发）：NAS 下载并逐集转 H.265，手机按集流式拉回 → 本地合并导出 → 删 NAS 原件。
 // 防重入：处理中置 forwardProcessing，避免 2s 轮询重复触发。
 let forwardProcessing = false;
 async function processForwardTasks(phoneTasks, nasTasks) {
   if (forwardProcessing) return;
-  const fwd = (phoneTasks || []).find(t => t.status === 'pulling');
+  const fwd = (phoneTasks || []).find(t => t.status === 'pulling' && t.nasTaskId);
   if (!fwd) return;
-  if (!fwd.nasTaskId) return;   // 旧任务无关联 NAS id（持久化前版本），跳过等用户重下
   const nas = (nasTasks || []).find(t => String(t.id) === String(fwd.nasTaskId));
-  if (!nas) return;
-  if (!['done', 'ready'].includes(nas.status)) return;   // 等 NAS 下载完成
-  if (nas.status === 'ready') {
-    // NAS 已下载未合并：触发 NAS 端合并（merging/done 状态后端会拒绝，忽略即可，继续等）
-    try { await withTimeout(api('nas-download-merge', { id: fwd.nasTaskId }), 8000); } catch (ignore) {}
+  if (!nas) return;   // NAS 任务刚提交、列表还没刷到：下一轮再说
+  if (nas.status === 'failed' || nas.status === 'canceled') {
+    forwardProcessing = true;
+    try { await api('download-forward-fail', { id: fwd.id, error: nas.error || 'NAS 下载失败' }); } catch (ignore) {}
+    finally { forwardProcessing = false; }
+    refreshCurrentDownloads();
+    return;
+  }
+  const eps = asArray(fwd.episodes);
+  if (!eps.length) return;
+  const pulled = new Set(asArray(fwd.pulled).map(Number));
+  // 全部已在手机上（上次合并请求没发出去/失败了）：补触发一次合并即可
+  if (pulled.size >= eps.length) {
+    forwardProcessing = true;
+    try {
+      try { await api('nas-download-cancel', { id: fwd.nasTaskId }); } catch (ignore) {}
+      await api('download-merge', { id: fwd.id });
+    } catch (ignore) {} finally { forwardProcessing = false; }
     return;
   }
   forwardProcessing = true;
+  let fetched = 0;
   try {
-    toast(`NAS 已合并，正在拉到手机（${fwd.title}）`);
-    await api('download-forward-pull-merged', { id: fwd.id, nasTaskId: fwd.nasTaskId });
-    try { await api('nas-download-cancel', { id: fwd.nasTaskId }); } catch (ignore) {}  // 清理 NAS 原文件
-    toast('已拉到手机完整成品');
+    // 后端只回复「已下载且已转码完成」的集（done）：转码中的集即使文件在也还是旧 H.264，不能拉
+    const info = await api('nas-download-episodes', { id: fwd.nasTaskId });
+    const ready = new Set(asArray(info && info.episodes).filter(e => e && e.done).map(e => Number(e.index)));
+    if (!ready.size) return;
+    for (let i = 0; i < eps.length; i++) {
+      const seq = Number(eps[i] && eps[i].index) || (i + 1);
+      if (!ready.has(seq) || pulled.has(seq)) continue;
+      // index = 任务内批次序号（落盘 epNNN.mp4），episode = NAS 上的真实集号（拼文件地址）
+      await api('download-forward-pull', { id: fwd.id, index: i + 1, episode: seq, nasTaskId: fwd.nasTaskId });
+      pulled.add(seq);
+      fetched++;
+    }
   } catch (error) {
-    toast(`转发拉取失败：${error.message}`, true);
+    console.log('[forward] 拉取中断（下一轮按 Range 续传）:', error && error.message);
   } finally {
     forwardProcessing = false;
   }
+  if (!fetched) return;
+  if (pulled.size >= eps.length) {
+    toast(`已从 NAS 拉取全部 ${eps.length} 集，开始合并`);
+    try { await api('nas-download-cancel', { id: fwd.nasTaskId }); } catch (ignore) {}   // 手机已有成品，NAS 原件删掉
+    try { await api('download-merge', { id: fwd.id }); } catch (error) { toast(`合并失败：${error.message}`, true); }
+  }
+  refreshCurrentDownloads();
 }
 
 // 有进行中任务则维持 2s 轮询，全部终态则停止；避免反复 stop/start 重置定时器
@@ -1455,7 +1483,7 @@ function downloadTaskRow(task, kind) {
   // 直写导出后 output 是 file:// 路径（不再走 MediaStore 的 content://），两者都按「已保存」展示
   const output = task.output && (task.output.startsWith('content://') || task.output.startsWith('file://')) ? '已保存到系统下载目录' : task.output || '';
   // 合并中不给取消：后端删任务会把分集目录整个 rm，正在被 ffmpeg 读的文件会中途消失
-  const cancelBtn = running && !merging ? `<button type="button" class="dl-cancel" data-dl-cancel="${kind}" data-dl-id="${esc(task.id)}">取消</button>` : '';
+  const cancelBtn = running && !merging ? `<button type="button" class="dl-cancel" data-dl-cancel="${kind}" data-dl-id="${esc(task.id)}" data-dl-nas="${esc(task.nasTaskId || '')}">取消</button>` : '';
   const retryBtn = !running && kind === 'phone' && (task.status === 'failed' || task.status === 'canceled') && !(task.error || '').includes('合并失败')
     ? `<button type="button" class="dl-cancel dl-retry" data-dl-retry="phone" data-dl-id="${esc(task.id)}">重试</button>` : '';
   const failedList = task.failedEpisodes || [];
@@ -1512,7 +1540,7 @@ function downloadStatusText(task, kind) {
   if (task.status === 'pulling') {
     const d = task.detail || '';
     if (d.includes('拉取')) return d.replace(/已从 NAS /, '从 NAS ');
-    return '等待 NAS 下载';
+    return 'NAS 下载中 · 转 H.265';
   }
   // NAS 端合并：状态码直接就是 merging，具体在做什么看 detail（逐集转码 / 音频整轨重编码 / 校验）
   if (task.status === 'merging') return '合并中';
@@ -1712,6 +1740,26 @@ async function resolveEpisodesForDownload(episodes) {
   return resolved;
 }
 
+// 转发模式（黄果 + 后端转发）：「下载到手机」不再由手机下分片，而是让 NAS 全权下载并转 H.265，
+// 手机只按集把成品流式拉回来。这里只负责提交任务，拉取由 processForwardTasks 轮询完成。
+async function startNasForwardDownload(episodes) {
+  const detail = state.detail || {};
+  const seriesId = String(detail.seriesId || detail.id || '');
+  if (!seriesId) throw new Error('缺少剧集 id，无法提交 NAS 下载');
+  const created = await api('nas-download-start', {
+    source: 'huangguo', title: detail.title,
+    seriesId, episodes, cover: detail.cover || '',
+  });
+  const nasTaskId = String((created && created.task && created.task.id) || (created && created.id) || '');
+  if (!nasTaskId) throw new Error('NAS 未返回任务 id，请确认后端已更新');
+  await api('download-forward-prepare', {
+    title: detail.title,
+    episodes: asArray(episodes).map(Number).filter(n => n > 0),
+    nasTaskId,
+  });
+  return nasTaskId;
+}
+
 async function submitDownloadTo(target, remoteId) {
   if (downloadParsing) return;
   if (target === 'nas') {
@@ -1755,20 +1803,28 @@ async function submitDownloadTo(target, remoteId) {
         try { const fresh = await api('content-status'); if (fresh && fresh.source) sourceNow = fresh.source; } catch (ignore) {}
         if (sourceNow !== 'huangguo' && sourceNow !== 'hongguo') sourceNow = contentSource;
       }
-      // 下载到手机：黄果/红果一律手机本地（黄果经后端代理拉 m3u8/ts → 本地合并单集 mp4）。
-      // 原"走后端转发"(proxyMode=3：NAS 全权下载→手机拉→手机合并)已废弃：手机本地 ts→mp4
-      // 合并（含源显式 IV 保留）修好后，转发无需 NAS 下载合并，与代理/直连同一条链路；
-      // NAS 端"下载到 NAS"入口仍保留（主动下载到 NAS 用）。
+      // 下载到手机的两种链路：
+      //  ① 黄果 + 后端转发（proxyMode=3）：NAS 全权下载 + 转 H.265 → 手机流式拉取成品分集 → 本地合并导出。
+      //     手机不解析 m3u8、不下分片、不解密、不转码，只收文件（这正是"转发"该有的样子）。
+      //  ② 直连 / 仅代理，或红果：手机本地拉 m3u8/分片并合并（保持原样，一条链路都不动）。
       let proxyModeNow = Number(state.proxyMode) || 3;
       try { const pmv = await api('get-proxy-mode'); if (pmv !== null && pmv !== undefined && pmv !== '') proxyModeNow = Number(pmv) || 3; } catch (ignore) {}
       console.log(`[dl-judge] source=${sourceNow} proxyMode=${proxyModeNow} role=${state.account?.role} remote=${remoteId || '-'}`);
       {
+        // 调试模式要拿原始 TS/KEY，必须走手机本地链路；远程服务器传输暂时也走本地链路
+        const debug = target === 'phone-debug';
+        const targetRemote = target === 'remote' ? String(remoteId || '') : '';
+        if (sourceNow === 'huangguo' && proxyModeNow === 3 && !debug && !targetRemote) {
+          if (!state.account.loggedIn) throw new Error('转发模式需要登录账号（NAS 按账号隔离任务）');
+          const nasTaskId = await startNasForwardDownload(episodes);
+          console.log(`[dl-start] 源=huangguo 通道=转发 nasTask=${nasTaskId} 集数=${episodes.length}`);
+          nativeToast(`已提交 NAS 下载 ${episodes.length} 集（下完自动转 H.265），完成后自动拉到手机`);
+          refreshCurrentDownloads();
+          hideDownloadSheet();   // 这条分支自己 return，不会走到函数末尾的统一关闭
+          return;
+        }
         const resolved = await resolveEpisodesForDownload(episodes);
         if (!resolved.length) throw new Error('没有可下载的分集');
-        // 调试模式：仍是「下载到手机」，但要求原生保留 TS/KEY、不自动合并，最后打成一个调试包
-        const debug = target === 'phone-debug';
-        // 远程服务器：先照常下到手机（同一条链路），下载+合并完成后原生自动上传到所选服务器
-        const targetRemote = target === 'remote' ? String(remoteId || '') : '';
         await api('download-start', { source: sourceNow, title: state.detail.title, episodes: resolved, debug, cover: state.detail.cover || '', remoteId: targetRemote });
         /* 成功提示走系统 Toast（屏幕底部小条）。原来这条塞了「判定[源=… 通道=…]」，
          * 在顶部浮层里又长又难读；技术细节留 console，用户只需要知道已经开始下了。 */
@@ -5114,8 +5170,13 @@ document.addEventListener('click', async event => {
   if (event.target.closest('[data-dl-cancel]')) {
     const button = event.target.closest('[data-dl-cancel]');
     const kind = button.dataset.dlCancel, id = button.dataset.dlId;
+    const nasId = button.dataset.dlNas || '';
     const action = kind === 'nas' ? 'nas-download-cancel' : 'download-cancel';
-    api(action, { id }).then(() => { toast('已取消任务'); removeDownloadRow(kind, id); refreshCurrentDownloads(); }).catch(error => toast(error.message, true));
+    api(action, { id }).then(() => {
+      // 转发任务：NAS 侧也要一起停，否则后台继续下+转码，白占带宽和磁盘
+      if (nasId && kind !== 'nas') api('nas-download-cancel', { id: nasId }).catch(() => {});
+      toast('已取消任务'); removeDownloadRow(kind, id); refreshCurrentDownloads();
+    }).catch(error => toast(error.message, true));
     return;
   }
   if (event.target.closest('[data-dl-copy]')) {
