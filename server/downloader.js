@@ -855,6 +855,13 @@ const HUANGGUO_SITES = ['https://huangguoai.io', 'https://0624.gitiecgad.cc', 'h
 /** 黄果下载编码：默认 hevc（体积约 H.264 的 3-5 成，画质更好）；老设备设 VEYRA_HUANGGUO_CODEC=main。 */
 const HUANGGUO_CODEC = String(process.env.VEYRA_HUANGGUO_CODEC || 'hevc').toLowerCase() === 'main' ? 'main' : 'hevc';
 
+/* 下载完成后统一转 H.265（默认开）：源站若是 HEVC 直接跳过（-c copy 已经是最优），
+ * H.264 分集转一遍，1080p 一集约 70-90MB、720p 约 45-55MB。
+ * VEYRA_TRANSCODE_HEVC=0 关闭；CRF/预设可调。 */
+const TRANSCODE_HEVC = process.env.VEYRA_TRANSCODE_HEVC !== '0';
+const TRANSCODE_CRF = Math.max(16, Math.min(32, parseInt(process.env.VEYRA_TRANSCODE_CRF || '23', 10) || 23));
+const TRANSCODE_PRESET = process.env.VEYRA_TRANSCODE_PRESET || 'fast';
+
 function readBackendProxy() {
   try {
     const s = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'settings.json'), 'utf8'));
@@ -1203,6 +1210,84 @@ function cleanupHg(segFiles, keyFiles, mapFile) {
   if (mapFile) { try { fs.rmSync(mapFile, { force: true }); } catch { } }
 }
 
+/** 探测可用 HEVC 编码器：优先核显 QSV / NVENC（NAS 上快一个数量级），没有就 libx265 软编。 */
+let hevcEncoders = null;
+function hevcEncoderList() {
+  if (hevcEncoders) return hevcEncoders;
+  const out = spawnSync('ffmpeg', ['-hide_banner', '-encoders'], { encoding: 'utf8', timeout: 20_000 });
+  const txt = String(out.stdout || '');
+  const list = [];
+  try { if (fs.existsSync('/dev/dri/renderD128') && /hevc_qsv/.test(txt)) list.push('hevc_qsv'); } catch { }
+  try { if (fs.existsSync('/dev/nvidia0') && /hevc_nvenc/.test(txt)) list.push('hevc_nvenc'); } catch { }
+  if (/libx265/.test(txt)) list.push('libx265');
+  if (!list.length) list.push('libx265');
+  hevcEncoders = list;
+  return list;
+}
+
+function hevcEncoderArgs(enc) {
+  if (enc === 'hevc_qsv') {
+    return ['-c:v', 'hevc_qsv', '-preset', 'medium', '-global_quality', String(TRANSCODE_CRF),
+      '-pix_fmt', 'nv12', '-tag:v', 'hvc1'];
+  }
+  if (enc === 'hevc_nvenc') {
+    return ['-c:v', 'hevc_nvenc', '-preset', 'p4', '-cq', String(TRANSCODE_CRF),
+      '-pix_fmt', 'yuv420p', '-tag:v', 'hvc1'];
+  }
+  return ['-c:v', 'libx265', '-preset', TRANSCODE_PRESET, '-crf', String(TRANSCODE_CRF),
+    '-pix_fmt', 'yuv420p', '-x265-params', 'log-level=error', '-tag:v', 'hvc1'];
+}
+
+/** 转一集到 HEVC。已是 HEVC 直接跳过；转完更大则保留原文件。
+ *  返回 true=已替换，false=跳过/失败（原文件原样保留，调用方无需处理）。 */
+async function transcodeToHevc(file, label) {
+  let info;
+  try { info = probeFile(file); } catch (e) {
+    console.log(`[transcode] ${label} 探测失败，跳过: ${e.message}`);
+    return false;
+  }
+  if (String(info.videoCodec || '').toLowerCase() === 'hevc') return false;
+  const before = fs.statSync(file).size;
+  const dur = Number(info.duration) || 0;
+  const tmp = file + '.h265.mp4';
+  const audioCopy = !info.audioCodec || ['aac', 'mp3', 'ac3', 'eac3', 'alac'].includes(String(info.audioCodec).toLowerCase());
+  const head = ['-hide_banner', '-nostdin', '-y', '-i', file, '-map', '0:v:0', '-map', '0:a:0?', '-sn', '-dn'];
+  const tail = [...(audioCopy ? ['-c:a', 'copy'] : ['-c:a', 'aac', '-b:a', '128k']),
+    '-movflags', '+faststart', '-f', 'mp4', tmp];
+  for (const enc of hevcEncoderList()) {
+    fs.rmSync(tmp, { force: true });
+    try {
+      await runFFmpeg([...head, ...hevcEncoderArgs(enc), ...tail]);
+      const after = probeFile(tmp);
+      if (dur && Math.abs((Number(after.duration) || 0) - dur) > 3)
+        throw new Error(`时长异常 ${after.duration}s（源 ${dur}s）`);
+      const size = fs.statSync(tmp).size;
+      if (size < 64 * 1024) throw new Error('产物过小');
+      if (size >= before * 0.95) {
+        console.log(`[transcode] ${label} 转码后没变小（${(before / 1048576).toFixed(1)}MB → ${(size / 1048576).toFixed(1)}MB），保留原文件`);
+        fs.rmSync(tmp, { force: true });
+        return false;
+      }
+      fs.rmSync(file, { force: true });
+      fs.renameSync(tmp, file);
+      console.log(`[transcode] ${label} H.264→HEVC ${enc} crf${TRANSCODE_CRF}: ${(before / 1048576).toFixed(1)}MB → ${(size / 1048576).toFixed(1)}MB`);
+      return true;
+    } catch (e) {
+      console.log(`[transcode] ${label} ${enc} 失败: ${e.message}`);
+      fs.rmSync(tmp, { force: true });
+    }
+  }
+  return false;
+}
+
+/* 串行转码：下载是 10 集并发，转码同时跑 10 个会把 NAS CPU 打满、还会拖慢下载 */
+let transcodeChain = Promise.resolve();
+function queueTranscode(fn) {
+  const p = transcodeChain.then(fn, fn);
+  transcodeChain = p.then(() => { }, () => { });
+  return p;
+}
+
 async function runTask(task) {
   const dir = taskDir(task);
   const workDir = safeJoin(dir, '.merge-work');
@@ -1366,13 +1451,24 @@ async function runTask(task) {
                 }, signal);
                 fs.renameSync(rawFile, plainFile);
               }
+              const downloadCost = Date.now() - started; // 只算下载耗时，转码不算进「播放地址过期」
+              // 下载后自动转 H.265：源站已是 HEVC 的会跳过，转码失败保留原文件、不影响任务
+              if (TRANSCODE_HEVC) {
+                task.progress.detail = `第 ${ep.index} 集转码 H.265…`;
+                touch(task);
+                try {
+                  await queueTranscode(() => transcodeToHevc(plainFile, `第 ${ep.index} 集`));
+                } catch (e) {
+                  console.log(`[transcode] 第 ${ep.index} 集转码失败，保留原文件: ${e.message}`);
+                }
+              }
               const size = fs.statSync(plainFile).size;
               ep._ok = true;
               downloaded++;
               task.progress.percent = Math.min(98, Math.round(downloaded / task.episodes.length * 100));
               task.progress.detail = `已下载 ${downloaded}/${task.episodes.length} 集`;
               touch(task);
-              if (Date.now() - started > REDOWNLOAD_TIMEOUT_MS) throw new Error('播放地址超时失效，请重新提交');
+              if (downloadCost > REDOWNLOAD_TIMEOUT_MS) throw new Error('播放地址超时失效，请重新提交');
               break;
             } catch (err) {
               fs.rmSync(safeJoin(dir, epEncName(ep.index)), { force: true });
