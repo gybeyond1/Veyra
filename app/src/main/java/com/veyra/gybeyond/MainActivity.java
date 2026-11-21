@@ -1395,18 +1395,24 @@ public final class MainActivity extends Activity {
             case "download-delete": DownloadManager.get(this).delete(args.optString("id")); RemoteTransfer.get(this).forgetTask(args.optString("id")); return new JSONObject().put("ok", true);
             case "download-retry": DownloadManager.get(this).retry(args.optString("id")); return new JSONObject().put("ok", true);
             case "download-merge": return DownloadManager.get(this).merge(args.optString("id"));
-            case "download-forward-prepare": return DownloadManager.get(this).forwardPrepare(args.optString("title"), args.optInt("count"), args.optString("nasTaskId"));
+            case "download-forward-prepare": return DownloadManager.get(this).forwardPrepare(args.optString("title"), args.optJSONArray("episodes"), args.optString("nasTaskId"));
+            /* 转发模式：逐集流式拉取（边读边写盘）。老实现把整集几百 MB 读进 byte[]，中端机必 OOM。 */
             case "download-forward-pull": {
                 String nasId = args.optString("nasTaskId");
-                int index = args.optInt("index");
-                byte[] bytes = account.getBytes("api/download/files/" + nasId + "/" + index);
-                return DownloadManager.get(this).forwardPull(args.optString("id"), index, bytes);
+                int batch = Math.max(1, args.optInt("index", 1));   // 任务内批次序号
+                int seq = args.optInt("episode", batch);            // NAS 上的真实集号
+                DownloadManager dm = DownloadManager.get(this);
+                java.io.File out = dm.forwardEpisodeFile(args.optString("id"), batch);
+                long written = account.getToFile("api/download/files/" + nasId + "/" + seq, out);
+                return dm.forwardPulled(args.optString("id"), batch, seq, out, written);
             }
             case "download-forward-pull-merged": {
                 String nasId = args.optString("nasTaskId");
                 byte[] bytes = account.getBytes("api/download/files/" + nasId + "/0");
                 return DownloadManager.get(this).forwardPullMerged(args.optString("id"), bytes);
             }
+            /* NAS 任务每集是否已下载+转码完成：复用已有 nas-download-episodes（参数名 id）。 */
+            case "download-forward-fail": return DownloadManager.get(this).forwardFailed(args.optString("id"), args.optString("error"));
             case "input-edit": setInputEditing(args.optBoolean("active")); return new JSONObject().put("ok", true);
             case "open-url": {
                 String url = args.optString("url");
