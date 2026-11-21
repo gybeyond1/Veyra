@@ -422,7 +422,44 @@ final class AccountService {
         call("DELETE", path, null, true);
     }
 
-    /** 登录态二进制下载（转发模式：手机从 NAS 拉取已下载的单集 mp4）。 */
+    /** 登录态流式下载到文件（转发模式：手机从 NAS 拉取已转码的单集 mp4）。
+     *  边读边写，不再把整集 60~500MB 读进 byte[]（老实现必然 OOM）。
+     *  目标文件已有内容时带 Range 续传：服务器返回 206 就接着写，返回 200 说明不支持续传则从头覆盖。
+     *  @return 写入后的文件总字节数 */
+    long getToFile(String path, java.io.File out) throws Exception {
+        if (!isLoggedIn()) throw new IllegalStateException("请先登录");
+        long offset = out.exists() ? out.length() : 0;
+        Request.Builder builder = new Request.Builder().url(baseUrl + path)
+                .header("Authorization", "Bearer " + prefs.getString("token", ""));
+        if (offset > 0) builder.header("Range", "bytes=" + offset + "-");
+        // 常规接口 20s 读超时，拉整集文件太紧：单独放宽到 2 分钟（按「相邻两次读到数据」计，不是总时长）
+        OkHttpClient io = client.newBuilder().readTimeout(120, TimeUnit.SECONDS).build();
+        try (Response response = io.newCall(builder.build()).execute()) {
+            if (!response.isSuccessful()) {
+                String message = "";
+                try { if (response.body() != null) message = new JSONObject(response.body().string()).optString("error", ""); } catch (Exception ignored) { }
+                if (message.isEmpty()) message = "拉取失败（HTTP " + response.code() + "）";
+                throw new AccountApiException(response.code(), message);
+            }
+            if (response.body() == null) throw new java.io.IOException("拉取内容为空");
+            boolean resume = offset > 0 && response.code() == 206;
+            try (java.io.InputStream in = response.body().byteStream();
+                 java.io.RandomAccessFile raf = new java.io.RandomAccessFile(out, "rw")) {
+                if (!resume) { raf.setLength(0); offset = 0; }
+                raf.seek(offset);
+                byte[] buffer = new byte[256 * 1024];
+                long total = offset;
+                int k;
+                while ((k = in.read(buffer)) > 0) {
+                    raf.write(buffer, 0, k);
+                    total += k;
+                }
+                return total;
+            }
+        }
+    }
+
+    /** 登录态二进制下载（保留给旧调用方；大文件请用 getToFile）。 */
     byte[] getBytes(String path) throws Exception {
         if (!isLoggedIn()) throw new IllegalStateException("请先登录");
         Request.Builder builder = new Request.Builder().url(baseUrl + path);
