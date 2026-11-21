@@ -198,6 +198,11 @@ final class HongguoRepository {
     private static final java.util.Map<String, Long> episodeAt = new java.util.concurrent.ConcurrentHashMap<>();
 
     JSONObject episode(String id, int number) throws Exception {
+        return episode(id, number, false);
+    }
+
+    /** @param background 详情页预热：取址失败不占冷却、不重试，少给上游添无效请求。 */
+    JSONObject episode(String id, int number, boolean background) throws Exception {
         final String cacheKey = id + "#" + number;
         JSONObject cached = episodes.get(cacheKey);
         Long at = episodeAt.get(cacheKey);
@@ -205,7 +210,7 @@ final class HongguoRepository {
         Detail detail = details.get(id);
         if (detail == null) { detail = upstream.detail(id); details.put(id, detail); }
         if (number < 1 || number > detail.getEpisodes().size()) throw new IllegalArgumentException("无效集数");
-        StreamInfo info = resolveStream(id, detail.getEpisodes().get(number - 1));
+        StreamInfo info = resolveStream(id, detail.getEpisodes().get(number - 1), background);
         HongguoPlayback.register(info);
         JSONObject result = new JSONObject().put("id", id).put("episode", number)
                 .put("source", info.getUrl())
@@ -245,7 +250,7 @@ final class HongguoRepository {
         try {
             PREWARM_POOL.execute(() -> {
                 try {
-                    JSONObject data = episode(id, number);
+                    JSONObject data = episode(id, number, true);
                     HongguoPlayback.warm(data.optString("source"));
                 } catch (Exception ignored) {
                     // 预热失败无所谓：真点播时还会走一次完整流程
@@ -274,9 +279,9 @@ final class HongguoRepository {
             });
     private static final long FRESH_TIMEOUT_MS = 9000L;
 
-    private StreamInfo resolveStream(String id, String vid) throws Exception {
+    private StreamInfo resolveStream(String id, String vid, boolean background) throws Exception {
         java.util.concurrent.Future<StreamInfo> task =
-                RESOLVE_POOL.submit(() -> HongguoDirect.fetch(vid));
+                RESOLVE_POOL.submit(() -> HongguoDirect.fetch(vid, background));
         StreamInfo info;
         try {
             info = task.get(FRESH_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS);

@@ -58,21 +58,21 @@ final class HongguoApi {
     private static String deviceId = "";
     private static String installId = "";
     private static String clientId = "";
-    private static long identityAt = 0L;
 
     private HongguoApi() { }
 
-    /** 匿名身份：10 分钟内复用，过期重注册（注册一次约 200~400ms）。 */
+    /**
+     * 匿名身份：和播放共用同一台落盘设备（{@link HongguoDirect#identity()}）。
+     *
+     * 以前这里 10 分钟重新注册一台，加上播放每集再注册两台，一天能造出上百台
+     * 「刚出生就请求」的匿名设备 —— 上游对这种模式判得很死，取址直接回空正文。
+     * 现在全应用只有一台设备，注册一次用一周。
+     */
     static synchronized String[] identity() throws Exception {
-        long now = System.currentTimeMillis();
-        if (!deviceId.isEmpty() && now - identityAt < 600_000L) {
-            return new String[]{deviceId, installId, clientId};
-        }
-        HongguoDirect.Device device = HongguoDirect.register();
+        HongguoDirect.Device device = HongguoDirect.identity();
         deviceId = device.deviceId;
         installId = device.iid;
         clientId = device.cdid;
-        identityAt = now;
         return new String[]{deviceId, installId, clientId};
     }
 

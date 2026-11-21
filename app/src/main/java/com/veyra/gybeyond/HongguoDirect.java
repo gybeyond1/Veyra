@@ -1,5 +1,6 @@
 package com.veyra.gybeyond;
 
+import android.content.Context;
 import android.util.Base64;
 
 import com.hongguotv.core.MediaCrypto;
@@ -42,12 +43,22 @@ import okhttp3.Response;
  * HTTP 200 + 空正文；再往前的 8402 签名连 query 都不认。也就是说「能翻能点、
  * 就是播不出来」不是网络问题，是签名版本不对。
  *
- * 身份是一次性的：同一台设备短时间内连续取流会被判重返回空正文，所以失败后
- * 换一台身份再试一次（注册一次约 200~400ms）。
+ * 身份不再是一次性的：2026-11-20 起，站方对「刚注册就立刻取址的新设备」判得极严，
+ * 每集都新注册一台再取址，大概率两台都拿到空正文 —— 这正是「播不了」的真正原因，
+ * 不是用户网络。现在改成注册一台、落盘、长期复用（7 天），只有设备真的被拒才换；
+ * 空正文时先在同一个身份上重试，再考虑换身份，并且连续全空后冷却几秒，
+ * 避免把身份和出口 IP 一起打废。
+ *
+ * 近期成功过的地址也会留一份：确认还在有效期内时，空正文可以直接复用，
+ * 不必再向上游要一次（重播同一集、退出再进都走这条）。
  */
 final class HongguoDirect {
-    private static final String HOST = "https://api5-normal-sinfonlinea.fqnovel.com";
-    private static final String PLAYER_MODEL = HOST + "/novel/player/multi_video_model/player/v1";
+    /** 取址节点：a 不通/空正文时换 b，签名的 medusa 是按完整 URL 算的，换节点会重新签。 */
+    private static final String[] HOSTS = {
+            "https://api5-normal-sinfonlinea.fqnovel.com",
+            "https://api5-normal-sinfonlineb.fqnovel.com",
+    };
+    private static final String PLAYER_PATH = "/novel/player/multi_video_model/player/v1";
     private static final String REGISTER = "https://log5-applog-lf.fqnovel.com/service/2/device_register/"
             + "?tt_data=a&cronet_version=8d40f833_2026-03-03&ttnet_version=4.2.243.31-douyin&use_store_region_cookie=1";
     private static final String REGISTER_UA = "com.phoenix.read/72232 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3)";
@@ -71,6 +82,102 @@ final class HongguoDirect {
 
     private HongguoDirect() { }
 
+    // ---------------- 身份：落盘复用 ----------------
+
+    private static final String PREFS = "hongguo-identity";
+    private static final String KEY_DEVICE = "device_id";
+    private static final String KEY_IID = "iid";
+    private static final String KEY_CDID = "cdid";
+    private static final String KEY_SAVED_AT = "saved_at";
+    /** 一台设备用一周。上游真正作废时会回 401/403，那时再换。 */
+    private static final long IDENTITY_TTL_MS = 7L * 24 * 3600 * 1000;
+    /** 连续全空之后静默几秒：这时候再请求只会让风控判得更死。 */
+    private static final long EMPTY_COOLDOWN_MS = 6000L;
+    private static final long RETRY_GAP_MS = 500L;
+    /** 近期成功地址的保留时间，用于空正文时兜底复用。 */
+    private static final long RECENT_TTL_MS = 30L * 60 * 1000;
+
+    private static volatile Context appContext;
+    private static Device cached;
+    private static long cachedAt;
+    private static volatile long lastAllEmptyAt;
+    private static int consecutiveEmpty;
+
+    private static final Map<String, Object[]> RECENT = new java.util.concurrent.ConcurrentHashMap<>();
+    /** 最近一次取址的形态（状态码/正文长度），只进错误文案，不含地址与凭据。 */
+    private static final ThreadLocal<String> LAST_PROBE = new ThreadLocal<>();
+
+    static void init(Context context) {
+        appContext = context == null ? null : context.getApplicationContext();
+        synchronized (HongguoDirect.class) {
+            if (cached == null) {
+                cached = loadIdentity();
+                if (cached != null) cachedAt = savedAt();
+            }
+        }
+    }
+
+    private static synchronized Device loadIdentity() {
+        if (appContext == null) return null;
+        try {
+            android.content.SharedPreferences prefs =
+                    appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+            String deviceId = prefs.getString(KEY_DEVICE, "");
+            String iid = prefs.getString(KEY_IID, "");
+            String cdid = prefs.getString(KEY_CDID, "");
+            if (deviceId == null || iid == null || !deviceId.matches("[0-9]{1,30}") || !iid.matches("[0-9]{1,30}"))
+                return null;
+            if (System.currentTimeMillis() - prefs.getLong(KEY_SAVED_AT, 0L) >= IDENTITY_TTL_MS) return null;
+            return new Device(deviceId, iid, cdid == null ? "" : cdid);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private static synchronized long savedAt() {
+        if (appContext == null) return 0L;
+        try {
+            return appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getLong(KEY_SAVED_AT, 0L);
+        } catch (Throwable ignored) {
+            return 0L;
+        }
+    }
+
+    private static synchronized void persist(Device device) {
+        cached = device;
+        cachedAt = System.currentTimeMillis();
+        if (appContext == null) return;
+        try {
+            appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                    .putString(KEY_DEVICE, device.deviceId)
+                    .putString(KEY_IID, device.iid)
+                    .putString(KEY_CDID, device.cdid)
+                    .putLong(KEY_SAVED_AT, cachedAt)
+                    .apply();
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** 现用身份；没有或过期的注册一台并落盘。内容接口（搜索/详情）共用同一台。 */
+    static synchronized Device identity() throws IOException {
+        long now = System.currentTimeMillis();
+        if (cached != null && now - cachedAt < IDENTITY_TTL_MS) return cached;
+        Device fresh = register();
+        persist(fresh);
+        return fresh;
+    }
+
+    /** 设备被明确拒绝时才调用：清掉持久身份，下一轮重新注册。 */
+    private static synchronized void dropIdentity() {
+        cached = null;
+        cachedAt = 0L;
+        if (appContext == null) return;
+        try {
+            appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply();
+        } catch (Throwable ignored) {
+        }
+    }
+
     /** 注册到的匿名设备身份。 */
     static final class Device {
         final String deviceId;
@@ -91,40 +198,121 @@ final class HongguoDirect {
      * @return 直链 + CENC 密钥 + 清晰度
      */
     static StreamInfo fetch(String vid) throws Exception {
+        return fetch(vid, false);
+    }
+
+    /**
+     * @param background 详情页预热走的取址。失败不设冷却、不换身份、不重试 ——
+     *                   预热把请求打光了，用户真正点播放时反而只能吃「稍后再试」。
+     */
+    static StreamInfo fetch(String vid, boolean background) throws Exception {
         if (vid == null || !vid.matches("[0-9]{1,30}")) throw new IOException("分集编号无效");
+
+        /* 刚刚连续吃空正文：现在再打只会让上游把身份和出口 IP 一起判死，
+           直接告诉用户几秒后再点，比硬撞更容易恢复。 */
+        long cooling = lastAllEmptyAt;
+        if (cooling > 0 && System.currentTimeMillis() - cooling < EMPTY_COOLDOWN_MS) {
+            if (background) throw new IOException("上游刚返回空片源，跳过预热");
+            long wait = Math.max(1, (EMPTY_COOLDOWN_MS - (System.currentTimeMillis() - cooling) + 999) / 1000);
+            throw new IOException("上游刚连续返回空片源，请 " + wait + " 秒后再试");
+        }
+
         List<String> errors = new ArrayList<>();
-        /* 注册失败单独成句，不要和「返回空正文」混在一起，否则实机只看到一个笼统的错。 */
         Device device;
         try {
-            device = register();
+            device = identity();
         } catch (Exception error) {
             throw new IOException("匿名设备注册失败：" + describe(error));
         }
-        try {
-            StreamInfo info = fetchModel(vid, device);
-            if (info != null) return info;
-            errors.add("首台设备返回空正文");
-        } catch (Exception error) {
-            errors.add(describe(error));
+
+        /* 同一身份先重试一次。空正文大多是瞬时判定，同一台设备隔半秒再问一次
+           往往就有 —— 立刻换新设备反而两台一起判，这是之前最常见的失败形态。 */
+        int attempts = background ? 1 : 2;
+        for (int attempt = 0; attempt < attempts; attempt++) {
+            try {
+                StreamInfo info = fetchModel(vid, device);
+                if (info != null) {
+                    lastAllEmptyAt = 0L;
+                    consecutiveEmpty = 0;
+                    remember(vid, info);
+                    return info;
+                }
+                String probe = LAST_PROBE.get();
+                errors.add((attempt == 0 ? "首台设备返回空正文" : "同一身份重试仍为空正文")
+                        + (probe == null ? "" : "[" + probe + "]"));
+            } catch (Exception error) {
+                errors.add(describe(error));
+            }
+            if (attempt + 1 < attempts) pause(RETRY_GAP_MS);
         }
-        /* 空正文多半是这台匿名身份被判重/风控，换一台再试一次。
-           两台设备背靠背发等于同一瞬间两次取流，反而更容易一起被判重，
-           所以中间留 400ms —— 续作自动起播时这段间隔往往就是成败之差。 */
+        if (background) throw new IOException("播放接口未返回片源（" + join(errors) + "）");
+
+        /* 同一身份两次都空：先冷却，不再当场注册新设备。
+           以前失败一次就换一台，用户点两下就是四台「刚出生就取址」的设备，
+           上游看出来之后连老设备一起拒 —— 越修越坏就是这么来的。
+           连续三轮全空才算这台设备真的废了，标记掉，下一轮重新注册。 */
+        lastAllEmptyAt = System.currentTimeMillis();
+        if (++consecutiveEmpty >= 3) dropIdentity();
+
+        /* 兜底：这一集最近成功播过，地址还在有效期内，就直接复用
+           （hongguoTV 0.16.11 的同一做法：新请求只用来验证，不为拿地址再撞一次接口）。 */
+        StreamInfo recent = recall(vid);
+        if (recent != null) return recent;
+
+
+        throw new IOException("播放接口未返回片源（" + join(errors) + "）");
+    }
+
+    private static void pause(long millis) throws IOException {
         try {
-            Thread.sleep(400L);
+            Thread.sleep(millis);
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
             throw new IOException("取址被取消");
         }
-        try {
-            Device fresh = register();
-            StreamInfo info = fetchModel(vid, fresh);
-            if (info != null) return info;
-            errors.add("换设备后仍为空正文");
-        } catch (Exception error) {
-            errors.add(describe(error));
+    }
+
+    // ---------------- 近期地址（空正文时复用） ----------------
+
+    private static void remember(String vid, StreamInfo info) {
+        if (vid == null || info == null || info.getUrl() == null) return;
+        RECENT.put(vid, new Object[]{info, System.currentTimeMillis()});
+        if (RECENT.size() > 12) {
+            String oldest = null;
+            long oldestAt = Long.MAX_VALUE;
+            for (Map.Entry<String, Object[]> entry : RECENT.entrySet()) {
+                long at = (Long) entry.getValue()[1];
+                if (at < oldestAt) { oldestAt = at; oldest = entry.getKey(); }
+            }
+            if (oldest != null && !oldest.equals(vid)) RECENT.remove(oldest);
         }
-        throw new IOException("播放接口未返回片源（" + join(errors) + "）");
+    }
+
+    /** 近期地址还能用吗：一次 1 字节的 Range 请求，200/206 且拿得到字节才算数。 */
+    private static StreamInfo recall(String vid) {
+        Object[] row = RECENT.get(vid);
+        if (row == null) return null;
+        long age = System.currentTimeMillis() - (Long) row[1];
+        if (age < 0 || age > RECENT_TTL_MS) { RECENT.remove(vid); return null; }
+        StreamInfo info = (StreamInfo) row[0];
+        try {
+            Request request = new Request.Builder()
+                    .url(info.getUrl())
+                    .header("User-Agent", PLAYBACK_UA)
+                    .header("Referer", "https://novel.snssdk.com/")
+                    .header("Range", "bytes=0-0")
+                    .build();
+            try (Response response = HTTP.newCall(request).execute()) {
+                if (response.code() != 200 && response.code() != 206) {
+                    RECENT.remove(vid);
+                    return null;
+                }
+                if (response.body() != null) response.body().close();
+            }
+            return info;
+        } catch (Exception error) {
+            return null;
+        }
     }
 
     private static String describe(Exception error) {
@@ -297,6 +485,18 @@ final class HongguoDirect {
 
     /** v5 取址：注册身份 + v5 签名 + gzip 正文，单次请求。 */
     private static StreamInfo fetchModel(String vid, Device device) throws Exception {
+        try {
+            return fetchModelFrom(HOSTS[0], vid, device);
+        } catch (IOException network) {
+            /* a 节点连不上或回了 HTTP 错误才换 b。空正文（返回 null）属于身份判定，
+               换节点一样空，白多一次请求只会加重风控。 */
+            if (HOSTS.length < 2) throw network;
+            return fetchModelFrom(HOSTS[1], vid, device);
+        }
+    }
+
+    private static StreamInfo fetchModelFrom(String host, String vid, Device device) throws Exception {
+        String endpoint = host + PLAYER_PATH;
         long now = System.currentTimeMillis();
         LinkedHashMap<String, String> values = new LinkedHashMap<>();
         values.put("aid", "8662");
@@ -320,7 +520,7 @@ final class HongguoDirect {
                 + "\"mixed_video_id_map\":{\"1004\":[\"" + vid + "\"]},\"dr_scene\":\"player\"}";
         byte[] body = gzip(payload.getBytes(StandardCharsets.UTF_8));
 
-        HongguoV5.Signed signed = HongguoV5.signPlayback(PLAYER_MODEL, values, body, now);
+        HongguoV5.Signed signed = HongguoV5.signPlayback(endpoint, values, body, now);
         Request.Builder builder = new Request.Builder()
                 .url(signed.url)
                 .header("User-Agent", PLAYBACK_UA)
@@ -330,7 +530,13 @@ final class HongguoDirect {
         for (Map.Entry<String, String> entry : signed.headers.entrySet()) {
             builder.header(entry.getKey(), entry.getValue());
         }
-        return parse(execute(builder.post(RequestBody.create(body, JSON)).build()), vid);
+        String text = execute(builder.post(RequestBody.create(body, JSON)).build());
+        StreamInfo info = parse(text, vid);
+        if (info == null) {
+            int length = text == null ? 0 : text.trim().length();
+            LAST_PROBE.set(length == 0 ? "200/0B" : "200/" + length + "B 无片源");
+        }
+        return info;
     }
 
     /** 执行请求并返回正文；空正文原样返回空串，由调用方判断。 */
