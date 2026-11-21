@@ -852,6 +852,8 @@ function startTask(task) {
 // 2026-11 换站：pqhybuxo.cc 整族只剩 301，实体内容在 huangguoai.io。
 // 带日期的 gitiecgad.cc 是同一套站的轮换域名，旧域留最后兜底。
 const HUANGGUO_SITES = ['https://huangguoai.io', 'https://0624.gitiecgad.cc', 'https://thu.pqhybuxo.cc'];
+/** 黄果下载编码：默认 hevc（体积约 H.264 的 3-5 成，画质更好）；老设备设 VEYRA_HUANGGUO_CODEC=main。 */
+const HUANGGUO_CODEC = String(process.env.VEYRA_HUANGGUO_CODEC || 'hevc').toLowerCase() === 'main' ? 'main' : 'hevc';
 
 function readBackendProxy() {
   try {
@@ -878,14 +880,19 @@ function hgRequest(url, referer, maxBytes, opts) {
   // 请求头策略：默认带 Accept-Encoding: identity 强制明文；noIdentity=true 时模仿播放代理
   // （源站对 identity 请求可能返回二进制/加密体，播放代理不带 identity 拿到的就是明文）
   const noIdentity = !!(opts && opts.noIdentity);
+  // 播放取址接口是 POST + JSON body（2026-11 改版），其余抓取仍是 GET
+  const method = String((opts && opts.method) || 'GET').toUpperCase();
+  const payload = opts && opts.body !== undefined ? opts.body : null;
   // https 握手失败自动降级 http 重试（部分 CDN 如 tp1.drleao.cn 的 https 端口不稳，与播放代理行为一致）
   const attempt = (u, retriedHttp) => new Promise((resolve, reject) => {
     proxyFetch.requestThroughProxy(u, readBackendProxy(), {
+      method, body: payload,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36',
         'Accept': '*/*',
         ...(noIdentity ? {} : { 'Accept-Encoding': 'identity' }),
         ...(referer ? { Referer: referer } : {}),
+        ...((opts && opts.headers) || {}),
       },
       timeout: 30_000, maxBytes: maxBytes || 40 * 1024 * 1024, redirects: 5,
     }, (err, result) => {
@@ -926,7 +933,8 @@ function isGarbledText(text) {
   return bad / text.length > 0.02;
 }
 
-// 展开 m3u8：master 里若含子流（#EXT-X-STREAM-INF）则递归取第一条子流；返回 { segments:[url], keys:[url] }
+// 展开 m3u8：master 里若含子流（#EXT-X-STREAM-INF）则递归取第一条子流；
+// 返回 { segments:[url], durs:[秒], keys:[url], map:init段url, mediaSeq }
 // 双策略请求：先模仿播放代理（不带 Accept-Encoding，源站对播放链路返回明文），
 // 拿到的仍是乱码/二进制则换 Accept-Encoding: identity 重试（直连场景 identity 返回明文）。
 async function expandHuangguoM3u8(masterUrl, referer, depth) {
@@ -949,13 +957,27 @@ async function expandHuangguoM3u8(masterUrl, referer, depth) {
   const lines = text.split(/\r?\n/);
   const keys = [];
   const segments = [];
+  const durs = [];
   const subStreams = [];
+  let map = '';
+  let mediaSeq = 0;
+  let pendingDur = 0;
   let expectSub = false;
   for (const raw of lines) {
     const line = raw.trim();
     if (line.startsWith('#EXT-X-KEY')) {
       const m = line.match(/URI="([^"]+)"/);
       if (m) keys.push(resolveHuangguoUri(m[1], masterUrl));
+    } else if (line.startsWith('#EXT-X-MAP')) {
+      // fMP4（HEVC/m4s）的初始化段，缺了它分片没法解，封装出来是坏片
+      const m = line.match(/URI="([^"]+)"/);
+      if (m) map = resolveHuangguoUri(m[1], masterUrl);
+    } else if (line.startsWith('#EXT-X-MEDIA-SEQUENCE')) {
+      const v = parseInt(line.slice(line.indexOf(':') + 1), 10);
+      if (Number.isFinite(v) && v >= 0) mediaSeq = v;
+    } else if (line.startsWith('#EXTINF')) {
+      const m = line.match(/#EXTINF:([\d.]+)/);
+      if (m) pendingDur = parseFloat(m[1]) || 0;
     } else if (line.startsWith('#EXT-X-STREAM-INF')) {
       expectSub = true;
     } else if (line.startsWith('#EXT-X-MEDIA')) {
@@ -968,6 +990,8 @@ async function expandHuangguoM3u8(masterUrl, referer, depth) {
       if (!/^https?:\/\//.test(uri)) continue;
       if (expectSub) { subStreams.push(uri); expectSub = false; continue; }
       segments.push(uri);
+      durs.push(pendingDur || 4.0);
+      pendingDur = 0;
     }
   }
   // variant playlist：依次尝试子流，某条 CDN 风控/乱码则换下一条；
@@ -985,48 +1009,82 @@ async function expandHuangguoM3u8(masterUrl, referer, depth) {
     }
     if (segments.length) {
       console.log(`[huangguo] 子流全部失败，回退 master 自身分片 ${segments.length} 个`);
-      return { segments, keys };
+      return { segments, durs, keys, map, mediaSeq };
     }
     throw lastErr || new Error('所有子流展开失败');
   }
-  return { segments, keys };
+  return { segments, durs, keys, map, mediaSeq };
 }
 
-// 下载一整集：返回 { bytes }；产出 plainFile（明文 MP4）。失败抛错（分片/KEY/合并产物清理由调用方兜底）
-async function huangguoDownloadEpisode(seriesId, number, dir, plainFile) {
+// 2026-11 改版：详情页 videoSrc 置空，播放地址改由
+// POST /api/videos/:id/episodes/:ep/playback 下发（data.streams.main / hevc / preview）。
+async function fetchHuangguoStreams(site, seriesId, number) {
+  const api = `${site}/api/videos/${seriesId}/episodes/${number}/playback`;
+  const raw = await hgRequest(api, `${site}/video/${seriesId}/`, 1024 * 1024, {
+    method: 'POST',
+    body: '{}',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+  });
+  const data = (JSON.parse(raw.toString('utf8')) || {}).data || {};
+  const st = data.streams || {};
+  if (!st.main && !st.hevc) throw new Error('playback 未下发 streams');
+  return { main: st.main || '', hevc: st.hevc || '', cdn: data.cdn || null };
+}
+
+// 取一集播放地址：站点顺序 + 详情页 videoSrc 优先，空了走 playback 接口。
+// codec=hevc 时主选 HEVC（同画质体积约 40%），源站没给 HEVC 时自动落回 main。
+async function resolveHuangguoSource(seriesId, number, codec) {
   const first = number === 1;
   const errors = [];
-  let masterUrl = null;
-  let masterSite = null;
   for (const site of HUANGGUO_SITES) {
+    const pageReferer = `${site}/video/${seriesId}/`;
+    const pageUrl = first ? `${site}/video/${seriesId}/` : `${site}/video/${seriesId}/ep-${number}/`;
     try {
-      const pageUrl = first ? `${site}/video/${seriesId}/` : `${site}/video/${seriesId}/ep-${number}/`;
-      const page = await hgRequest(pageUrl, `${site}/video/${seriesId}/`, 3 * 1024 * 1024);
-      const html = page.toString('utf8');
-      const jsonText = (html.match(/<script[^>]*id="videoInitialData"[^>]*>([\s\S]*?)<\/script>/) || [])[1]
-        || (html.match(/videoInitialData["']?\s*[:=]\s*(\{[\s\S]*?\})\s*;/) || [])[1];
-      if (!jsonText) throw new Error('页面无 videoInitialData');
-      const data = JSON.parse(jsonText.replace(/^[\s\S]*?(?=\{)/, ''));
-      let src = data.videoSrc || (Array.isArray(data.videoSrcList) ? data.videoSrcList[0] : '');
+      let src = '';
+      let cdn = null;
+      try {
+        const page = await hgRequest(pageUrl, pageReferer, 3 * 1024 * 1024);
+        const html = page.toString('utf8');
+        const jsonText = (html.match(/<script[^>]*id="videoInitialData"[^>]*>([\s\S]*?)<\/script>/) || [])[1]
+          || (html.match(/videoInitialData["']?\s*[:=]\s*(\{[\s\S]*?\})\s*;/) || [])[1];
+        if (jsonText) {
+          const data = JSON.parse(jsonText.replace(/^[\s\S]*?(?=\{)/, ''));
+          src = data.videoSrc || (Array.isArray(data.videoSrcList) ? data.videoSrcList[0] : '');
+        }
+      } catch (e) {
+        errors.push(site.replace(/^https:\/\//, '') + '页面:' + e.message);
+      }
       if (!src) {
-        // 2026-11 改版：详情页不再塞播放地址，改由 /api/videos/:id/play 单独下发
-        const apiRes = await hgRequest(`${site}/api/videos/${seriesId}/play?ep=${number}`, `${site}/video/${seriesId}/`, 1 * 1024 * 1024);
-        try { src = JSON.parse(apiRes.toString('utf8')).data.video_url || ''; } catch { src = ''; }
+        const streams = await fetchHuangguoStreams(site, seriesId, number);
+        cdn = streams.cdn;
+        if (codec === 'hevc') {
+          src = streams.hevc || streams.main;
+          if (src && !streams.hevc) console.log(`[huangguo] 第 ${number} 集 源站无 HEVC，回退 main`);
+        } else {
+          src = streams.main || streams.hevc;
+        }
       }
       if (!src) throw new Error('videoSrc 为空');
-      masterSite = site; // 记住解析出 m3u8 的站点，防盗链 Referer 必须用播放页所属站点
-      masterUrl = resolveHuangguoUri(src, `${site}/video/${seriesId}/`);
-      console.log(`[huangguo] 第 ${number} 集 页面解析成功 site=${site.replace(/^https:\/\//, '')} master=${String(masterUrl).slice(0, 110)}`);
-      break;
+      console.log(`[huangguo] 第 ${number} 集 页面解析成功 site=${site.replace(/^https:\/\//, '')} codec=${codec} master=${String(src).slice(0, 110)}`);
+      return { src: resolveHuangguoUri(src, pageReferer), site, cdn };
     } catch (e) {
       errors.push(site.replace(/^https:\/\//, '') + ':' + e.message);
       console.log(`[huangguo] 第 ${number} 集 页面解析失败 site=${site.replace(/^https:\/\//, '')} 原因: ${e.message}`);
     }
   }
-  if (!masterUrl) throw new Error('解析播放地址失败（' + errors.join(' | ') + '）');
-  // Referer 用主站域名：源站/CDN 防盗链校验播放页域名，对不上的会被 302 到 CDN
-  // 后返回风控二进制（600KB 垃圾）导致 m3u8 展开失败
+  throw new Error('解析播放地址失败（' + errors.join(' | ') + '）');
+}
+
+// 下载一整集：返回 { bytes }；产出 plainFile（明文 MP4）。失败抛错（分片/KEY/合并产物清理由调用方兜底）
+async function huangguoDownloadEpisodeAs(seriesId, number, dir, plainFile, codec) {
+  const first = number === 1;
+  const picked = await resolveHuangguoSource(seriesId, number, codec);
+  const masterUrl = picked.src;
+  // Referer 用主站域名（源站/CDN 防盗链校验播放页域名，www/thu 域会被 302 到风控二进制）
   const referer = `https://huangguoai.io/video/${seriesId}/` + (first ? '' : `ep-${number}/`);
+  // 新站 CDN 鉴权头（data.cdn.authKey/authValue，如 x-cdn-auth）：分片/密钥带上更稳
+  const authHeaders = picked.cdn && picked.cdn.authKey && picked.cdn.authValue
+    ? { [String(picked.cdn.authKey)]: String(picked.cdn.authValue) } : {};
   let plan;
   try {
     plan = await expandHuangguoM3u8(masterUrl, referer, 0);
@@ -1035,12 +1093,12 @@ async function huangguoDownloadEpisode(seriesId, number, dir, plainFile) {
     throw e;
   }
   if (!plan.segments.length) throw new Error('m3u8 无分片');
-  console.log(`[huangguo] 第 ${number} 集 m3u8 展开成功 分片=${plan.segments.length} keys=${plan.keys.length}`);
+  console.log(`[huangguo] 第 ${number} 集 m3u8 展开成功 codec=${codec} 分片=${plan.segments.length} keys=${plan.keys.length} map=${plan.map ? 'yes' : 'no'}`);
 
   const keyFiles = [];
   for (let i = 0; i < plan.keys.length; i++) {
     try {
-      const k = await hgRequest(plan.keys[i], referer, 1024 * 1024);
+      const k = await hgRequest(plan.keys[i], referer, 1024 * 1024, { headers: authHeaders });
       const f = safeJoin(dir, `key-${number}-${i}.key`);
       fs.writeFileSync(f, k);
       keyFiles.push(f);
@@ -1050,51 +1108,99 @@ async function huangguoDownloadEpisode(seriesId, number, dir, plainFile) {
     }
   }
 
+  // fMP4 / HEVC 的初始化段（#EXT-X-MAP），缺了它分片拼不出可播文件
+  let mapFile = null;
+  if (plan.map) {
+    try {
+      const buf = await hgRequest(plan.map, referer, 8 * 1024 * 1024, { headers: authHeaders });
+      mapFile = safeJoin(dir, `init-${number}.mp4`);
+      fs.writeFileSync(mapFile, buf);
+    } catch (e) {
+      console.log(`[huangguo] 第 ${number} 集 init 段下载失败: ${e.message}`);
+      throw e;
+    }
+  }
+
   // 并发下载全部分片（源站分片通常数百 KB～数 MB）
-  // 下载失败自动重试：403/瞬时限流换 Referer 变体（www/thu/m 站点域名各试一次），仍失败才报错
+  // 下载失败自动重试：403/瞬时限流换 Referer 变体（gitiecgad/thu 站点域名各试一次），仍失败才报错
   const segFiles = new Array(plan.segments.length);
   let nextSeg = 0;
   const segReferers = [referer, `https://0624.gitiecgad.cc/video/${seriesId}/` + (first ? '' : `ep-${number}/`), `https://thu.pqhybuxo.cc/video/${seriesId}/` + (first ? '' : `ep-${number}/`)];
-  await Promise.all(Array.from({ length: Math.min(6, plan.segments.length) }, async () => {
-    while (nextSeg < plan.segments.length) {
-      const i = nextSeg++;
-      let buf = null;
-      let lastErr = null;
-  for (const rf of segReferers) {
-        try { buf = await hgRequest(plan.segments[i], rf, 60 * 1024 * 1024); break; }
-        catch (e) { lastErr = e; }
+  try {
+    await Promise.all(Array.from({ length: Math.min(6, plan.segments.length) }, async () => {
+      while (nextSeg < plan.segments.length) {
+        const i = nextSeg++;
+        let buf = null;
+        let lastErr = null;
+        for (const rf of segReferers) {
+          try { buf = await hgRequest(plan.segments[i], rf, 60 * 1024 * 1024, { headers: authHeaders }); break; }
+          catch (e) { lastErr = e; }
+        }
+        if (buf === null) {
+          console.log(`[huangguo] 第 ${number} 集 分片 ${i} 下载失败(换 ${segReferers.length} 个站点 Referer 均失败): ${lastErr && lastErr.message} url=${String(plan.segments[i]).slice(0, 110)}`);
+          throw lastErr || new Error(`分片 ${i} 下载失败`);
+        }
+        // 扩展名必须跟源一致：m4s 分片存成 .ts 会被 ffmpeg 当 MPEG-TS 解，直接坏片
+        let ext = 'ts';
+        try { if (/\.m4s$/i.test(new URL(plan.segments[i]).pathname)) ext = 'm4s'; } catch { /* 保持 ts */ }
+        const f = safeJoin(dir, `seg-${number}-${String(i).padStart(4, '0')}.${ext}`);
+        fs.writeFileSync(f, buf);
+        segFiles[i] = f;
       }
-      if (buf === null) {
-        console.log(`[huangguo] 第 ${number} 集 分片 ${i} 下载失败(换 ${segReferers.length} 个站点 Referer 均失败): ${lastErr && lastErr.message} url=${String(plan.segments[i]).slice(0, 110)}`);
-        throw lastErr || new Error(`分片 ${i} 下载失败`);
-      }
-      const f = safeJoin(dir, `seg-${number}-${String(i).padStart(4, '0')}.ts`);
-      fs.writeFileSync(f, buf);
-      segFiles[i] = f;
-    }
-  }));
+    }));
+  } catch (e) {
+    cleanupHg(segFiles, keyFiles, mapFile);
+    throw e;
+  }
   for (let i = 0; i < segFiles.length; i++) {
-    if (!segFiles[i]) { const e = new Error('分片下载不完整（第 ' + (i + 1) + '/' + segFiles.length + ' 片缺失）'); cleanupHg(segFiles, keyFiles); throw e; }
+    if (!segFiles[i]) { const e = new Error('分片下载不完整（第 ' + (i + 1) + '/' + segFiles.length + ' 片缺失）'); cleanupHg(segFiles, keyFiles, mapFile); throw e; }
   }
 
-  // 写本地 playlist（分片/KEY 用本地相对路径），ffmpeg 原生支持 AES-128 解密
+  // 写本地 playlist（分片/KEY/MAP 用本地相对路径），ffmpeg 原生支持 AES-128 解密与 fMP4 拼接
+  // EXTINF 必须写真实分片时长：写死 4.0 会让 fMP4 时间轴与音频错位
   const playlist = safeJoin(dir, `play-${number}.m3u8`);
   const keyTag = keyFiles.length ? `#EXT-X-KEY:METHOD=AES-128,URI="${path.basename(keyFiles[0])}"\n` : '';
-  const content = '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:12\n#EXT-X-MEDIA-SEQUENCE:0\n'
-    + keyTag + segFiles.map(f => '#EXTINF:4.0,\n' + path.basename(f)).join('\n') + '\n#EXT-X-ENDLIST\n';
+  const mapTag = mapFile ? `#EXT-X-MAP:URI="${path.basename(mapFile)}"\n` : '';
+  const seq = Number.isFinite(plan.mediaSeq) ? plan.mediaSeq : 0;
+  const bodyTxt = segFiles.map((f, i) => `#EXTINF:${(plan.durs && plan.durs[i]) || 4.0},\n${path.basename(f)}`).join('\n');
+  const content = `#EXTM3U\n#EXT-X-VERSION:${mapFile ? 6 : 3}\n#EXT-X-TARGETDURATION:12\n#EXT-X-MEDIA-SEQUENCE:${seq}\n`
+    + keyTag + mapTag + bodyTxt + '\n#EXT-X-ENDLIST\n';
   fs.writeFileSync(playlist, content);
   try {
-    await runFFmpeg(['-allowed_extensions', 'ALL', '-i', playlist, '-c', 'copy', '-f', 'mp4', '-y', plainFile]);
+    const args = ['-allowed_extensions', 'ALL', '-i', playlist, '-c', 'copy'];
+    if (codec === 'hevc') args.push('-tag:v', 'hvc1');
+    args.push('-f', 'mp4', '-y', plainFile);
+    await runFFmpeg(args);
   } finally {
-    cleanupHg(segFiles, keyFiles);
+    cleanupHg(segFiles, keyFiles, mapFile);
     try { fs.rmSync(playlist, { force: true }); } catch { }
   }
   if (!fs.existsSync(plainFile) || fs.statSync(plainFile).size < 1024) throw new Error('合并产物无效');
 }
 
-function cleanupHg(segFiles, keyFiles) {
+// 默认优选取 HEVC：同剧实测 1080p30 2.7-4.5 Mbps，H.264 主路 6-12 Mbps；
+// 体积降到 3-5 成、分辨率反而更高。源站没给 HEVC 或封装失败会自动回退 main。
+// 老设备（不支持 HEVC 硬解）可设 VEYRA_HUANGGUO_CODEC=main。
+async function huangguoDownloadEpisode(seriesId, number, dir, plainFile) {
+  const order = HUANGGUO_CODEC === 'main' ? ['main'] : ['hevc', 'main'];
+  let lastErr = null;
+  for (let i = 0; i < order.length; i++) {
+    try {
+      return await huangguoDownloadEpisodeAs(seriesId, number, dir, plainFile, order[i]);
+    } catch (e) {
+      lastErr = e;
+      fs.rmSync(plainFile, { force: true });
+      const next = order[i + 1];
+      if (next) console.log(`[huangguo] 第 ${number} 集 ${order[i]} 流失败，回退 ${next}: ${e.message}`);
+    }
+  }
+  throw lastErr || new Error('黄果下载失败');
+}
+
+function cleanupHg(segFiles, keyFiles, mapFile) {
   for (const f of segFiles || []) { try { if (f) fs.rmSync(f, { force: true }); } catch { } }
   for (const f of keyFiles || []) { try { if (f) fs.rmSync(f, { force: true }); } catch { } }
+  if (mapFile) { try { fs.rmSync(mapFile, { force: true }); } catch { } }
 }
 
 async function runTask(task) {
