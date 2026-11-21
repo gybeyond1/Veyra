@@ -1050,7 +1050,9 @@ app.get('/api/download/tasks/:id/episodes', requireDownloadAuth, (req, res) => {
       const f = downloader.safeJoin(dir, name);
       let size = 0, exists = false;
       try { exists = fs2.existsSync(f); if (exists) size = fs2.statSync(f).size; } catch { /* ignore */ }
-      eps.push({ index: no, name, exists, size });
+      /* done 才是「可以给手机」：文件可能还在转 H.265（先写 .h265.mp4 再替换），
+       * 此时 exists=true 但内容还是旧的 H.264 大文件。_ok 在转码完成后才置位。 */
+      eps.push({ index: no, name, exists, size, done: !!ep._ok });
     }
     res.json({ taskId: t.id, title: t.title, episodes: eps });
   } catch (e) { res.status(400).json({ error: e.message }); }
