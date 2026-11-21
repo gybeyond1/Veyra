@@ -988,6 +988,39 @@ final class DownloadManager {
         return found.snapshot();
     }
 
+    /**
+     * 转发模式：NAS 已收工但有的集永远拉不到（转码失败、文件缺失、被清理）。
+     * 把缺的集标 skip（合并时跳过），任务置 ready，前端随即调 merge 只导出已拉到的集；
+     * 否则缺一集就整单「分集未就绪」，任务会永远钉在「NAS 下载中」。
+     */
+    JSONObject forwardPartial(String id, JSONArray missing) throws Exception {
+        Task found = findTask(id);
+        if (found == null) throw new IllegalStateException("任务不存在");
+        if (!"pulling".equals(found.status)) return found.snapshot();
+        java.util.Set<Integer> drop = new java.util.HashSet<>();
+        if (missing != null) {
+            for (int i = 0; i < missing.length(); i++) drop.add(missing.optInt(i, -1));
+        }
+        int pulled = 0, skipped = 0;
+        for (int i = 0; i < found.episodes.length(); i++) {
+            JSONObject ep = found.episodes.optJSONObject(i);
+            if (ep == null) continue;
+            if (ep.optBoolean("pulled", false)) { pulled++; continue; }
+            int seq = ep.optInt("index", i + 1);
+            if (drop.contains(seq)) { ep.put("skip", true); skipped++; }
+        }
+        if (pulled <= 0) throw new java.io.IOException("没有任何已拉取的分集可合并");
+        found.status = "ready";
+        found.error = "";
+        found.doneCount = pulled;
+        found.percent = 90;
+        found.detail = skipped > 0
+                ? "NAS 有 " + skipped + " 集未完成，仅合并已拉取的 " + pulled + " 集"
+                : "已拉取全部 " + pulled + " 集，可合并";
+        persist();
+        return found.snapshot();
+    }
+
     /** 手动合并：等待合并信号后执行（任务须处于 ready/failed 状态；合并失败保留分集可重试）。 */
     JSONObject merge(String id) {
         Task found = null;
@@ -1029,6 +1062,9 @@ final class DownloadManager {
             java.util.Set<Integer> wanted = new java.util.TreeSet<>();
             for (int i = 0; i < n; i++) {
                 JSONObject ep = task.episodes.optJSONObject(i);
+                // 转发模式：NAS 端转码失败/文件缺失的集，前端标 skip —— 只合并已拉到的部分。
+                // 不跳过的话，缺一集就整单「分集未就绪」，用户永远拿不到已经下好的那些。
+                if (ep != null && ep.optBoolean("skip", false)) continue;
                 int seq = ep != null ? ep.optInt("index", i + 1) : i + 1;
                 wanted.add(seq);
                 seqToBatch.put(seq, i);
