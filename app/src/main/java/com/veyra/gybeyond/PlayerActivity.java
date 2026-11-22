@@ -277,6 +277,16 @@ public final class PlayerActivity extends Activity {
     private float lastTapX;
     private float lastTapY;
     private final Runnable singleTap = () -> {
+        if (tvMode) {
+            /* 电视包也会装到平板上当触摸屏用：点一下画面等同于遥控器确定键，
+               唤出/收起底部控件条。以前这里只弹一条标题，控件条只能靠遥控器，
+               平板上就等于「点了没反应、也没有控件」。 */
+            if (tvEpPanel != null) { closeTvEpisodes(); showTvBar(); return; }
+            if (danmakuPanel != null) { closeDanmakuPanel(); showTvBar(); return; }
+            if (commentPanel != null) { closeComments(); showTvBar(); return; }
+            if (tvBarShown) hideTvBar(); else showTvBar();
+            return;
+        }
         if (controlsShown) concealControls();
         else revealControls();
     };
@@ -1209,7 +1219,7 @@ public final class PlayerActivity extends Activity {
             danmakuPanel = null;
         } else {
             danmakuScrim = new View(this);
-            danmakuScrim.setOnClickListener(v -> { closeDanmakuPanel(); revealControls(); });
+            danmakuScrim.setOnClickListener(v -> { closeDanmakuPanel(); if (tvMode) showTvBar(); else revealControls(); });
             root.addView(danmakuScrim, new FrameLayout.LayoutParams(-1, -1));
         }
         danmakuChipSeq = 0;
@@ -1332,7 +1342,7 @@ public final class PlayerActivity extends Activity {
         View scrim = new View(this);
         /* 电视上的评论是右侧一条，不要把整幅画面压暗：只留一层很轻的暗底 */
         scrim.setBackgroundColor(tvMode ? 0x33000000 : 0x66000000);
-        scrim.setOnClickListener(v -> closeComments());
+        scrim.setOnClickListener(v -> { closeComments(); if (tvMode) showTvBar(); });
         commentHost.addView(scrim, new FrameLayout.LayoutParams(-1, -1));
         root.addView(commentHost, new FrameLayout.LayoutParams(-1, -1));
     }
@@ -2215,7 +2225,7 @@ public final class PlayerActivity extends Activity {
                         lastTapAt = 0;
                         if (episodesOpen) closeEpisodes();
                         if (player != null) player.setPlayWhenReady(!player.getPlayWhenReady());
-                        revealControls();
+                        if (tvMode) showTvBar(); else revealControls();
                     } else {
                         lastTapAt = SystemClock.uptimeMillis();
                         lastTapX = event.getX();
