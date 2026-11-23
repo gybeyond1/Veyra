@@ -634,7 +634,7 @@ final class HongguoV5 {
                 .bytes(10, flags).sint(12, ts).bytes(13, digest)
                 .bytes(14, slice(queryHash, 0, 6))
                 .bytes(15, new Proto().sint(1, 1).sint(2, 1).sint(3, 1).sint(5, 1).done())
-                .sint(17, ts).text(20, "none").sint(21, 377)
+                .sint(17, ts).text(20, "none").sint(21, 369)
                 .bytes(23, env)
                 .text(24, "{\"cmr\":16777216,\"cmr2\":16777216,\"un_h\":11,\"vpn\":0,\"kd\":0,"
                         + "\"dyn\":\"\",\"do\":1,\"tk\":true}")
