@@ -51,6 +51,10 @@ import okhttp3.Response;
  *
  * 近期成功过的地址也会留一份：确认还在有效期内时，空正文可以直接复用，
  * 不必再向上游要一次（重播同一集、退出再进都走这条）。
+ *
+ * 2026-11-23：站方把 device_level=3 的响应收窄成「只给 bytevc2 / 直接空正文」。
+ * 改为 level 1 协商兼容档位，并补两层备用：video_tab GET（v5 签名 + 空字节摘要）
+ * 与 b 域主接口 —— 取址链与 hongguoTV 0.16.13 对齐。
  */
 final class HongguoDirect {
     /** 取址节点：a 不通/空正文时换 b，签名的 medusa 是按完整 URL 算的，换节点会重新签。 */
@@ -59,13 +63,23 @@ final class HongguoDirect {
             "https://api5-normal-sinfonlineb.fqnovel.com",
     };
     private static final String PLAYER_PATH = "/novel/player/multi_video_model/player/v1";
+    /** 备用取址：主接口空正文时，这条 GET 仍在服务。 */
+    private static final String TAB_PATH = "/reading/bookapi/video_tab/multi_video_model/v1/";
     private static final String REGISTER = "https://log5-applog-lf.fqnovel.com/service/2/device_register/"
             + "?tt_data=a&cronet_version=8d40f833_2026-03-03&ttnet_version=4.2.243.31-douyin&use_store_region_cookie=1";
     private static final String REGISTER_UA = "com.phoenix.read/72232 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3)";
     /** 官方播放器的头形态：Android 12 / PGT-AN10，与 v5 签名里的设备描述一致。 */
     private static final String PLAYBACK_UA = "com.phoenix.read/73932 (Linux; U; Android 12; zh_CN_#Hans;"
             + " PGT-AN10; Build/V417IR;tt-ok/3.12.13.20)";
+    /** video_tab 只认这台机型的头（与 hongguoTV 0.16.12 实网验证一致）。 */
+    private static final String TAB_UA = "com.phoenix.read/73932 (Linux; U; Android 16; zh_CN; 25053RT47C;"
+            + " Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)";
     private static final String VERSION_NAME = "7.4.3.32";
+    /**
+     * 3 是官方 App 的档位，只下发 bytevc2（手机/TV 的 MediaCodec 都解不了），
+     * 部分分集干脆回空正文。1 才是「协商兼容档位」，会正常给 h264/hevc。
+     */
+    private static final int PLAYER_LEVEL = 1;
     private static final MediaType JSON = MediaType.get("application/json; charset=UTF-8");
     private static final MediaType OCTET = MediaType.get("application/octet-stream;tt-data=a");
     /** 与 ttEncrypt 同一个盐（客户端协议常量）。 */
@@ -97,6 +111,9 @@ final class HongguoDirect {
     private static final long IDENTITY_TTL_MS = 7L * 24 * 3600 * 1000;
     /** 连续全空之后静默几秒：这时候再请求只会让风控判得更死。 */
     private static final long EMPTY_COOLDOWN_MS = 6000L;
+    /** 主接口近期整片空时，下一集先走 video_tab：省掉两次必然失败的主接口请求。 */
+    private static final long PRIMARY_EMPTY_TTL_MS = 90_000L;
+    private static volatile long primaryEmptyAt;
     private static final long RETRY_GAP_MS = 500L;
     /** 近期成功地址的保留时间，用于空正文时兜底复用。 */
     private static final long RECENT_TTL_MS = 30L * 60 * 1000;
@@ -234,7 +251,39 @@ final class HongguoDirect {
         int attempts = background ? 1 : 2;
         for (int attempt = 0; attempt < attempts; attempt++) {
             try {
-                StreamInfo info = fetchModel(vid, device);
+                /* 三层取址（对齐 hongguoTV 0.16.12/0.16.13）：
+                   1) 主接口 player/v1（level 1，协商兼容档位）；
+                   2) 主接口空正文 → video_tab GET（同样要 v5 签名）；
+                   3) 仍只有 bytevc2 / 无档位 → 换 b 域主接口再问一次。
+                   预热只打第一层，别把请求预算烧光。
+                   主接口刚整片空过就先走第 2 层：省两次注定空的请求，也少一次风控暴露。 */
+                boolean preferTab = !background
+                        && System.currentTimeMillis() - primaryEmptyAt < PRIMARY_EMPTY_TTL_MS;
+                StreamInfo info = preferTab ? null : fetchModel(vid, device);
+                if (info == null && !background) {
+                    if (!preferTab) primaryEmptyAt = System.currentTimeMillis();
+                    /* 备用层各自兜住异常：tab 打不通不能把「换 b 域」这条也一起掐死。 */
+                    try {
+                        info = fetchTab(vid, device);
+                    } catch (Exception tabError) {
+                        errors.add("备用 video_tab：" + describe(tabError));
+                    }
+                }
+                if (info == null && !background && preferTab) {
+                    /* 刚才只是「近期主接口空」，仍要给它一次机会：可能已经恢复。 */
+                    try {
+                        info = fetchModel(vid, device);
+                    } catch (Exception primaryError) {
+                        errors.add("主接口重试：" + describe(primaryError));
+                    }
+                }
+                if (info == null && !background) {
+                    try {
+                        info = fetchModelFrom(HOSTS[1], vid, device);
+                    } catch (Exception altError) {
+                        errors.add("备用域名：" + describe(altError));
+                    }
+                }
                 if (info != null) {
                     lastAllEmptyAt = 0L;
                     consecutiveEmpty = 0;
@@ -242,7 +291,7 @@ final class HongguoDirect {
                     return info;
                 }
                 String probe = LAST_PROBE.get();
-                errors.add((attempt == 0 ? "首台设备返回空正文" : "同一身份重试仍为空正文")
+                errors.add((attempt == 0 ? "首轮三层均为空片源" : "同一身份重试仍为空片源")
                         + (probe == null ? "" : "[" + probe + "]"));
             } catch (Exception error) {
                 errors.add(describe(error));
@@ -568,9 +617,8 @@ final class HongguoDirect {
         }
     }
 
-    private static StreamInfo fetchModelFrom(String host, String vid, Device device) throws Exception {
-        String endpoint = host + PLAYER_PATH;
-        long now = System.currentTimeMillis();
+    /** 移动端公共参数：player 与 video_tab 共用，签名必须与实际发送的一致。 */
+    private static LinkedHashMap<String, String> deviceQuery(Device device) {
         LinkedHashMap<String, String> values = new LinkedHashMap<>();
         values.put("aid", "8662");
         values.put("app_name", "novelread");
@@ -584,9 +632,16 @@ final class HongguoDirect {
         values.put("iid", device.iid);
         values.put("cdid", device.cdid);
         values.put("device_id", device.deviceId);
+        return values;
+    }
+
+    private static StreamInfo fetchModelFrom(String host, String vid, Device device) throws Exception {
+        String endpoint = host + PLAYER_PATH;
+        long now = System.currentTimeMillis();
+        LinkedHashMap<String, String> values = deviceQuery(device);
         values.put("_rticket", String.valueOf(now));
 
-        String payload = "{\"biz_param\":{\"detail_page_version\":0,\"device_level\":3,"
+        String payload = "{\"biz_param\":{\"detail_page_version\":0,\"device_level\":" + PLAYER_LEVEL + ","
                 + "\"disable_digg_stat\":false,\"disable_video_relate_book\":false,"
                 + "\"need_all_video_definition\":true,\"need_mp4_align\":false,"
                 + "\"use_os_player\":false,\"use_server_dns\":false,\"video_platform\":1024},"
@@ -607,7 +662,54 @@ final class HongguoDirect {
         StreamInfo info = parse(text, vid);
         if (info == null) {
             int length = text == null ? 0 : text.trim().length();
-            LAST_PROBE.set(length == 0 ? "200/0B" : "200/" + length + "B 无片源");
+            boolean onlyBytevc2 = text != null && text.contains("bytevc2")
+                    && !text.contains("\"h264\"") && !text.contains("\"hevc\"");
+            LAST_PROBE.set(length == 0 ? "200/0B"
+                    : "200/" + length + "B " + (onlyBytevc2 ? "仅bytevc2" : "无兼容片源"));
+        }
+        return info;
+    }
+
+    /**
+     * 备用取址：{@code video_tab} GET。
+     *
+     * 主接口回 200 空正文时它仍在服务，但 v5 之后这条 GET 也要签名：
+     * 签名输入是「最终 query + 空字节的 MD5」，且必须删掉 POST 专用的
+     * {@code x-ss-stub / Content-Type / Content-Encoding} —— 带上就回空包。
+     */
+    private static StreamInfo fetchTab(String vid, Device device) throws Exception {
+        long now = System.currentTimeMillis();
+        String endpoint = HOSTS[0] + TAB_PATH;
+        LinkedHashMap<String, String> values = deviceQuery(device);
+        values.put("video_id", vid);
+        values.put("video_id_type", "0");
+        values.put("device_level", String.valueOf(PLAYER_LEVEL));
+        values.put("need_all_video_definition", "1");
+        values.put("need_mp4_align", "0");
+        values.put("use_os_player", "0");
+        values.put("video_platform", "1024");
+        values.put("source", "0");
+        values.put("from_video_id", "");
+        values.put("_rticket", String.valueOf(now));
+
+        HongguoV5.Signed signed = HongguoV5.signPlayback(endpoint, values, new byte[0], now);
+        Request.Builder builder = new Request.Builder()
+                .url(signed.url)
+                .get()
+                .header("User-Agent", TAB_UA)
+                .header("Accept", "application/json; charset=utf-8")
+                .header("Accept-Language", "zh-CN,zh;q=0.9");
+        for (Map.Entry<String, String> entry : signed.headers.entrySet()) {
+            builder.header(entry.getKey(), entry.getValue());
+        }
+        String text = execute(builder.build());
+        StreamInfo info = parse(text, vid);
+        if (info == null) {
+            int length = text == null ? 0 : text.trim().length();
+            boolean onlyBytevc2 = text != null && text.contains("bytevc2")
+                    && !text.contains("\"h264\"") && !text.contains("\"hevc\"");
+            LAST_PROBE.set(length == 0 ? "tab/200-0B"
+                    : "tab/200-" + length + "B " + (onlyBytevc2 ? "仅bytevc2" : "无兼容片源"));
         }
         return info;
     }
