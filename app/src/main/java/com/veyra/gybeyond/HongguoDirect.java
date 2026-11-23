@@ -635,11 +635,48 @@ final class HongguoDirect {
         return values;
     }
 
+    /**
+     * 取模接口的完整参数集：服务端会校验集合是否齐全，少一项就静默回空正文。
+     * 顺序照客户端原样排，签名按这个顺序算，任何一项缺失都会让签名和正文对不上。
+     */
+    private static LinkedHashMap<String, String> playerQuery(Device device, long now) {
+        LinkedHashMap<String, String> values = new LinkedHashMap<>();
+        values.put("device_platform", "android");
+        values.put("os", "android");
+        values.put("ssmix", "a");
+        values.put("_rticket", String.valueOf(now));
+        values.put("cdid", device.cdid);
+        values.put("channel", "vivo_8662_64");
+        values.put("aid", "8662");
+        values.put("app_name", "novelread");
+        values.put("version_code", "74332");
+        values.put("version_name", VERSION_NAME);
+        values.put("manifest_version_code", "74332");
+        values.put("update_version_code", "74332");
+        values.put("resolution", "1200*2670");
+        values.put("dpi", "460");
+        values.put("device_type", "PGT-AN10");
+        values.put("device_brand", "HONOR");
+        values.put("language", "zh");
+        values.put("os_api", "31");
+        values.put("os_version", "12");
+        values.put("ac", "wifi");
+        values.put("host_abi", "arm64-v8a");
+        values.put("dragon_device_type", "phone");
+        values.put("pv_player", "74332");
+        values.put("compliance_status", "0");
+        values.put("need_personal_recommend", "1");
+        values.put("player_so_load", "1");
+        values.put("is_android_pad_screen", "0");
+        values.put("iid", device.iid);
+        values.put("device_id", device.deviceId);
+        return values;
+    }
+
     private static StreamInfo fetchModelFrom(String host, String vid, Device device) throws Exception {
         String endpoint = host + PLAYER_PATH;
         long now = System.currentTimeMillis();
-        LinkedHashMap<String, String> values = deviceQuery(device);
-        values.put("_rticket", String.valueOf(now));
+        LinkedHashMap<String, String> values = playerQuery(device, now);
 
         String payload = "{\"biz_param\":{\"detail_page_version\":0,\"device_level\":" + PLAYER_LEVEL + ","
                 + "\"disable_digg_stat\":false,\"disable_video_relate_book\":false,"
@@ -652,9 +689,14 @@ final class HongguoDirect {
         Request.Builder builder = new Request.Builder()
                 .url(signed.url)
                 .header("User-Agent", PLAYBACK_UA)
-                .header("Accept", "application/json")
+                .header("x-ss-dp", "8662")
+                .header("Accept", "application/json; charset=utf-8,application/x-protobuf")
+                .header("Content-Type", "application/json; charset=utf-8")
                 .header("Content-Encoding", "gzip")
-                .header("x-ss-stub", HongguoV5.hexText(HongguoV5.md5(body)).toUpperCase());
+                .header("x-ss-stub", HongguoV5.hexText(HongguoV5.md5(body)).toUpperCase())
+                .header("lc", "101")
+                .header("x-reading-request", now + "-" + Math.abs(RANDOM.nextInt(1000000000)))
+                .header("x-xs-from-web", "0");
         for (Map.Entry<String, String> entry : signed.headers.entrySet()) {
             builder.header(entry.getKey(), entry.getValue());
         }
