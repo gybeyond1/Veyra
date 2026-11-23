@@ -5,16 +5,21 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
 import android.util.Size;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
+import android.view.WindowInsets;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -34,6 +39,7 @@ import com.google.common.util.concurrent.ListenableFuture;
 import com.google.zxing.BinaryBitmap;
 import com.google.zxing.MultiFormatReader;
 import com.google.zxing.PlanarYUVLuminanceSource;
+import com.google.zxing.RGBLuminanceSource;
 import com.google.zxing.common.HybridBinarizer;
 
 import org.json.JSONObject;
@@ -65,6 +71,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class QrScanActivity extends Activity implements LifecycleOwner {
     private static final String TAG = "VeyraQrScan";
     private static final int REQUEST_CAMERA = 0x61;
+    private static final int REQUEST_GALLERY = 0x62;
     private static final String HINT_IDLE = "对准另一台设备上的登录二维码（电视 / 电脑 / 平板 / 手机）";
 
     private final LifecycleRegistry lifecycleRegistry = new LifecycleRegistry(this);
@@ -77,6 +84,7 @@ public class QrScanActivity extends Activity implements LifecycleOwner {
     private ExecutorService worker;
     private String sessionJson = "";
     private TextView hint;
+    private TextView galleryButton;
 
     /* ---- 二次确认 ---- */
     private View confirmLayer;
@@ -110,7 +118,8 @@ public class QrScanActivity extends Activity implements LifecycleOwner {
 
         addViewfinder(root);
         addHint(root);
-        addCancel(root);
+        addGallery(root);
+        applyStatusBarInset(root);
         buildConfirmLayer(root);
 
         setContentView(root);
@@ -184,19 +193,138 @@ public class QrScanActivity extends Activity implements LifecycleOwner {
         root.addView(hint, params);
     }
 
-    private void addCancel(FrameLayout root) {
-        TextView cancel = new TextView(this);
-        cancel.setText("取消");
-        cancel.setTextColor(0xFFC89B3C);
-        cancel.setTextSize(16f);
-        cancel.setGravity(Gravity.CENTER);
-        cancel.setPadding(dp(14), dp(8), dp(14), dp(8));
+    /**
+     * 右上角「相册」：从图库里挑一张已经存好的二维码。
+     *
+     * 取消按钮去掉了 —— 返回键和手势本来就是取消，右上角那块留给更常用的入口。
+     * targetSdk 35 起系统强制 edge-to-edge，状态栏压在内容上，按钮必须让开状态栏高度，
+     * 否则会跟时间、信号那排字叠在一起（旧版「取消」就是这么被挡住的）。
+     */
+    private void addGallery(FrameLayout root) {
+        TextView gallery = new TextView(this);
+        gallery.setText("相册");
+        gallery.setTextColor(0xFFF3EFE4);
+        gallery.setTextSize(15f);
+        gallery.setGravity(Gravity.CENTER);
+        gallery.setPadding(dp(18), dp(9), dp(18), dp(9));
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(0x99000000);
+        background.setCornerRadius(dp(20));
+        background.setStroke(dp(1), 0x66FFD277);
+        gallery.setBackground(background);
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(-2, -2);
         params.gravity = Gravity.TOP | Gravity.END;
-        params.topMargin = dp(12);
-        params.rightMargin = dp(12);
-        cancel.setOnClickListener(v -> finishWith(false, "已取消"));
-        root.addView(cancel, params);
+        params.topMargin = statusBarHeight() + dp(8);
+        params.rightMargin = dp(14);
+        gallery.setOnClickListener(v -> openGallery());
+        galleryButton = gallery;
+        root.addView(gallery, params);
+    }
+
+    /** 状态栏高度：attach 之前 getRootWindowInsets 可能是空的，退回系统资源。 */
+    private int statusBarHeight() {
+        WindowInsets insets = getWindow().getDecorView().getRootWindowInsets();
+        if (insets != null) {
+            int top = Build.VERSION.SDK_INT >= 30
+                    ? insets.getInsets(WindowInsets.Type.statusBars()).top
+                    : insets.getSystemWindowInsetTop();
+            if (top > 0) return top;
+        }
+        int id = getResources().getIdentifier("status_bar_height", "dimen", "android");
+        return id > 0 ? getResources().getDimensionPixelSize(id) : dp(24);
+    }
+
+    /** 布局完成后再校一次：沉浸式下 insets 要到 attach 之后才有值。 */
+    private void applyStatusBarInset(FrameLayout root) {
+        root.setOnApplyWindowInsetsListener((view, insets) -> {
+            int top = Build.VERSION.SDK_INT >= 30
+                    ? insets.getInsets(WindowInsets.Type.statusBars()).top
+                    : insets.getSystemWindowInsetTop();
+            TextView target = galleryButton;
+            if (target != null) {
+                ViewGroup.LayoutParams raw = target.getLayoutParams();
+                if (raw instanceof FrameLayout.LayoutParams) {
+                    FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
+                    int wanted = top + dp(8);
+                    if (lp.topMargin != wanted) {
+                        lp.topMargin = wanted;
+                        target.setLayoutParams(lp);
+                    }
+                }
+            }
+            return insets;
+        });
+    }
+
+    private void openGallery() {
+        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+        intent.setType("image/*");
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        try {
+            startActivityForResult(Intent.createChooser(intent, "选择二维码图片"), REQUEST_GALLERY);
+        } catch (Exception error) {
+            flashHint("打不开图库");
+        }
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_GALLERY) return;
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
+        decodeImage(data.getData());
+    }
+
+    /**
+     * 相册图片解码。截图和原图都可能有几千万像素，先按 2 的幂降采样再解，
+     * 否则 getPixels 那一步就先 OOM 了。zxing 的 RGBLuminanceSource 直接吃 int[]。
+     */
+    private void decodeImage(final Uri uri) {
+        new Thread(() -> {
+            Bitmap bitmap = null;
+            String found = null;
+            String problem = "这张图里没找到二维码";
+            try {
+                BitmapFactory.Options bounds = new BitmapFactory.Options();
+                bounds.inJustDecodeBounds = true;
+                try (InputStream probe = getContentResolver().openInputStream(uri)) {
+                    BitmapFactory.decodeStream(probe, null, bounds);
+                }
+                int sample = 1;
+                while (bounds.outWidth > 0 && bounds.outWidth / (sample * 2) >= 1600) sample *= 2;
+
+                BitmapFactory.Options options = new BitmapFactory.Options();
+                options.inSampleSize = sample;
+                try (InputStream source = getContentResolver().openInputStream(uri)) {
+                    bitmap = BitmapFactory.decodeStream(source, null, options);
+                }
+                if (bitmap == null) {
+                    problem = "读不出这张图片";
+                } else {
+                    int width = bitmap.getWidth();
+                    int height = bitmap.getHeight();
+                    int[] pixels = new int[width * height];
+                    bitmap.getPixels(pixels, 0, width, 0, 0, width, height);
+                    MultiFormatReader reader = new MultiFormatReader();
+                    found = reader.decode(new BinaryBitmap(new HybridBinarizer(
+                            new RGBLuminanceSource(width, height, pixels)))).getText();
+                }
+            } catch (Exception error) {
+                found = null;
+            } finally {
+                if (bitmap != null) bitmap.recycle();
+            }
+            final String text = found;
+            final String message = problem;
+            runOnUiThread(() -> {
+                if (isFinishing()) return;
+                if (text != null && !text.trim().isEmpty()) {
+                    handled.set(true);
+                    onCode(text);
+                } else {
+                    flashHint(message);
+                }
+            });
+        }, "veyra-scan-gallery").start();
     }
 
     /* ---------------- 二次确认 ---------------- */
