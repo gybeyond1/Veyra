@@ -359,7 +359,7 @@ const hgCatalog = createHongguoContent((url, timeoutMs) => new Promise((resolve,
 function normTitle(value) {
   return String(value || '').replace(/[\s\p{P}]/gu, '').toLowerCase();
 }
-downloader.setSeriesResolver(async (title, wantEpisodes) => {
+const seriesResolver = async (title, wantEpisodes) => {
   const data = await hgCatalog.search(title);
   const items = (data && Array.isArray(data.items)) ? data.items : [];
   if (!items.length) throw new Error('目录里没有搜到这部剧');
@@ -367,12 +367,18 @@ downloader.setSeriesResolver(async (title, wantEpisodes) => {
   if (exact) return exact.id;
   const want = Number(wantEpisodes) || 0;
   const base = normTitle(String(title || '').replace(/第\s*[\d零〇一二两三四五六七八九十百]+\s*[季部]$/u, ''));
-  const picked = items
-    .filter(item => normTitle(item.title).includes(base || normTitle(title)))
-    .filter(item => !want || Number(item.episodeCount || 0) >= want)
-    .sort((a, b) => Number(a.episodeCount || 0) - Number(b.episodeCount || 0));
+  /* 目录接口不返回 episodeCount，集数只在 badge 里（「全71集」「更新至12集」）。 */
+  const countOf = (item) => {
+    const m = String(item.badge || '').match(/(\d+)/);
+    return m ? Number(m[1]) : 0;
+  };
+  const same = items.filter(item => normTitle(item.title).includes(base || normTitle(title)));
+  const enough = same.filter(item => !want || countOf(item) >= want);
+  const picked = (enough.length ? enough : same)
+    .sort((a, b) => countOf(a) - countOf(b));
   return picked.length ? picked[0].id : '';
-});
+};
+downloader.setSeriesResolver(seriesResolver);
 function sendHongguoError(res, error) {
   const status = error.statusCode || 502;
   res.status(status).json({ error: (status === 400 ? '请求无效: ' : '内容加载失败: ') + error.message });
@@ -443,21 +449,39 @@ function mapVidsToEpisodes(seriesId, vids) {
     while (vidEpCache.size > 5000) vidEpCache.delete(vidEpCache.keys().next().value);
   }).catch(() => { /* 取流服务不可用时静默跳过，播放时会再试 */ });
 }
-async function resolveEpisodeId({ vid, series, episode }) {
+async function resolveEpisodeId({ vid, series, episode, title }) {
   const v = String(vid || '').trim();
   if (/^\d{4,25}$/.test(v)) return v;
   if (v && vidEpCache.has(v)) return vidEpCache.get(v);
-  const sid = String(series || '').trim();
-  if (!sid) return '';
-  let hit = seriesEpCache.get(sid);
-  if (!hit || Date.now() - hit.at > SERIES_EP_TTL) {
-    const eps = await hgApp.episodeIds(sid);
-    hit = { at: Date.now(), eps };
-    seriesEpCache.set(sid, hit);
-    while (seriesEpCache.size > 40) seriesEpCache.delete(seriesEpCache.keys().next().value);
-  }
+
+  const load = async (sid) => {
+    let hit = seriesEpCache.get(sid);
+    if (!hit || Date.now() - hit.at > SERIES_EP_TTL) {
+      const eps = await hgApp.episodeIds(sid);
+      hit = { at: Date.now(), eps };
+      seriesEpCache.set(sid, hit);
+      while (seriesEpCache.size > 40) seriesEpCache.delete(seriesEpCache.keys().next().value);
+    }
+    return hit;
+  };
+
   const n = Number(episode);
-  if (Number.isFinite(n) && n > 0) {
+  let sid = String(series || '').trim();
+  let hit = null;
+  if (sid) {
+    try { hit = await load(sid); } catch (e) { console.log('[stream] series 取分集失败:', e.message); }
+  }
+  /* 详情页的 id 有时是网页 id，取流服务那边查不到分集；按剧名反查一次。 */
+  if ((!hit || !hit.eps.length) && title && seriesResolver) {
+    try {
+      const alt = await seriesResolver(title, Number.isFinite(n) ? n : 0);
+      if (alt && alt !== sid) {
+        console.log(`[stream] 标题反查 series_id=${alt}（原 ${sid || '空'}）`);
+        hit = await load(alt);
+      }
+    } catch (e) { console.log('[stream] 标题反查失败:', e.message); }
+  }
+  if (hit && Array.isArray(hit.eps) && Number.isFinite(n) && n > 0) {
     const one = hit.eps.find(e => Number(e.index) === n);
     if (one) return one.id;
   }
@@ -465,10 +489,10 @@ async function resolveEpisodeId({ vid, series, episode }) {
 }
 
 // 取流：先走 hongguo-fetch（完整客户端签名链），拿不到再退回内置的旧签名链路。
-async function fetchStream({ vid, series, episode }) {
+async function fetchStream({ vid, series, episode, title }) {
   let epId = '';
   try {
-    epId = await resolveEpisodeId({ vid, series, episode });
+    epId = await resolveEpisodeId({ vid, series, episode, title });
     if (epId) return await hgApp.videoModelByEpisode(epId);
   } catch (e) {
     console.log('[stream] 新链路取流失败，退回旧链路:', e.message);
@@ -483,6 +507,7 @@ app.get('/api/web/hongguo/stream', async (req, res) => {
   const vid = String(req.query.vid || '').trim();
   const series = String(req.query.series || '').trim();
   const episode = String(req.query.episode || '').trim();
+  const title = String(req.query.title || '').trim();
   if (!vid && !(series && episode)) return res.status(400).json({ error: '缺少 vid（或 series + episode）' });
   const safeVid = (vid || series + '-' + episode).replace(/[^a-zA-Z0-9_-]/g, '');
   const streamDir = path.join(os.tmpdir(), 'veyra-stream');
@@ -491,7 +516,7 @@ app.get('/api/web/hongguo/stream', async (req, res) => {
   if (fs.existsSync(outFile) && fs.statSync(outFile).size > 100000) return res.sendFile(outFile);
   console.log('[stream]', new Date().toISOString(), 'vid', vid || (series + '#' + episode));
   try {
-    const { url: mainUrl, key } = await fetchStream({ vid, series, episode });
+    const { url: mainUrl, key } = await fetchStream({ vid, series, episode, title });
     const args = ['-hide_banner', '-loglevel', 'error', '-y'];
     if (key && /^[0-9a-fA-F]{32}$/.test(key)) args.push('-decryption_key', key.toLowerCase());
     args.push('-i', mainUrl, '-c', 'copy', '-movflags', '+faststart', '-f', 'mp4', outFile);
@@ -541,7 +566,7 @@ app.get('/api/hongguo/play-direct', async (req, res) => {
   if (!vid && !(series && episode)) return res.status(400).json({ error: '缺少 vid（或 series + episode）' });
   console.log('[play-direct]', new Date().toISOString(), 'vid', vid || (series + '#' + episode));
   try {
-    const { url: mainUrl, altUrls, key, quality } = await fetchStream({ vid, series, episode });
+    const { url: mainUrl, altUrls, key, quality } = await fetchStream({ vid, series, episode, title });
     const result = {
       vid,
       definition: quality || '',

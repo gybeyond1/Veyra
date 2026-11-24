@@ -1104,6 +1104,8 @@ function playEpisode(j,resumeSec){
     const q=[];
     if(ep.vid)q.push('vid='+encodeURIComponent(ep.vid));
     if(_detail.id)q.push('series='+encodeURIComponent(_detail.id));
+    // 带剧名：series 是网页 id 时后端取不到分集，用剧名反查 series_id
+    if(_detail.title)q.push('title='+encodeURIComponent(_detail.title));
     q.push('episode='+encodeURIComponent(ep.number!=null?ep.number:(j+1)));
     attachPlayer('/api/web/hongguo/stream?'+q.join('&'),doResume);
   }else if(remotePrivate()){
