@@ -15,7 +15,9 @@ services:
     container_name: veyra
     restart: unless-stopped
     depends_on:
-      - hongguo-signer
+      hongguo-signer:
+        # 签名服务启动约 20~40 秒才 ready，等健康再起后端，避免冷启动期取流全空
+        condition: service_healthy
     ports:
       - "8888:8888"
     environment:
