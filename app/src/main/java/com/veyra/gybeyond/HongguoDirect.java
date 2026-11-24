@@ -107,7 +107,6 @@ final class HongguoDirect {
     private static final String KEY_IID = "iid";
     private static final String KEY_CDID = "cdid";
     private static final String KEY_SAVED_AT = "saved_at";
-    private static final String KEY_SEED_MODE = "seed_mode";
     /** 一台设备用一周。上游真正作废时会回 401/403，那时再换。 */
     private static final long IDENTITY_TTL_MS = 7L * 24 * 3600 * 1000;
     /** 连续全空之后静默几秒：这时候再请求只会让风控判得更死。 */
@@ -132,10 +131,7 @@ final class HongguoDirect {
     static void init(Context context) {
         appContext = context == null ? null : context.getApplicationContext();
         synchronized (HongguoDirect.class) {
-            seedMode = readSeedMode();
-            if (seedMode) {
-                seed();
-            } else if (cached == null) {
+            if (cached == null) {
                 cached = loadIdentity();
                 if (cached != null) cachedAt = savedAt();
             }
@@ -156,15 +152,6 @@ final class HongguoDirect {
             return new Device(deviceId, iid, cdid == null ? "" : cdid);
         } catch (Throwable ignored) {
             return null;
-        }
-    }
-
-    private static boolean readSeedMode() {
-        if (appContext == null) return false;
-        try {
-            return appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_SEED_MODE, false);
-        } catch (Throwable ignored) {
-            return false;
         }
     }
 
@@ -192,46 +179,13 @@ final class HongguoDirect {
         }
     }
 
-    /**
-     * 官方基线设备（7.1.3.32 时代就在用的一台）。
-     *
-     * 站方 2026-11-24 之后对新注册的匿名设备一律回 200 + 空正文，而且「一失败就换一台」
-     * 会让新设备被连坐——越换越空。所以本机取址连续全空时，不再重新注册，
-     * 直接切到这台长期在用的基线设备。
-     */
-    private static final String SEED_DEVICE_ID = "1905892595378490";
-    private static final String SEED_IID = "1905892595382586";
-    private static final String SEED_CDID = "37affbbf-0590-4c12-8900-9dde232f4885";
-    /** 切到基线设备后一直用它，避免又回到「注册一台新的、再被拒」的循环。 */
-    private static volatile boolean seedMode;
-
     /** 现用身份；没有或过期的注册一台并落盘。内容接口（搜索/详情）共用同一台。 */
     static synchronized Device identity() throws IOException {
-        if (seedMode) return seed();
         long now = System.currentTimeMillis();
         if (cached != null && now - cachedAt < IDENTITY_TTL_MS) return cached;
         Device fresh = register();
         persist(fresh);
         return fresh;
-    }
-
-    private static Device seed() {
-        Device device = new Device(SEED_DEVICE_ID, SEED_IID, SEED_CDID);
-        cached = device;
-        cachedAt = System.currentTimeMillis();
-        return device;
-    }
-
-    /** 连续全空：切到基线设备，不再注册新设备（新设备必空，还会连累老设备）。 */
-    private static synchronized void switchToSeed() {
-        seedMode = true;
-        seed();
-        if (appContext == null) return;
-        try {
-            appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                    .putBoolean(KEY_SEED_MODE, true).apply();
-        } catch (Throwable ignored) {
-        }
     }
 
     /** 设备被明确拒绝时才调用：清掉持久身份，下一轮重新注册。 */
@@ -351,7 +305,7 @@ final class HongguoDirect {
            上游看出来之后连老设备一起拒 —— 越修越坏就是这么来的。
            连续三轮全空才算这台设备真的废了，标记掉，下一轮重新注册。 */
         lastAllEmptyAt = System.currentTimeMillis();
-        if (++consecutiveEmpty >= 3) switchToSeed();
+        if (++consecutiveEmpty >= 3) dropIdentity();
 
         /* 兜底：这一集最近成功播过，地址还在有效期内，就直接复用
            （hongguoTV 0.16.11 的同一做法：新请求只用来验证，不为拿地址再撞一次接口）。 */
