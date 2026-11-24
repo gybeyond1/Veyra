@@ -193,6 +193,13 @@ function httpGet(url, headers, onData, onEnd, onError) {
 }
 function downloadFile(url, destPath, headers, progressCb, signal) {
   return new Promise((resolve, reject) => {
+    /* 地址是空串/相对路径时，http.get 会同步抛 TypeError(Invalid URL)，
+       而 WriteStream 的 ENOENT 是异步 emit 的 —— 两者撞在一起就成了
+       "Unhandled 'error' event" 直接把整个 Node 进程带走。这里先拦一道。 */
+    if (!/^https?:\/\//i.test(String(url || ''))) {
+      return reject(new Error(`这一集没取到播放地址（${url ? '地址格式非法：' + String(url).slice(0, 40) : '地址为空，多半是取流服务没拿到 episode_id'}）`));
+    }
+    try { fs.mkdirSync(path.dirname(destPath), { recursive: true }); } catch { /* ignore */ }
     const file = fs.createWriteStream(destPath);
     let received = 0;
     let lastTick = 0;
@@ -206,6 +213,9 @@ function downloadFile(url, destPath, headers, progressCb, signal) {
       try { file.destroy(); } catch { /* ignore */ }
       reject(err || new Error('任务已取消'));
     };
+    /* 必须在发请求之前挂上：目录不存在/磁盘满时 WriteStream 会在下一个 tick
+       emit ENOENT，晚一步挂 listener 就是 Unhandled 'error'，整个进程直接退出。 */
+    file.on('error', err => abort(err));
     const onData = chunk => {
       if (signal && signal.aborted) { if (req) req.destroy(); return; }
       received += chunk.length;
@@ -217,7 +227,6 @@ function downloadFile(url, destPath, headers, progressCb, signal) {
       onData,
       () => { file.end(() => { if (progressCb) progressCb(received); resolve(); }); },
       err => { file.destroy(); abort(err); });
-    file.on('error', err => abort(err));
     if (signal) {
       const check = setInterval(() => {
         if (signal.aborted) { clearInterval(check); if (req) req.destroy(); abort(new Error('任务已取消')); }
@@ -229,8 +238,12 @@ function downloadFile(url, destPath, headers, progressCb, signal) {
 
 // App 源多 CDN 域下载：main_url 失败自动切 backup_url（红果每变体 main/backup 属不同 CDN 域）
 async function downloadWithFallback(urls, destPath, headers, progressCb, signal) {
+  /* 取流为空时 [ep.url] 就是 ['']，直接丢给 http.get 只会得到一句 Invalid URL，
+     对用户毫无信息量。这里先过滤，空的情况直接说清楚是哪一步没拿到地址。 */
+  const list = (urls || []).filter(u => /^https?:\/\//i.test(String(u || '')));
+  if (!list.length) throw new Error('这一集没拿到播放地址（取流返回空，检查后端 HG_SIGNER 是否配置）');
   let lastErr = null;
-  for (const u of urls) {
+  for (const u of list) {
     if (signal.aborted) throw new Error('任务已取消');
     try {
       await downloadFile(u, destPath, headers, progressCb, signal);
@@ -1457,8 +1470,8 @@ async function runTask(task) {
           while (attempt <= RETRIES && !signal.aborted) {
             try {
               const started = Date.now();
-              // 红果 App 取流：每轮每集首次尝试重新取流（换新 URL 解 403/过期；失败保留旧 url 降级网页源）
-              if (ep.episodeId && attempt === 0 && !ep.url) {
+              // 红果 App 取流：手里没有地址才去取（有地址说明预热/上一轮拿到了，别重复打配额）
+              if (ep.episodeId && !ep.url) {
                 for (const wait of [0, 6000]) {
                   if (wait) await new Promise(r => setTimeout(r, wait));
                   try {
@@ -1479,8 +1492,8 @@ async function runTask(task) {
                 }
                 if (!ep.url) console.log(`[hongguo-app] 第 ${ep.index} 集取流仍未拿到地址，降级网页源`);
               }
-              // 仍无播放地址（手机端未推 URL 且 App 源不可用）：NAS 自抓镜像站网页源保底
-              if (!ep.url && attempt === 0) {
+              // 仍无播放地址（取流为空或地址被判过期）：NAS 自抓镜像站网页源保底
+              if (!ep.url) {
                 try {
                   const web = await hgApp.fetchWebUrl(task._webId || task.seriesId, ep.index);
                   ep.url = web.url;
@@ -1545,6 +1558,11 @@ async function runTask(task) {
             } catch (err) {
               fs.rmSync(safeJoin(dir, epEncName(ep.index)), { force: true });
               fs.rmSync(plainFile, { force: true });
+              /* 地址可能被 CDN 判过期（403）或取流本身返回空。清掉它，
+                 下一次尝试才会重新取流换新地址，而不是拿着死链重试。 */
+              ep.url = '';
+              ep.key = '';
+              ep.altUrls = [];
               attempt++;
               if (attempt > RETRIES) {
                 // 单集失败不中断整剧：标记失败集进入下一轮自动重试，其余分集继续
@@ -1576,8 +1594,11 @@ async function runTask(task) {
   const appCount = task.episodes.filter(ep => ep._appSource).length;
   const failedCount = (task.failedEpisodes || []).length;
   const sourceNote = task._appVids ? `（红果 App 源 ${appCount}/${task.episodes.length} 集）` : '（网页源）';
+  /* App 源整条没起来 = 分集接口没给我们 episode_id，最可能的原因是后端没配 HG_SIGNER。
+     把这句话写进任务详情，用户不用翻容器日志也能知道该改什么。 */
+  const signerHint = task._appVids ? '' : '；没有拿到分集列表，请确认 docker-compose.yml 里配了 HG_SIGNER 并启动了 hongguo-signer';
   if (failedCount > 0) {
-    task.progress = { phase: 'ready', episode: downloaded, total: task.episodes.length, percent: 100, detail: `已下载 ${downloaded}/${task.episodes.length} 集，失败 ${failedCount} 集${sourceNote}，可重试失败集或先合并成功部分` };
+    task.progress = { phase: 'ready', episode: downloaded, total: task.episodes.length, percent: 100, detail: `已下载 ${downloaded}/${task.episodes.length} 集，失败 ${failedCount} 集${sourceNote}，可重试失败集或先合并成功部分${signerHint}` };
   } else {
     task.progress = { phase: 'ready', episode: task.episodes.length, total: task.episodes.length, percent: 100, detail: `已下载 ${task.episodes.length} 集${sourceNote}，待合并` };
   }

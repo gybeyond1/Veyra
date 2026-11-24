@@ -1766,6 +1766,16 @@ app.get('/api/update/apk', (req, res) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`veyra-backend listening on 0.0.0.0:${PORT}, data dir: ${DATA_DIR}`);
+  /* 分集/详情接口只认真实 so 签名，没配 signer 时 NAS 下载必然 0 集全部失败，
+     而 WebUI 播放（走 video_tab）看起来却是好的 —— 很容易被误判成"播放好了下载应该也能好"。
+     启动就把这条打出来，省得每次去翻容器日志。 */
+  const signer = process.env.HG_SIGNER || '';
+  if (signer) {
+    console.log(`[fetch] HG_SIGNER=${signer}`);
+  } else {
+    console.log('[fetch] !! HG_SIGNER 未配置：WebUI 播放仍可用，但 NAS 下载会因为拿不到分集列表而全部失败');
+    console.log('[fetch] !! 请更新 docker-compose.yml（新增 hongguo-signer 服务 + HG_SIGNER 环境变量）后重启容器');
+  }
   // 更新包缓存：启动 20 秒后跑第一轮，之后每 10 分钟一次（都发生在后台，不挡请求）
   appUpdater.start();
 });
