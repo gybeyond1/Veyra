@@ -563,6 +563,7 @@ app.get('/api/hongguo/play-direct', async (req, res) => {
   const vid = String(req.query.vid || '').trim();
   const series = String(req.query.series_id || req.query.series || '').trim();
   const episode = String(req.query.episode || '').trim();
+  const title = String(req.query.title || '').trim();
   if (!vid && !(series && episode)) return res.status(400).json({ error: '缺少 vid（或 series + episode）' });
   console.log('[play-direct]', new Date().toISOString(), 'vid', vid || (series + '#' + episode));
   try {

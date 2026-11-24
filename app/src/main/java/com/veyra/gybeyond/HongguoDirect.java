@@ -234,6 +234,14 @@ final class HongguoDirect {
         long cooling = lastAllEmptyAt;
         if (cooling > 0 && System.currentTimeMillis() - cooling < EMPTY_COOLDOWN_MS) {
             if (background) throw new IOException("上游刚返回空片源，跳过预热");
+            /* 上游刚空，本地这套签名注定拿不到；冷却期内先问后端（walk 真实 so 签名）。 */
+            StreamInfo remoteCooling = fetchFromBackend(vid);
+            if (remoteCooling != null) {
+                lastAllEmptyAt = 0L;
+                consecutiveEmpty = 0;
+                remember(vid, remoteCooling);
+                return remoteCooling;
+            }
             long wait = Math.max(1, (EMPTY_COOLDOWN_MS - (System.currentTimeMillis() - cooling) + 999) / 1000);
             throw new IOException("上游刚连续返回空片源，请 " + wait + " 秒后再试");
         }
@@ -307,6 +315,17 @@ final class HongguoDirect {
         lastAllEmptyAt = System.currentTimeMillis();
         if (++consecutiveEmpty >= 3) dropIdentity();
 
+        /* 本地三层全空：交给 Veyra 后端。那边跑 openhongguo-signer（unidbg + App 自带
+           libmetasec_ml.so），签名是站方认的那一份；2026-11-24 起本地这套移植签名
+           无论哪一档常量都只回 200 + 空正文。 */
+        StreamInfo remote = fetchFromBackend(vid);
+        if (remote != null) {
+            lastAllEmptyAt = 0L;
+            consecutiveEmpty = 0;
+            remember(vid, remote);
+            return remote;
+        }
+
         /* 兜底：这一集最近成功播过，地址还在有效期内，就直接复用
            （hongguoTV 0.16.11 的同一做法：新请求只用来验证，不为拿地址再撞一次接口）。 */
         StreamInfo recent = recall(vid);
@@ -314,6 +333,60 @@ final class HongguoDirect {
 
 
         throw new IOException("播放接口未返回片源（" + join(errors) + "）");
+    }
+
+    /**
+     * 兜底取址：问 Veyra 后端要直链与内容密钥。
+     *
+     * 2026-11-24 起站方只接受 App 自带 {@code libmetasec_ml.so} 产出的播放签名，
+     * 本地这套移植签名（v04.06.04 / v04.10.03 两档都试过）一律回 HTTP 200 + 空正文。
+     * 后端跑 openhongguo-signer，用同一份 so 签名，取到的直链和密钥与本地同构，
+     * 这里直接转成 StreamInfo 交回本地播放器。
+     *
+     * 只在本地三层全失败后调用；后端没配、连不上或返回异常时返回 null，
+     * 不改变原有失败文案。
+     */
+    private static StreamInfo fetchFromBackend(String vid) {
+        if (appContext == null) return null;
+        String base;
+        try {
+            base = ServerConfig.get(appContext);
+        } catch (Throwable ignored) {
+            return null;
+        }
+        if (base == null || base.trim().isEmpty()) return null;
+        String endpoint = base.trim().replaceAll("/+$", "") + "/api/hongguo/play-direct?vid=" + vid;
+        StreamInfo info = backendStream(QUICK, endpoint);
+        if (info == null) info = backendStream(HTTP, endpoint);
+        return info;
+    }
+
+    private static StreamInfo backendStream(OkHttpClient client, String endpoint) {
+        try {
+            Request request = new Request.Builder()
+                    .url(endpoint)
+                    .header("Accept", "application/json")
+                    .get()
+                    .build();
+            try (Response response = client.newCall(request).execute()) {
+                if (!response.isSuccessful() || response.body() == null) {
+                    LAST_PROBE.set("backend/HTTP " + response.code());
+                    return null;
+                }
+                String text = new String(response.body().bytes(), StandardCharsets.UTF_8);
+                if (text.trim().isEmpty()) return null;
+                JSONObject json = new JSONObject(text);
+                String main = json.optString("main_url", "");
+                if (main.isEmpty()) return null;
+                JSONObject encrypt = json.optJSONObject("encrypt");
+                String hexKey = encrypt == null ? "" : encrypt.optString("key", "");
+                if (!hexKey.matches("[0-9a-fA-F]{32,64}")) return null;
+                return new StreamInfo(main, HongguoSign551.hex(hexKey), json.optString("definition", ""));
+            }
+        } catch (Throwable error) {
+            LAST_PROBE.set("backend/不可达");
+            return null;
+        }
     }
 
     private static void pause(long millis) throws IOException {
