@@ -21,6 +21,10 @@ const { spawnSync, spawn } = require('child_process');
 const hgApp = require('./hongguo-app');
 const proxyFetch = require('./proxy-fetch');
 
+// 由 index.js 注入：按剧名反查 fqnovel series_id（走目录搜索接口，失败返回空）。
+let seriesResolver = null;
+function setSeriesResolver(fn) { seriesResolver = typeof fn === 'function' ? fn : null; }
+
 // 数据/下载目录：环境变量指定，默认 /data、/video（docker-compose 挂载）。
 // 裸跑/本地运行时根目录不可写 → 自动回退到可写目录，避免服务因 EACCES 直接崩溃。
 let DATA_DIR = process.env.DATA_DIR || '/data';
@@ -1344,7 +1348,21 @@ async function runTask(task) {
       try {
         fetcher = await hgApp.episodeIds(task.seriesId);
       } catch (e) {
-        console.log(`[hongguo-app] ${task.title} 取流服务分集失败: ${e.message}`);
+        console.log(`[hongguo-app] ${task.title} 取流服务分集失败（series=${task.seriesId}）: ${e.message}`);
+      }
+    }
+    /* seriesId 是手机推来的，可能是网页 id、也可能是老任务留下的错值；分集拿不到就用
+     * 目录搜索按标题反查。镜像站搜索页已改版，这里走的是后端 curl 通道的 JSON 接口。 */
+    if ((!fetcher || !fetcher.length) && seriesResolver) {
+      try {
+        const sid = await seriesResolver(task.title, maxIndex);
+        if (sid && sid !== task.seriesId) {
+          console.log(`[hongguo-app] ${task.title} 标题反查 series_id=${sid}（原 ${task.seriesId || '空'}）`);
+          task.seriesId = sid;
+          fetcher = await hgApp.episodeIds(sid);
+        }
+      } catch (e) {
+        console.log(`[hongguo-app] ${task.title} 标题反查 series_id 失败: ${e.message}`);
       }
     }
     if (fetcher && fetcher.length > 0) {
@@ -1825,4 +1843,4 @@ function status() {
 loadTasks();
 ensureDirs();
 
-module.exports = { createTask, listTasks, getTask, getRawTask, taskDirOf, patchTask, deleteTask, mergeTask, retryFailedEpisodes, status, setDownloadDir, setConcurrency, setMergeOptions, mergeEpisodes, epName, safeJoin, collectEpisodeFiles };
+module.exports = { createTask, listTasks, getTask, getRawTask, taskDirOf, patchTask, deleteTask, mergeTask, retryFailedEpisodes, status, setDownloadDir, setConcurrency, setMergeOptions, mergeEpisodes, epName, safeJoin, collectEpisodeFiles, setSeriesResolver };

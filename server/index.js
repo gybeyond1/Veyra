@@ -352,6 +352,27 @@ function extractRouterData(html) {
 const hgCatalog = createHongguoContent((url, timeoutMs) => new Promise((resolve, reject) => {
   curlGet(url, timeoutMs, (err, html) => err ? reject(err) : resolve(html));
 }));
+
+// 剧名反查 series_id。镜像站的搜索页已经改版（不再内嵌 _ROUTER_DATA），
+// 这里改走目录搜索的 JSON 接口：精确标题优先，否则在同名剧里挑集数够得着的那一季，
+// 免得把「第七季」匹配成第一季。仅在手机推来的 seriesId 取不到分集时才用。
+function normTitle(value) {
+  return String(value || '').replace(/[\s\p{P}]/gu, '').toLowerCase();
+}
+downloader.setSeriesResolver(async (title, wantEpisodes) => {
+  const data = await hgCatalog.search(title);
+  const items = (data && Array.isArray(data.items)) ? data.items : [];
+  if (!items.length) throw new Error('目录里没有搜到这部剧');
+  const exact = items.find(item => normTitle(item.title) === normTitle(title));
+  if (exact) return exact.id;
+  const want = Number(wantEpisodes) || 0;
+  const base = normTitle(String(title || '').replace(/第\s*[\d零〇一二两三四五六七八九十百]+\s*[季部]$/u, ''));
+  const picked = items
+    .filter(item => normTitle(item.title).includes(base || normTitle(title)))
+    .filter(item => !want || Number(item.episodeCount || 0) >= want)
+    .sort((a, b) => Number(a.episodeCount || 0) - Number(b.episodeCount || 0));
+  return picked.length ? picked[0].id : '';
+});
 function sendHongguoError(res, error) {
   const status = error.statusCode || 502;
   res.status(status).json({ error: (status === 400 ? '请求无效: ' : '内容加载失败: ') + error.message });
