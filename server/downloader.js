@@ -42,6 +42,24 @@ function serialFetch(fn) {
   return run;
 }
 
+/* 分集表兜底：详情接口 /novel/player/video_detail/v1/ 用的是内置签名，
+   在没有 openhongguo-signer 的情况下照样能返回完整分集（实测 96 集）。
+   它给的 vid 就是数字形式的 episode_id，顺序也和 /episodes 完全一致
+   （index 1 对第一项），所以没配签名服务时也能正常下载。 */
+async function detailEpisodes(seriesId) {
+  if (!seriesId) return [];
+  try {
+    const det = await hgApp.videoDetail(seriesId);
+    const vids = (det && det.vids) || [];
+    if (!vids.length) return [];
+    console.log(`[hongguo-app] series=${seriesId} 详情页分集兜底：${vids.length} 集`);
+    return vids.map((id, i) => ({ index: i + 1, id: String(id), playable: true }));
+  } catch (e) {
+    console.log(`[hongguo-app] series=${seriesId} 详情页分集兜底失败: ${e.message}`);
+    return [];
+  }
+}
+
 async function warmupFetcher(episodeId) {
   const waits = [0, 8000, 16000, 32000, 48000];
   for (let i = 0; i < waits.length; i++) {
@@ -1377,6 +1395,11 @@ async function runTask(task) {
         console.log(`[hongguo-app] ${task.title} 取流服务分集失败（series=${task.seriesId}）: ${e.message}`);
       }
     }
+    /* 没配 hongguo-signer 时 /episodes 必空，但详情接口用的是内置签名、照样能出分集。
+       这条路不需要签名服务，优先用它兜住。 */
+    if (!fetcher || !fetcher.length) {
+      fetcher = await detailEpisodes(task.seriesId);
+    }
     /* seriesId 是手机推来的，可能是网页 id、也可能取不到分集；用目录搜索按标题反查。 */
     if ((!fetcher || !fetcher.length) && seriesResolver) {
       try {
@@ -1385,6 +1408,7 @@ async function runTask(task) {
           console.log(`[hongguo-app] ${task.title} 标题反查 series_id=${sid}（原 ${task.seriesId || '空'}）`);
           task.seriesId = sid;
           fetcher = await hgApp.episodeIds(sid);
+          if (!fetcher || !fetcher.length) fetcher = await detailEpisodes(sid);
         } else {
           console.log(`[hongguo-app] ${task.title} 标题反查没有匹配到 series_id`);
         }

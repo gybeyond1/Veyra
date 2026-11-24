@@ -457,7 +457,21 @@ async function resolveEpisodeId({ vid, series, episode, title }) {
   const load = async (sid) => {
     let hit = seriesEpCache.get(sid);
     if (!hit || Date.now() - hit.at > SERIES_EP_TTL) {
-      const eps = await hgApp.episodeIds(sid);
+      let eps = [];
+      try {
+        eps = await hgApp.episodeIds(sid);
+      } catch (e) {
+        /* 没配 hongguo-signer 时这条必空（200 + 空正文），走下面的详情接口兜底 */
+      }
+      if (!Array.isArray(eps) || !eps.length) {
+        try {
+          const det = await hgApp.videoDetail(sid);
+          eps = ((det && det.vids) || []).map((id, i) => ({ index: i + 1, id: String(id) }));
+          if (eps.length) console.log(`[stream] series=${sid} 分集走详情接口兜底：${eps.length} 集`);
+        } catch (e) {
+          console.log('[stream] 详情页分集兜底失败:', e.message);
+        }
+      }
       hit = { at: Date.now(), eps };
       seriesEpCache.set(sid, hit);
       while (seriesEpCache.size > 40) seriesEpCache.delete(seriesEpCache.keys().next().value);
@@ -1766,15 +1780,15 @@ app.get('/api/update/apk', (req, res) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`veyra-backend listening on 0.0.0.0:${PORT}, data dir: ${DATA_DIR}`);
-  /* 分集/详情接口只认真实 so 签名，没配 signer 时 NAS 下载必然 0 集全部失败，
-     而 WebUI 播放（走 video_tab）看起来却是好的 —— 很容易被误判成"播放好了下载应该也能好"。
-     启动就把这条打出来，省得每次去翻容器日志。 */
+  /* 分集/详情接口只认真实 so 签名，没配 signer 时 /episodes 会返回空。
+     但详情接口用的是内置签名、照样能出分集，下载会自动走那条兜底，
+     所以这里只提示、不报警。 */
   const signer = process.env.HG_SIGNER || '';
   if (signer) {
     console.log(`[fetch] HG_SIGNER=${signer}`);
   } else {
-    console.log('[fetch] !! HG_SIGNER 未配置：WebUI 播放仍可用，但 NAS 下载会因为拿不到分集列表而全部失败');
-    console.log('[fetch] !! 请更新 docker-compose.yml（新增 hongguo-signer 服务 + HG_SIGNER 环境变量）后重启容器');
+    console.log('[fetch] 未配置 HG_SIGNER：分集列表改走详情接口兜底，下载/播放仍可用');
+    console.log('[fetch] 想更稳可以按 docker-compose.yml 加 hongguo-signer 服务并设置 HG_SIGNER，但这不是必需的');
   }
   // 更新包缓存：启动 20 秒后跑第一轮，之后每 10 分钟一次（都发生在后台，不挡请求）
   appUpdater.start();
