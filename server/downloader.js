@@ -24,12 +24,30 @@ const hgApp = require('./hongguo-app');
  * HTTP 200 + 0 字节，清数据换一台新的反而能立刻播 —— 不是封号，是「新设备要预热」。
  * 之前失败一次就降级网页源，等于每集都拿到空地址（Invalid URL → 0 字节 .enc）。
  * 这里改成退避重试，先拿一集把设备「养」热，再批量下。 */
+/* 取流全局串行 + 最小间隔：播放接口对同一出口 IP 的并发极其敏感。
+ * 之前下载默认 10 个 worker 并行取流，几秒钟就把匿名配额打光，之后整段时间
+ * 取流全回 200 + 0 字节（详情接口也跟着降级）。串行后 71 集约 2 分钟，
+ * 比「并发打黑 → 全军覆没 → 重跑再打黑」快得多。 */
+let fetchChain = Promise.resolve();
+let lastFetchAt = 0;
+const FETCH_MIN_GAP = Math.max(0, parseInt(process.env.HG_FETCH_GAP_MS || '1500', 10) || 0);
+function serialFetch(fn) {
+  const run = fetchChain.then(async () => {
+    const wait = FETCH_MIN_GAP - (Date.now() - lastFetchAt);
+    if (wait > 0) await new Promise(r => setTimeout(r, wait));
+    lastFetchAt = Date.now();
+    return fn();
+  });
+  fetchChain = run.then(() => {}, () => {});
+  return run;
+}
+
 async function warmupFetcher(episodeId) {
   const waits = [0, 8000, 16000, 32000, 48000];
   for (let i = 0; i < waits.length; i++) {
     if (waits[i]) await new Promise(r => setTimeout(r, waits[i]));
     try {
-      const s = await hgApp.videoModelByEpisode(episodeId);
+      const s = await serialFetch(() => hgApp.videoModelByEpisode(episodeId));
       if (s && s.url) return s;
       console.log(`[hongguo-app] 取流预热第 ${i + 1}/${waits.length} 次：空响应`);
     } catch (e) {
@@ -1441,10 +1459,10 @@ async function runTask(task) {
               const started = Date.now();
               // 红果 App 取流：每轮每集首次尝试重新取流（换新 URL 解 403/过期；失败保留旧 url 降级网页源）
               if (ep.episodeId && attempt === 0 && !ep.url) {
-                for (const wait of [0, 8000, 20000]) {
+                for (const wait of [0, 6000]) {
                   if (wait) await new Promise(r => setTimeout(r, wait));
                   try {
-                    const s = await hgApp.videoModelByEpisode(ep.episodeId);
+                    const s = await serialFetch(() => hgApp.videoModelByEpisode(ep.episodeId));
                     if (s && s.url) {
                       ep.url = s.url;
                       ep.key = s.key || '';

@@ -148,7 +148,6 @@ async function signedPost(path, bodyObj) {
     if (!registeredDevice) currentDevice();
   }
   const bodyStr = JSON.stringify(bodyObj);
-  let rotations = 0;
   let attempts = 0;
   let lastErr = null;
   while (attempts < 3) {
@@ -192,16 +191,8 @@ async function signedPost(path, bodyObj) {
     if (!text.text.trim() || text.code !== 200) {
       lastErr = new Error(`空响应/异常 HTTP ${text.code} len=${text.text.length}`);
       attempts++;
-      if (attempts >= 2 && rotations < 3) {
-        registeredDevice = null;
-        currentDevice.pair = null;
-        await registerDevice();
-        if (!registeredDevice) currentDevice();
-        rotations++;
-        attempts = 0;
-        await sleep(1200);
-        continue;
-      }
+      /* 不再换设备重试：2026-11-24 起服务端对内置签名一律回 200+0 字节，
+         换设备只会白注册、把 IP 和设备配额打光（新设备还要“养”才有片源）。 */
       if (attempts < 3) { await sleep(1800); continue; }
       throw lastErr;
     }
@@ -485,9 +476,38 @@ async function episodeIds(seriesId) {
 }
 
 /** 按 episode_id 取流，返回与 videoModel 同形状的结果（key 为 32 位 hex）。 */
+/* 上游对同一出口 IP 的播放请求有静默配额：连续打空之后整段时间（实测 ≥40 分钟）
+ * 所有播放接口都回 HTTP 200 + 0 字节，连详情接口也会跟着降级。继续重试只会把
+ * IP 打得更黑，所以连续 3 次空就进入冷却，冷却期内直接报错、不再发请求。 */
+let emptyStreak = 0;
+let cooldownUntil = 0;
+const COOLDOWN_MS = Math.max(60_000, parseInt(process.env.HG_COOLDOWN_MS || '600000', 10) || 600000);
+
+function noteEmpty(reason) {
+  emptyStreak++;
+  if (emptyStreak >= 3 && Date.now() >= cooldownUntil) {
+    cooldownUntil = Date.now() + COOLDOWN_MS;
+    console.log(`[stream] 连续 ${emptyStreak} 次空响应（${reason}），进入 ${Math.round(COOLDOWN_MS / 60000)} 分钟冷却`);
+  }
+}
+
 async function videoModelByEpisode(episodeId) {
-  const json = await fetchJson(`/play?episode=${encodeURIComponent(String(episodeId))}`);
-  if (!json || !json.url) throw new Error((json && json.error) || '取流结果为空');
+  if (Date.now() < cooldownUntil) {
+    const left = Math.max(1, Math.ceil((cooldownUntil - Date.now()) / 60000));
+    throw new Error(`上游限流冷却中（约剩 ${left} 分钟）：继续重试只会让出口 IP 被封更久，请稍后再试`);
+  }
+  let json;
+  try {
+    json = await fetchJson(`/play?episode=${encodeURIComponent(String(episodeId))}`);
+  } catch (e) {
+    noteEmpty(e.message);
+    throw e;
+  }
+  if (!json || !json.url) {
+    noteEmpty((json && json.error) || '取流结果为空');
+    throw new Error((json && json.error) || '取流结果为空');
+  }
+  emptyStreak = 0;
   return {
     url: json.url,
     altUrls: Array.isArray(json.altUrls) ? json.altUrls : [],

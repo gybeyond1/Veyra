@@ -488,17 +488,19 @@ async function resolveEpisodeId({ vid, series, episode, title }) {
   return '';
 }
 
-// 取流：先走 hongguo-fetch（完整客户端签名链），拿不到再退回内置的旧签名链路。
+// 取流：只走 hongguo-fetch（完整客户端签名链 + openhongguo-signer 真实 so 签名）。
+// 旧的内置签名链路（video_model/v1 + vid）2026-11-24 后一律被服务端静默丢弃
+// （HTTP 200 + 0 字节），而且它每次失败都会注册一台新设备、连注册 3 轮，
+// 把 IP 和设备配额一路打光，反而拖累真正能用的链路，所以彻底断开不再兜底。
 async function fetchStream({ vid, series, episode, title }) {
   let epId = '';
   try {
     epId = await resolveEpisodeId({ vid, series, episode, title });
-    if (epId) return await hgApp.videoModelByEpisode(epId);
   } catch (e) {
-    console.log('[stream] 新链路取流失败，退回旧链路:', e.message);
+    throw new Error('定位剧集失败：' + e.message);
   }
-  if (!vid) throw new Error('这一集定位不到 episode_id，请刷新详情页后重试');
-  return hgApp.videoModel(vid);
+  if (!epId) throw new Error('这一集定位不到 episode_id，请刷新详情页后重试');
+  return hgApp.videoModelByEpisode(epId);
 }
 
 // 红果单集播放：签名取流 -> ffmpeg 解密转封装（浏览器不能播 CENC 密文）-> 明文 MP4 直发（sendFile 支持 Range 拖动）
