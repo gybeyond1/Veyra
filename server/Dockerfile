@@ -15,11 +15,20 @@ RUN npm ci --omit=dev --no-audit --no-fund --prefer-offline
 # hongguo-sign.js：红果签名链 JS 内嵌实现（hongguo-app.js require 依赖，缺失会导致取流失败）
 COPY . ./
 
+# 本地取流服务：hongguo-app.js 的旧签名链（Gorgon/Argus/Ladon）已经过不了
+# 2026-11-23 之后的校验，取流改由这个 Go 二进制负责（完整客户端签名 + CENC 密钥派生）。
+# 二进制随源码一起 COPY 进来（fetch/），这里只按构建架构建个软链，不重复占空间。
+ARG TARGETARCH=amd64
+RUN ln -sf /app/fetch/hongguo-fetch-linux-${TARGETARCH} /usr/local/bin/hongguo-fetch \
+    && chmod +x /app/fetch/hongguo-fetch-linux-${TARGETARCH}
+
 ENV PORT=8080
+ENV HG_PROFILE=/data/hongguo-profile.json
 EXPOSE 8080
 VOLUME /data
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
   CMD wget -qO- http://127.0.0.1:8080/api/health || exit 1
 
-CMD ["node", "index.js"]
+# 先起取流服务（失败不阻塞主进程），再交给 node
+CMD ["sh", "-c", "/usr/local/bin/hongguo-fetch & exec node index.js"]

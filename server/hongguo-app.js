@@ -444,4 +444,56 @@ async function fetchWebUrl(id, episode) {
   throw new Error('网页源播放地址获取失败');
 }
 
-module.exports = { videoDetail, videoModel, deriveKey, searchSeries, fetchWebUrl, registerDevice, currentDevice, buildQuery, goEscape, signedPost };
+/* ---------------- 本地取流服务（hongguo-fetch） ----------------
+ *
+ * 站方 2026-11-23 之后把「参数不全」和「缺 x-medusa」的请求一律判成非客户端，
+ * 回 200 + 空正文 —— 本文件里那套 Gorgon/Argus/Ladon 签名已经过不去了。
+ * hongguo-fetch 是随镜像一起分发的 Go 小服务，内部用完整的客户端签名链，
+ * 按 episode_id 取流并顺带把 CENC 内容密钥解出来：
+ *   GET /episodes?series=<seriesId> → { episodes: [{ index, id, playable }] }
+ *   GET /play?episode=<episodeId>   → { url, altUrls, key(32 hex), quality, expires_at }
+ */
+const HG_FETCH = (process.env.HG_FETCH_URL || 'http://127.0.0.1:18098').replace(/\/+$/, '');
+
+function fetchJson(pathname, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const mod = require('http');
+    const req = mod.get(`${HG_FETCH}${pathname}`, { timeout: timeoutMs || 45000 }, res => {
+      const chunks = [];
+      res.on('data', chunk => chunks.push(chunk));
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        try {
+          resolve(JSON.parse(text));
+        } catch (error) {
+          reject(new Error(`取流服务响应异常: ${text.slice(0, 120)}`));
+        }
+      });
+    });
+    req.on('error', error => reject(new Error(`取流服务不可用: ${error.message}`)));
+    req.on('timeout', () => req.destroy(new Error('取流服务超时')));
+  });
+}
+
+/** 分集列表：返回 [{ index, id, playable }]，id 是数字 episode_id。 */
+async function episodeIds(seriesId) {
+  const json = await fetchJson(`/episodes?series=${encodeURIComponent(String(seriesId))}`);
+  if (!json || !Array.isArray(json.episodes) || json.episodes.length === 0) {
+    throw new Error((json && json.error) || '分集列表为空');
+  }
+  return json.episodes;
+}
+
+/** 按 episode_id 取流，返回与 videoModel 同形状的结果（key 为 32 位 hex）。 */
+async function videoModelByEpisode(episodeId) {
+  const json = await fetchJson(`/play?episode=${encodeURIComponent(String(episodeId))}`);
+  if (!json || !json.url) throw new Error((json && json.error) || '取流结果为空');
+  return {
+    url: json.url,
+    altUrls: Array.isArray(json.altUrls) ? json.altUrls : [],
+    key: json.key || '',
+    quality: json.quality || '',
+  };
+}
+
+module.exports = { videoDetail, videoModel, deriveKey, searchSeries, fetchWebUrl, registerDevice, currentDevice, buildQuery, goEscape, signedPost, episodeIds, videoModelByEpisode };

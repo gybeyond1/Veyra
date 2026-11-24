@@ -1337,7 +1337,26 @@ async function runTask(task) {
         console.log(`[hongguo-app] ${task.title} 标题搜索匹配失败: ${e.message}`);
       }
     }
-    if (vids) {
+    /* 首选：本地取流服务给出数字 episode_id。2026-11-23 之后旧签名连 query 都过不了，
+     * 只有这条链（完整客户端签名 + 参数集）还能取到片源。 */
+    let fetcher = null;
+    if (task.seriesId) {
+      try {
+        fetcher = await hgApp.episodeIds(task.seriesId);
+      } catch (e) {
+        console.log(`[hongguo-app] ${task.title} 取流服务分集失败: ${e.message}`);
+      }
+    }
+    if (fetcher && fetcher.length > 0) {
+      const byIndex = new Map(fetcher.map(item => [Number(item.index), String(item.id)]));
+      let mapped = 0;
+      task.episodes.forEach(ep => {
+        const id = byIndex.get(Number(ep.index));
+        if (id) { ep.episodeId = id; mapped++; }
+      });
+      task._appVids = true;
+      console.log(`[hongguo-app] ${task.title} 取流服务注入 ${mapped}/${task.episodes.length} 个 episode_id`);
+    } else if (vids) {
       /* 按真实集号取 vid：第 3 集用 vids[2]，不是 vids[0] */
       task.episodes.forEach(ep => { ep.vid = vids[Number(ep.index) - 1]; });
       task._appVids = true;
@@ -1391,9 +1410,11 @@ async function runTask(task) {
             try {
               const started = Date.now();
               // 红果 App 取流：每轮每集首次尝试重新取流（换新 URL 解 403/过期；失败保留旧 url 降级网页源）
-              if (ep.vid && attempt === 0) {
+              if ((ep.episodeId || ep.vid) && attempt === 0) {
                 try {
-                  const s = await hgApp.videoModel(ep.vid);
+                  const s = ep.episodeId
+                    ? await hgApp.videoModelByEpisode(ep.episodeId)
+                    : await hgApp.videoModel(ep.vid);
                   if (s && s.url) {
                     ep.url = s.url;
                     ep.key = s.key || '';
