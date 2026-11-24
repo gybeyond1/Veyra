@@ -396,6 +396,7 @@ app.get('/api/web/hongguo/detail', async (req, res) => {
         } catch (e) { console.log('[detail] videoDetail 兜底失败:', e.message); }
       }
       res.json({ raw, vids });
+      if (vids.length) mapVidsToEpisodes(id, vids);
     })();
   });
 });
@@ -408,19 +409,68 @@ app.get('/api/web/hongguo/tags', async (_req, res) => {
   try { res.json(await hgCatalog.tags()); } catch (e) { sendHongguoError(res, e); }
 });
 
-// 红果单集播放：签名取流（内置 videoModel）-> ffmpeg 解密转封装（浏览器不能播 CENC 密文）-> 明文 MP4 直发（sendFile 支持 Range 拖动）
+// 取流要的是数字 episode_id（详情页给的是 v0xxx 形式的 vid），这里统一换算。
+// 有 series + 集号就查一次分集表，结果缓存 10 分钟，避免每次播放都多打一次上游。
+const seriesEpCache = new Map();
+const SERIES_EP_TTL = 10 * 60 * 1000;
+// 详情页顺带给出的 vid → episode_id 映射，播放时直接用，省一次分集查询。
+const vidEpCache = new Map();
+function mapVidsToEpisodes(seriesId, vids) {
+  hgApp.episodeIds(seriesId).then(eps => {
+    if (!Array.isArray(eps) || eps.length !== vids.length) return;
+    eps.forEach((e, i) => { if (e && e.id) vidEpCache.set(vids[i], e.id); });
+    while (vidEpCache.size > 5000) vidEpCache.delete(vidEpCache.keys().next().value);
+  }).catch(() => { /* 取流服务不可用时静默跳过，播放时会再试 */ });
+}
+async function resolveEpisodeId({ vid, series, episode }) {
+  const v = String(vid || '').trim();
+  if (/^\d{4,25}$/.test(v)) return v;
+  if (v && vidEpCache.has(v)) return vidEpCache.get(v);
+  const sid = String(series || '').trim();
+  if (!sid) return '';
+  let hit = seriesEpCache.get(sid);
+  if (!hit || Date.now() - hit.at > SERIES_EP_TTL) {
+    const eps = await hgApp.episodeIds(sid);
+    hit = { at: Date.now(), eps };
+    seriesEpCache.set(sid, hit);
+    while (seriesEpCache.size > 40) seriesEpCache.delete(seriesEpCache.keys().next().value);
+  }
+  const n = Number(episode);
+  if (Number.isFinite(n) && n > 0) {
+    const one = hit.eps.find(e => Number(e.index) === n);
+    if (one) return one.id;
+  }
+  return '';
+}
+
+// 取流：先走 hongguo-fetch（完整客户端签名链），拿不到再退回内置的旧签名链路。
+async function fetchStream({ vid, series, episode }) {
+  let epId = '';
+  try {
+    epId = await resolveEpisodeId({ vid, series, episode });
+    if (epId) return await hgApp.videoModelByEpisode(epId);
+  } catch (e) {
+    console.log('[stream] 新链路取流失败，退回旧链路:', e.message);
+  }
+  if (!vid) throw new Error('这一集定位不到 episode_id，请刷新详情页后重试');
+  return hgApp.videoModel(vid);
+}
+
+// 红果单集播放：签名取流 -> ffmpeg 解密转封装（浏览器不能播 CENC 密文）-> 明文 MP4 直发（sendFile 支持 Range 拖动）
 const { spawn } = require('child_process');
 app.get('/api/web/hongguo/stream', async (req, res) => {
   const vid = String(req.query.vid || '').trim();
-  if (!vid) return res.status(400).json({ error: '缺少 vid' });
-  const safeVid = vid.replace(/[^a-zA-Z0-9_-]/g, '');
+  const series = String(req.query.series || '').trim();
+  const episode = String(req.query.episode || '').trim();
+  if (!vid && !(series && episode)) return res.status(400).json({ error: '缺少 vid（或 series + episode）' });
+  const safeVid = (vid || series + '-' + episode).replace(/[^a-zA-Z0-9_-]/g, '');
   const streamDir = path.join(os.tmpdir(), 'veyra-stream');
   const outFile = path.join(streamDir, safeVid + '.mp4');
   try { fs.mkdirSync(streamDir, { recursive: true }); } catch { /* ignore */ }
   if (fs.existsSync(outFile) && fs.statSync(outFile).size > 100000) return res.sendFile(outFile);
-  console.log('[stream]', new Date().toISOString(), 'vid', vid);
+  console.log('[stream]', new Date().toISOString(), 'vid', vid || (series + '#' + episode));
   try {
-    const { url: mainUrl, key } = await hgApp.videoModel(vid);
+    const { url: mainUrl, key } = await fetchStream({ vid, series, episode });
     const args = ['-hide_banner', '-loglevel', 'error', '-y'];
     if (key && /^[0-9a-fA-F]{32}$/.test(key)) args.push('-decryption_key', key.toLowerCase());
     args.push('-i', mainUrl, '-c', 'copy', '-movflags', '+faststart', '-f', 'mp4', outFile);
@@ -462,13 +512,15 @@ app.get('/api/hongguo/relay-play', (req, res) => {
   });
 });
 
-// 直连取流：调用本地签名链路（videoModel），返回全清晰度 CDN 直链（APK 本地解密）
+// 直连取流：返回全清晰度 CDN 直链与内容密钥（客户端本地解密）
 app.get('/api/hongguo/play-direct', async (req, res) => {
   const vid = String(req.query.vid || '').trim();
-  if (!vid) return res.status(400).json({ error: '缺少 vid' });
-  console.log('[play-direct]', new Date().toISOString(), 'vid', vid);
+  const series = String(req.query.series_id || req.query.series || '').trim();
+  const episode = String(req.query.episode || '').trim();
+  if (!vid && !(series && episode)) return res.status(400).json({ error: '缺少 vid（或 series + episode）' });
+  console.log('[play-direct]', new Date().toISOString(), 'vid', vid || (series + '#' + episode));
   try {
-    const { url: mainUrl, altUrls, key, quality } = await hgApp.videoModel(vid);
+    const { url: mainUrl, altUrls, key, quality } = await fetchStream({ vid, series, episode });
     const result = {
       vid,
       definition: quality || '',
