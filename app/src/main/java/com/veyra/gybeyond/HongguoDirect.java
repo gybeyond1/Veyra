@@ -107,6 +107,9 @@ final class HongguoDirect {
     private static final String KEY_IID = "iid";
     private static final String KEY_CDID = "cdid";
     private static final String KEY_SAVED_AT = "saved_at";
+    /** 最近一次真的取到地址的分集，只给「链路检测」选样例用。 */
+    private static final String KEY_LAST_VID = "last_vid_ok";
+    private static volatile String lastPersistedVid = "";
     /** 一台设备用一周。上游真正作废时会回 401/403，那时再换。 */
     private static final long IDENTITY_TTL_MS = 7L * 24 * 3600 * 1000;
     /** 连续全空之后静默几秒：这时候再请求只会让风控判得更死。 */
@@ -403,6 +406,17 @@ final class HongguoDirect {
     private static void remember(String vid, StreamInfo info) {
         if (vid == null || info == null || info.getUrl() == null) return;
         RECENT.put(vid, new Object[]{info, System.currentTimeMillis()});
+        /* 顺手记下最近一次真的取到地址的分集：诊断拿它当样例最可靠 ——
+           用它测出来的结果才代表「用户正在看的这批内容能不能播」。 */
+        if (appContext != null && !vid.equals(lastPersistedVid)) {
+            lastPersistedVid = vid;
+            try {
+                appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                        .edit().putString(KEY_LAST_VID, vid).apply();
+            } catch (Throwable ignored) {
+                // 落盘失败不影响取址
+            }
+        }
         if (RECENT.size() > 12) {
             String oldest = null;
             long oldestAt = Long.MAX_VALUE;
@@ -450,6 +464,16 @@ final class HongguoDirect {
         for (Map.Entry<String, Object[]> entry : RECENT.entrySet()) {
             Object[] row = entry.getValue();
             if (row != null && row[0] != null) return entry.getKey();
+        }
+        // 进程刚起来时 RECENT 是空的，读上一次真正取到地址的分集（比内置样例可靠）
+        if (appContext != null) {
+            try {
+                String saved = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                        .getString(KEY_LAST_VID, "");
+                if (saved != null && saved.matches("[0-9]{1,30}")) return saved;
+            } catch (Throwable ignored) {
+                // 读不到就用样例
+            }
         }
         return SAMPLE_VID;
     }
