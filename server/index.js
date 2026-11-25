@@ -407,25 +407,29 @@ app.get('/api/web/hongguo/search', async (req, res) => {
 app.get('/api/web/hongguo/detail', async (req, res) => {
   const id = String(req.query.id || '').trim();
   if (!id) return res.status(400).json({ error: '缺少 id' });
-  curlGet('https://hongguoduanju.com/detail/' + id, 10000, (err, html) => {
-    if (err) return res.status(502).json({ error: '抓取失败: ' + err.message });
-    let raw;
+  // 网页详情的地址是 query 形式（detail?series_id=…）；path 形式 /detail/<id> 2026-11 起一律 404。
+  let raw = {};
+  let vids = [];
+  try {
+    const html = await new Promise((ok, fail) =>
+      curlGet('https://hongguoduanju.com/detail?series_id=' + encodeURIComponent(id), 10000,
+        (err, body) => (err ? fail(err) : ok(body))));
     try { raw = extractRouterData(html).loaderData || {}; }
-    catch (e) { return res.status(502).json({ error: '解析失败: ' + e.message }); }
-    // 从详情页 episode_list 提取每集 vid（供 WebUI 播放 /api/web/hongguo/stream）
-    const eps = (raw.detail_page && raw.detail_page.episode_list) || (raw.episode_list) || [];
-    let vids = eps.map(e => String(e && (e.vid || e.id || '')).trim()).filter(v => v);
-    (async () => {
-      if (!vids.length) {
-        try {
-          const det = await hgApp.videoDetail(id);
-          vids = det.vids || [];
-        } catch (e) { console.log('[detail] videoDetail 兜底失败:', e.message); }
-      }
-      res.json({ raw, vids });
-      if (vids.length) mapVidsToEpisodes(id, vids);
-    })();
-  });
+    catch (e) { console.log('[detail] 页面解析失败:', e.message); }
+  } catch (e) { console.log('[detail] 网页详情抓取失败:', e.message); }
+  const eps = (raw.detail_page && raw.detail_page.episode_list) || (raw.episode_list) || [];
+  vids = eps.map(e => String(e && (e.vid || e.id || '')).trim()).filter(v => v);
+  // 网页版只收录部分片源：搜得到、App 能播，但网页详情 404。这时用 App 详情接口兜底拿分集。
+  if (!vids.length) {
+    try {
+      const det = await hgApp.videoDetail(id);
+      vids = det.vids || [];
+      if (!raw.detail_page && det.title) raw = { detail_page: { seriesDetail: { series_id: id, series_name: det.title } } };
+    } catch (e) { console.log('[detail] videoDetail 兜底失败:', e.message); }
+  }
+  if (!vids.length && !raw.detail_page) return res.status(404).json({ error: '没有这个剧集' });
+  res.json({ raw, vids });
+  if (vids.length) mapVidsToEpisodes(id, vids);
 });
 
 // 与 APP 同源：short=短剧精选，comic=漫剧热榜，slug=对应大类题材；绝不跨分类回退。

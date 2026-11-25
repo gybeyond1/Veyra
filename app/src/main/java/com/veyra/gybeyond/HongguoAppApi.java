@@ -101,6 +101,9 @@ final class HongguoAppApi {
                     .put("season_index", video.optInt("season_index", 0))
                     .put("episode_cnt", video.optInt("episode_cnt", 0))
                     .put("series_title", video.optString("series_title", ""))
+                    // 网页详情 404 时要用这两项拼详情页（网页版才有封面/简介，App 接口里叫这个名字）
+                    .put("series_cover", video.optString("series_cover", video.optString("cover_url", "")))
+                    .put("series_intro", video.optString("series_intro", video.optString("video_desc", "")))
                     .put("vids", vids);
         }
     }

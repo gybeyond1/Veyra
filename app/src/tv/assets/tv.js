@@ -3137,6 +3137,8 @@ function openDetail(id) {
   /* 刚点进来的那张卡片，封面早就解密好了 —— 先铺上，别让背景空着等详情接口。
      详情数据回来后 hydrateCovers 会用正确的封面覆盖一次（通常就是同一张）。 */
   var seed = document.querySelector('.card.is-focused .art img');
+  /* 网页详情 404 改用 App 详情兜底时后端给不出封面，别把已经渲染好的这张图弄没了。 */
+  var seedCover = seed ? (seed.getAttribute('data-cover') || seed.src || '') : '';
   applyBackdropMode();
   if (seed && seed.src) setBackdrop(seed.src, seed.getAttribute('data-cover'));
   renderDetail();
@@ -3144,6 +3146,7 @@ function openDetail(id) {
     /* 这一页已经被换掉了（在下一页按了返回、快照都铺回来了），
        迟到的详情不许再整页重画一次 —— 否则返回键看着像没生效。 */
     if (ticket !== detailTicket || state.route !== 'detail') return;
+    if (data && !data.cover) data.cover = seedCover;
     state.detail = data;
     state.detailLoading = false;
     renderDetail();

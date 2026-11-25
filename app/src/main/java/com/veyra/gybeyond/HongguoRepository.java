@@ -29,6 +29,8 @@ final class HongguoRepository {
     private final HongguoGenres genres = new HongguoGenres(upstream.getHttp());
     private final HongguoSearch search = new HongguoSearch(upstream.getHttp());
     private final HongguoRandomFeed randomFeed = new HongguoRandomFeed(upstream.getHttp());
+    /** 网页详情 404 时的兜底接口（不走网页，直接用 App 协议拿分集）。 */
+    private final HongguoAppApi appApi = new HongguoAppApi();
 
     JSONObject tags() throws Exception { return genres.tags(); }
     JSONObject tagListing(String slug, int page) throws Exception { return genres.listing(slug, page); }
@@ -178,13 +180,52 @@ final class HongguoRepository {
     }
     JSONObject searchSequels(String keyword) throws Exception { return search.search(keyword, true); }
     JSONObject detail(String id) throws Exception {
-        Detail detail = upstream.detail(id);
-        details.put(id, detail);
+        Detail detail = loadDetail(id);
         JSONObject result = card(detail.getSeries(), "");
         JSONArray episodes = new JSONArray();
         for (int i = 0; i < detail.getEpisodes().size(); i++)
             episodes.put(new JSONObject().put("number", i + 1).put("videoId", detail.getEpisodes().get(i)));
         return result.put("episodes", episodes).put("episodeLabel", "共 " + episodes.length() + " 集");
+    }
+
+    /**
+     * 网页详情拿不到时（HTTP 404）改用 App 详情接口凑一份。
+     *
+     * 2026-11 起站方网页版只收录了一部分片源：App 搜索能搜到、能播，但
+     * https://hongguoduanju.com/detail?series_id=… 直接 404，表现就是「搜到点不进详情页」。
+     * App 详情接口（video_detail）不走网页，返回同样的分集列表，用它兜底至少能进页面、能播。
+     * 代价是封面/简介/相关推荐这些只有网页版才有的东西会缺，所以只作为兜底。
+     */
+    private Detail loadDetail(String id) throws Exception {
+        Detail cached = details.get(id);
+        if (cached != null) return cached;
+        Detail detail;
+        try {
+            detail = upstream.detail(id);
+        } catch (Exception error) {
+            detail = detailFromApp(id);
+            if (detail == null) throw new Exception("找不到这个剧集（" + id + "）：" + error.getMessage(), error);
+        }
+        details.put(id, detail);
+        return detail;
+    }
+
+    /** App 详情接口兜底；拿不到分集返回 null，把原始异常交给调用方。 */
+    private Detail detailFromApp(String id) {
+        JSONObject app = appApi.fetch(id);
+        JSONArray vids = app == null ? null : app.optJSONArray("vids");
+        if (vids == null || vids.length() == 0) return null;
+        java.util.List<String> episodes = new java.util.ArrayList<>(vids.length());
+        for (int i = 0; i < vids.length(); i++) {
+            String vid = vids.optString(i, "");
+            if (vid.isEmpty()) return null;
+            episodes.add(vid);
+        }
+        String title = app.optString("series_title", "");
+        if (title.isEmpty()) title = "剧集 " + id;
+        Series series = new Series(id, title, app.optString("series_cover", ""),
+                app.optString("series_intro", ""), "共 " + episodes.size() + " 集", "");
+        return new Detail(series, episodes);
     }
     /*
      * 播放地址缓存。
@@ -207,8 +248,7 @@ final class HongguoRepository {
         JSONObject cached = episodes.get(cacheKey);
         Long at = episodeAt.get(cacheKey);
         if (cached != null && at != null && System.currentTimeMillis() - at < EPISODE_TTL_MS) return cached;
-        Detail detail = details.get(id);
-        if (detail == null) { detail = upstream.detail(id); details.put(id, detail); }
+        Detail detail = loadDetail(id);
         if (number < 1 || number > detail.getEpisodes().size()) throw new IllegalArgumentException("无效集数");
         StreamInfo info = resolveStream(id, detail.getEpisodes().get(number - 1), background);
         HongguoPlayback.register(info);

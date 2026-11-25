@@ -4116,7 +4116,7 @@ async function goDetail(id, trigger, seed) {
   let hasDetailData = Boolean(cached?.data);
   if (hasDetailData) { state.detail = cached.data; state.detailLoading = false; renderDetail(); }
   api('bookmark-state', { id }).then(saved => { if (token === routeToken) { state.bookmarked = saved; if (state.detail) renderDetail(); } }).catch(() => {});
-  try { const fresh = await refreshing; if (token === routeToken) { state.detail = fresh; state.detailLoading = false; renderDetail(); } }
+  try { const fresh = await refreshing; if (token === routeToken) { if (fresh && !fresh.cover && state.detail) fresh.cover = state.detail.cover || ''; state.detail = fresh; state.detailLoading = false; renderDetail(); } }
   catch (error) { if (!hasDetailData && token === routeToken) { state.detailLoading = false; renderError(error, 'detail'); } }
 }
 
