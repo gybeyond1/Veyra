@@ -2947,7 +2947,12 @@ function detailMetaText(data) {
 
 function detailEpisodeSection(data) {
   const episodes = asArray(data.episodes).filter(item => Number(item.number) > 0);
-  if (!episodes.length) return '';
+  /* 一集都没有：站方还没上线（App 详情回「更新至 0 集」），或者片源全下线。
+     空着不吭声的话，页面看着像坏了；给一句话说清楚，再留个重试。 */
+  if (!episodes.length) return `<div class="detail-empty">
+    <p class="detail-empty-title">暂时没有可播放的剧集</p>
+    <p class="detail-empty-note">这部剧可能还没上线，或者片源已经下线了。过一阵子再来看看。</p>
+    <button type="button" class="detail-empty-retry" data-retry="detail">重新获取</button></div>`;
   const groups = Math.ceil(episodes.length / DETAIL_EP_PAGE);
   const group = Math.min(Math.max(0, Number(state.epGroup) || 0), groups - 1);
   state.epGroup = group;
@@ -2978,13 +2983,14 @@ function renderDetail() {
   const data = state.detail;
   if (!data) { renderSkeleton(); return; }
   const loading = state.detailLoading;
+  const emptyEp = !loading && !asArray(data.episodes).filter(item => Number(item.number) > 0).length;
   window.AndroidHost?.setDetailMode?.(true);
   const meta = loading ? '正在获取内容…' : [data.score, detailMetaText(data)].filter(Boolean).join(' · ');
   content.innerHTML = `<div class="detail-page">
     <div class="detail-art"><img data-cover="${esc(data.cover)}" alt=""></div><div class="detail-copy"><h1>${esc(data.title)}</h1>
     <p class="detail-meta"><span class="detail-meta-text">${esc(meta)}</span><span class="detail-meta-producer" data-producer-slot></span></p>
     <div class="detail-desc-wrap"><p class="detail-description">${esc(data.description || '')}</p></div>
-    <div class="detail-buttons"><button class="detail-play" type="button" data-play="1" ${loading ? 'disabled' : ''}>${loading ? '正在加载…' : resumeLabel()}</button><button class="detail-restart" type="button" data-restart="1" aria-label="从头播放" title="从头播放" ${resumeReady() ? '' : 'hidden'}>${icon('restart')}</button><button class="bookmark-button" type="button" data-bookmark="1" aria-label="${state.bookmarked ? '取消收藏' : '收藏'}" ${loading ? 'disabled' : ''}>${state.bookmarked ? '★' : '☆'}</button><button class="detail-download" type="button" data-download="1" ${loading ? 'disabled' : ''}>下载</button></div>
+    <div class="detail-buttons"><button class="detail-play" type="button" data-play="1" ${loading || emptyEp ? 'disabled' : ''}>${loading ? '正在加载…' : emptyEp ? '暂无可播放剧集' : resumeLabel()}</button><button class="detail-restart" type="button" data-restart="1" aria-label="从头播放" title="从头播放" ${resumeReady() && !emptyEp ? '' : 'hidden'}>${icon('restart')}</button><button class="bookmark-button" type="button" data-bookmark="1" aria-label="${state.bookmarked ? '取消收藏' : '收藏'}" ${loading ? 'disabled' : ''}>${state.bookmarked ? '★' : '☆'}</button><button class="detail-download" type="button" data-download="1" ${loading || emptyEp ? 'disabled' : ''}>下载</button></div>
     ${loading ? '<div class="detail-loading" role="status">正在获取选集…</div>' : `<div class="detail-episodes" id="detail-episodes">${detailEpisodeSection(data)}</div>`}<div class="detail-extras" id="detail-extras"></div></div></div>`;
   hydrateImages();
   ensureDetailFilled();
@@ -4052,12 +4058,23 @@ function sourceItem(id) {
   const candidates = [state.listing?.items, state.home?.featured, state.home?.homepageRecommend, state.home?.homepageNewest, state.home?.recommend?.items, state.home?.newest?.items, state.category?.items, state.search?.items, state.library?.bookmarks, state.library?.progress].flatMap(asArray);
   return candidates.find(item => item.id === id) || { id, title: `剧集 ${id}` };
 }
+/* 详情接口只回空分集时（待播 / 已下线的剧），标题、封面、简介这些还得靠点进来那张卡片：
+   接口回来的字段为空就保住卡片上的值，别把详情页刷成一张白板。 */
+function keepCardFields(fresh, prev) {
+  if (!fresh || !prev) return fresh;
+  ['title', 'cover', 'description', 'episodeLabel', 'category', 'tags'].forEach(key => {
+    const value = fresh[key];
+    const empty = value === undefined || value === null || value === '' || (Array.isArray(value) && !value.length);
+    if (empty && prev[key]) fresh[key] = prev[key];
+  });
+  return fresh;
+}
 async function goDetail(id, trigger, seed) {
   if (state.route === 'detail' && state.sourceItem?.id === id) {
     // Retry in place; preserve the original source card and return destination.
     state.detailLoading = true; renderDetail();
     const token = ++routeToken;
-    try { const fresh = await api('detail', { id }); if (token === routeToken) { state.detail = fresh; state.detailLoading = false; if (state.detail && state.detail.title) rememberTitleCover(state.detail.title, state.detail.cover || ''); renderDetail(); } }
+    try { const fresh = await api('detail', { id }); if (token === routeToken) { state.detail = keepCardFields(fresh, state.detail); state.detailLoading = false; if (state.detail && state.detail.title) rememberTitleCover(state.detail.title, state.detail.cover || ''); renderDetail(); } }
     catch (error) { if (token === routeToken) { state.detailLoading = false; renderError(error, 'detail'); } }
     return;
   }
@@ -4114,9 +4131,9 @@ async function goDetail(id, trigger, seed) {
   const cached = await api('cached', { key: `detail:${id}` }).catch(() => null);
   if (token !== routeToken) return;
   let hasDetailData = Boolean(cached?.data);
-  if (hasDetailData) { state.detail = cached.data; state.detailLoading = false; renderDetail(); }
+  if (hasDetailData) { state.detail = keepCardFields(cached.data, state.detail); state.detailLoading = false; renderDetail(); }
   api('bookmark-state', { id }).then(saved => { if (token === routeToken) { state.bookmarked = saved; if (state.detail) renderDetail(); } }).catch(() => {});
-  try { const fresh = await refreshing; if (token === routeToken) { if (fresh && !fresh.cover && state.detail) fresh.cover = state.detail.cover || ''; state.detail = fresh; state.detailLoading = false; renderDetail(); } }
+  try { const fresh = await refreshing; if (token === routeToken) { state.detail = keepCardFields(fresh, state.detail); state.detailLoading = false; renderDetail(); } }
   catch (error) { if (!hasDetailData && token === routeToken) { state.detailLoading = false; renderError(error, 'detail'); } }
 }
 

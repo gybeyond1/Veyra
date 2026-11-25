@@ -2267,6 +2267,8 @@ function resumePlan() {
 function playButtonText() {
   var resume = resumePlan();
   if (state.detailLoading) return '正在加载…';
+  /* 一集都没有就别再写「立即播放」，点了只会弹「无效集数」 */
+  if (state.detail && !list(state.detail.episodes).length) return '暂无可播放剧集';
   return resume ? ('继续播放 · 第' + resume.episode + '集') : '立即播放';
 }
 
@@ -2291,7 +2293,7 @@ function paintDetailStatus() {
   if (btn) {
     var text = playButtonText();
     if (btn.textContent !== text) btn.textContent = text;
-    if (state.detailLoading) btn.setAttribute('disabled', 'disabled');
+    if (state.detailLoading || !list(state.detail && state.detail.episodes).length) btn.setAttribute('disabled', 'disabled');
     else btn.removeAttribute('disabled');
   }
   var info = view.querySelector('.detail-info');
@@ -2358,7 +2360,7 @@ function renderDetail() {
     + (resumeLine ? '<p class="resume-line">' + esc(resumeLine) + '</p>' : '')
     + '<p class="desc">' + esc(data.description || '') + '</p>'
     + '<div class="actions detail-actions">'
-    + '<button type="button" class="btn primary" data-focusable data-key="play" data-play="1"' + (state.detailLoading ? ' disabled' : '') + '>' + playText + '</button>'
+    + '<button type="button" class="btn primary" data-focusable data-key="play" data-play="1"' + (state.detailLoading || !list(data.episodes).length ? ' disabled' : '') + '>' + playText + '</button>'
     + (resume ? restartBtnHtml() : '')
     + '<button type="button" class="btn" data-focusable data-key="bookmark" data-bookmark="1">' + (data.bookmarked ? '已收藏' : '收藏') + '</button>'
     + epTriggerHtml()
@@ -2392,7 +2394,10 @@ function epButtonHtml(number) {
 
 function epsBlockHtml() {
   var r = epRange();
-  if (!r.total) return '';
+  /* 待播 / 已下线的剧一集都没有：留一块说明，别让右栏空着像没加载完。
+     电视端没有「点击重试」，所以只给一句人话，不挂按钮。 */
+  if (!r.total) return '<div class="detail-empty"><p class="detail-empty-title">暂时没有可播放的剧集</p>'
+    + '<p class="detail-empty-note">这部剧可能还没上线，或者片源已经下线了。过一阵子再来看看。</p></div>';
   var html = '<h2 class="eps-title">选集<span>' + (r.start + 1) + '-' + r.end + ' / 共 ' + r.total + ' 集</span></h2><div class="eps">';
   for (var i = r.start; i < r.end; i++) {
     var number = r.episodes[i].number || (i + 1);
@@ -3139,6 +3144,9 @@ function openDetail(id) {
   var seed = document.querySelector('.card.is-focused .art img');
   /* 网页详情 404 改用 App 详情兜底时后端给不出封面，别把已经渲染好的这张图弄没了。 */
   var seedCover = seed ? (seed.getAttribute('data-cover') || seed.src || '') : '';
+  /* 待播 / 已下线的剧后端只能回一集都没有的空壳，标题这类只有卡片上有，先记下来。 */
+  var seedCard = document.querySelector('.card.is-focused');
+  var seedTitle = seedCard && seedCard.querySelector('.name') ? seedCard.querySelector('.name').textContent : '';
   applyBackdropMode();
   if (seed && seed.src) setBackdrop(seed.src, seed.getAttribute('data-cover'));
   renderDetail();
@@ -3147,6 +3155,7 @@ function openDetail(id) {
        迟到的详情不许再整页重画一次 —— 否则返回键看着像没生效。 */
     if (ticket !== detailTicket || state.route !== 'detail') return;
     if (data && !data.cover) data.cover = seedCover;
+    if (data && !data.title) data.title = seedTitle || '剧集';
     state.detail = data;
     state.detailLoading = false;
     renderDetail();

@@ -204,15 +204,26 @@ async function signedPost(path, bodyObj) {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-/** 详情：拿全集 vid 列表（与下载集序对齐：vids[i] = 第 i+1 集）。 */
-async function videoDetail(seriesId) {
+/** 详情原始信息：分集为空也照样返回，供「暂无剧集」这种待播剧用（不抛错）。 */
+async function seriesInfo(seriesId) {
   const json = await signedPost('/novel/player/video_detail/v1/', { series_id: String(seriesId) });
   const vd = (json.data || {}).video_data || {};
-  const list = vd.video_list || [];
-  if (!Array.isArray(list) || list.length === 0) throw new Error('红果详情未返回分集列表');
+  const list = Array.isArray(vd.video_list) ? vd.video_list : [];
   const vids = list.map(v => (v && v.vid != null ? String(v.vid) : '')).filter(v => v);
-  if (vids.length === 0) throw new Error('红果详情分集 vid 为空');
-  return { vids, title: vd.series_title || '' };
+  return {
+    vids,
+    title: vd.series_title || '',
+    cover: vd.series_cover || '',
+    label: vd.episode_right_text || '',
+    episodeCnt: Number(vd.episode_cnt) || 0,
+  };
+}
+
+/** 详情：拿全集 vid 列表（与下载集序对齐：vids[i] = 第 i+1 集）。 */
+async function videoDetail(seriesId) {
+  const info = await seriesInfo(seriesId);
+  if (info.vids.length === 0) throw new Error('红果详情未返回分集列表');
+  return { vids: info.vids, title: info.title };
 }
 
 /** 单集取流：签名调用 video_model/v1，选最高清晰度档（对齐 python 参照，无上限）。 */
@@ -516,4 +527,4 @@ async function videoModelByEpisode(episodeId) {
   };
 }
 
-module.exports = { videoDetail, videoModel, deriveKey, searchSeries, fetchWebUrl, registerDevice, currentDevice, buildQuery, goEscape, signedPost, episodeIds, videoModelByEpisode };
+module.exports = { videoDetail, seriesInfo, videoModel, deriveKey, searchSeries, fetchWebUrl, registerDevice, currentDevice, buildQuery, goEscape, signedPost, episodeIds, videoModelByEpisode };

@@ -185,7 +185,17 @@ final class HongguoRepository {
         JSONArray episodes = new JSONArray();
         for (int i = 0; i < detail.getEpisodes().size(); i++)
             episodes.put(new JSONObject().put("number", i + 1).put("videoId", detail.getEpisodes().get(i)));
-        return result.put("episodes", episodes).put("episodeLabel", "共 " + episodes.length() + " 集");
+        result.put("episodes", episodes);
+        if (episodes.length() == 0) {
+            /* 一部剧一集都没有：站方还没上线（video_detail 回 episode_cnt=0），
+               或者片源全下线。带上 unavailable，前端据此显示说明而不是空选集。 */
+            String label = detail.getSeries().getBadge();
+            result.put("episodeLabel", label == null || label.isEmpty() ? "暂无剧集" : label)
+                    .put("unavailable", true);
+        } else {
+            result.put("episodeLabel", "共 " + episodes.length() + " 集");
+        }
+        return result;
     }
 
     /**
@@ -204,27 +214,46 @@ final class HongguoRepository {
             detail = upstream.detail(id);
         } catch (Exception error) {
             detail = detailFromApp(id);
-            if (detail == null) throw new Exception("找不到这个剧集（" + id + "）：" + error.getMessage(), error);
+            if (detail == null) {
+                /* 两条路都不给分集：网页 404 + App 详情说「更新至 0 集」。
+                   这种多半是「已备案、还没上线」的待播剧（video_detail 里
+                   episode_cnt=0、show_player_entrance=false、allow_share=false），
+                   换成谁、用哪套签名都取不到片源——官方 App 里点开也是 0 集。
+                   以前这里直接把 404 抛给前端，整页变成「找不到这个剧集（…）：
+                   内容请求失败（HTTP 404）」，用户根本分不清是剧没上线还是软件坏了。
+                   现在返回一部空分集：详情页照常打开（标题/封面用列表卡片上的），
+                   只在选集区显示一句「暂时没有可播放的剧集」。 */
+                return pendingDetail(id);
+            }
         }
         details.put(id, detail);
         return detail;
     }
 
-    /** App 详情接口兜底；拿不到分集返回 null，把原始异常交给调用方。 */
+    /** 一集都没有的占位详情；标题/封面留空，前端用点进来时那张卡片补。 */
+    private static Detail pendingDetail(String id) {
+        return new Detail(new Series(id, "", "", "", "", ""), new java.util.ArrayList<String>(0));
+    }
+
+    /** App 详情接口兜底；连元信息都拿不到返回 null，由调用方退回占位详情。 */
     private Detail detailFromApp(String id) {
         JSONObject app = appApi.fetch(id);
-        JSONArray vids = app == null ? null : app.optJSONArray("vids");
-        if (vids == null || vids.length() == 0) return null;
-        java.util.List<String> episodes = new java.util.ArrayList<>(vids.length());
-        for (int i = 0; i < vids.length(); i++) {
+        if (app == null) return null;
+        JSONArray vids = app.optJSONArray("vids");
+        java.util.List<String> episodes = new java.util.ArrayList<>(vids == null ? 0 : vids.length());
+        for (int i = 0; vids != null && i < vids.length(); i++) {
             String vid = vids.optString(i, "");
             if (vid.isEmpty()) return null;
             episodes.add(vid);
         }
+        /* 分集为空但元信息在：这也是「还没上线」，照样返回一部空分集，
+           让详情页有标题/封面可显示，比一屏「找不到这个剧集」有用。 */
         String title = app.optString("series_title", "");
+        if (title.isEmpty() && episodes.isEmpty()) return null;
         if (title.isEmpty()) title = "剧集 " + id;
-        Series series = new Series(id, title, app.optString("series_cover", ""),
-                app.optString("series_intro", ""), "共 " + episodes.size() + " 集", "");
+        String label = app.optString("episode_label", "");
+        if (label.isEmpty()) label = episodes.isEmpty() ? "暂无剧集" : "共 " + episodes.size() + " 集";
+        Series series = new Series(id, title, app.optString("series_cover", ""), app.optString("series_intro", ""), label, "");
         return new Detail(series, episodes);
     }
     /*
@@ -249,6 +278,7 @@ final class HongguoRepository {
         Long at = episodeAt.get(cacheKey);
         if (cached != null && at != null && System.currentTimeMillis() - at < EPISODE_TTL_MS) return cached;
         Detail detail = loadDetail(id);
+        if (detail.getEpisodes().isEmpty()) throw new IllegalArgumentException("这部剧暂时没有可播放的剧集");
         if (number < 1 || number > detail.getEpisodes().size()) throw new IllegalArgumentException("无效集数");
         StreamInfo info = resolveStream(id, detail.getEpisodes().get(number - 1), background);
         HongguoPlayback.register(info);

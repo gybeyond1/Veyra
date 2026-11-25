@@ -436,6 +436,10 @@ body.page-windowed #stage{overflow:hidden}
   min-height:50.4rem;
 }
 .detail-eps{margin-top:auto;padding-top:1.2rem}
+/* 一集都没有的剧（待播 / 已下线）：右栏给一块说明，别直接空着 */
+.detail-empty{padding:2.2rem 2.4rem;border:1px dashed rgba(255,255,255,.22);border-radius:1.2rem;background:rgba(255,255,255,.04)}
+.detail-empty-title{margin:0 0 .8rem;font-size:1.7rem;font-weight:700;color:#fff}
+.detail-empty-note{margin:0;font-size:1.4rem;line-height:1.6;color:rgba(255,255,255,.6)}
 /* flex 里 desc 不参与收缩：min-height:0 + shrink 会让它被压成两行，
    四行截断就失效了。改成不收缩，内容多时让信息列整体变高。 */
 .detail .desc{flex:0 0 auto;min-height:0}

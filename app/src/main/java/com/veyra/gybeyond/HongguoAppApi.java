@@ -104,6 +104,8 @@ final class HongguoAppApi {
                     // 网页详情 404 时要用这两项拼详情页（网页版才有封面/简介，App 接口里叫这个名字）
                     .put("series_cover", video.optString("series_cover", video.optString("cover_url", "")))
                     .put("series_intro", video.optString("series_intro", video.optString("video_desc", "")))
+                    // 「更新至 0 集」这种状态就写在这，详情页拿它当待播提示
+                    .put("episode_label", video.optString("episode_right_text", ""))
                     .put("vids", vids);
         }
     }

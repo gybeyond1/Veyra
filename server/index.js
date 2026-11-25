@@ -422,9 +422,16 @@ app.get('/api/web/hongguo/detail', async (req, res) => {
   // 网页版只收录部分片源：搜得到、App 能播，但网页详情 404。这时用 App 详情接口兜底拿分集。
   if (!vids.length) {
     try {
-      const det = await hgApp.videoDetail(id);
+      const det = await hgApp.seriesInfo(id);
       vids = det.vids || [];
-      if (!raw.detail_page && det.title) raw = { detail_page: { seriesDetail: { series_id: id, series_name: det.title } } };
+      if (!raw.detail_page && det.title) {
+        raw = { detail_page: { seriesDetail: {
+          series_id: id, series_name: det.title, series_cover: det.cover, series_intro: '',
+        } } };
+      }
+      /* 剧在库里但一集都没有（待播 / 已下线）：别回 404，让客户端把详情页打开、
+         写一句「暂时没有可播放的剧集」。404 只会变成一屏「找不到这个剧集」。 */
+      if (!vids.length) return res.json({ raw, vids: [], unavailable: true, label: det.label || '' });
     } catch (e) { console.log('[detail] videoDetail 兜底失败:', e.message); }
   }
   if (!vids.length && !raw.detail_page) return res.status(404).json({ error: '没有这个剧集' });

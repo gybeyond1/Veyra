@@ -1005,6 +1005,10 @@ html[data-theme=dark] .remote-test-result.fail,html[data-theme=dark] .dl-remote-
 .ep-picker-menu button{border:0;border-radius:calc(9px * var(--corner-scale,1));background:none;color:var(--text);text-align:left;padding:9px 11px;font-size:12px;white-space:nowrap}
 .ep-picker-menu button.selected{background:var(--accent);color:var(--accent-ink);font-weight:800}
 .detail-extras{margin-top:2px}
+.detail-empty{margin:22px 0 8px;padding:20px 18px;border:1px dashed var(--line);border-radius:calc(14px * var(--corner-scale,1));background:color-mix(in srgb,var(--panel) 60%,transparent);text-align:center}
+.detail-empty-title{margin:0 0 6px;font-size:14px;font-weight:800;color:var(--text)}
+.detail-empty-note{margin:0 0 14px;font-size:12px;line-height:1.6;color:var(--muted)}
+.detail-empty-retry{height:34px;padding:0 18px;border:1px solid var(--line);border-radius:calc(999px * var(--corner-scale,1));background:var(--panel);color:var(--text);font-size:12px;font-weight:700}
 .detail-section{margin-top:16px}
 .detail-section h2{margin:0 0 12px;font-size:17px;letter-spacing:-.02em}
 .detail-related-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px 10px}
