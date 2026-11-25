@@ -43,8 +43,10 @@ ENV HG_PROFILE=/data/hongguo-profile.json
 EXPOSE 8080
 VOLUME /data
 
+# 健康检查跟随 PORT：之前写死 8080，用户把 PORT 改成别的（绿联默认 8888）后
+# 容器一直显示 unhealthy，但服务其实是好的。
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD curl -fsS http://127.0.0.1:8080/api/health || exit 1
+    CMD curl -fsS "http://127.0.0.1:${PORT:-8080}/api/health" || exit 1
 
 # 入口脚本：拉起内置签名服务 → 等就绪 → 起取流服务与 node
 CMD ["/app/docker-entrypoint.sh"]
