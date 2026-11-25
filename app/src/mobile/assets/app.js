@@ -1921,6 +1921,7 @@ function renderSettings() {
     <section><button type="button" class="settings-link" data-account-management="1"><span><strong>账号管理</strong><small>${state.account.loggedIn ? esc(state.account.username) : '登录或注册账号'}</small></span>${icon('arrow')}</button></section>
     ${privateMode() ? `<section><button type="button" class="settings-link" data-source-open><span><strong>私密内容源</strong><small data-source-summary>${esc((state.privateSite && state.privateSite.name) || '黄果')}</small></span>${icon('arrow')}</button></section>` : ''}
     <section><button type="button" class="settings-link" data-proxy-open><span><strong>黄果网络通道</strong><small data-proxy-summary>${esc(proxySummaryText())}</small></span>${icon('arrow')}</button></section>
+    <section><button type="button" class="settings-link" data-diagnose-open><span><strong>链路检测</strong><small>测本地取址 / 后端 / 视频流各自通不通、多快</small></span>${icon('arrow')}</button></section>
     <section><button type="button" class="settings-link" data-remote-open><span><strong>远程服务器</strong><small data-remote-summary>${esc(remoteSummaryText())}</small></span>${icon('arrow')}</button></section>
     <section><button type="button" class="settings-link" data-about-open><span><strong>关于 Veyra</strong><small>项目地址 · GPL-3.0 开源</small></span>${icon('arrow')}</button></section></div>`;
   if (window.bindAppearance) window.bindAppearance();
@@ -2407,6 +2408,116 @@ window.__veyraRemoteBack = () => {
   return true;
 };
 window.__veyraRemoteOpen = () => !!(remotePop && !remotePop.hidden);
+
+/* ---------------- 链路检测 ----------------
+   取流失败在用户眼里长得一模一样：转圈、然后报错。但成因可能是本地签名被拒、
+   后端地址不对、后端挂了、出口 IP 被限流、CDN 打不开——处理方式完全不同。
+   这里把「取一个播放地址」拆成几条独立链路各打一次，逐行给出通/不通 + 耗时 + 原因。 */
+var diagPop = null, diagRunning = false, diagData = null;
+const DIAG_GROUPS = [
+  ['local', '本地取址（APK 自己签名）'],
+  ['backend', 'NAS 后端'],
+  ['stream', '视频流（CDN 直连）']
+];
+
+function diagRowHtml(item) {
+  const ok = !!item.ok;
+  return `<div class="diag-row ${ok ? 'is-ok' : 'is-fail'}">
+    <span class="diag-dot"></span>
+    <span class="diag-name">${esc(item.name || '检测项')}</span>
+    <span class="diag-ms">${item.ms > 0 ? `${item.ms}ms` : '—'}</span>
+    <small class="diag-detail">${esc(item.detail || '')}</small></div>`;
+}
+
+function diagBodyHtml() {
+  if (diagRunning) return '<p class="appearance-note">正在逐条检测，最多十几秒…</p>';
+  if (!diagData) return '<p class="appearance-note">会向上游真实请求几次（本地最多 3 次、后端 2 次、CDN 1 次），测完之前别连点。</p>';
+  const items = asArray(diagData.items);
+  if (!items.length) return '<p class="appearance-note">没有拿到检测结果。</p>';
+  let html = '';
+  for (const [key, title] of DIAG_GROUPS) {
+    const rows = items.filter(item => item.group === key);
+    if (!rows.length) continue;
+    html += `<div class="diag-group"><h3>${title}</h3>${rows.map(diagRowHtml).join('')}</div>`;
+  }
+  // 结论先行：哪条链路能用、最快多少毫秒。视频流不算「取址」，所以只在都没有时兜底提到
+  const usable = items.filter(item => item.ok && item.group !== 'stream').sort((a, b) => a.ms - b.ms);
+  const stream = items.find(item => item.group === 'stream');
+  let verdict;
+  if (usable.length) {
+    verdict = `取址可用：${usable.map(item => `${esc(item.name)} ${item.ms}ms`).join('，')}。`;
+    if (stream && !stream.ok) verdict += ' 但视频流拉不动，播不了。';
+  } else {
+    verdict = '没有一条取址链路成功，先看下面第一条失败的原因。';
+  }
+  html += `<p class="appearance-note diag-verdict">${verdict}</p>`;
+  return html;
+}
+
+function renderDiagPop() {
+  if (!diagPop) return;
+  const vid = diagData && diagData.vid ? diagData.vid : '';
+  const base = diagData && diagData.base ? diagData.base : '';
+  diagPop.innerHTML = `<div class="appearance-pop account-pop diag-pop" role="dialog" aria-modal="true" aria-labelledby="diag-title">
+    <div class="appearance-head"><h2 id="diag-title">链路检测</h2></div>
+    ${vid || base ? `<p class="appearance-note diag-meta">${vid ? `测试分集 ${esc(vid)}` : ''}${base ? `${vid ? ' · ' : ''}后端 ${esc(base)}` : ''}</p>` : ''}
+    <div class="remote-test-row"><button type="button" class="remote-primary" data-diag-run${diagRunning ? ' disabled' : ''}>${diagRunning ? '检测中…' : '开始检测'}</button></div>
+    <div class="diag-body">${diagBodyHtml()}</div>
+    <div class="remote-actions"><button type="button" class="remote-secondary" data-diag-close>关闭</button></div>
+  </div>`;
+}
+
+function ensureDiagPop() {
+  if (diagPop && document.body.contains(diagPop)) return diagPop;
+  diagPop = document.createElement('div');
+  diagPop.className = 'appearance-scrim';
+  diagPop.hidden = true;
+  diagPop.addEventListener('click', event => {
+    if (event.target === diagPop || event.target.closest('[data-diag-close]')) { closeDiagPop(); return; }
+    if (event.target.closest('[data-diag-run]')) runDiagnose();
+  });
+  document.body.appendChild(diagPop);
+  return diagPop;
+}
+
+function openDiagPop() {
+  ensureDiagPop();
+  diagData = null;
+  diagRunning = false;
+  diagPop.hidden = false;
+  document.body.classList.add('appearance-open');
+  renderDiagPop();
+  updateBackEnabled();
+  runDiagnose();   // 进弹窗直接开测，少一次点击
+}
+
+function closeDiagPop() {
+  if (!diagPop || diagPop.hidden) return;
+  diagPop.hidden = true;
+  document.body.classList.remove('appearance-open');
+  updateBackEnabled();
+}
+
+async function runDiagnose() {
+  if (diagRunning) return;
+  diagRunning = true;
+  renderDiagPop();
+  try {
+    diagData = await api('link-diagnose', {});
+  } catch (error) {
+    diagData = { items: [{ group: 'local', name: '检测请求失败', ok: false, ms: 0, detail: error.message }] };
+  } finally {
+    diagRunning = false;
+    renderDiagPop();
+  }
+}
+
+window.__veyraDiagBack = () => {
+  if (!diagPop || diagPop.hidden) return false;
+  closeDiagPop();
+  return true;
+};
+window.__veyraDiagOpen = () => !!(diagPop && !diagPop.hidden);
 
 /** 读表单当前值（草稿 + DOM），保存/测试都用它，避免两组字段口径不一致。 */
 function readRemoteForm() {
@@ -3508,7 +3619,7 @@ window.hgPredictiveBackStart = fromRight => {
      所以不能让详情卡进入「预测性返回」的拖拽态 —— 以前没拦，commit 分支
      只关了浮层就 return，卡片永远停在缩小+左移的中间帧上，整个详情页错位。 */
   if (producerOverlay) return false;
-  if (!downloadOverlay.hidden || (window.__veyraAppearanceOpen && window.__veyraAppearanceOpen()) || (window.__veyraAccountOpen && window.__veyraAccountOpen()) || (window.__veyraProxyOpen && window.__veyraProxyOpen()) || (window.__veyraAboutOpen && window.__veyraAboutOpen()) || (window.__veyraRemoteOpen && window.__veyraRemoteOpen()) || (window.__veyraRemotePickOpen && window.__veyraRemotePickOpen())) return false;
+  if (!downloadOverlay.hidden || (window.__veyraAppearanceOpen && window.__veyraAppearanceOpen()) || (window.__veyraAccountOpen && window.__veyraAccountOpen()) || (window.__veyraProxyOpen && window.__veyraProxyOpen()) || (window.__veyraAboutOpen && window.__veyraAboutOpen()) || (window.__veyraDiagOpen && window.__veyraDiagOpen()) || (window.__veyraRemoteOpen && window.__veyraRemoteOpen()) || (window.__veyraRemotePickOpen && window.__veyraRemotePickOpen())) return false;
   if (state.route === 'detail' && detailCard && authOverlay.hidden && confirmOverlay.hidden && updateOverlay.hidden && unlockOverlay.hidden) {
     detailCard.fromRight = fromRight;
     return detailCard.begin();
@@ -4068,6 +4179,7 @@ window.hgBack = () => {
   if (window.__veyraAccountBack && window.__veyraAccountBack()) return true;
   if (window.__veyraProxyBack && window.__veyraProxyBack()) return true;
   if (window.__veyraAboutBack && window.__veyraAboutBack()) return true;
+  if (window.__veyraDiagBack && window.__veyraDiagBack()) return true;
   if (window.__veyraRemoteBack && window.__veyraRemoteBack()) return true;
   if (window.__veyraRemotePickBack && window.__veyraRemotePickBack()) return true;
   if (producerOverlay) {
@@ -5060,6 +5172,8 @@ document.addEventListener('click', async event => {
   }
   if (event.target.closest('[data-proxy-open]')) { openProxyPop(); return; }
   if (event.target.closest('[data-about-open]')) { openAboutPop(); return; }
+  // ---- 链路检测 ----
+  if (event.target.closest('[data-diagnose-open]')) { openDiagPop(); return; }
   // ---- 远程服务器配置 ----
   if (event.target.closest('[data-remote-open]')) { openRemotePop(); return; }
   if (event.target.closest('[data-remote-add]')) {

@@ -769,6 +769,7 @@ function activeOverlay() {
   if (otpPanel && !otpPanel.hidden && alive(otpPanel)) return otpPanel;
   if (sourcePanel && !sourcePanel.hidden && alive(sourcePanel)) return sourcePanel;
   if (proxyPanel && !proxyPanel.hidden && alive(proxyPanel)) return proxyPanel;
+  if (diagPanel && !diagPanel.hidden && alive(diagPanel)) return diagPanel;
   if (themePanel && !themePanel.hidden && alive(themePanel)) return themePanel;
   if (updateLayer && !updateLayer.hidden && alive(updateLayer)) return updateLayer;
   if (loginLayer && !loginLayer.hidden && alive(loginLayer)) return loginLayer;
@@ -3343,6 +3344,7 @@ window.hgBack = function () {
   }
   if (sourcePanel && !sourcePanel.hidden) { closeSourcePanel(); return true; }
   if (proxyPanel && !proxyPanel.hidden) { closeProxy(); return true; }
+  if (diagPanel && !diagPanel.hidden) { closeDiag(); return true; }
   if (themePanel && !themePanel.hidden) { closeTheme(); return true; }
   if (updateLayer && !updateLayer.hidden) { closeUpdatePanel(); return true; }
   /* 没登录就停在登录页：返回直接交给原生弹退出确认，不能靠返回键绕过去 */
@@ -3408,6 +3410,7 @@ document.addEventListener('click', function (event) {
   if (themePanel && !themePanel.hidden && target.id === 'theme') { closeTheme(); return; }
   if (sourcePanel && !sourcePanel.hidden && target.id === 'source') { closeSourcePanel(); return; }
   if (proxyPanel && !proxyPanel.hidden && target.id === 'proxy') { closeProxy(); return; }
+  if (diagPanel && !diagPanel.hidden && target.id === 'diag') { closeDiag(); return; }
 
   /* 右上角「设置」：原来点左下角头像开的那个账号面板（主题 / 私密 / 更新 / 退出）。
      搜索、最近两颗按钮带 data-nav，走下面的 go() 路由，跟原来侧栏里
@@ -3492,6 +3495,9 @@ document.addEventListener('click', function (event) {
   if (target.closest('#account-mode')) { switchMode(); return; }
   if (target.closest('#account-source')) { openSourcePanel(); return; }
   if (target.closest('#account-proxy')) { openProxy(); return; }
+  if (target.closest('#account-diag')) { openDiag(); return; }
+  if (target.closest('#diag-run')) { runDiag(); return; }
+  if (target.closest('#diag-close')) { closeDiag(); return; }
   if (target.closest('#source-close')) { closeSourcePanel(); return; }
   var sitePick = target.closest('[data-site-pick]');
   if (sitePick) { pickSite(sitePick.getAttribute('data-site-pick'), sitePick.getAttribute('data-site-name')); return; }
@@ -3623,6 +3629,99 @@ var proxyMode = 3;
 var proxyAddress = '';
 var proxyQrCache = { url: '', html: '' };
 var PROXY_MODE_NAMES = { 1: '仅直连', 2: '仅代理', 3: '走后端转发' };
+
+/* ---------------- 链路检测 ----------------
+   跟手机端设置里那颗按钮走同一个原生接口（link-diagnose）。
+   取流失败在电视上长得一模一样：点进去转圈、然后报错。
+   但成因可能是本地签名被拒、NAS 地址不对、NAS 挂了、CDN 打不开，
+   逐条打一遍才知道卡在哪一段。 */
+var diagPanel = document.getElementById('diag');
+var diagListEl = document.getElementById('diag-list');
+var diagSubEl = document.getElementById('diag-sub');
+var diagRunning = false;
+var DIAG_SUB_DEFAULT = '点「开始检测」，分别测试本地取址、NAS 后端、视频流三条链路，逐行给出通断与耗时。';
+
+function diagGroupTitle(key) {
+  if (key === 'local') return '本地取址（电视自己签名）';
+  if (key === 'backend') return 'NAS 后端';
+  if (key === 'stream') return '视频流（CDN 直连）';
+  return key;
+}
+
+function renderDiagList(data) {
+  if (!diagListEl) return;
+  if (diagRunning) { diagListEl.innerHTML = '<p class="diag-note">正在逐条检测，最多十几秒…</p>'; return; }
+  if (!data) { diagListEl.innerHTML = '<p class="diag-note">还没测。点下面「开始检测」。</p>'; return; }
+  var items = data.items || [];
+  if (!items.length) { diagListEl.innerHTML = '<p class="diag-note">没有拿到检测结果。</p>'; return; }
+  var groups = ['local', 'backend', 'stream'];
+  var html = '';
+  for (var g = 0; g < groups.length; g++) {
+    var rows = items.filter(function (item) { return item.group === groups[g]; });
+    if (!rows.length) continue;
+    html += '<div class="diag-group"><h2>' + esc(diagGroupTitle(groups[g])) + '</h2>';
+    for (var i = 0; i < rows.length; i++) {
+      var item = rows[i];
+      html += '<div class="diag-row ' + (item.ok ? 'is-ok' : 'is-fail') + '">'
+        + '<span class="diag-dot"></span>'
+        + '<span class="diag-name">' + esc(item.name || '检测项') + '</span>'
+        + '<span class="diag-ms">' + (item.ms > 0 ? item.ms + 'ms' : '—') + '</span>'
+        + '<small class="diag-detail">' + esc(item.detail || '') + '</small></div>';
+    }
+    html += '</div>';
+  }
+  /* 结论先行：哪条能用、最快多少毫秒；都不通就点明「看第一条失败原因」 */
+  var usable = items.filter(function (item) { return item.ok && item.group !== 'stream'; })
+    .sort(function (a, b) { return a.ms - b.ms; });
+  var verdict;
+  if (usable.length) {
+    verdict = '可用：' + usable.map(function (item) { return item.name + ' ' + item.ms + 'ms'; }).join('，') + '。';
+    var stream = items.filter(function (item) { return item.group === 'stream'; })[0];
+    if (stream && !stream.ok) verdict += ' 但视频流拉不动，播不了。';
+  } else {
+    verdict = '没有一条取址链路成功，先看第一条失败的原因。';
+  }
+  html += '<p class="diag-verdict">' + esc(verdict) + '</p>';
+  diagListEl.innerHTML = html;
+}
+
+function runDiag() {
+  if (diagRunning) return;
+  diagRunning = true;
+  renderDiagList(null);
+  if (diagSubEl) diagSubEl.textContent = '检测中…';
+  api('link-diagnose', {}).then(function (data) {
+    diagRunning = false;
+    renderDiagList(data);
+    if (diagSubEl) {
+      diagSubEl.textContent = data && data.vid
+        ? ('测试分集 ' + data.vid + (data.base ? '　后端 ' + data.base : ''))
+        : '检测完成';
+    }
+  }).catch(function (error) {
+    diagRunning = false;
+    renderDiagList({ items: [{ group: 'local', name: '检测请求失败', ok: false, ms: 0, detail: (error && error.message) || '未知错误' }] });
+    if (diagSubEl) diagSubEl.textContent = '检测失败';
+  });
+}
+
+function openDiag() {
+  if (accountPanel) accountPanel.hidden = true;
+  diagRunning = false;
+  if (diagSubEl) diagSubEl.textContent = DIAG_SUB_DEFAULT;
+  renderDiagList(null);
+  if (diagPanel) diagPanel.hidden = false;
+  state.focusKey = 'diag:run';
+  restoreFocus();
+}
+
+function closeDiag() {
+  if (diagPanel) diagPanel.hidden = true;
+  diagRunning = false;
+  if (accountPanel) accountPanel.hidden = false;
+  state.focusKey = 'acct:diag';
+  restoreFocus();
+}
 
 /* 走后端转发只有管理员/特权组能用；普通用户点上去给一句人话，而不是静默失败 */
 function roleCanUseBackend() {

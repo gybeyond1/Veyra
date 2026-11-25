@@ -1295,6 +1295,10 @@ public final class MainActivity extends Activity {
                     .put("ms", System.currentTimeMillis() - started)
                     .put("address", RemoteStore.describe(server));
         }
+        if ("link-diagnose".equals(action)) {
+            // 设置页「链路检测」：本地 / 后端 / 视频流各打一次，返回每条的耗时与成败
+            return LinkDiagnostics.run(this, args.optString("vid"));
+        }
         if ("remote-transfer-start".equals(action)) {
             return RemoteTransfer.get(this).enqueue(args.optString("taskId"), args.optString("remoteId"));
         }

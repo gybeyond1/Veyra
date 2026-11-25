@@ -991,3 +991,28 @@ body[data-perf="lite"] .eps button.is-focused{transform:none}
 body[data-perf="lite"] .chip{transition:none}
 body[data-perf="lite"] .theme-swatch{transition:none}
 body[data-perf="lite"] #tv-bg img{transition:opacity .12s linear}
+
+/* ---------------- 链路检测 ----------------
+   跟「网络通道」同一套遮罩与盒子：电视上弹层必须是整屏铺满 + 居中，
+   否则遥控器焦点框会跑到黑边里。字号按 rem 走，跟其它面板一致。 */
+#diag{
+  position:absolute;left:0;right:0;top:0;bottom:0;z-index:29;
+  background:rgba(6,8,10,.97);
+  display:flex;align-items:center;justify-content:center;
+  color:#F2F3F5;
+}
+.diag-box{width:108rem;max-width:92vw;max-height:82vh;overflow:auto;padding:3.2rem 3.6rem;background:var(--panel);border-radius:1.4rem}
+.diag-list{margin:0 0 2rem}
+.diag-note{font-size:1.8rem;color:var(--muted);margin:2rem 0}
+.diag-group{margin:0 0 2rem}
+.diag-group h2{font-size:1.85rem;font-weight:700;color:var(--muted);margin:0 0 .6rem;letter-spacing:.04em}
+.diag-row{display:grid;grid-template-columns:auto 1fr auto;grid-template-rows:auto auto;gap:.3rem 1.2rem;padding:1rem 0;border-bottom:1px solid rgba(255,255,255,.08)}
+.diag-row:last-child{border-bottom:0}
+.diag-dot{grid-row:1 / span 2;align-self:center;width:1rem;height:1rem;border-radius:50%;background:var(--muted)}
+.diag-row.is-ok .diag-dot{background:#3ec46a}
+.diag-row.is-fail .diag-dot{background:#ff5d61}
+.diag-name{font-size:1.9rem;font-weight:600}
+.diag-ms{font-size:1.8rem;font-weight:700;color:var(--muted);align-self:center}
+.diag-row.is-fail .diag-ms{color:#ff5d61}
+.diag-detail{grid-column:2 / -1;font-size:1.5rem;color:var(--muted);line-height:1.4;word-break:break-all}
+.diag-verdict{font-size:1.9rem;font-weight:700;margin:1.4rem 0 0;color:#F2F3F5}

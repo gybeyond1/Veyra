@@ -441,6 +441,151 @@ final class HongguoDirect {
         }
     }
 
+    // ---------------- 链路诊断（设置页「链路检测」用） ----------------
+
+    /** 诊断样例：优先挑一台最近真的取到过地址的分集，没有就用内置样例。 */
+    private static final String SAMPLE_VID = "7704580168144129086";
+
+    static String diagnoseVid() {
+        for (Map.Entry<String, Object[]> entry : RECENT.entrySet()) {
+            Object[] row = entry.getValue();
+            if (row != null && row[0] != null) return entry.getKey();
+        }
+        return SAMPLE_VID;
+    }
+
+    /**
+     * 逐层测本地取址链路，并把第一层拿到的地址顺手探一下 CDN。
+     *
+     * 跟 {@link #fetch(String)} 的区别：不读近期地址缓存、不写冷却、不做多轮重试 ——
+     * 诊断要回答的是「此刻这一层通不通、花了多久」，不是「最终能不能拿到地址」。
+     * 三层各打一次，不重复请求：同一轮里能拿到的地址直接留给 CDN 探测用。
+     */
+    static JSONObject diagnoseLocalWithStream(String vid) {
+        JSONArray layers = new JSONArray();
+        JSONObject result = new JSONObject();
+        if (vid == null || !vid.matches("[0-9]{1,30}")) {
+            layers.put(probeRow("本地取址", false, 0L, "分集编号无效"));
+            putJson(result, "layers", layers);
+            putJson(result, "stream", probeRow("视频流直连", false, 0L, "没有可用地址"));
+            return result;
+        }
+        long started = System.currentTimeMillis();
+        Device device;
+        try {
+            device = identity();
+            layers.put(probeRow("匿名设备", true, System.currentTimeMillis() - started,
+                    "device …" + tail(device.deviceId, 6)));
+        } catch (Exception error) {
+            layers.put(probeRow("匿名设备", false, System.currentTimeMillis() - started, describe(error)));
+            putJson(result, "layers", layers);
+            putJson(result, "stream", probeRow("视频流直连", false, 0L, "设备注册失败，没有地址可探"));
+            return result;
+        }
+        String url = "";
+        for (Object[] layer : new Object[][]{
+                {"本地主接口 v5", (LayerTask) () -> fetchModel(vid, device)},
+                {"本地 video_tab", (LayerTask) () -> fetchTab(vid, device)},
+                {"本地备用域名", (LayerTask) () -> fetchModelFrom(HOSTS[1], vid, device)}}) {
+            JSONObject row = probeLayer((String) layer[0], (LayerTask) layer[1]);
+            layers.put(row);
+            if (url.isEmpty() && row.optBoolean("ok")) url = row.optString("url", "");
+        }
+        putJson(result, "layers", layers);
+        putJson(result, "stream", probeCdn(url));
+        return result;
+    }
+
+    private interface LayerTask {
+        StreamInfo run() throws Exception;
+    }
+
+    private static JSONObject probeLayer(String name, LayerTask task) {
+        long started = System.currentTimeMillis();
+        try {
+            StreamInfo info = task.run();
+            long ms = System.currentTimeMillis() - started;
+            if (info == null || info.getUrl() == null || info.getUrl().isEmpty()) {
+                String probe = LAST_PROBE.get();
+                return probeRow(name, false, ms, probe == null || probe.isEmpty() ? "返回空正文" : probe);
+            }
+            // url 只在这一层内部流转给 CDN 探测，不进 UI
+            JSONObject row = probeRow(name, true, ms, "命中 " + info.getQuality());
+            putJson(row, "url", info.getUrl());
+            return row;
+        } catch (Exception error) {
+            return probeRow(name, false, System.currentTimeMillis() - started, describe(error));
+        }
+    }
+
+    /** org.json 的 put 会抛受检异常，而这里所有 key 都是常量、值都可序列化，包一层省得每处都写 try。 */
+    private static void putJson(JSONObject target, String key, Object value) {
+        try {
+            target.put(key, value);
+        } catch (Exception ignored) {
+            // 常量 key + 可序列化值，实际不会抛
+        }
+    }
+
+    private static JSONObject probeRow(String name, boolean ok, long ms, String detail) {
+        JSONObject row = new JSONObject();
+        putJson(row, "name", name);
+        putJson(row, "ok", ok);
+        putJson(row, "ms", ms);
+        putJson(row, "detail", detail == null ? "" : detail);
+        return row;
+    }
+
+    private static String tail(String text, int count) {
+        if (text == null) return "";
+        return text.length() <= count ? text : text.substring(text.length() - count);
+    }
+
+    /** 给诊断用的 CDN 探测：取到地址后真正拉一小段，确认视频流不是死的。 */
+    static JSONObject probeCdn(String url) {
+        if (url == null || url.isEmpty()) return probeRow("视频流直连", false, 0L, "没有可用地址");
+        /* 红果 CDN 对 Referer 的态度在不同域名上不一致：有的带 Referer 直接 403。
+           所以先按播放器的真实形态（只带 UA）拉一次，被拒了再退回带 Referer 的老写法，
+           免得把「能播」误报成「打不通」。 */
+        JSONObject plain = pullHead(url, false);
+        if (plain.optBoolean("ok")) return plain;
+        JSONObject withReferer = pullHead(url, true);
+        return withReferer.optBoolean("ok") ? withReferer : plain;
+    }
+
+    private static JSONObject pullHead(String url, boolean referer) {
+        long started = System.currentTimeMillis();
+        Request.Builder builder = new Request.Builder()
+                .url(url)
+                .header("User-Agent", PLAYBACK_UA)
+                .header("Range", "bytes=0-262143");
+        if (referer) builder.header("Referer", "https://novel.snssdk.com/");
+        try (Response response = HTTP.newCall(builder.build()).execute()) {
+            if (response.code() != 200 && response.code() != 206) {
+                return probeRow("视频流直连", false, System.currentTimeMillis() - started,
+                        "HTTP " + response.code() + (referer ? "（带 Referer 也不行）" : ""));
+            }
+            long firstByte = System.currentTimeMillis() - started;
+            long total = 0;
+            if (response.body() != null) {
+                byte[] buffer = new byte[16 * 1024];
+                int read;
+                while ((read = response.body().byteStream().read(buffer)) > 0) {
+                    total += read;
+                    if (total >= 262144) break;
+                }
+                response.body().close();
+            }
+            long elapsed = Math.max(1L, System.currentTimeMillis() - started);
+            long kbps = total * 8 / elapsed;   // Kbps ≈ 字节*8/毫秒
+            return probeRow("视频流直连", total > 0, elapsed,
+                    (total > 0 ? (total / 1024) + "KB / " + kbps + "Kbps" : "无数据")
+                            + "，首包 " + firstByte + "ms");
+        } catch (Exception error) {
+            return probeRow("视频流直连", false, System.currentTimeMillis() - started, describe(error));
+        }
+    }
+
     private static String describe(Exception error) {
         String text = error.getMessage();
         if (text == null || text.isEmpty()) text = error.getClass().getSimpleName();

@@ -58,6 +58,7 @@
         <button id="account-theme" class="btn" type="button" data-focusable data-key="acct:theme">主题设置</button>
         <button id="account-perf" class="btn" type="button" data-focusable data-key="acct:perf">高性能模式 · 关</button>
         <button id="account-privacy" class="btn" type="button" data-focusable data-key="acct:privacy">私密模式</button>
+        <button id="account-diag" class="btn" type="button" data-focusable data-key="acct:diag">链路检测</button>
         <button id="account-update" class="btn" type="button" data-focusable data-key="acct:update">检查更新</button>
         <button id="account-logout" class="btn" type="button" data-focusable data-key="acct:logout">退出登录</button>
       </div>
@@ -118,6 +119,20 @@
       <div class="proxy-actions">
         <button id="proxy-save" class="btn" type="button" data-focusable data-key="proxy:save">保存地址</button>
         <button id="proxy-close" class="btn ghost" type="button" data-focusable data-key="proxy:close">关闭</button>
+      </div>
+    </section>
+  </div>
+
+  <!-- 链路检测：本地取址 / NAS 后端 / 视频流各测一次，逐行给出通断与耗时。
+       跟手机端设置里那颗「链路检测」是同一套原生接口，只是这边用遥控器操作。 -->
+  <div id="diag" hidden>
+    <section class="proxy-box diag-box">
+      <h1>链路检测</h1>
+      <p class="proxy-sub" id="diag-sub">点「开始检测」，分别测试本地取址、NAS 后端、视频流三条链路，逐行给出通断与耗时。</p>
+      <div class="diag-list" id="diag-list"></div>
+      <div class="proxy-actions">
+        <button id="diag-run" class="btn" type="button" data-focusable data-key="diag:run">开始检测</button>
+        <button id="diag-close" class="btn ghost" type="button" data-focusable data-key="diag:close">关闭</button>
       </div>
     </section>
   </div>
