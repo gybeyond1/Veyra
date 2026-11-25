@@ -15,11 +15,11 @@ RUN npm ci --omit=dev --no-audit --no-fund --prefer-offline
 # hongguo-sign.js：红果签名链 JS 内嵌实现（hongguo-app.js require 依赖，缺失会导致取流失败）
 COPY . ./
 
-# 本地取流服务：hongguo-app.js 的旧签名链（Gorgon/Argus/Ladon）已经过不了
-# 2026-11-23 之后的校验，取流改由这个 Go 二进制负责（完整客户端签名 + CENC 密钥派生）。
+# 本地取流服务：红果签名（Gorgon/Argus/Ladon/Medusa）全部由这个 Go 二进制负责。
 # 二进制随源码一起 COPY 进来（fetch/），这里只按构建架构建个软链，不重复占空间。
-# 2026-11-24 起，站方只接受 App 自带 so 产出的播放签名，内置移植版全被静默丢弃，
-# 必须通过 HG_SIGNER 指向 openhongguo-signer（见 docker-compose.yml 的 hongguo-signer）。
+# 2026-11-25：站方要求旧播放接口必须携带 x-medusa（设备布局 field 21 = 369），
+# 缺它就回空 200 body；修复见 openhongguo#25，内置签名已带该头。
+# HG_SIGNER 仍可选：配了能少一次请求（走 /episodes），不配也能播/下。
 ARG TARGETARCH=amd64
 RUN ln -sf /app/fetch/hongguo-fetch-linux-${TARGETARCH} /usr/local/bin/hongguo-fetch \
     && chmod +x /app/fetch/hongguo-fetch-linux-${TARGETARCH}
