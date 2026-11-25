@@ -219,11 +219,52 @@ async function seriesInfo(seriesId) {
   };
 }
 
+/**
+ * UGC 合集：个人创作者上传的多集视频。
+ *
+ * 这类内容在 video_detail 里是个空壳（content_type 1003、episode_cnt 0、video_list 空），
+ * 分集实际挂在 album_detail 下，album_id 就是搜索结果里给的那个 series_id。
+ * 每集的 series_id 就是取流用的 vid（列表项的 video_list[0].vid 是空的，
+ * 真正的 vid 只在 video_detail_data 里出现，所以两处都看，取不到就用 series_id 顶上）。
+ */
+async function albumInfo(albumId) {
+  const json = await signedPost('/novel/player/album_detail/v1/', {
+    album_id: String(albumId),
+    need_video_detail_info: true,
+    series_ids: [],
+    biz_param: { video_platform: 3 },
+  });
+  const ad = (json.data || {}).album_data || {};
+  const vdd = (json.data || {}).video_detail_data || {};
+  const vids = [];
+  for (const it of (ad.video_detail_list || [])) {
+    const sid = String(it.series_id_str || it.series_id || '');
+    const one = sid ? vdd[sid] : null;
+    const wl = (one && one.video_data && one.video_data.video_list) || [];
+    const vid = String((wl[0] && wl[0].vid) || '') || sid;
+    if (vid) vids.push(vid);
+  }
+  /* episode_entrance_text 是数组（['合集', 标题, '更新至10集']），挑带「集」的那条当标签 */
+  const entrance = ad.episode_entrance_text;
+  const pickLabel = arr => (Array.isArray(arr) ? arr.map(String).filter(s => /集/.test(s)).pop() : '');
+  let label = pickLabel(entrance) || pickLabel(ad.sub_title_list) || (vids.length ? '共 ' + vids.length + ' 集' : '');
+  return {
+    vids,
+    title: ad.title || '',
+    cover: ad.cover || '',
+    label,
+    episodeCnt: Number(ad.episode_cnt) || 0,
+  };
+}
+
 /** 详情：拿全集 vid 列表（与下载集序对齐：vids[i] = 第 i+1 集）。 */
 async function videoDetail(seriesId) {
   const info = await seriesInfo(seriesId);
-  if (info.vids.length === 0) throw new Error('红果详情未返回分集列表');
-  return { vids: info.vids, title: info.title };
+  if (info.vids.length) return { vids: info.vids, title: info.title };
+  /* video_detail 空壳时再问一次 album：UGC 合集（个人创作者的多集视频）就长这样 */
+  const album = await albumInfo(seriesId).catch(() => null);
+  if (album && album.vids.length) return { vids: album.vids, title: album.title || info.title };
+  throw new Error('红果详情未返回分集列表');
 }
 
 /** 单集取流：签名调用 video_model/v1，选最高清晰度档（对齐 python 参照，无上限）。 */
@@ -527,4 +568,4 @@ async function videoModelByEpisode(episodeId) {
   };
 }
 
-module.exports = { videoDetail, seriesInfo, videoModel, deriveKey, searchSeries, fetchWebUrl, registerDevice, currentDevice, buildQuery, goEscape, signedPost, episodeIds, videoModelByEpisode };
+module.exports = { videoDetail, seriesInfo, albumInfo, videoModel, deriveKey, searchSeries, fetchWebUrl, registerDevice, currentDevice, buildQuery, goEscape, signedPost, episodeIds, videoModelByEpisode };

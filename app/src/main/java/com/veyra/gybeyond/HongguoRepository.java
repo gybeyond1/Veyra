@@ -215,14 +215,12 @@ final class HongguoRepository {
         } catch (Exception error) {
             detail = detailFromApp(id);
             if (detail == null) {
-                /* 两条路都不给分集：网页 404 + App 详情说「更新至 0 集」。
-                   这种多半是「已备案、还没上线」的待播剧（video_detail 里
-                   episode_cnt=0、show_player_entrance=false、allow_share=false），
-                   换成谁、用哪套签名都取不到片源——官方 App 里点开也是 0 集。
-                   以前这里直接把 404 抛给前端，整页变成「找不到这个剧集（…）：
-                   内容请求失败（HTTP 404）」，用户根本分不清是剧没上线还是软件坏了。
-                   现在返回一部空分集：详情页照常打开（标题/封面用列表卡片上的），
-                   只在选集区显示一句「暂时没有可播放的剧集」。 */
+                /* 网页 404，App 详情也不给分集。以前这里直接把 404 抛给前端，整页变成
+                   「找不到这个剧集（…）：内容请求失败（HTTP 404）」，用户分不清是剧没了
+                   还是软件坏了。现在返回一部空分集：详情页照常打开（标题/封面用列表
+                   卡片上的），选集区只显示一句「暂时没有可播放的剧集」。
+                   能走到这一步的是真的没片源（还没上线的待播剧 / 片源全下线）——
+                   UGC 合集那种「看起来 0 集其实能播」的，上面 album 那一步就兜住了。 */
                 return pendingDetail(id);
             }
         }
@@ -239,22 +237,41 @@ final class HongguoRepository {
     private Detail detailFromApp(String id) {
         JSONObject app = appApi.fetch(id);
         if (app == null) return null;
-        JSONArray vids = app.optJSONArray("vids");
-        java.util.List<String> episodes = new java.util.ArrayList<>(vids == null ? 0 : vids.length());
+        java.util.List<String> episodes = vidsOf(app);
+        String title = app.optString("series_title", "");
+        String cover = app.optString("series_cover", "");
+        String intro = app.optString("series_intro", "");
+        String label = app.optString("episode_label", "");
+        if (episodes.isEmpty()) {
+            /* video_detail 是个空壳时（content_type 1003、episode_cnt 0、video_list 空），
+               多半是 UGC 合集——个人创作者上传的多集视频。它的分集挂在 album_detail 下，
+               album_id 就是搜索给的那个 series_id，每集的 series_id 就是取流用的 vid。
+               以前只看 video_detail，于是这类合集被当成「一集都没有」。 */
+            JSONObject album = appApi.album(id);
+            if (album != null) {
+                episodes = vidsOf(album);
+                if (title.isEmpty()) title = album.optString("title", "");
+                if (cover.isEmpty()) cover = album.optString("cover", "");
+                if (intro.isEmpty()) intro = album.optString("intro", "");
+                if (label.isEmpty()) label = album.optString("label", "");
+            }
+        }
+        if (episodes.isEmpty() && title.isEmpty()) return null;
+        if (title.isEmpty()) title = "剧集 " + id;
+        if (label.isEmpty()) label = episodes.isEmpty() ? "暂无剧集" : "共 " + episodes.size() + " 集";
+        return new Detail(new Series(id, title, cover, intro, label, ""), episodes);
+    }
+
+    /** 读接口里的 vids 数组；中间有空洞就当整份不可用（播放要按集序对齐）。 */
+    private static java.util.List<String> vidsOf(JSONObject source) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        JSONArray vids = source.optJSONArray("vids");
         for (int i = 0; vids != null && i < vids.length(); i++) {
             String vid = vids.optString(i, "");
-            if (vid.isEmpty()) return null;
-            episodes.add(vid);
+            if (vid.isEmpty()) return new java.util.ArrayList<>(0);
+            out.add(vid);
         }
-        /* 分集为空但元信息在：这也是「还没上线」，照样返回一部空分集，
-           让详情页有标题/封面可显示，比一屏「找不到这个剧集」有用。 */
-        String title = app.optString("series_title", "");
-        if (title.isEmpty() && episodes.isEmpty()) return null;
-        if (title.isEmpty()) title = "剧集 " + id;
-        String label = app.optString("episode_label", "");
-        if (label.isEmpty()) label = episodes.isEmpty() ? "暂无剧集" : "共 " + episodes.size() + " 集";
-        Series series = new Series(id, title, app.optString("series_cover", ""), app.optString("series_intro", ""), label, "");
-        return new Detail(series, episodes);
+        return out;
     }
     /*
      * 播放地址缓存。
