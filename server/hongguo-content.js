@@ -250,15 +250,18 @@ function searchType(genre) {
 
 function searchItemFromRow(row, fallbackTitle) {
   const video = (row && row.video_data) || {};
-  const id = text(video.series_id);
+  /* 联想接口的合集项（word_type=album）video_data 是空的，id 放在 keyword 里。
+     这类就是 UGC 合集（个人上传的多集视频），不认它 Web 上就永远搜不到。 */
+  const id = text(video.series_id) || text(row && row.keyword);
   if (!/^\d{1,30}$/.test(id)) return null;
   const title = text(video.series_title || (row && row.name) || fallbackTitle);
   if (!title) return null;
   const count = Number(video.episode_cnt) || 0;
+  const album = String((row && row.word_type) || '') === 'album';
   return {
     id, title, cover: cleanUrl(video.series_cover || video.cover),
     description: text(video.series_intro), type: searchType(video.genre),
-    badge: text(video.episode_right_text) || (count > 0 ? `全 ${count} 集` : ''),
+    badge: text(video.episode_right_text) || (count > 0 ? `全 ${count} 集` : (album ? '合集' : '')),
     episodeCount: count,
     tags: tagTextList(video.category_list || video.tags),
   };
@@ -296,7 +299,11 @@ function createHongguoContent(fetchText) {
       try { json = JSON.parse(body); } catch { return []; }
       if (json && json.isSuccess === false) return [];
       const rows = json.searchList || json.suggestionList || [];
-      return rows.filter(row => !row || !row.word_type || row.word_type === 'short_play_name')
+      /* word_type 标了 album 的也要：那是 UGC 合集（个人创作者上传的多集视频），
+         只在联想里出现，主搜索结果里没有它。以前一律按 short_play_name 过滤，
+         这类剧在 Web 上就搜不出来。 */
+      return rows.filter(row => !row || !row.word_type
+        || row.word_type === 'short_play_name' || row.word_type === 'album')
         .map(row => searchItemFromRow(row, fallbackTitle)).filter(Boolean);
     };
 
