@@ -410,6 +410,7 @@ app.get('/api/web/hongguo/detail', async (req, res) => {
   // 网页详情的地址是 query 形式（detail?series_id=…）；path 形式 /detail/<id> 2026-11 起一律 404。
   let raw = {};
   let vids = [];
+  let isAlbum = false;
   try {
     const html = await new Promise((ok, fail) =>
       curlGet('https://hongguoduanju.com/detail?series_id=' + encodeURIComponent(id), 10000,
@@ -435,6 +436,7 @@ app.get('/api/web/hongguo/detail', async (req, res) => {
         const album = await hgApp.albumInfo(id).catch(() => null);
         if (album && album.vids.length) {
           vids = album.vids;
+          isAlbum = true;
           if (album.title) {
             raw = { detail_page: { seriesDetail: {
               series_id: id, series_name: album.title, series_cover: album.cover, series_intro: '',
@@ -449,7 +451,9 @@ app.get('/api/web/hongguo/detail', async (req, res) => {
     } catch (e) { console.log('[detail] videoDetail 兜底失败:', e.message); }
   }
   if (!vids.length && !raw.detail_page) return res.status(404).json({ error: '没有这个剧集' });
-  res.json({ raw, vids });
+  /* album=true 告诉客户端这批 vid 属于 UGC 合集，本地直连取流时要换 PUGC 分组；
+     走后端的话后端已经按登记表自动换语义，这个字段只是让两端判断一致。 */
+  res.json({ raw, vids, album: isAlbum });
   if (vids.length) mapVidsToEpisodes(id, vids);
 });
 
@@ -531,7 +535,7 @@ async function resolveEpisodeId({ vid, series, episode, title }) {
 // 旧的内置签名链路（video_model/v1 + vid）2026-11-24 后一律被服务端静默丢弃
 // （HTTP 200 + 0 字节），而且它每次失败都会注册一台新设备、连注册 3 轮，
 // 把 IP 和设备配额一路打光，反而拖累真正能用的链路，所以彻底断开不再兜底。
-async function fetchStream({ vid, series, episode, title }) {
+async function fetchStream({ vid, series, episode, title, album }) {
   let epId = '';
   try {
     epId = await resolveEpisodeId({ vid, series, episode, title });
@@ -539,7 +543,7 @@ async function fetchStream({ vid, series, episode, title }) {
     throw new Error('定位剧集失败：' + e.message);
   }
   if (!epId) throw new Error('这一集定位不到 episode_id，请刷新详情页后重试');
-  return hgApp.videoModelByEpisode(epId);
+  return hgApp.videoModelByEpisode(epId, { album: Boolean(album) });
 }
 
 // 红果单集播放：签名取流 -> ffmpeg 解密转封装（浏览器不能播 CENC 密文）-> 明文 MP4 直发（sendFile 支持 Range 拖动）
@@ -549,15 +553,16 @@ app.get('/api/web/hongguo/stream', async (req, res) => {
   const series = String(req.query.series || '').trim();
   const episode = String(req.query.episode || '').trim();
   const title = String(req.query.title || '').trim();
+  const album = String(req.query.album || '') === '1' || String(req.query.kind || '') === 'album';
   if (!vid && !(series && episode)) return res.status(400).json({ error: '缺少 vid（或 series + episode）' });
   const safeVid = (vid || series + '-' + episode).replace(/[^a-zA-Z0-9_-]/g, '');
   const streamDir = path.join(os.tmpdir(), 'veyra-stream');
   const outFile = path.join(streamDir, safeVid + '.mp4');
   try { fs.mkdirSync(streamDir, { recursive: true }); } catch { /* ignore */ }
   if (fs.existsSync(outFile) && fs.statSync(outFile).size > 100000) return res.sendFile(outFile);
-  console.log('[stream]', new Date().toISOString(), 'vid', vid || (series + '#' + episode));
+  console.log('[stream]', new Date().toISOString(), 'vid', vid || (series + '#' + episode), album ? '[album]' : '');
   try {
-    const { url: mainUrl, key } = await fetchStream({ vid, series, episode, title });
+    const { url: mainUrl, key } = await fetchStream({ vid, series, episode, title, album });
     const args = ['-hide_banner', '-loglevel', 'error', '-y'];
     if (key && /^[0-9a-fA-F]{32}$/.test(key)) args.push('-decryption_key', key.toLowerCase());
     args.push('-i', mainUrl, '-c', 'copy', '-movflags', '+faststart', '-f', 'mp4', outFile);
@@ -605,10 +610,11 @@ app.get('/api/hongguo/play-direct', async (req, res) => {
   const series = String(req.query.series_id || req.query.series || '').trim();
   const episode = String(req.query.episode || '').trim();
   const title = String(req.query.title || '').trim();
+  const album = String(req.query.album || '') === '1' || String(req.query.kind || '') === 'album';
   if (!vid && !(series && episode)) return res.status(400).json({ error: '缺少 vid（或 series + episode）' });
-  console.log('[play-direct]', new Date().toISOString(), 'vid', vid || (series + '#' + episode));
+  console.log('[play-direct]', new Date().toISOString(), 'vid', vid || (series + '#' + episode), album ? '[album]' : '');
   try {
-    const { url: mainUrl, altUrls, key, quality } = await fetchStream({ vid, series, episode, title });
+    const { url: mainUrl, altUrls, key, quality } = await fetchStream({ vid, series, episode, title, album });
     const result = {
       vid,
       definition: quality || '',

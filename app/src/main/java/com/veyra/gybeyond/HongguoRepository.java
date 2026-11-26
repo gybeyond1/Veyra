@@ -228,6 +228,16 @@ final class HongguoRepository {
         return detail;
     }
 
+    /**
+     * UGC 合集（个人创作者上传的多集视频）的 series id。
+     *
+     * 这类内容的分集取流要按 PUGC 分组走，和普通短剧不是一套语义：
+     * 用短剧语义请求站方只会回 101000 或 200 + 空正文，表现就是「有 10 集，点哪集都不播」。
+     * 详情走过 album 兜底就记下来，取流时告诉后端换语义。
+     */
+    private static final java.util.Set<String> ALBUM_SERIES =
+            java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<String, Boolean>());
+
     /** 一集都没有的占位详情；标题/封面留空，前端用点进来时那张卡片补。 */
     private static Detail pendingDetail(String id) {
         return new Detail(new Series(id, "", "", "", "", ""), new java.util.ArrayList<String>(0));
@@ -250,6 +260,7 @@ final class HongguoRepository {
             JSONObject album = appApi.album(id);
             if (album != null) {
                 episodes = vidsOf(album);
+                if (!episodes.isEmpty()) ALBUM_SERIES.add(id);
                 if (title.isEmpty()) title = album.optString("title", "");
                 if (cover.isEmpty()) cover = album.optString("cover", "");
                 if (intro.isEmpty()) intro = album.optString("intro", "");
@@ -367,8 +378,9 @@ final class HongguoRepository {
     private static final long FRESH_TIMEOUT_MS = 9000L;
 
     private StreamInfo resolveStream(String id, String vid, boolean background) throws Exception {
+        final boolean album = ALBUM_SERIES.contains(id);
         java.util.concurrent.Future<StreamInfo> task =
-                RESOLVE_POOL.submit(() -> HongguoDirect.fetch(vid, background));
+                RESOLVE_POOL.submit(() -> HongguoDirect.fetch(vid, background, album));
         StreamInfo info;
         try {
             info = task.get(FRESH_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS);

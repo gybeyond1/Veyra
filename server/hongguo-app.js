@@ -220,6 +220,30 @@ async function seriesInfo(seriesId) {
 }
 
 /**
+ * UGC 合集分集登记表。
+ *
+ * 合集分集（个人创作者上传的多集视频）取流时要按 PUGC 分组（1001）+ video_id_type=1，
+ * 按普通短剧语义（1004）请求只会回 101000 或 200+空正文——表现就是「详情有 10 集，
+ * 点哪集都播不了」。详情走 albumInfo 时把这些 vid 记下来，取流就能自动换语义。
+ */
+const albumVids = new Set();
+const ALBUM_VID_LIMIT = 4000;
+
+function markAlbumVids(vids, on = true) {
+  if (!Array.isArray(vids)) return;
+  for (const vid of vids) {
+    const id = String(vid || '').trim();
+    if (!/^\d{4,25}$/.test(id)) continue;
+    if (on) albumVids.add(id); else albumVids.delete(id);
+  }
+  while (albumVids.size > ALBUM_VID_LIMIT) albumVids.delete(albumVids.values().next().value);
+}
+
+function isAlbumVid(vid) {
+  return albumVids.has(String(vid || '').trim());
+}
+
+/**
  * UGC 合集：个人创作者上传的多集视频。
  *
  * 这类内容在 video_detail 里是个空壳（content_type 1003、episode_cnt 0、video_list 空），
@@ -248,6 +272,7 @@ async function albumInfo(albumId) {
   const entrance = ad.episode_entrance_text;
   const pickLabel = arr => (Array.isArray(arr) ? arr.map(String).filter(s => /集/.test(s)).pop() : '');
   let label = pickLabel(entrance) || pickLabel(ad.sub_title_list) || (vids.length ? '共 ' + vids.length + ' 集' : '');
+  markAlbumVids(vids);
   return {
     vids,
     title: ad.title || '',
@@ -527,7 +552,8 @@ async function episodeIds(seriesId) {
   return json.episodes;
 }
 
-/** 按 episode_id 取流，返回与 videoModel 同形状的结果（key 为 32 位 hex）。 */
+/** 按 episode_id 取流，返回与 videoModel 同形状的结果（key 为 32 位 hex）。
+ *  [opts.album] 强制按 UGC 合集语义取；不传则查登记表（详情走过 albumInfo 就算登记过）。 */
 /* 上游对同一出口 IP 的播放请求有静默配额：连续打空之后整段时间（实测 ≥40 分钟）
  * 所有播放接口都回 HTTP 200 + 0 字节，连详情接口也会跟着降级。继续重试只会把
  * IP 打得更黑，所以连续 3 次空就进入冷却，冷却期内直接报错、不再发请求。 */
@@ -543,14 +569,15 @@ function noteEmpty(reason) {
   }
 }
 
-async function videoModelByEpisode(episodeId) {
+async function videoModelByEpisode(episodeId, opts) {
   if (Date.now() < cooldownUntil) {
     const left = Math.max(1, Math.ceil((cooldownUntil - Date.now()) / 60000));
     throw new Error(`上游限流冷却中（约剩 ${left} 分钟）：继续重试只会让出口 IP 被封更久，请稍后再试`);
   }
+  const album = Boolean(opts && opts.album) || isAlbumVid(episodeId);
   let json;
   try {
-    json = await fetchJson(`/play?episode=${encodeURIComponent(String(episodeId))}`);
+    json = await fetchJson(`/play?episode=${encodeURIComponent(String(episodeId))}${album ? '&album=1' : ''}`);
   } catch (e) {
     noteEmpty(e.message);
     throw e;
@@ -568,4 +595,4 @@ async function videoModelByEpisode(episodeId) {
   };
 }
 
-module.exports = { videoDetail, seriesInfo, albumInfo, videoModel, deriveKey, searchSeries, fetchWebUrl, registerDevice, currentDevice, buildQuery, goEscape, signedPost, episodeIds, videoModelByEpisode };
+module.exports = { videoDetail, seriesInfo, albumInfo, markAlbumVids, isAlbumVid, videoModel, deriveKey, searchSeries, fetchWebUrl, registerDevice, currentDevice, buildQuery, goEscape, signedPost, episodeIds, videoModelByEpisode };

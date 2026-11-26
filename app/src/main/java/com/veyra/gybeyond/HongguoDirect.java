@@ -222,7 +222,7 @@ final class HongguoDirect {
      * @return 直链 + CENC 密钥 + 清晰度
      */
     static StreamInfo fetch(String vid) throws Exception {
-        return fetch(vid, false);
+        return fetch(vid, false, false);
     }
 
     /**
@@ -230,6 +230,14 @@ final class HongguoDirect {
      *                   预热把请求打光了，用户真正点播放时反而只能吃「稍后再试」。
      */
     static StreamInfo fetch(String vid, boolean background) throws Exception {
+        return fetch(vid, background, false);
+    }
+
+    /**
+     * @param album 这一集属于 UGC 合集（个人创作者上传的多集视频）。
+     *              这类分集要后端按 PUGC 分组（1001）取址，按普通短剧语义只会回空。
+     */
+    static StreamInfo fetch(String vid, boolean background, boolean album) throws Exception {
         if (vid == null || !vid.matches("[0-9]{1,30}")) throw new IOException("分集编号无效");
 
         /* 刚刚连续吃空正文：现在再打只会让上游把身份和出口 IP 一起判死，
@@ -238,7 +246,7 @@ final class HongguoDirect {
         if (cooling > 0 && System.currentTimeMillis() - cooling < EMPTY_COOLDOWN_MS) {
             if (background) throw new IOException("上游刚返回空片源，跳过预热");
             /* 上游刚空，本地这套签名注定拿不到；冷却期内先问后端（walk 真实 so 签名）。 */
-            StreamInfo remoteCooling = fetchFromBackend(vid);
+            StreamInfo remoteCooling = fetchFromBackend(vid, album);
             if (remoteCooling != null) {
                 lastAllEmptyAt = 0L;
                 consecutiveEmpty = 0;
@@ -321,7 +329,7 @@ final class HongguoDirect {
         /* 本地三层全空：交给 Veyra 后端。那边跑 openhongguo-signer（unidbg + App 自带
            libmetasec_ml.so），签名是站方认的那一份；2026-11-24 起本地这套移植签名
            无论哪一档常量都只回 200 + 空正文。 */
-        StreamInfo remote = fetchFromBackend(vid);
+        StreamInfo remote = fetchFromBackend(vid, album);
         if (remote != null) {
             lastAllEmptyAt = 0L;
             consecutiveEmpty = 0;
@@ -349,7 +357,7 @@ final class HongguoDirect {
      * 只在本地三层全失败后调用；后端没配、连不上或返回异常时返回 null，
      * 不改变原有失败文案。
      */
-    private static StreamInfo fetchFromBackend(String vid) {
+    private static StreamInfo fetchFromBackend(String vid, boolean album) {
         if (appContext == null) return null;
         String base;
         try {
@@ -358,7 +366,7 @@ final class HongguoDirect {
             return null;
         }
         if (base == null || base.trim().isEmpty()) return null;
-        String endpoint = base.trim().replaceAll("/+$", "") + "/api/hongguo/play-direct?vid=" + vid;
+        String endpoint = base.trim().replaceAll("/+$", "") + "/api/hongguo/play-direct?vid=" + vid + (album ? "&album=1" : "");
         StreamInfo info = backendStream(QUICK, endpoint);
         if (info == null) info = backendStream(HTTP, endpoint);
         return info;
