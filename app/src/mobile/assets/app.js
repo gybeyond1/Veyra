@@ -2952,6 +2952,7 @@ function detailEpisodeSection(data) {
   if (!episodes.length) return `<div class="detail-empty">
     <p class="detail-empty-title">暂时没有可播放的剧集</p>
     <p class="detail-empty-note">这部剧可能还没上线，或者片源已经下线了。过一阵子再来看看。</p>
+    ${data.detailNote ? `<p class="detail-empty-trace">${esc(data.detailNote)}</p>` : ''}
     <button type="button" class="detail-empty-retry" data-retry="detail">重新获取</button></div>`;
   const groups = Math.ceil(episodes.length / DETAIL_EP_PAGE);
   const group = Math.min(Math.max(0, Number(state.epGroup) || 0), groups - 1);

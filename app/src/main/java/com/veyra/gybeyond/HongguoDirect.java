@@ -141,6 +141,9 @@ final class HongguoDirect {
         }
     }
 
+    /** 应用上下文：详情兜底问后端时要用它读服务器地址。 */
+    static Context context() { return appContext; }
+
     private static synchronized Device loadIdentity() {
         if (appContext == null) return null;
         try {

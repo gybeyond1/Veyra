@@ -261,6 +261,11 @@ async function albumInfo(albumId) {
   const ad = (json.data || {}).album_data || {};
   const vdd = (json.data || {}).video_detail_data || {};
   const vids = [];
+  /* 目录项自带的 video_list 里 vid 是空的，只有 video_detail_data 里那个（第一个子作品）
+     才是真 vid。但实测每个子作品的 series_id_str 与它的 vid 完全一致（content_type 1001
+     的 PUGC 子作品，series 号即播放号），所以其余项直接用 series_id_str 顶上。
+     用 series_ids 再问一次接口补齐是群友的做法，这里实测回的是空 video_detail_data，
+     反而不如直接取 series_id_str 稳。 */
   for (const it of (ad.video_detail_list || [])) {
     const sid = String(it.series_id_str || it.series_id || '');
     const one = sid ? vdd[sid] : null;

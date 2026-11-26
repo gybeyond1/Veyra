@@ -2397,7 +2397,8 @@ function epsBlockHtml() {
   /* 待播 / 已下线的剧一集都没有：留一块说明，别让右栏空着像没加载完。
      电视端没有「点击重试」，所以只给一句人话，不挂按钮。 */
   if (!r.total) return '<div class="detail-empty"><p class="detail-empty-title">暂时没有可播放的剧集</p>'
-    + '<p class="detail-empty-note">这部剧可能还没上线，或者片源已经下线了。过一阵子再来看看。</p></div>';
+    + '<p class="detail-empty-note">这部剧可能还没上线，或者片源已经下线了。过一阵子再来看看。</p>'
+    + (state.detail && state.detail.detailNote ? '<p class="detail-empty-trace">' + esc(state.detail.detailNote) + '</p>' : '') + '</div>';
   var html = '<h2 class="eps-title">选集<span>' + (r.start + 1) + '-' + r.end + ' / 共 ' + r.total + ' 集</span></h2><div class="eps">';
   for (var i = r.start; i < r.end; i++) {
     var number = r.episodes[i].number || (i + 1);

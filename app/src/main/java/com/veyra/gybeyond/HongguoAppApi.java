@@ -117,25 +117,23 @@ final class HongguoAppApi {
             JSONArray list = album.optJSONArray("video_detail_list");
             if (list == null || list.length() == 0) return null;
             JSONObject details = data.optJSONObject("video_detail_data");
+            if (details == null) details = new JSONObject();
+            /* 目录项自带的 video_list 里 vid 是空的，只有 video_detail_data 里那第一个
+               子作品是真的。但实测每个子作品的 series_id_str 与它的 vid 完全一致
+               （content_type 1001 的 PUGC 子作品，series 号就是播放号），其余项直接用它顶上。 */
             JSONArray vids = new JSONArray(), titles = new JSONArray();
             for (int i = 0; i < list.length(); i++) {
                 JSONObject item = list.optJSONObject(i);
-                if (item == null) continue;
-                String seriesId = item.optString("series_id_str", "");
-                if (seriesId.isEmpty()) {
-                    long numeric = item.optLong("series_id", 0L);
-                    if (numeric > 0) seriesId = String.valueOf(numeric);
-                }
-                String vid = "";
-                JSONObject one = seriesId.isEmpty() || details == null ? null : details.optJSONObject(seriesId);
+                String sid = seriesIdOf(item);
+                JSONObject one = sid.isEmpty() ? null : details.optJSONObject(sid);
                 JSONObject video = one == null ? null : one.optJSONObject("video_data");
                 JSONArray wl = video == null ? null : video.optJSONArray("video_list");
                 JSONObject first = wl == null ? null : wl.optJSONObject(0);
-                if (first != null) vid = first.optString("vid", "");
-                if (vid.isEmpty()) vid = seriesId;
+                String vid = first == null ? "" : first.optString("vid", "");
+                if (vid.isEmpty()) vid = sid;
                 if (vid.isEmpty()) continue;
                 vids.put(vid);
-                titles.put(item.optString("series_title", ""));
+                titles.put(item == null ? "" : item.optString("series_title", ""));
             }
             if (vids.length() == 0) return null;
             /* episode_entrance_text 是数组（["合集", 标题, "更新至10集"]），
@@ -151,6 +149,15 @@ final class HongguoAppApi {
                     .put("vids", vids)
                     .put("titles", titles);
         } catch (Exception ignored) { return null; }
+    }
+
+    /** 目录项的 series_id：接口有时给字符串、有时给数字，两个都认。 */
+    private static String seriesIdOf(JSONObject item) {
+        if (item == null) return "";
+        String sid = item.optString("series_id_str", "");
+        if (!sid.isEmpty()) return sid;
+        long numeric = item.optLong("series_id", 0L);
+        return numeric > 0 ? String.valueOf(numeric) : "";
     }
 
     /** 从 ["合集", 标题, "更新至10集"] 这种副标题数组里挑出带「集」的那条。 */

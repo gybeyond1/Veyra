@@ -1008,6 +1008,7 @@ html[data-theme=dark] .remote-test-result.fail,html[data-theme=dark] .dl-remote-
 .detail-empty{margin:22px 0 8px;padding:20px 18px;border:1px dashed var(--line);border-radius:calc(14px * var(--corner-scale,1));background:color-mix(in srgb,var(--panel) 60%,transparent);text-align:center}
 .detail-empty-title{margin:0 0 6px;font-size:14px;font-weight:800;color:var(--text)}
 .detail-empty-note{margin:0 0 14px;font-size:12px;line-height:1.6;color:var(--muted)}
+.detail-empty-trace{margin:0 0 12px;font-size:11px;line-height:1.5;color:var(--muted);opacity:.7;word-break:break-all}
 .detail-empty-retry{height:34px;padding:0 18px;border:1px solid var(--line);border-radius:calc(999px * var(--corner-scale,1));background:var(--panel);color:var(--text);font-size:12px;font-weight:700}
 .detail-section{margin-top:16px}
 .detail-section h2{margin:0 0 12px;font-size:17px;letter-spacing:-.02em}
