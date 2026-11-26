@@ -548,6 +548,14 @@ function fetchJson(pathname, timeoutMs) {
   });
 }
 
+/** App 搜索：网页目录搜不到的 UGC 合集（个人创作者上传）只在 App 的搜索里。
+ *  返回 { id, title, cover, badge, episodeCount, ... }，与网页搜索结果同形状。 */
+async function appSearch(keyword, page) {
+  const json = await fetchJson(`/search?q=${encodeURIComponent(String(keyword || ''))}&page=${page || 1}`, 30000);
+  if (!json || !Array.isArray(json.items)) return [];
+  return json.items.filter(it => it && /^\d{1,30}$/.test(String(it.id || '')));
+}
+
 /** 分集列表：返回 [{ index, id, playable }]，id 是数字 episode_id。 */
 async function episodeIds(seriesId) {
   const json = await fetchJson(`/episodes?series=${encodeURIComponent(String(seriesId))}`);
@@ -614,4 +622,4 @@ async function videoModelByEpisode(episodeId, opts) {
   };
 }
 
-module.exports = { videoDetail, seriesInfo, albumInfo, markAlbumVids, isAlbumVid, videoModel, deriveKey, searchSeries, fetchWebUrl, registerDevice, currentDevice, buildQuery, goEscape, signedPost, episodeIds, videoModelByEpisode };
+module.exports = { videoDetail, seriesInfo, albumInfo, markAlbumVids, isAlbumVid, videoModel, deriveKey, searchSeries, appSearch, fetchWebUrl, registerDevice, currentDevice, buildQuery, goEscape, signedPost, episodeIds, videoModelByEpisode };

@@ -394,10 +394,39 @@ const SEARCH_TTL_MS = 5 * 60 * 1000;
 app.get('/api/web/hongguo/search', async (req, res) => {
   const q = String(req.query.q || '').trim();
   if (!q) return res.json({ items: [] });
+
+  /* 直接贴编号或分享链接：UGC 合集（个人创作者上传的多集视频）不参与搜索索引，
+     站内搜不到，只能按 series_id 打开。支持纯数字，以及带 series_id= 的 URL。 */
+  const direct = /^\d{8,20}$/.test(q) ? q
+    : (() => {
+      const m = /[?&](?:series_id|id)=(\d{8,20})/.exec(q) || /\/detail\/(\d{8,20})/.exec(q);
+      return m ? m[1] : '';
+    })();
+  if (direct) {
+    return res.json({
+      items: [{ id: direct, title: '剧集 ' + direct, cover: '', description: '', type: '', badge: '按编号直达', episodeCount: 0, tags: [] }],
+      query: q, direct: true,
+    });
+  }
+
   const hit = searchCache.get(q);
   if (hit && Date.now() - hit.at < SEARCH_TTL_MS) return res.json(hit.data);
   try {
     const data = await hgCatalog.search(q);
+    /* 网页目录只收录站内短剧：UGC 合集与部分新剧只在 App 的搜索里。
+       这里补一遍 App 搜索并按 id 去重，再一起返回。 */
+    try {
+      const extra = await hgApp.appSearch(q, 1);
+      if (extra.length) {
+        const seen = new Set((data.items || []).map(it => String(it.id)));
+        for (const it of extra) {
+          if (seen.has(String(it.id))) continue;
+          seen.add(String(it.id));
+          data.items.push(it);
+        }
+        data.counts = { total: data.items.length };
+      }
+    } catch (e) { console.log('[search] App 搜索兜底失败:', e.message); }
     searchCache.set(q, { at: Date.now(), data });
     while (searchCache.size > 60) searchCache.delete(searchCache.keys().next().value);
     res.json(data);
