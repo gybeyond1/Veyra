@@ -1489,8 +1489,15 @@ app.get('/api/app-download/:channel/:file', (req, res) => {
 
 app.get('/api/health', (_req, res) => {
   const update = appUpdater.manifest;
+  // 取流链自述：入口脚本把签名 / 取流服务状态写进 /tmp/veyra-state，
+  // 「播不了」时先看这里，一眼分清是后端没起、签名没就绪还是上游空片源。
+  const readState = (name) => {
+    try { return fs.readFileSync(`/tmp/veyra-state/${name}`, 'utf8').trim() || 'unknown'; }
+    catch { return 'unknown'; }
+  };
   res.json({
     code: 200, service: 'veyra-backend', status: 'ok', time: Date.now(),
+    chain: { backend: 'up', signer: readState('signer'), fetch: readState('fetch') },
     download: downloader.status(),
     update: update ? { version: update.version, channels: Object.keys(update.channels || {}) } : null,
     // 正在拉的包进度（几段、第几轮、已下多少）—— 排查「为什么一直没好」全靠它

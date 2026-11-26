@@ -1,31 +1,22 @@
 services:
-  # 红果取流签名服务：在 unidbg 里跑 App 自带的 libmetasec_ml.so，生成真实的
-  # X-Gorgon / X-Helios / X-Medusa 头。
-  # 2026-11-24 起站方只接受真实 so 产出的播放签名，内置移植版（v04.06.04 和
-  # v04.10.03 两档都试过）一律回 HTTP 200 + 空正文，所以这个服务不能省。
-  hongguo-signer:
-    image: beilunyang/openhongguo-signer:latest
-    container_name: veyra-signer
-    restart: unless-stopped
-    # 只给 veyra-backend 在容器网络内调用，不映射端口到宿主机
-    # 镜像自带 HEALTHCHECK（GET /ready），启动约 20~40 秒才 ready
-
+  # 后端镜像已经内置播放签名服务（unidbg + App 自带 libmetasec_ml.so），
+  # 不需要再单独跑一个 hongguo-signer 容器。
+  #
+  # 2026-11-26：以前这里挂着 depends_on: service_healthy，一旦 hongguo-signer
+  # 拉不下来或起不来，后端容器就永远停在 Created 不启动 —— 手机端报
+  # 「后端连不上」，一集都播不了。依赖已删掉，后端不再被别的容器卡住。
   veyra-backend:
     image: gybeyond/veyra-backend:latest
     container_name: veyra
     restart: unless-stopped
-    depends_on:
-      hongguo-signer:
-        # 签名服务启动约 20~40 秒才 ready，等健康再起后端，避免冷启动期取流全空
-        condition: service_healthy
     ports:
       - "8888:8888"
     environment:
       - PORT=8888
       - DATA_DIR=/data
       - ADMIN_PASSWORD=change-me   # WebUI 管理台密码（务必改为强密码；勿把真实密码提交进仓库）
-      # 取流签名服务地址（容器名）。留空会退回内置签名，2026-11-24 之后取流必失败。
-      - HG_SIGNER=http://hongguo-signer:19830
+      # 留空 = 用镜像内置的签名服务；只有自己另跑签名容器时才填。
+      # - HG_SIGNER=http://hongguo-signer:19830
     volumes:
       - ./data:/data            # 用户/任务/头像等数据
       - /volume1/gy/veyra:/video  # NAS 下载合并产物（固定 /video 挂载）
