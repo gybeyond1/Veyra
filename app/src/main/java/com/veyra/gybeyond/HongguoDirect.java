@@ -414,12 +414,20 @@ final class HongguoDirect {
                 }
                 JSONObject encrypt = json.optJSONObject("encrypt");
                 String hexKey = encrypt == null ? "" : encrypt.optString("key", "");
-                if (!hexKey.matches("[0-9a-fA-F]{32,64}")) {
-                    LAST_PROBE.set("backend/缺密钥");
-                    BACKEND_NOTE.set("返回里没有内容密钥");
-                    return null;
+                /* encrypt 为 null 是合法返回：UGC 合集与部分片源是明文 mp4，没有 CENC 密钥。
+                   以前这里一律要求 32~64 位 hex，明文流被当成「后端没给密钥」丢掉 ——
+                   表现就是普通短剧能播、个人创作者上传的合集一集都播不了。
+                   MediaCrypto 对 key=null 本来就是明文直通（prepare/decrypt 都直接返回原数据）。 */
+                byte[] key = null;
+                if (encrypt != null) {
+                    if (!hexKey.matches("[0-9a-fA-F]{32,64}")) {
+                        LAST_PROBE.set("backend/缺密钥");
+                        BACKEND_NOTE.set("返回里没有内容密钥");
+                        return null;
+                    }
+                    key = HongguoSign551.hex(hexKey);
                 }
-                return new StreamInfo(main, HongguoSign551.hex(hexKey), json.optString("definition", ""));
+                return new StreamInfo(main, key, json.optString("definition", ""));
             }
         } catch (Throwable error) {
             LAST_PROBE.set("backend/不可达");
