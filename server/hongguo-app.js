@@ -560,38 +560,52 @@ async function episodeIds(seriesId) {
 /** 按 episode_id 取流，返回与 videoModel 同形状的结果（key 为 32 位 hex）。
  *  [opts.album] 强制按 UGC 合集语义取；不传则查登记表（详情走过 albumInfo 就算登记过）。 */
 /* 上游对同一出口 IP 的播放请求有静默配额：连续打空之后整段时间（实测 ≥40 分钟）
- * 所有播放接口都回 HTTP 200 + 0 字节，连详情接口也会跟着降级。继续重试只会把
- * IP 打得更黑，所以连续 3 次空就进入冷却，冷却期内直接报错、不再发请求。 */
-let emptyStreak = 0;
-let cooldownUntil = 0;
-const COOLDOWN_MS = Math.max(60_000, parseInt(process.env.HG_COOLDOWN_MS || '600000', 10) || 600000);
+ * 所有播放接口都回 HTTP 200 + 0 字节。继续重试只会把 IP 打得更黑，所以连续 3 次空
+ * 就进入冷却，冷却期内直接报错、不再发请求。
+ *
+ * 2026-11-26 修正：计数与冷却必须按「普通 / 合集」分开。
+ * 以前是全局一份，一个取不到片源的 UGC 合集被连点几下就把普通短剧一起拖下水——
+ * 全站 10 分钟播不了，用户看到的就是「更新之后什么都播不了了」。
+ * 另外只有真正的空响应（200/0B）才计数：路由返回错误码、超时、后端自述的原因
+ * 都不代表出口被限流，不该触发冷却。 */
+const COOLDOWN_MS = Math.max(60_000, parseInt(process.env.HG_COOLDOWN_MS || '300000', 10) || 300000);
+const emptyStreak = { short: 0, album: 0 };
+const cooldownUntil = { short: 0, album: 0 };
 
-function noteEmpty(reason) {
-  emptyStreak++;
-  if (emptyStreak >= 3 && Date.now() >= cooldownUntil) {
-    cooldownUntil = Date.now() + COOLDOWN_MS;
-    console.log(`[stream] 连续 ${emptyStreak} 次空响应（${reason}），进入 ${Math.round(COOLDOWN_MS / 60000)} 分钟冷却`);
+function isRateLimited(reason) {
+  const text = String(reason || '');
+  return /200\s*\/?\s*0B|空正文|empty response|取流结果为空/i.test(text);
+}
+
+function noteEmpty(kind, reason) {
+  if (!isRateLimited(reason)) return;
+  emptyStreak[kind]++;
+  if (emptyStreak[kind] >= 3 && Date.now() >= cooldownUntil[kind]) {
+    cooldownUntil[kind] = Date.now() + COOLDOWN_MS;
+    console.log(`[stream] ${kind} 连续 ${emptyStreak[kind]} 次空响应（${reason}），进入 ${Math.round(COOLDOWN_MS / 60000)} 分钟冷却`);
   }
 }
 
 async function videoModelByEpisode(episodeId, opts) {
-  if (Date.now() < cooldownUntil) {
-    const left = Math.max(1, Math.ceil((cooldownUntil - Date.now()) / 60000));
+  const album = Boolean(opts && opts.album) || isAlbumVid(episodeId);
+  const kind = album ? 'album' : 'short';
+  if (Date.now() < cooldownUntil[kind]) {
+    const left = Math.max(1, Math.ceil((cooldownUntil[kind] - Date.now()) / 60000));
     throw new Error(`上游限流冷却中（约剩 ${left} 分钟）：继续重试只会让出口 IP 被封更久，请稍后再试`);
   }
-  const album = Boolean(opts && opts.album) || isAlbumVid(episodeId);
   let json;
   try {
     json = await fetchJson(`/play?episode=${encodeURIComponent(String(episodeId))}${album ? '&album=1' : ''}`);
   } catch (e) {
-    noteEmpty(e.message);
+    noteEmpty(kind, e.message);
     throw e;
   }
   if (!json || !json.url) {
-    noteEmpty((json && json.error) || '取流结果为空');
-    throw new Error((json && json.error) || '取流结果为空');
+    const reason = (json && json.error) || '取流结果为空';
+    noteEmpty(kind, reason);
+    throw new Error(reason);
   }
-  emptyStreak = 0;
+  emptyStreak[kind] = 0;
   return {
     url: json.url,
     altUrls: Array.isArray(json.altUrls) ? json.altUrls : [],

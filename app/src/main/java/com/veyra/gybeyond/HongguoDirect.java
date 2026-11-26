@@ -130,6 +130,8 @@ final class HongguoDirect {
     private static final Map<String, Object[]> RECENT = new java.util.concurrent.ConcurrentHashMap<>();
     /** 最近一次取址的形态（状态码/正文长度），只进错误文案，不含地址与凭据。 */
     private static final ThreadLocal<String> LAST_PROBE = new ThreadLocal<>();
+    /** 后端这次失败的原因（HTTP 码 / 空正文 / 后端自述的路由结果），单独记，避免和本地的混在一起。 */
+    private static final ThreadLocal<String> BACKEND_NOTE = new ThreadLocal<>();
 
     static void init(Context context) {
         appContext = context == null ? null : context.getApplicationContext();
@@ -340,6 +342,9 @@ final class HongguoDirect {
             return remote;
         }
 
+        String backendNote = BACKEND_NOTE.get();
+        if (backendNote != null) errors.add("后端 " + backendNote);
+
         /* 兜底：这一集最近成功播过，地址还在有效期内，就直接复用
            （hongguoTV 0.16.11 的同一做法：新请求只用来验证，不为拿地址再撞一次接口）。 */
         StreamInfo recent = recall(vid);
@@ -370,6 +375,7 @@ final class HongguoDirect {
         }
         if (base == null || base.trim().isEmpty()) return null;
         String endpoint = base.trim().replaceAll("/+$", "") + "/api/hongguo/play-direct?vid=" + vid + (album ? "&album=1" : "");
+        BACKEND_NOTE.remove();
         StreamInfo info = backendStream(QUICK, endpoint);
         if (info == null) info = backendStream(HTTP, endpoint);
         return info;
@@ -385,22 +391,45 @@ final class HongguoDirect {
             try (Response response = client.newCall(request).execute()) {
                 if (!response.isSuccessful() || response.body() == null) {
                     LAST_PROBE.set("backend/HTTP " + response.code());
+                    BACKEND_NOTE.set("HTTP " + response.code());
                     return null;
                 }
                 String text = new String(response.body().bytes(), StandardCharsets.UTF_8);
-                if (text.trim().isEmpty()) return null;
+                if (text.trim().isEmpty()) {
+                    LAST_PROBE.set("backend/200-0B");
+                    BACKEND_NOTE.set("200 空正文");
+                    return null;
+                }
                 JSONObject json = new JSONObject(text);
                 String main = json.optString("main_url", "");
-                if (main.isEmpty()) return null;
+                if (main.isEmpty()) {
+                    /* 后端的错误文案比本地这三层有用得多：它知道自己是哪条路由空的
+                       （V5/1001、播放器入口、旧接口），会写在 error 字段里。 */
+                    String error = json.optString("error", "");
+                    LAST_PROBE.set("backend/" + (error.isEmpty() ? "无直链" : clip(error)));
+                    BACKEND_NOTE.set(error.isEmpty() ? "返回里没有直链" : clip(error));
+                    return null;
+                }
                 JSONObject encrypt = json.optJSONObject("encrypt");
                 String hexKey = encrypt == null ? "" : encrypt.optString("key", "");
-                if (!hexKey.matches("[0-9a-fA-F]{32,64}")) return null;
+                if (!hexKey.matches("[0-9a-fA-F]{32,64}")) {
+                    LAST_PROBE.set("backend/缺密钥");
+                    BACKEND_NOTE.set("返回里没有内容密钥");
+                    return null;
+                }
                 return new StreamInfo(main, HongguoSign551.hex(hexKey), json.optString("definition", ""));
             }
         } catch (Throwable error) {
             LAST_PROBE.set("backend/不可达");
+            BACKEND_NOTE.set("连不上（服务器地址填错 / 后端没起来）");
             return null;
         }
+    }
+
+    /** 后端错误文案截断：气泡里放不下整段，取前 60 个字够定位。 */
+    private static String clip(String text) {
+        String one = text.replace('\n', ' ').trim();
+        return one.length() <= 60 ? one : one.substring(0, 60) + "…";
     }
 
     private static void pause(long millis) throws IOException {
