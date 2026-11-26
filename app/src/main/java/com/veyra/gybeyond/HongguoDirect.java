@@ -259,7 +259,9 @@ final class HongguoDirect {
                 return remoteCooling;
             }
             long wait = Math.max(1, (EMPTY_COOLDOWN_MS - (System.currentTimeMillis() - cooling) + 999) / 1000);
-            throw new IOException("上游刚连续返回空片源，请 " + wait + " 秒后再试");
+            String coolingNote = BACKEND_NOTE.get();
+            throw new IOException("上游刚连续返回空片源，请 " + wait + " 秒后再试"
+                    + (coolingNote == null ? "" : "（后端 " + coolingNote + "）"));
         }
 
         List<String> errors = new ArrayList<>();
