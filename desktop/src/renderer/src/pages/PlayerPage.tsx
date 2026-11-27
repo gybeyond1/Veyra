@@ -37,15 +37,14 @@ export default function PlayerPage({ source, id, episode, title, position, local
   const [remoteFallback, setRemoteFallback] = useState(false);
   /** 当前这一集是不是正在本机转码（只影响提示文案） */
   const [transcoding, setTranscoding] = useState(false);
-  /**
-   * 这一集是 CENC 加密的：后端给了远端直链和内容密钥。
-   * 有它就能把地址直接交给 mpv 边下边解（可拖进度），不用等整集落盘。
-   */
-  const [decrypt, setDecrypt] = useState<{ url: string; key: string } | null>(null);
   /** 滚轮切集的上一次触发时间：一次拨动会连发好几帧 wheel，必须节流 */
   const wheelAt = useRef(0);
   /** 加密集：地址秒回但首帧还要等，loading 遮罩先别撤 */
   const holdLoading = useRef(false);
+  /** 加密集的远端直链 + 密钥：说明这集是边下边解的，首帧出来后拿它去后台落一份完整文件 */
+  const decryptRef = useRef<{ url: string; key: string } | null>(null);
+  /** 整集落盘、换成本地文件后给个短提示，让人知道现在能拖进度了 */
+  const [cachedTip, setCachedTip] = useState(false);
 
   /**
    * 这台机器的 Chromium 能不能直接解 H.265。
@@ -93,7 +92,8 @@ export default function PlayerPage({ source, id, episode, title, position, local
     setLoading(true);
     setError('');
     setUrl('');
-    setDecrypt(null);
+    decryptRef.current = null;
+    setCachedTip(false);
     holdLoading.current = false;
 
     // 别的设备上的成品：本机能解 H.265 就原样播（零转码、可随意拖进度）；
@@ -118,7 +118,7 @@ export default function PlayerPage({ source, id, episode, title, position, local
         const nextKind = (result as { kind?: 'hls' | 'file' | 'stream' }).kind;
         setKind(nextKind === 'hls' ? 'hls' : 'file');
         const encrypted = (result as { decrypt?: { url: string; key: string } }).decrypt || null;
-        setDecrypt(encrypted);
+        decryptRef.current = encrypted;
         // 加密集的地址是秒回的，遮罩要留到第一帧出来（loadeddata 那边才撤）
         holdLoading.current = Boolean(encrypted);
         setUrl(result.url);
@@ -137,6 +137,7 @@ export default function PlayerPage({ source, id, episode, title, position, local
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !url) return;
+    let alive = true;
     let hls: Hls | null = null;
 
     // 服务端已经告诉我们这是 m3u8 还是 mp4：m3u8 必须走 hls.js，直接塞给 video 只会一直转圈
@@ -168,6 +169,43 @@ export default function PlayerPage({ source, id, episode, title, position, local
     // 边下边解时地址是秒回的，遮罩不能跟着地址一起收 —— 等第一帧真的解出来再撤
     const onReady = () => setLoading(false);
     video.addEventListener('loadeddata', onReady);
+
+    /**
+     * 先流式出画面，再在后台把这一集完整落成 mp4。
+     * 落好之后把同一路视频的源换成本地文件（带 Range），从这一刻起进度条能往前拖、
+     * 时长也不再是 ∞。换源时把当前播放位置带过去，画面不会跳回开头。
+     */
+    let swapping = false;
+    let cacheTimer = 0;
+    const startCache = () => {
+      if (swapping || !decryptRef.current || localTaskId || remoteUrl) return;
+      swapping = true;
+      void call<{ url: string } | null>('player.cacheEpisode', { source, id, episode, hevc: hevcOk })
+        .then((result) => {
+          if (!alive || !result?.url) return;
+          const at = video.currentTime;
+          const playing = !video.paused;
+          video.src = result.url;
+          video.addEventListener(
+            'loadedmetadata',
+            () => {
+              if (!alive) return;
+              if (Number.isFinite(video.duration) && at > 0 && at < video.duration - 1) video.currentTime = at;
+              if (playing) void video.play().catch(() => undefined);
+              setCachedTip(true);
+              window.setTimeout(() => setCachedTip(false), 6000);
+            },
+            { once: true },
+          );
+        })
+        .catch(() => undefined);
+    };
+    // 首帧出来先别急着抢带宽：等开头那段缓冲稳住再去后台拉整集
+    const kickCache = () => {
+      if (cacheTimer || swapping) return;
+      cacheTimer = window.setTimeout(startCache, 8000);
+    };
+    video.addEventListener('loadeddata', kickCache);
 
     // 远端成品如是 H.265：有声音、进度在走，但 videoWidth 永远是 0。
     // 这里一旦发现「能播但没画面」，就切到媒体服务的转码版重来一次。
@@ -205,9 +243,12 @@ export default function PlayerPage({ source, id, episode, title, position, local
     video.addEventListener('ended', onEnded);
 
     return () => {
+      alive = false;
       window.clearInterval(timer);
       video.removeEventListener('ended', onEnded);
       video.removeEventListener('loadeddata', onReady);
+      video.removeEventListener('loadeddata', kickCache);
+      window.clearTimeout(cacheTimer);
       video.removeEventListener('loadeddata', checkPicture);
       video.removeEventListener('error', onPictureError);
       if (hls) hls.destroy();
@@ -280,6 +321,7 @@ export default function PlayerPage({ source, id, episode, title, position, local
         ) : (
           <>
             <video ref={videoRef} controls playsInline preload="auto" />
+            {cachedTip && !error && <div className="player-tip">已缓存到本机，现在可以拖动进度条了</div>}
             {loading && (
               <div className="player-loading">
                 <p>

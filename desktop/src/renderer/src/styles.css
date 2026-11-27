@@ -1641,6 +1641,26 @@ input::placeholder {
   color: var(--muted);
   font-size: 12px;
 }
+/* 整集落盘完成、源已换成本地文件：右下角提示一下现在能拖进度 */
+.player-tip {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  padding: 6px 11px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.66);
+  border: 1px solid var(--line);
+  color: var(--text);
+  font-size: 12px;
+  backdrop-filter: blur(6px);
+  animation: player-tip-in 0.2s ease;
+}
+@keyframes player-tip-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
 
 /* ---------- 选集：默认点集播放，点「下载」才进入勾选 ---------- */
 .ep {

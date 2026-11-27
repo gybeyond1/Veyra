@@ -21,9 +21,12 @@ export default function SettingsPage({ settings, notify, onSaved, onClose, sourc
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [checking, setChecking] = useState(false);
   const [progress, setProgress] = useState<{ phase: string; percent: number } | null>(null);
+  /** 播放缓存占用：只统计 media-cache/play，和下载目录互不相干 */
+  const [cache, setCache] = useState<{ bytes: number; limit: number } | null>(null);
 
   useEffect(() => {
     call<ServerInfo>('app.info').then(setInfo).catch(() => undefined);
+    call<{ bytes: number; limit: number }>('player.cacheInfo').then(setCache).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -104,6 +107,17 @@ export default function SettingsPage({ settings, notify, onSaved, onClose, sourc
       await call('app.openPath', draft.downloadDir);
     } catch (issue) {
       notify(`打不开这个目录：${errorText(issue)}`, 'error');
+    }
+  }
+
+  /** 清播放缓存：只删 media-cache/play，下载目录里用户的东西不动 */
+  async function clearCache() {
+    try {
+      const next = await call<{ bytes: number; limit: number }>('player.cacheClear');
+      setCache(next);
+      notify('播放缓存已清理，下载的剧集没动');
+    } catch (issue) {
+      notify(errorText(issue), 'error');
     }
   }
 
@@ -190,6 +204,20 @@ export default function SettingsPage({ settings, notify, onSaved, onClose, sourc
               <button type="button" className="ghost" onClick={pickDir}>
                 选择目录
               </button>
+            </div>
+            <div className="row">
+              <div>
+                <strong>播放缓存</strong>
+                <p>
+                  {cache ? `${formatBytes(cache.bytes)} / 上限 ${formatBytes(cache.limit)}` : '统计中…'}
+                  。在线播放时边看边存一份，存完就能拖进度条；满了自动删最久没看的。只动这块缓存，下载目录里的剧集不会被删。
+                </p>
+              </div>
+              <div className="row-ctrl">
+                <button type="button" className="ghost" disabled={!cache || cache.bytes === 0} onClick={() => void clearCache()}>
+                  清理
+                </button>
+              </div>
             </div>
             <div className="row">
               <div>

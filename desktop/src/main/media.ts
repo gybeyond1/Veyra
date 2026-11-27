@@ -59,6 +59,196 @@ function cacheDir(): string {
   return dir;
 }
 
+/**
+ * 播放缓存：边看边把整集解密落成一个完整的 mp4，落盘后播放器就能随意拖进度条。
+ *
+ * 只写在 userData/media-cache/play 里，和「下载」目录（settings.downloadDir）完全隔离：
+ * 这边超限只淘汰这边的文件，用户下载的成品一个字节都不会动。
+ */
+const PLAY_CACHE_LIMIT = 200 * 1024 * 1024;
+const playCacheJobs = new Map<string, Promise<string>>();
+/** 正在写 / 正在发的文件：淘汰时必须跳过，删了播放器当场断流 */
+const playCacheActive = new Set<string>();
+
+function playCacheDir(): string {
+  const dir = path.join(cacheDir(), 'play');
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function playCacheFile(source: string, seriesId: string, episode: number, h264: boolean): string {
+  const safe = String(seriesId).replace(/[^0-9a-zA-Z_-]/g, '').slice(0, 24) || 'x';
+  return path.join(playCacheDir(), `${source}-${safe}-${episode}${h264 ? '-h264' : ''}.mp4`);
+}
+
+/** 命中就把访问时间刷新一下：淘汰按「最久没用」先删 */
+function playCacheHit(source: string, seriesId: string, episode: number, h264: boolean): string | null {
+  const file = playCacheFile(source, seriesId, episode, h264);
+  try {
+    const stat = fs.statSync(file);
+    // 半截文件（上次进程被杀）当没命中，重下一遍
+    if (stat.size < 64 * 1024) {
+      fs.rmSync(file, { force: true });
+      return null;
+    }
+    const now = new Date();
+    fs.utimesSync(file, now, now);
+    return file;
+  } catch {
+    return null;
+  }
+}
+
+function playCacheBytes(): number {
+  const dir = playCacheDir();
+  let total = 0;
+  try {
+    for (const name of fs.readdirSync(dir)) {
+      try {
+        total += fs.statSync(path.join(dir, name)).size;
+      } catch {
+        /* 刚好被删掉 */
+      }
+    }
+  } catch {
+    /* 目录还没建起来 */
+  }
+  return total;
+}
+
+/**
+ * 超上限就淘汰：只动 play 目录里的 .mp4，按最后访问时间从旧到新删，
+ * 删到 200MB 以下为止。keep（刚写好、马上要播的那一集）和正在写的 .part 永远跳过。
+ */
+function enforcePlayCache(keep?: string): void {
+  const dir = playCacheDir();
+  let names: string[] = [];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return;
+  }
+
+  const rows: { file: string; size: number; at: number }[] = [];
+  let total = 0;
+  for (const name of names) {
+    const file = path.join(dir, name);
+    // 正在写的那一份也要算进占用（不然 200MB 上限会被一个半截文件顶穿），只是不删
+    const writing = playCacheActive.has(file);
+    if (!name.endsWith('.mp4')) {
+      if (name.endsWith('.part')) {
+        if (writing) {
+          try {
+            total += fs.statSync(file).size;
+          } catch {
+            /* 刚 rename 掉 */
+          }
+        } else {
+          // 上次写到一半就被杀掉的残留，顺手清掉
+          fs.rmSync(file, { force: true });
+        }
+      }
+      continue;
+    }
+    try {
+      const stat = fs.statSync(file);
+      total += stat.size;
+      if (writing || file === keep) continue;
+      rows.push({ file, size: stat.size, at: stat.mtimeMs });
+    } catch {
+      /* 已经不在 */
+    }
+  }
+  if (total <= PLAY_CACHE_LIMIT) return;
+
+  rows.sort((a, b) => a.at - b.at);
+  for (const row of rows) {
+    if (total <= PLAY_CACHE_LIMIT) break;
+    try {
+      fs.rmSync(row.file, { force: true });
+      total -= row.size;
+    } catch {
+      /* 被播放器占着，下次再说 */
+    }
+  }
+}
+
+/**
+ * 后台把一整集解密（必要时转码）写成可 seek 的完整 mp4。
+ * 先写 .part，ffmpeg 正常退出才 rename —— 半截文件不能冒充成品，
+ * 否则播放器会拿到一个坏文件、拖一下就报错。
+ */
+function decryptToFile(enc: { url: string; key: string }, needH264: boolean, file: string): Promise<string> {
+  const part = `${file}.part`;
+  playCacheActive.add(part);
+  const run = async (): Promise<string> => {
+    const args = ['-hide_banner', '-loglevel', 'error', '-y', '-decryption_key', enc.key, '-i', enc.url];
+    if (needH264) {
+      const encoders = await listEncoders();
+      if (!encoders.length) throw new Error('这个 ffmpeg 没有 H.264 编码器');
+      const encoder = encoders[0];
+      args.push('-c:v', encoder);
+      // 这时候正在播的那一路也在转码，别把 CPU 全抢走：限 3 线程、稍降画质要求
+      if (encoder === 'libx264') args.push('-preset', 'veryfast', '-crf', '23', '-threads', '3');
+      args.push('-vf', 'scale=-2:min(1280\\,ih)', '-c:a', 'aac', '-b:a', '128k');
+    } else {
+      args.push('-c', 'copy');
+    }
+    // faststart：moov 挪到文件头，播放器拖进度时不用先把整段读完
+    args.push('-movflags', '+faststart', '-f', 'mp4', part);
+
+    await new Promise<void>((resolve, reject) => {
+      const proc = spawn(ffmpegAvailable(), args, { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+      let stderr = '';
+      proc.stderr?.on('data', (chunk: Buffer) => {
+        stderr = (stderr + chunk.toString()).slice(-2000);
+      });
+      proc.on('error', (error) => reject(error));
+      proc.on('exit', (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(stderr.split('\n').map((line) => line.trim()).filter(Boolean).pop() || `ffmpeg 退出 ${code}`));
+      });
+    });
+
+    fs.renameSync(part, file);
+    playCacheActive.delete(part);
+    enforcePlayCache(file);
+    return file;
+  };
+
+  return run().catch((error) => {
+    playCacheActive.delete(part);
+    try {
+      fs.rmSync(part, { force: true });
+    } catch {
+      /* ignore */
+    }
+    throw error;
+  });
+}
+
+/** 同一集只跑一个后台任务：上一集没落完又点了同一集，直接等同一个 Promise */
+function ensurePlayCache(
+  source: string,
+  seriesId: string,
+  episode: number,
+  enc: { url: string; key: string },
+  needH264: boolean,
+): Promise<string> {
+  const hit = playCacheHit(source, seriesId, episode, needH264);
+  if (hit) return Promise.resolve(hit);
+  const file = playCacheFile(source, seriesId, episode, needH264);
+  const running = playCacheJobs.get(file);
+  if (running) return running;
+  // 开新任务前先腾地方：别让新一集落完才发现超了，又回头删掉刚存的
+  enforcePlayCache();
+  const job = decryptToFile(enc, needH264, file).finally(() => {
+    playCacheJobs.delete(file);
+  });
+  playCacheJobs.set(file, job);
+  return job;
+}
+
 function encode(value: string): string {
   return Buffer.from(value, 'utf8').toString('base64url');
 }
@@ -580,7 +770,11 @@ export async function prepare(
     return { kind: /\.m3u8(\?|$)/i.test(found.url) ? 'hls' : 'file' };
   }
   const target = await hongguoStream(seriesId, episode);
-  if (target.enc) return { kind: 'stream', enc: target.enc };
+  if (target.enc) {
+    // 这一集上次已经完整落过盘：直接给文件地址，一打开就能拖进度条
+    if (playCacheHit('hongguo', seriesId, episode, h264)) return { kind: 'file' };
+    return { kind: 'stream', enc: target.enc };
+  }
   // 这台机器放不了 H.265：先把转码做完再交地址，别让播放器对着黑屏干等
   if (target.file && h264) await ensureH264(target.file);
   return { kind: target.hls ? 'hls' : 'file' };
@@ -895,8 +1089,16 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       }
       if (target.enc) {
         /* 远端 CENC：ffmpeg 边下边解，fragmented mp4 直接写进响应。
-           首帧只要拿到第一个关键帧就出，不再等整集下完。 */
-        return streamDecrypt(res, target.enc, url.searchParams.get('h264') === '1');
+           首帧只要拿到第一个关键帧就出，不再等整集下完。
+           后台已落盘的整集优先：走 sendFile 才有 Range，进度条才拖得动。 */
+        const needH264 = url.searchParams.get('h264') === '1';
+        const cached = playCacheHit('hongguo', seriesId, Number(episode) || 1, needH264);
+        if (cached) {
+          playCacheActive.add(cached);
+          res.on('close', () => playCacheActive.delete(cached));
+          return sendFile(req, res, cached, 'video/mp4');
+        }
+        return streamDecrypt(res, target.enc, needH264);
       }
       if (url.searchParams.get('h264') === '1') {
         return sendFile(req, res, await ensureH264(target.file!), 'video/mp4');
@@ -913,6 +1115,12 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
 
 export function start(): Promise<{ port: number; token: string; base: string }> {
   if (server && port) return Promise.resolve({ port, token, base: `http://127.0.0.1:${port}` });
+  // 上次退出时留下的残留 / 超限的旧缓存，开机先收拾一遍
+  try {
+    enforcePlayCache();
+  } catch (error) {
+    console.warn('[media] 播放缓存清理失败：', (error as Error).message);
+  }
   return new Promise((resolve, reject) => {
     const instance = http.createServer((req, res) => {
       const startedAt = Date.now();
@@ -1024,6 +1232,58 @@ export async function prepareLocal(taskId: string, index = 0): Promise<void> {
 /** 本地已下载文件：index=0 是合并成品，>0 是分集。 */
 export function fileUrl(taskId: string, index = 0, h264 = false): string {
   return mediaUrl(`/file/${encodeURIComponent(taskId)}/${index}${h264 ? '?h264=1' : ''}`);
+}
+
+/**
+ * 播放页首帧出来之后调：后台把这一集完整落成可拖动的 mp4。
+ * 返回时文件已就绪，给的是带 Range 的本地地址，播放器换过去就能随便拖。
+ * 失败返回 null，前端保持原来的流式播放，不影响正在看的内容。
+ */
+export async function cacheEpisode(
+  source: 'hongguo' | 'huangguo',
+  seriesId: string,
+  episode: number,
+  hevcOk = false,
+): Promise<{ url: string } | null> {
+  if (source !== 'hongguo' || !seriesId) return null;
+  const number = Math.max(1, Number(episode) || 1);
+  const needH264 = !hevcOk;
+  try {
+    const target = await hongguoStream(seriesId, number);
+    if (!target.enc) return null;
+    await ensurePlayCache('hongguo', seriesId, number, target.enc, needH264);
+    return { url: playUrl('hongguo', seriesId, number, needH264, false) };
+  } catch (error) {
+    console.warn('[media] 播放缓存失败：', (error as Error).message);
+    return null;
+  }
+}
+
+/** 设置页展示用：只统计播放缓存，和下载目录无关 */
+export function cacheInfo(): { bytes: number; limit: number } {
+  return { bytes: playCacheBytes(), limit: PLAY_CACHE_LIMIT };
+}
+
+/** 只清播放缓存目录。下载目录是另一处，这里一个字节都不碰。 */
+export function clearCache(): { bytes: number; limit: number } {
+  const dir = playCacheDir();
+  let names: string[] = [];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return { bytes: 0, limit: PLAY_CACHE_LIMIT };
+  }
+  for (const name of names) {
+    if (!name.endsWith('.mp4') && !name.endsWith('.part')) continue;
+    const file = path.join(dir, name);
+    if (playCacheActive.has(file)) continue;
+    try {
+      fs.rmSync(file, { force: true });
+    } catch {
+      /* 正在播的删不掉，留着下次再说 */
+    }
+  }
+  return cacheInfo();
 }
 
 export function stop(): void {

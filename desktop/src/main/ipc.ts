@@ -24,7 +24,7 @@ import * as source from './source';
 import * as update from './update';
 import * as device from './device';
 import * as mpv from './mpv';
-import { info as mediaInfo, fileUrl, prepareLocal } from './media';
+import { info as mediaInfo, fileUrl, prepareLocal, cacheEpisode, cacheInfo, clearCache } from './media';
 import { setEmitter } from './bus';
 import { deviceName, ffmpegAvailable, isDev, lanAddress, serverDir, userDataDir } from './paths';
 
@@ -277,6 +277,16 @@ const handlers: { [K in ApiName]: (...args: any[]) => any } = {
   'player.mpvClose': () => {
     mpv.close();
   },
+
+  /* 播放缓存：首帧已出，后台把整集落盘（上限 200MB，只淘汰自己的目录）*/
+  'player.cacheEpisode': async (payload: { source?: string; id: string; episode: number; hevc?: boolean }) => {
+    if (!payload?.id) return null;
+    return cacheEpisode(source.requireSource(payload.source), payload.id, payload.episode, payload?.hevc === true);
+  },
+
+  'player.cacheInfo': () => cacheInfo(),
+
+  'player.cacheClear': () => clearCache(),
 
   'sync.pull': async (payload?: { source?: 'hongguo' | 'huangguo' }) => {
     const { server, token } = requireOnline();

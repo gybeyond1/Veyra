@@ -205,7 +205,11 @@ export interface Api {
   'catalog.tags': (payload?: { source?: string }) => Promise<{ items: { name: string; slug: string; type: string }[] }>;
   'catalog.search': (payload: { source?: string; q: string }) => Promise<{ items: SeriesCard[] }>;
   'catalog.detail': (payload: { source?: string; id: string }) => Promise<SeriesDetail>;
-  'catalog.play': (payload: { source?: string; id: string; episode: number }) => Promise<{ url: string; kind: 'hls' | 'file' }>;
+  'catalog.play': (payload: { source?: string; id: string; episode: number; hevc?: boolean }) => Promise<{
+    url: string;
+    kind: 'hls' | 'file' | 'stream';
+    decrypt?: { url: string; key: string };
+  }>;
 
   'source.state': () => Promise<SourceState>;
   'source.enter': (payload: { code: string }) => Promise<SourceState>;
@@ -230,6 +234,11 @@ export interface Api {
   'player.mpvControl': (action: string, value?: number) => Promise<unknown>;
   'player.mpvStatus': () => Promise<{ position: number; duration: number; paused: boolean }>;
   'player.mpvClose': () => Promise<void>;
+
+  /** 播放缓存：首帧出来后在后台把这一集落成完整 mp4，落完就能拖进度条 */
+  'player.cacheEpisode': (payload: { source?: string; id: string; episode: number; hevc?: boolean }) => Promise<{ url: string } | null>;
+  'player.cacheInfo': () => Promise<{ bytes: number; limit: number }>;
+  'player.cacheClear': () => Promise<{ bytes: number; limit: number }>;
 
   'sync.pull': (payload?: { source?: 'hongguo' | 'huangguo' }) => Promise<{ payload: Record<string, unknown> }>;
   'sync.push': (payload: { library: Record<string, unknown> }) => Promise<{ ok: boolean; at: number }>;
