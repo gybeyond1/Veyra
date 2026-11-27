@@ -565,14 +565,44 @@ async function resolveEpisodeId({ vid, series, episode, title }) {
 // （HTTP 200 + 0 字节），而且它每次失败都会注册一台新设备、连注册 3 轮，
 // 把 IP 和设备配额一路打光，反而拖累真正能用的链路，所以彻底断开不再兜底。
 async function fetchStream({ vid, series, episode, title, album }) {
+  const startedAt = Date.now();
   let epId = '';
   try {
     epId = await resolveEpisodeId({ vid, series, episode, title });
+    /* 耗时拆开打：客户端报「点了四十秒才出来」时，一眼能看出是卡在定位剧集
+       还是卡在签名取流，不用再靠猜。 */
+    console.log(`[stream] 定位 episode=${epId || '空'} 用了 ${Date.now() - startedAt}ms`);
   } catch (e) {
     throw new Error('定位剧集失败：' + e.message);
   }
   if (!epId) throw new Error('这一集定位不到 episode_id，请刷新详情页后重试');
-  return hgApp.videoModelByEpisode(epId, { album: Boolean(album) });
+  if (album) {
+    const got = await hgApp.videoModelByEpisode(epId, { album: true });
+    console.log(`[stream] 合集取流完成 ${Date.now() - startedAt}ms`);
+    return got;
+  }
+  try {
+    const got = await hgApp.videoModelByEpisode(epId, { album: false });
+    console.log(`[stream] 取流完成 ${Date.now() - startedAt}ms`);
+    return got;
+  } catch (first) {
+    /* 普通短剧语义拿不到，最常见的原因是这部剧其实是 UGC 合集：
+       分组 1004 请求只会回 101000 或 200 + 0 字节。
+       以前把错误甩回客户端，桌面端再补一次 album=1 —— 白白多等一整轮（实测能到二三十秒）。
+       这里直接换语义重试，成功后把这一集登记成合集，下次一步到位。
+       顺手把刚才那次空响应从限流计数里撤掉：合集回空不代表出口 IP 被限，
+       否则连点几部合集会把普通短剧一起拖进 5 分钟冷却（之前踩过这个坑）。 */
+    console.log('[stream] 普通语义失败，改按合集重试：', first.message);
+    try {
+      const got = await hgApp.videoModelByEpisode(epId, { album: true });
+      hgApp.resetEmptyStreak('short');
+      hgApp.markAlbumVids([epId]);
+      console.log(`[stream] 合集语义命中，已登记 episode ${epId}（${Date.now() - startedAt}ms）`);
+      return got;
+    } catch (second) {
+      throw new Error(first.message + '；按合集重试也失败：' + second.message);
+    }
+  }
 }
 
 // 红果单集播放：签名取流 -> ffmpeg 解密转封装（浏览器不能播 CENC 密文）-> 明文 MP4 直发（sendFile 支持 Range 拖动）

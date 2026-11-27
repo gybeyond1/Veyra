@@ -585,6 +585,11 @@ function isRateLimited(reason) {
   return /200\s*\/?\s*0B|空正文|empty response|取流结果为空/i.test(text);
 }
 
+/** 撤销一次空响应计数：普通语义失败但合集语义成功时用（合集回空不代表出口被限）。 */
+function resetEmptyStreak(kind) {
+  if (kind === 'short' || kind === 'album') emptyStreak[kind] = 0;
+}
+
 function noteEmpty(kind, reason) {
   if (!isRateLimited(reason)) return;
   emptyStreak[kind]++;
@@ -622,4 +627,4 @@ async function videoModelByEpisode(episodeId, opts) {
   };
 }
 
-module.exports = { videoDetail, seriesInfo, albumInfo, markAlbumVids, isAlbumVid, videoModel, deriveKey, searchSeries, appSearch, fetchWebUrl, registerDevice, currentDevice, buildQuery, goEscape, signedPost, episodeIds, videoModelByEpisode };
+module.exports = { videoDetail, seriesInfo, albumInfo, markAlbumVids, isAlbumVid, videoModel, deriveKey, searchSeries, appSearch, fetchWebUrl, registerDevice, currentDevice, buildQuery, goEscape, signedPost, episodeIds, videoModelByEpisode, resetEmptyStreak };
