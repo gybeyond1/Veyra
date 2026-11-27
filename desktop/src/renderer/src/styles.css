@@ -470,6 +470,18 @@ input::placeholder {
   background: var(--gold);
 }
 
+/* 页头：标题与切换同一行（「全部剧集」+ 短剧/漫剧） */
+.head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.head-row h1 {
+  margin: 0;
+}
+
 .section {
   display: flex;
   flex-direction: column;
@@ -595,6 +607,86 @@ input::placeholder {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 「下载」也用同一套封面卡片：底部进度条 + 悬停操作条 */
+.tile-task .tile-art {
+  cursor: pointer;
+}
+.tile-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4px;
+  background: rgba(8, 11, 15, 0.6);
+}
+/* 有进度条时把集数角标抬起来，不然压在条上 */
+.tile-task .tile-badge {
+  bottom: 12px;
+}
+.tile-progress i {
+  display: block;
+  height: 100%;
+  background: var(--gold);
+  transition: width 0.3s ease;
+}
+.tile-actions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px 8px 10px;
+  background: linear-gradient(to top, rgba(6, 9, 12, 0.92), rgba(6, 9, 12, 0));
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+.tile-task:hover .tile-actions,
+.tile-task:focus-within .tile-actions {
+  opacity: 1;
+}
+.tile-actions button {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(12, 16, 21, 0.72);
+  color: #dfe5ee;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  line-height: 1.4;
+}
+.tile-actions button:hover {
+  border-color: rgba(243, 198, 105, 0.5);
+  color: var(--gold);
+}
+.tile-actions button.danger:hover {
+  border-color: rgba(232, 122, 122, 0.6);
+  color: #e87a7a;
+}
+/* 右上角的「···」：常驻提示，hover 后让位给操作条 */
+.tile-more {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 0 7px 2px;
+  border-radius: 8px;
+  background: rgba(8, 11, 15, 0.62);
+  color: #cfd6e0;
+  font-size: 13px;
+  line-height: 18px;
+  letter-spacing: 1px;
+  backdrop-filter: blur(6px);
+  transition: opacity 0.18s ease;
+}
+.tile-task:hover .tile-more,
+.tile-task:focus-within .tile-more {
+  opacity: 0;
+}
+.tile-task:hover .tile-badge,
+.tile-task:focus-within .tile-badge {
+  opacity: 0;
 }
 
 .tile-skeleton,

@@ -232,7 +232,7 @@ export default function App() {
       />
 
       <main className="main">
-        {view === 'home' && <HomePage source={source} onOpen={openDetail} onSearch={startSearch} />}
+        {view === 'home' && <HomePage source={source} onOpen={openDetail} />}
         {view === 'search' && <BrowsePage mode="search" seed={searchSeed} source={source} onOpen={openDetail} />}
         {view === 'library' && (
           <LibraryPage

@@ -85,13 +85,13 @@ export default function LibraryPage({ source, onOpen, tasks, remote, onRefresh, 
 
       <div className="seg">
         <button type="button" className={tab === 'history' ? 'active' : ''} onClick={() => setTab('history')}>
-          最近在看 {stats.history > 0 ? `(${stats.history})` : ''}
+          最近在看 ({stats.history})
         </button>
         <button type="button" className={tab === 'bookmarks' ? 'active' : ''} onClick={() => setTab('bookmarks')}>
-          收藏 {stats.bookmarks > 0 ? `(${stats.bookmarks})` : ''}
+          收藏 ({stats.bookmarks})
         </button>
         <button type="button" className={tab === 'downloads' ? 'active' : ''} onClick={() => setTab('downloads')}>
-          下载 {tasks.length > 0 ? `(${tasks.length})` : ''}
+          下载 ({tasks.length})
         </button>
       </div>
 

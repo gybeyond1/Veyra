@@ -745,6 +745,21 @@ function createAppUpdater(options) {
         };
       }
     }
+    /* 桌面端是「可以后补」的渠道：release 里没有 exe 时，manifest.version 是手机/电视的版本号。
+       以前这里直接把它当桌面最新版回给客户端，桌面端 0.28.x 就永远看到「最新 0.31.51」，
+       点更新 url 又是空的 —— 提示有新版却装不上，比不提示更糟。
+       所以拿不到本渠道的包时，只报这个渠道真正有的版本。 */
+    if (REQUIRED_CHANNELS.indexOf(channel) < 0) {
+      const local = localVersions(channel)[0];
+      if (local && compareVersion(local.version, current) > 0) {
+        return {
+          status: 'available', version: local.version, size: local.size, sha256: '',
+          url: `/api/app-download/${channel}/${encodeURIComponent(local.file)}`,
+          notes: '', source: 'server',
+        };
+      }
+      return { status: 'current', version: current || (local && local.version) || data.version };
+    }
     // 知道有新版本但还没拉到包：客户端据此回退 GitHub，界面不用等
     return { status: 'preparing', version: data.version };
   }

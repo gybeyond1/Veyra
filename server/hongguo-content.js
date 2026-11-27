@@ -167,8 +167,41 @@ function attr(tag, name) {
 }
 function decodeJson(value) { return typeof value === 'string' ? JSON.parse(value) : value; }
 
+/** 把榜单接口的 payload 变成分类页结构；两处入口（新 content / 旧 script）共用。 */
+function comicRankPayload(payload, page) {
+  if (!payload || typeof payload !== 'object') throw new Error('漫剧榜单格式已变化');
+  if (payload.isSuccess === false) throw new Error('漫剧榜单暂不可用');
+  if (!Array.isArray(payload.rankList)) throw new Error('漫剧榜单格式已变化');
+  const pagination = payload.pagination || {};
+  const totalPages = Number(pagination.totalPages) || 0;
+  if (totalPages < 1 || Number(pagination.pageNum == null ? page : pagination.pageNum) !== page) throw new Error('漫剧分页信息异常');
+  const items = validItems(payload.rankList, row => {
+    const count = Number(row.episodeCount != null ? row.episodeCount : (row.episodeVids || []).length) || 0;
+    return {
+      id: text(row.seriesId || row.id), title: text(row.title), cover: cleanUrl(row.cover),
+      description: text(row.description), badge: count > 0 ? `全 ${count} 集` : text(row.heatText),
+      score: text(row.heatText), tags: tagTextList(row.tags), rank: Number(row.rank) || null,
+    };
+  });
+  return { items, type: 'comic', slug: '', page, nextPage: items.length && page < Math.min(totalPages, 100) ? page + 1 : null, tabs: [] };
+}
+
 function parseComicRank(html, normalized) {
   const { page } = normalized;
+  /* 老页面没有 _ROUTER_DATA（只剩 script 兜底），别让取路由数据这一步把整页判死。 */
+  let route = {};
+  try { route = (extractRouterData(html).loaderData || {})['rank_hot-comic-drama/page'] || {}; } catch { route = {}; }
+
+  /* 2026-11 站方改版：榜单数据直接挂在 _ROUTER_DATA 的 route.content 上，
+     script 里的 data-fn-args 变成 ["rank_hot-comic-drama/page", []]（空数组）。
+     老代码只认 script，于是每页都掉到最后那句「延期数据尚未解析，请重试」——
+     手机端看不出这个问题，因为它压根不解析这个页面（走的是题材流）。 */
+  if (route.content != null) {
+    let payload = null;
+    try { payload = decodeJson(route.content); } catch { payload = null; }
+    if (payload && Array.isArray(payload.rankList)) return comicRankPayload(payload, page);
+  }
+
   const scripts = html.match(/<script\b[^>]*>/gi) || [];
   for (const tag of scripts) {
     const name = attr(tag, 'data-fn-name');
@@ -185,23 +218,9 @@ function parseComicRank(html, normalized) {
     let payload;
     try { payload = decodeJson(raw); } catch { continue; }
     if (!payload || typeof payload !== 'object') continue;
-    if (payload.isSuccess === false) throw new Error('漫剧榜单暂不可用');
-    if (!Array.isArray(payload.rankList)) throw new Error('漫剧榜单格式已变化');
-    const pagination = payload.pagination || {};
-    const totalPages = Number(pagination.totalPages) || 0;
-    if (totalPages < 1 || Number(pagination.pageNum == null ? page : pagination.pageNum) !== page) throw new Error('漫剧分页信息异常');
-    const items = validItems(payload.rankList, row => {
-      const count = Number(row.episodeCount != null ? row.episodeCount : (row.episodeVids || []).length) || 0;
-      return {
-        id: text(row.seriesId || row.id), title: text(row.title), cover: cleanUrl(row.cover),
-        description: text(row.description), badge: count > 0 ? `全 ${count} 集` : text(row.heatText),
-        score: text(row.heatText), tags: tagTextList(row.tags), rank: Number(row.rank) || null,
-      };
-    });
-    return { items, type: 'comic', slug: '', page, nextPage: items.length && page < Math.min(totalPages, 100) ? page + 1 : null, tabs: [] };
+    return comicRankPayload(payload, page);
   }
   // 上游已直接渲染卡片时，至少不能悄悄退回短剧接口。
-  const route = (((extractRouterData(html).loaderData || {})['rank_hot-comic-drama/page']) || {});
   if (text(route.rankKey) !== 'comic' || Number(route.pageNum) !== page) throw new Error('页面没有漫剧榜单数据');
   throw new Error('漫剧榜单延期数据尚未解析，请重试');
 }

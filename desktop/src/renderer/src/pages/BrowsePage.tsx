@@ -6,8 +6,9 @@ import SeriesTile from '../components/SeriesTile';
 /**
  * 上一次的搜索结果。从侧栏点「搜索」时组件会重新挂载，模块级变量还留着，
  * 先把上次那批铺上再等新数据 —— 以前每次进来都是空屏 + 骨架，看着像搜索被清了。
+ * 同时记住上次搜的词：不带 seed 进来也能接着搜同一部剧，而不是弹回空搜索页。
  */
-let lastSearch: { key: string; items: SeriesCard[] } = { key: '', items: [] };
+let lastSearch: { key: string; query: string; items: SeriesCard[] } = { key: '', query: '', items: [] };
 
 interface Props {
   mode?: 'category' | 'search';
@@ -16,16 +17,23 @@ interface Props {
   onOpen: (id: string, fallback: { title: string; cover: string }) => void;
 }
 
+/** 初始状态：搜索页尽量还原上一次的结果与关键词。 */
+function restore(mode: string | undefined, seed: string, source: string): { query: string; items: SeriesCard[] } {
+  if (mode !== 'search') return { query: seed, items: [] };
+  if (seed) return { query: seed, items: lastSearch.key === `${source}:${seed}` ? lastSearch.items : [] };
+  const same = lastSearch.key.startsWith(`${source}:`);
+  return { query: same ? lastSearch.query : '', items: same ? lastSearch.items : [] };
+}
+
 export default function BrowsePage({ mode = 'category', seed = '', source, onOpen }: Props) {
   const [type, setType] = useState<'short' | 'comic'>('short');
   const [slug, setSlug] = useState('');
   const [page, setPage] = useState(1);
   const [tags, setTags] = useState<{ name: string; slug: string; type: string }[]>([]);
-  const [items, setItems] = useState<SeriesCard[]>(() =>
-    mode === 'search' && seed ? (lastSearch.key === `${source}:${seed}` ? lastSearch.items : []) : [],
-  );
-  const [query, setQuery] = useState(seed);
-  const [submitted, setSubmitted] = useState(seed);
+  const initial = restore(mode, seed, source);
+  const [items, setItems] = useState<SeriesCard[]>(initial.items);
+  const [query, setQuery] = useState(initial.query);
+  const [submitted, setSubmitted] = useState(initial.query);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [hasMore, setHasMore] = useState(false);
@@ -81,7 +89,7 @@ export default function BrowsePage({ mode = 'category', seed = '', source, onOpe
         setItems(data.items);
         setHasMore(data.hasMore);
         // 记住这批结果：下次从侧栏进来先显示它，直到新的搜索覆盖
-        if (mode === 'search' && submitted) lastSearch = { key: `${source}:${submitted}`, items: data.items };
+        if (mode === 'search' && submitted) lastSearch = { key: `${source}:${submitted}`, query: submitted, items: data.items };
       })
       .catch((issue) => alive && setError(errorText(issue)))
       .finally(() => alive && setLoading(false));

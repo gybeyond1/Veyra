@@ -19,7 +19,9 @@ const STATUS_TEXT: Record<string, string> = {
   ready: '待合并',
   done: '已完成',
   failed: '有失败集',
+  error: '有失败集',
   canceled: '已取消',
+  paused: '已暂停',
 };
 
 const KIND_TEXT: Record<RemoteTask['kind'], string> = {
@@ -29,6 +31,13 @@ const KIND_TEXT: Record<RemoteTask['kind'], string> = {
   tv: '电视',
 };
 
+/**
+ * 「我的 → 下载」。
+ *
+ * 以前这里是两张长条列表（本机任务 / 其它设备），和「最近在看」「收藏」的封面格子完全两个样子，
+ * 明明是同一层的三个 tab，切换过去像进了另一个页面。现在本机任务也用同一套封面卡片，
+ * 其余设备的成品留在下面一小段，不抢主视觉。
+ */
 export default function DownloadsPage({ tasks, remote, onRefresh, onPlay, onPlayRemote, notify }: Props) {
   async function act(label: string, job: () => Promise<unknown>) {
     try {
@@ -43,84 +52,96 @@ export default function DownloadsPage({ tasks, remote, onRefresh, onPlay, onPlay
   const playing = remote.filter((task) => task.playUrl);
 
   return (
-    <div className="page">
-      <div className="page-head">
-        <h1>下载</h1>
-        <p>
-          本机 {tasks.length} 个任务
-          {remote.length ? ` · 另有 ${remote.length} 个来自手机 / 电视 / 服务器（其中 ${playing.length} 个在线可播）` : ''}
-        </p>
-      </div>
+    <>
+      {tasks.length === 0 ? (
+        <div className="empty-block">
+          <h3>还没有下载任务</h3>
+          <p>去详情页点「下载」选几集，下完会自动合并成一个文件。</p>
+        </div>
+      ) : (
+        <div className="grid">
+          {tasks.map((task) => {
+            const failed = task.failedEpisodes?.length || 0;
+            const active = task.status === 'downloading' || task.status === 'merging' || task.status === 'queued';
+            const finished = task.status === 'done' || Boolean(task.output);
+            const percent =
+              task.status === 'done' || task.status === 'ready'
+                ? 100
+                : Math.max(0, Math.min(100, task.percent || 0));
+            const subtitle = [
+              STATUS_TEXT[task.status] || task.status,
+              task.totalCount ? `${task.doneCount}/${task.totalCount} 集` : task.episodeCount ? `全 ${task.episodeCount} 集` : '',
+              failed ? `${failed} 集失败` : '',
+            ].filter(Boolean).join(' · ');
 
-      <section className="task-section">
-        <header className="task-section-head">
-          <h2>本机</h2>
-          {!tasks.length && <span>还没有下载任务，去详情页点「下载」选几集</span>}
-        </header>
-
-        {tasks.length > 0 && (
-          <div className="task-list">
-            {tasks.map((task) => {
-              const failed = task.failedEpisodes?.length || 0;
-              const active = task.status === 'downloading' || task.status === 'merging' || task.status === 'queued';
-              const percent =
-                task.status === 'done' || task.status === 'ready' ? 100 : Math.max(0, Math.min(100, task.percent || 0));
-              return (
-                <article key={task.id} className={`task ${task.status}${active ? ' active' : ''}`}>
-                  <div className="task-cover">
-                    <Cover src={task.cover} alt={task.title} />
-                  </div>
-                  <div className="task-body">
-                    <header>
-                      <h3 title={task.title}>{task.title}</h3>
-                      <span className={`status ${task.status}`}>{STATUS_TEXT[task.status] || task.status}</span>
-                    </header>
-                    <div className="progress">
-                      <div className="progress-bar" style={{ width: `${percent}%` }} />
+            return (
+              <div key={task.id} className={`tile tile-task${active ? ' active' : ''}`}>
+                <div
+                  className="tile-art"
+                  role="button"
+                  tabIndex={0}
+                  title={finished ? '播放本地文件' : subtitle}
+                  onClick={() => (finished ? onPlay(task) : undefined)}
+                  onKeyDown={(event) => {
+                    if (finished && (event.key === 'Enter' || event.key === ' ')) onPlay(task);
+                  }}
+                >
+                  <Cover src={task.cover} alt={task.title} />
+                  {percent < 100 && (
+                    <div className="tile-progress">
+                      <i style={{ width: `${Math.max(2, percent)}%` }} />
                     </div>
-                    <p className="task-detail">
-                      {task.detail || ''}
-                      {task.totalCount ? ` · ${task.doneCount}/${task.totalCount} 集` : ''}
-                      {failed ? ` · ${failed} 集失败` : ''}
-                      {task.status === 'done' && task.output ? ` · ${task.output.split(/[\\/]/).pop()}` : ''}
-                    </p>
-                    {task.error && <p className="task-error">{task.error}</p>}
-                  </div>
-                  <div className="task-actions">
-                    {(task.status === 'done' || task.output) && (
-                      <button type="button" className="primary small" onClick={() => onPlay(task)}>
-                        播放本地
-                      </button>
-                    )}
+                  )}
+                  <span className="tile-badge">{STATUS_TEXT[task.status] || task.status}</span>
+                  {/* 不 hover 也能看出这里还有操作（目录/重试/合并/删除） */}
+                  <span className="tile-more" aria-hidden="true">
+                    ···
+                  </span>
+                  {finished && (
+                    <span className="tile-play">
+                      <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M8 5.5v13l11-6.5z" />
+                      </svg>
+                    </span>
+                  )}
+                  {/* 卡片上的操作条：悬停出现，和封面同高，不额外占一行 */}
+                  <div className="tile-actions">
                     <button
                       type="button"
-                      className="ghost"
-                      onClick={() => act('已打开目录', () => call('downloads.openFolder', { id: task.id }))}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void act('已打开目录', () => call('downloads.openFolder', { id: task.id }));
+                      }}
                     >
                       目录
                     </button>
                     {failed > 0 && (
                       <button
                         type="button"
-                        className="ghost"
-                        onClick={() => act('已重新排队失败集', () => call('downloads.retry', { id: task.id }))}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void act('已重新排队失败集', () => call('downloads.retry', { id: task.id }));
+                        }}
                       >
-                        重试失败集
+                        重试
                       </button>
                     )}
                     {(task.status === 'ready' || (task.status === 'failed' && failed === 0)) && (
                       <button
                         type="button"
-                        className="ghost"
-                        onClick={() => act('已开始合并', () => call('downloads.merge', { id: task.id }))}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void act('已开始合并', () => call('downloads.merge', { id: task.id }));
+                        }}
                       >
                         合并
                       </button>
                     )}
                     <button
                       type="button"
-                      className="ghost danger"
-                      onClick={() => {
+                      className="danger"
+                      onClick={(event) => {
+                        event.stopPropagation();
                         if (!window.confirm(`删除「${task.title}」？已下载的文件会一起删掉。`)) return;
                         void act('已删除任务', () => call('downloads.remove', { id: task.id }));
                       }}
@@ -128,24 +149,24 @@ export default function DownloadsPage({ tasks, remote, onRefresh, onPlay, onPlay
                       删除
                     </button>
                   </div>
-                </article>
-              );
-            })}
-          </div>
-        )}
-      </section>
+                </div>
+                <p className="tile-title">{task.title}</p>
+                <p className="tile-sub">{subtitle}</p>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
-      <section className="task-section">
-        <header className="task-section-head">
-          <h2>其它设备</h2>
-          <span>同一账号下的服务器、手机、电视和另一台电脑；设备在线且有成品时可以直接播</span>
-        </header>
-
-        {!remote.length ? (
-          <div className="empty-block small">
-            <p>没有读到其它设备的下载记录。手机 / 电视 / 电脑需要在线并登录同一账号。</p>
-          </div>
-        ) : (
+      {remote.length > 0 && (
+        <section className="task-section">
+          <header className="task-section-head">
+            <h2>其它设备</h2>
+            <span>
+              {remote.length} 个下载记录
+              {playing.length ? ` · ${playing.length} 个可在线播放` : ''}
+            </span>
+          </header>
           <div className="task-list remote">
             {remote.map((task) => {
               const percent =
@@ -186,8 +207,8 @@ export default function DownloadsPage({ tasks, remote, onRefresh, onPlay, onPlay
               );
             })}
           </div>
-        )}
-      </section>
-    </div>
+        </section>
+      )}
+    </>
   );
 }
