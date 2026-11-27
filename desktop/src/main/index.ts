@@ -45,8 +45,6 @@ function saveWindowState(win: BrowserWindow): void {
   }
 }
 
-const PROJECT_URL = 'https://github.com/gybeyond1/Veyra';
-
 /**
  * 托盘图标。
  *
@@ -112,46 +110,16 @@ function createTray(): void {
   tray.on('double-click', () => showWindow());
 }
 
+/**
+ * 不要系统菜单栏。
+ *
+ * 原来这里有「文件 / 视图 / 帮助」三条，功能全都能在界面里点到（打开下载目录在
+ * 设置 → 下载，关于与更新在设置最下面，退出在托盘右键），留着只是白占一条高度，
+ * 而且和界面自己的视觉语言完全不搭。Windows 上设 null 后 Alt 也不会再弹出。
+ * 开发时用 F12 / Ctrl+R 代替「开发者工具 / 刷新」那两项。
+ */
 function buildMenu(): void {
-  const template: Electron.MenuItemConstructorOptions[] = [
-    {
-      label: '文件',
-      submenu: [
-        {
-          label: '打开下载目录',
-          accelerator: 'CmdOrCtrl+O',
-          click: () => {
-            const dir = readSettings().downloadDir;
-            void shell.openPath(dir);
-          },
-        },
-        { type: 'separator' },
-        { role: 'quit', label: '退出' },
-      ],
-    },
-    {
-      label: '视图',
-      submenu: [
-        { role: 'reload', label: '刷新' },
-        { role: 'togglefullscreen', label: '全屏' },
-        ...(isDev ? ([{ role: 'toggleDevTools', label: '开发者工具' }] as Electron.MenuItemConstructorOptions[]) : []),
-      ],
-    },
-    {
-      label: '帮助',
-      submenu: [
-        {
-          // 之前是给渲染层发 about 事件，但界面根本没监听，点了像没反应。
-          // 直接打开项目主页，也顺便让用户能看到更新日志。
-          label: '关于 Veyra',
-          click: () => {
-            void shell.openExternal(PROJECT_URL);
-          },
-        },
-      ],
-    },
-  ];
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  Menu.setApplicationMenu(null);
 }
 
 async function createWindow(): Promise<void> {
@@ -225,6 +193,20 @@ async function createWindow(): Promise<void> {
     if (/^https?:\/\//.test(url)) void shell.openExternal(url);
     return { action: 'deny' };
   });
+
+  // 菜单栏去掉之后，开发时靠快捷键干活（打包版这两个键没注册）
+  if (isDev) {
+    win.webContents.on('before-input-event', (event, input) => {
+      if (input.type !== 'keyDown') return;
+      if (input.key === 'F12') {
+        win.webContents.toggleDevTools();
+        event.preventDefault();
+      } else if (input.key.toLowerCase() === 'r' && (input.control || input.meta)) {
+        win.webContents.reload();
+        event.preventDefault();
+      }
+    });
+  }
 
   if (devServerUrl) {
     await win.loadURL(devServerUrl);

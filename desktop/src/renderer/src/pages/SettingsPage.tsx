@@ -97,6 +97,25 @@ export default function SettingsPage({ settings, notify, onSaved, onClose, sourc
     }
   }
 
+  /** 打开当前的下载目录（下载目录那一行点一下就能进） */
+  async function openDir() {
+    if (!draft?.downloadDir) return;
+    try {
+      await call('app.openPath', draft.downloadDir);
+    } catch (issue) {
+      notify(`打不开这个目录：${errorText(issue)}`, 'error');
+    }
+  }
+
+  /** 项目主页：更新日志、issue、源码都在那边 */
+  async function openProject() {
+    try {
+      await call('app.openExternal', 'https://github.com/gybeyond1/Veyra');
+    } catch (issue) {
+      notify(errorText(issue), 'error');
+    }
+  }
+
   const downloading = progress?.phase === 'downloading';
 
   return (
@@ -155,7 +174,18 @@ export default function SettingsPage({ settings, notify, onSaved, onClose, sourc
             <div className="row">
               <div>
                 <strong>下载目录</strong>
-                <p className="path" title={draft.downloadDir}>{draft.downloadDir}</p>
+                {/* 路径本身就是按钮：点一下在资源管理器 / Finder 里打开 */}
+                <button
+                  type="button"
+                  className="path-btn"
+                  title={`打开 ${draft.downloadDir}`}
+                  onClick={() => void openDir()}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                  </svg>
+                  <span className="path-text">{draft.downloadDir}</span>
+                </button>
               </div>
               <button type="button" className="ghost" onClick={pickDir}>
                 选择目录
@@ -292,6 +322,14 @@ export default function SettingsPage({ settings, notify, onSaved, onClose, sourc
               <p>
                 <span>下载模块</span>
                 <strong className="path">{info?.serverDir || '—'}</strong>
+              </p>
+              <p>
+                <span>项目地址</span>
+                <strong className="path">
+                  <button type="button" className="link" onClick={() => void openProject()}>
+                    github.com/gybeyond1/Veyra
+                  </button>
+                </strong>
               </p>
             </div>
             <p className="hint">日志：用户数据目录下 logs/desktop.log，排查问题直接把最后几十行发过来。</p>

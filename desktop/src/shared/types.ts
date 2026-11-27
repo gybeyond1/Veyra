@@ -183,6 +183,7 @@ export interface Api {
   'app.saveSettings': (patch: Partial<AppSettings>) => Promise<AppSettings>;
   'app.pickDownloadDir': () => Promise<string>;
   'app.openPath': (target: string) => Promise<void>;
+  'app.openExternal': (url: string) => Promise<void>;
   'app.revealFile': (target: string) => Promise<void>;
   'app.logs': () => Promise<string[]>;
 

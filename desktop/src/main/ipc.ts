@@ -124,6 +124,13 @@ const handlers: { [K in ApiName]: (...args: any[]) => any } = {
     if (info) throw new Error(info);
   },
 
+  /** 打开网页（设置页的「项目地址」用）。只放行 http(s)，别让它变成任意命令入口。 */
+  'app.openExternal': async (url: string) => {
+    const value = String(url || '');
+    if (!/^https?:\/\//i.test(value)) throw new Error('只支持打开网页地址');
+    await shell.openExternal(value);
+  },
+
   'app.revealFile': async (target: string) => {
     if (!target) return;
     if (fs.existsSync(target) && fs.statSync(target).isDirectory()) {
