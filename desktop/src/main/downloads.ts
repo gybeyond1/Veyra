@@ -152,8 +152,10 @@ export function remove(id: string): void {
   dl().deleteTask(id, OWNER, true);
 }
 
-export function merge(id: string): DownloadTask {
-  const result = dl().mergeTask(id, OWNER, true);
+export function merge(id: string, keepEpisodes?: boolean): DownloadTask {
+  // keepEpisodes 由「合并」对话框传入：这一次合并后分集留不留，只影响这一次
+  const opts = typeof keepEpisodes === 'boolean' ? { keepEpisodes } : undefined;
+  const result = dl().mergeTask(id, OWNER, true, opts);
   if (!result) throw new Error('任务不存在');
   return result as DownloadTask;
 }

@@ -1782,19 +1782,22 @@ async function mergeStage(task, dir, workDir) {
   if (task.status === 'canceled') return;
 
   // 清理分集与中间文件（保留合并产物 outputPath 与同剧目录其它产物）
+  // 这一次合并保留还是删除分集，由用户点合并时在对话框里的选择决定
+  const keepEpisodes = typeof task._keepEpisodes === 'boolean' ? task._keepEpisodes : KEEP_EPISODES;
   try {
     if (fs.existsSync(dir)) {
       for (const k of fs.readdirSync(dir)) {
         if (k === path.basename(outputPath)) continue;
         const episodeFile = k.endsWith('.mp4') || k.endsWith('.enc');
-        // 保留分集时只留下每集的 mp4/enc，中间文件照样清掉
-        if (episodeFile && KEEP_EPISODES) continue;
+        // 选择保留分集时只留下每集的 mp4/enc，中间文件照样清掉
+        if (episodeFile && keepEpisodes) continue;
         if (episodeFile || k === '.merge-work' || k.endsWith('.ffconcat')) {
           fs.rmSync(safeJoin(dir, k), { recursive: true, force: true });
         }
       }
     }
   } catch { /* ignore */ }
+  delete task._keepEpisodes;
   task.status = 'done';
   task.output = outputPath;
   task.progress = {
@@ -1812,12 +1815,15 @@ async function mergeStage(task, dir, workDir) {
   flushStore(true);
 }
 
-/** 手动合并：等待合并信号后执行（任务须处于 ready/failed 状态，合并失败保留分集可重试） */
-function mergeTask(id, owner, isAdmin) {
+/** 手动合并：等待合并信号后执行（任务须处于 ready/failed 状态，合并失败保留分集可重试）
+ *  opts.keepEpisodes：这一次合并是否保留分集（前端弹窗里选的），不传就用全局默认 */
+function mergeTask(id, owner, isAdmin, opts) {
   const t = tasks[id];
   if (!t) return null;
   if (!isAdmin && t.owner && t.owner !== owner) return null;
   if (t.status !== 'ready' && t.status !== 'failed') throw new Error('当前状态不可合并（需先完成下载）');
+  // 每次合并都重新决定：对话框里的选择优先，没选才退回全局默认（桌面设置 / VEYRA_KEEP_EPISODES）
+  t._keepEpisodes = opts && typeof opts.keepEpisodes === 'boolean' ? opts.keepEpisodes : KEEP_EPISODES;
   const dir = taskDir(t);
   const workDir = safeJoin(dir, '.merge-work');
   fs.mkdirSync(workDir, { recursive: true });
@@ -1828,6 +1834,7 @@ function mergeTask(id, owner, isAdmin) {
   t.progress.detail = '开始合并';
   touch(t);
   mergeStage(t, dir, workDir).catch(err => {
+    delete t._keepEpisodes;
     if (t.status === 'canceled') return;
     t.status = 'failed';
     t.error = err && err.message ? err.message : String(err);

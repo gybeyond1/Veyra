@@ -1518,6 +1518,36 @@ input::placeholder {
   gap: 10px;
   margin-top: 18px;
 }
+/* 合并确认里的「保留分集」：复选框贴顶，右边两行说明 */
+.modal-option {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-deep);
+  cursor: pointer;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.modal-option input {
+  margin: 2px 0 0;
+  accent-color: var(--accent, #f3c669);
+  flex: none;
+}
+.modal-option strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.modal-option em {
+  display: block;
+  margin-top: 2px;
+  font-style: normal;
+  color: var(--muted);
+}
 
 /* ---------- 选集：数字播放，右上角勾选 ---------- */
 .ep {

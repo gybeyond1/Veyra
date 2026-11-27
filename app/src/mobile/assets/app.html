@@ -135,6 +135,14 @@
         <div class="confirm-buttons"><button id="confirm-cancel" type="button">取消</button><button id="confirm-accept" type="button">清空</button></div>
       </section>
     </div>
+    <div id="merge-overlay" hidden>
+      <section class="confirm-panel merge-panel" role="dialog" aria-modal="true" aria-labelledby="merge-title">
+        <h2 id="merge-title">合并</h2>
+        <p id="merge-message"></p>
+        <label class="merge-keep"><input type="checkbox" id="merge-keep"><span>合并后保留分集<em>不勾选＝合并完删掉分集、只留整季成品，省空间；之后不能再追加或重新合并</em></span></label>
+        <div class="confirm-buttons"><button id="merge-cancel" type="button">取消</button><button id="merge-accept" type="button">开始合并</button></div>
+      </section>
+    </div>
     <div id="download-overlay" hidden>
       <section class="download-panel" role="dialog" aria-modal="true" aria-labelledby="download-title">
         <h2 id="download-title">下载</h2>

@@ -35,6 +35,7 @@ const updateLaterButton = document.getElementById('update-later');
 const searchInput = document.getElementById('search-input');
 const headerSettings = document.getElementById('header-settings');
 const confirmOverlay = document.getElementById('confirm-overlay');
+const mergeOverlay = document.getElementById('merge-overlay');
 const unlockOverlay = document.getElementById('unlock-overlay');
 const downloadOverlay = document.getElementById('download-overlay');
 const categoryIds = { adult: ['ai-duanju', 'ai-manju'], ai: ['ai-huanlian', 'ai-mogai'] };
@@ -183,6 +184,39 @@ function askConfirmation(title, message, action = '清空') {
   updateBackEnabled();
   document.getElementById('confirm-cancel').focus();
   return new Promise(resolve => { finishConfirmation = resolve; });
+}
+/**
+ * 合并前的选择：这次合并后分集留不留。
+ * 返回 { keepEpisodes: boolean }，取消返回 null。
+ */
+function askMergeChoice(title, message) {
+  const keepBox = document.getElementById('merge-keep');
+  document.getElementById('merge-title').textContent = title;
+  document.getElementById('merge-message').textContent = message;
+  keepBox.checked = false;   // 默认删分集：省空间，符合「合并完只留成品」的直觉
+  mergeOverlay.hidden = false;
+  updateBackEnabled();
+  return new Promise(resolve => {
+    let settled = false;
+    const cancelBtn = document.getElementById('merge-cancel');
+    const acceptBtn = document.getElementById('merge-accept');
+    const finish = value => {
+      if (settled) return;
+      settled = true;
+      mergeOverlay.hidden = true;
+      cancelBtn.removeEventListener('click', onCancel);
+      acceptBtn.removeEventListener('click', onAccept);
+      mergeOverlay.removeEventListener('click', onMask);
+      updateBackEnabled();
+      resolve(value);
+    };
+    const onCancel = () => finish(null);
+    const onAccept = () => finish({ keepEpisodes: keepBox.checked });
+    const onMask = event => { if (event.target === mergeOverlay) finish(null); };
+    cancelBtn.addEventListener('click', onCancel);
+    acceptBtn.addEventListener('click', onAccept);
+    mergeOverlay.addEventListener('click', onMask);
+  });
 }
 document.getElementById('confirm-cancel').addEventListener('click', () => closeConfirmation(false));
 document.getElementById('confirm-accept').addEventListener('click', () => closeConfirmation(true));
@@ -3549,7 +3583,7 @@ function restoreScreen(snapshot) {
 }
 
 function updateBackEnabled() {
-  const modalOpen = [unlockOverlay, authOverlay, confirmOverlay, updateOverlay, downloadOverlay].some(overlay => !overlay.hidden);
+  const modalOpen = [unlockOverlay, authOverlay, confirmOverlay, mergeOverlay, updateOverlay, downloadOverlay].some(overlay => !overlay.hidden);
   window.AndroidHost?.setBackEnabled(modalOpen || Boolean(producerOverlay) || !isRootColumn());
 }
 
@@ -5417,7 +5451,18 @@ document.addEventListener('click', async event => {
     const button = event.target.closest('[data-dl-merge]');
     const kind = button.dataset.dlMerge, id = button.dataset.dlId;
     const action = kind === 'nas' ? 'nas-download-merge' : 'download-merge';
-    api(action, { id }).then(() => { toast('已开始合并'); refreshCurrentDownloads(); }).catch(error => toast(error.message, true));
+    if (kind !== 'nas') {
+      // 本机下载的「合并」是把分集导出到剧集目录后拼成整季，分集本身就是可播文件，不在这里删
+      api(action, { id }).then(() => { toast('已开始合并'); refreshCurrentDownloads(); }).catch(error => toast(error.message, true));
+      return;
+    }
+    askMergeChoice('合并', '把这部剧的分集拼成一个整季文件。合并后分集要保留吗？')
+      .then(choice => {
+        if (!choice) return;
+        return api(action, { id, keepEpisodes: choice.keepEpisodes })
+          .then(() => { toast(choice.keepEpisodes ? '已开始合并（保留分集）' : '已开始合并（不保留分集）'); refreshCurrentDownloads(); })
+          .catch(error => toast(error.message, true));
+      });
     return;
   }
   if (event.target.closest('[data-dl-retry-failed]')) {

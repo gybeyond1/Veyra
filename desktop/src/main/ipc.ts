@@ -238,7 +238,7 @@ const handlers: { [K in ApiName]: (...args: any[]) => any } = {
   'downloads.remove': (payload: { id: string }) => {
     downloads.remove(payload.id);
   },
-  'downloads.merge': (payload: { id: string }) => downloads.merge(payload.id),
+  'downloads.merge': (payload: { id: string; keepEpisodes?: boolean }) => downloads.merge(payload.id, payload.keepEpisodes),
   'downloads.retry': (payload: { id: string }) => downloads.retry(payload.id),
   'downloads.openFolder': async (payload: { id: string }) => {
     const dir = downloads.taskFolder(payload.id);

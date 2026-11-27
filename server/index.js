@@ -1302,7 +1302,9 @@ app.get('/api/download/files/:id/:index', requireDownloadAuth, (req, res) => {
 });
 app.post('/api/download/merge', requireDownloadAuth, (req, res) => {
   try {
-    const task = downloader.mergeTask(String(req.body.id || ''), req.actor.owner, req.actor.isAdmin);
+    // keepEpisodes：客户端弹窗里选的「合并后是否删除分集」，不传就用服务端默认
+    const keep = typeof req.body.keepEpisodes === 'boolean' ? { keepEpisodes: req.body.keepEpisodes } : undefined;
+    const task = downloader.mergeTask(String(req.body.id || ''), req.actor.owner, req.actor.isAdmin, keep);
     if (!task) return res.status(404).json({ error: '任务不存在' });
     res.json(task);
   } catch (e) { res.status(400).json({ error: e && e.message ? e.message : '合并失败' }); }

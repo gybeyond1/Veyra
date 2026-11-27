@@ -222,7 +222,8 @@ export interface Api {
   'downloads.create': (payload: { id: string; title: string; cover?: string; source?: string; episodes?: number[]; target?: string }) => Promise<DownloadDispatchResult>;
   'downloads.targets': () => Promise<DownloadTarget[]>;
   'downloads.remove': (payload: { id: string; deleteFiles?: boolean }) => Promise<void>;
-  'downloads.merge': (payload: { id: string }) => Promise<DownloadTask>;
+  /** keepEpisodes：本次合并后是否保留分集（不传则用设置里的默认） */
+  'downloads.merge': (payload: { id: string; keepEpisodes?: boolean }) => Promise<DownloadTask>;
   'downloads.retry': (payload: { id: string }) => Promise<DownloadTask>;
   'downloads.openFolder': (payload: { id: string }) => Promise<void>;
   'downloads.play': (payload: { id: string; index?: number }) => Promise<{ url: string; rawUrl: string }>;

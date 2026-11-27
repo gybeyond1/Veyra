@@ -1704,7 +1704,12 @@ public final class MainActivity extends Activity {
             }
             case "nas-download-episodes": return account.getJson("api/download/tasks/" + args.optString("id") + "/episodes");
             case "nas-download-cancel": account.deleteJson("api/download/tasks/" + args.optString("id")); return new JSONObject().put("ok", true);
-            case "nas-download-merge": return account.postJson("api/download/merge", new JSONObject().put("id", args.optString("id")));
+            case "nas-download-merge": {
+                JSONObject body = new JSONObject().put("id", args.optString("id"));
+                // 合并前弹窗里选了才传：true=保留分集，false=合并完删掉；没传就按后端默认
+                if (args.has("keepEpisodes")) body.put("keepEpisodes", args.optBoolean("keepEpisodes", true));
+                return account.postJson("api/download/merge", body);
+            }
             case "nas-download-retry-failed": return account.postJson("api/download/retry-failed", new JSONObject().put("id", args.optString("id")));
             case "choose-avatar": {
                 if (!account.isLoggedIn()) throw new IllegalStateException("请先登录");

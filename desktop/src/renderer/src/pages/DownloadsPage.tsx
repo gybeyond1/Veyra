@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import type { DownloadTask, RemoteTask } from '@shared/types';
 import { call, errorText } from '../api';
 import Cover from '../components/Cover';
@@ -39,6 +40,16 @@ const KIND_TEXT: Record<RemoteTask['kind'], string> = {
  * 因为进度和合并发生在它们自己那边，这边能做的只有播。
  */
 export default function DownloadsPage({ tasks, remote, onRefresh, onPlay, onPlayRemote, notify }: Props) {
+  /** 点「合并」先不合并：弹窗里由用户决定这次合并后分集留不留 */
+  const [merging, setMerging] = useState<{ task: DownloadTask; keep: boolean } | null>(null);
+  /** 弹窗里复选框的初始值跟着设置走（设置里「合并后保留分集」开着就默认勾上） */
+  const [keepDefault, setKeepDefault] = useState(false);
+  useEffect(() => {
+    call<{ keepEpisodes?: boolean }>('app.settings')
+      .then((config) => setKeepDefault(config?.keepEpisodes === true))
+      .catch(() => undefined);
+  }, []);
+
   async function act(label: string, job: () => Promise<unknown>) {
     try {
       await job();
@@ -131,7 +142,7 @@ export default function DownloadsPage({ tasks, remote, onRefresh, onPlay, onPlay
                         type="button"
                         onClick={(event) => {
                           event.stopPropagation();
-                          void act('已开始合并', () => call('downloads.merge', { id: task.id }));
+                          setMerging({ task, keep: keepDefault });
                         }}
                       >
                         合并
@@ -198,6 +209,53 @@ export default function DownloadsPage({ tasks, remote, onRefresh, onPlay, onPlay
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* 合并确认：分集删不删由这一次决定，不再固定跟着设置 */}
+      {merging && (
+        <div
+          className="modal-mask"
+          role="presentation"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setMerging(null);
+          }}
+        >
+          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="merge-title">
+            <h2 id="merge-title">合并「{merging.task.title}」</h2>
+            <p className="modal-desc">
+              把{merging.task.totalCount ? ` ${merging.task.totalCount} ` : ' '}集合并成一个整季文件。
+              {merging.keep ? '这次会保留分集，合并完它们还在。' : '这次合并完会删掉分集，只留成品。'}
+            </p>
+            <label className="modal-option">
+              <input
+                type="checkbox"
+                checked={merging.keep}
+                onChange={(event) => setMerging((prev) => (prev ? { ...prev, keep: event.target.checked } : prev))}
+              />
+              <span>
+                <strong>合并后保留分集</strong>
+                <em>不勾＝合并完删掉分集，省空间，但之后没法再追加分集或重新合并</em>
+              </span>
+            </label>
+            <div className="modal-actions">
+              <button type="button" className="ghost" onClick={() => setMerging(null)}>
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const target = merging;
+                  setMerging(null);
+                  void act('已开始合并', () =>
+                    call('downloads.merge', { id: target.task.id, keepEpisodes: target.keep }),
+                  );
+                }}
+              >
+                开始合并
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </>
