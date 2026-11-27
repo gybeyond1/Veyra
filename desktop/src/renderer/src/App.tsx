@@ -278,7 +278,6 @@ export default function App() {
             remoteUrl={player.remoteUrl}
             onClose={() => setView('detail')}
             onEpisode={(next) => setPlayer({ ...player, episode: next })}
-            notify={notify}
           />
         )}
         {view === 'settings' && <div className="page" />}

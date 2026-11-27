@@ -16,7 +16,6 @@ interface Props {
   episodes?: number[];
   onClose: () => void;
   onEpisode: (episode: number) => void;
-  notify: (text: string, tone?: 'info' | 'error') => void;
 }
 
 /**
@@ -25,7 +24,7 @@ interface Props {
  * 在线内容不直接连源站：交给主进程的媒体服务转一手（hls.js 带不了 Referer，
  * 红果的 CENC 流浏览器也解不了）。本地已下载的 mp4 走同一个服务的 /file。
  */
-export default function PlayerPage({ source, id, episode, title, position, localTaskId, remoteUrl, episodes, onClose, onEpisode, notify }: Props) {
+export default function PlayerPage({ source, id, episode, title, position, localTaskId, remoteUrl, episodes, onClose, onEpisode }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [url, setUrl] = useState('');
   const [kind, setKind] = useState<'hls' | 'file'>('file');
@@ -38,10 +37,6 @@ export default function PlayerPage({ source, id, episode, title, position, local
   const [remoteFallback, setRemoteFallback] = useState(false);
   /** 当前这一集是不是正在本机转码（只影响提示文案） */
   const [transcoding, setTranscoding] = useState(false);
-  /** 未转码的原始地址，给 mpv 用 */
-  const [rawUrl, setRawUrl] = useState('');
-  /** 这台机器有没有带 mpv（有就能原片直放，彻底不转码） */
-  const [nativeOk, setNativeOk] = useState(false);
   /**
    * 这一集是 CENC 加密的：后端给了远端直链和内容密钥。
    * 有它就能把地址直接交给 mpv 边下边解（可拖进度），不用等整集落盘。
@@ -51,12 +46,6 @@ export default function PlayerPage({ source, id, episode, title, position, local
   const wheelAt = useRef(0);
   /** 加密集：地址秒回但首帧还要等，loading 遮罩先别撤 */
   const holdLoading = useRef(false);
-
-  useEffect(() => {
-    call<boolean>('player.mpvAvailable')
-      .then((flag) => setNativeOk(flag === true))
-      .catch(() => setNativeOk(false));
-  }, []);
 
   /**
    * 这台机器的 Chromium 能不能直接解 H.265。
@@ -112,7 +101,6 @@ export default function PlayerPage({ source, id, episode, title, position, local
     if (remoteUrl) {
       const transcode = !hevcOk || remoteFallback;
       setTranscoding(transcode);
-      setRawUrl(remoteUrl);
       setKind(transcode ? 'hls' : 'file');
       setUrl(transcode ? `${remoteUrl}${remoteUrl.includes('?') ? '&' : '?'}h264=1` : remoteUrl);
       setLoading(transcode);
@@ -134,7 +122,6 @@ export default function PlayerPage({ source, id, episode, title, position, local
         // 加密集的地址是秒回的，遮罩要留到第一帧出来（loadeddata 那边才撤）
         holdLoading.current = Boolean(encrypted);
         setUrl(result.url);
-        setRawUrl((result as { rawUrl?: string }).rawUrl || result.url);
       })
       .catch((issue) => {
         if (alive) setError(errorText(issue));
@@ -251,26 +238,6 @@ export default function PlayerPage({ source, id, episode, title, position, local
     onEpisode(target);
   };
 
-  /** 交给 mpv：不吃 Chromium 的解码能力，H.265 原片硬解，零转码 */
-  const openNative = async () => {
-    // 加密的集直接把远端直链和密钥交给 mpv：它内置的 ffmpeg 能边下边解，
-    // 不用等本机 ffmpeg 把整集解密成文件，还能随意拖进度条
-    const target = decrypt?.url || rawUrl || url;
-    if (!target) return;
-    try {
-      const saved = Number(localStorage.getItem(`pos:${source}:${id}:${episode}`) || 0);
-      // 交给 mpv 之后把内置播放器停下，不然两路声音一起响
-      videoRef.current?.pause();
-      await call('player.mpvPlay', { url: target, title, start: saved, decryptionKey: decrypt?.key });
-      notify('已用原生内核打开：原片直放，不转码', 'info');
-    } catch (issue) {
-      notify(errorText(issue), 'error');
-    }
-  };
-
-  // 本地成品、其它设备的成品、以及加密的在线集（带密钥）都能交给 mpv
-  const canNative = nativeOk && Boolean(localTaskId || remoteUrl || decrypt);
-
   return (
     <div className="page player-page" onWheel={onWheel}>
       <header className="player-head">
@@ -283,16 +250,11 @@ export default function PlayerPage({ source, id, episode, title, position, local
             {localTaskId
               ? '本地文件 · 合并成品'
               : remoteUrl
-                ? `其它设备 · 在线播放${transcoding ? ' · 本机转码' : ' · 原片直放'}`
+                ? `其它设备 · 在线播放${transcoding ? ' · 本机转码' : ' · 不转码'}`
                 : `第 ${episode} 集${source === 'huangguo' ? ' · 私密模式' : ''}`}
           </p>
         </div>
         <div className="player-nav">
-          {canNative && (
-            <button type="button" className={transcoding ? 'primary' : 'ghost'} onClick={openNative}>
-              原片直放
-            </button>
-          )}
           {!localTaskId && !remoteUrl && (
             <>
               <button type="button" className="ghost" disabled={!prev} onClick={() => prev && onEpisode(prev)}>
@@ -326,13 +288,11 @@ export default function PlayerPage({ source, id, episode, title, position, local
                 {transcoding ? (
                   <p className="player-loading-sub">
                     这集是 H.265，内置内核解不了，就在这台电脑上转成 H.264；转过的会缓存，下次快很多。
-                    {canNative ? '不想等的话，点右上角「原片直放」，用原生内核硬解，零转码。' : ''}
                   </p>
                 ) : (
                   waited >= 3 && (
                     <p className="player-loading-sub">
                       这集是加密的，正在边下边解，通常几秒出画面
-                      {canNative ? '；要拖进度条就点右上角「原片直放」' : ''}
                     </p>
                   )
                 )}
