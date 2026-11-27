@@ -677,6 +677,41 @@ input::placeholder {
   cursor: default;
 }
 
+/* 首页内嵌的题材筛选：50 来个展开后是一大片，收起时只留一行 */
+.chip-more {
+  border-style: dashed;
+  color: var(--text);
+}
+.seg-inline {
+  margin-left: auto;
+}
+.section-head .seg-inline button {
+  padding: 5px 14px;
+  font-size: 13px;
+}
+
+/* 推荐区失败只占一行，不把下面的「全部剧集」一起顶掉 */
+.inline-error {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border: 1px solid rgba(232, 122, 122, 0.35);
+  background: rgba(232, 122, 122, 0.08);
+  border-radius: 10px;
+  color: #e8a07a;
+  font-size: 13px;
+}
+.inline-error button {
+  margin-left: auto;
+}
+
+/* 「我的」里的下载 tab 直接复用下载页组件，内层不要再套一层页面内边距 */
+.page > .page {
+  padding: 0;
+  max-width: none;
+}
+
 .search-bar {
   display: flex;
   gap: 12px;

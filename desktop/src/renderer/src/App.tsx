@@ -7,13 +7,12 @@ import LoginPage from './pages/LoginPage';
 import HomePage from './pages/HomePage';
 import BrowsePage from './pages/BrowsePage';
 import DetailPage from './pages/DetailPage';
-import DownloadsPage from './pages/DownloadsPage';
 import LibraryPage from './pages/LibraryPage';
 import SettingsPage from './pages/SettingsPage';
 import PlayerPage from './pages/PlayerPage';
 import type { DetailFallback } from './pages/DetailPage';
 
-export type View = 'home' | 'category' | 'search' | 'library' | 'detail' | 'downloads' | 'settings' | 'player';
+export type View = 'home' | 'search' | 'library' | 'detail' | 'settings' | 'player';
 export type Source = 'hongguo' | 'huangguo';
 
 interface PlayerState {
@@ -70,9 +69,9 @@ export default function App() {
     }
   }, []);
 
-  // 下载页打开时刷新本机 + 其它设备，并每 15 秒跟一次进度
+  // 「我的」里有下载 tab，打开这一页就刷新本机 + 其它设备，并每 15 秒跟一次进度
   useEffect(() => {
-    if (view !== 'downloads') return;
+    if (view !== 'library') return;
     void refreshTasks();
     void refreshRemote();
     const timer = window.setInterval(() => void refreshRemote(), 15000);
@@ -234,9 +233,28 @@ export default function App() {
 
       <main className="main">
         {view === 'home' && <HomePage source={source} onOpen={openDetail} onSearch={startSearch} />}
-        {view === 'category' && <BrowsePage source={source} onOpen={openDetail} />}
         {view === 'search' && <BrowsePage mode="search" seed={searchSeed} source={source} onOpen={openDetail} />}
-        {view === 'library' && <LibraryPage source={source} onOpen={openDetail} />}
+        {view === 'library' && (
+          <LibraryPage
+            source={source}
+            onOpen={openDetail}
+            tasks={tasks.filter((task) => (task.source || 'hongguo') === source)}
+            remote={remoteTasks}
+            onRefresh={() => {
+              void refreshTasks();
+              void refreshRemote();
+            }}
+            onPlayLocal={(task) => {
+              setPlayer({ source: 'hongguo', id: task.seriesId || task.id, episode: 1, title: task.title, localTaskId: task.id });
+              setView('player');
+            }}
+            onPlayRemote={(task) => {
+              setPlayer({ source: 'hongguo', id: task.remoteId, episode: 1, title: task.title, remoteUrl: task.playUrl });
+              setView('player');
+            }}
+            notify={notify}
+          />
+        )}
         {view === 'detail' && (
           <DetailPage
             id={detailId}
@@ -260,25 +278,6 @@ export default function App() {
             remoteUrl={player.remoteUrl}
             onClose={() => setView('detail')}
             onEpisode={(next) => setPlayer({ ...player, episode: next })}
-            notify={notify}
-          />
-        )}
-        {view === 'downloads' && (
-          <DownloadsPage
-            tasks={tasks.filter((task) => (task.source || 'hongguo') === source)}
-            remote={remoteTasks}
-            onRefresh={() => {
-              void refreshTasks();
-              void refreshRemote();
-            }}
-            onPlay={(task) => {
-              setPlayer({ source: 'hongguo', id: task.seriesId || task.id, episode: 1, title: task.title, localTaskId: task.id });
-              setView('player');
-            }}
-            onPlayRemote={(task) => {
-              setPlayer({ source: 'hongguo', id: task.remoteId, episode: 1, title: task.title, remoteUrl: task.playUrl });
-              setView('player');
-            }}
             notify={notify}
           />
         )}

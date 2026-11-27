@@ -111,6 +111,18 @@ async function createWindow(): Promise<void> {
   mainWindow = win;
   bindWindow(win);
 
+  /* 播放器点全屏时，视频铺满整个窗口，但 Windows 上菜单栏（文件/视图/帮助）
+     还挂在最上面 —— 看着像「放大的窗口」而不是全屏。这里跟着 HTML 全屏一起
+     收起菜单栏，退出再恢复。 */
+  win.on('enter-html-full-screen', () => {
+    win.setMenuBarVisibility(false);
+    if (!win.isFullScreen()) win.setFullScreen(true);
+  });
+  win.on('leave-html-full-screen', () => {
+    win.setMenuBarVisibility(true);
+    if (win.isFullScreen()) win.setFullScreen(false);
+  });
+
   if (saved.maximized) win.maximize();
 
   win.once('ready-to-show', () => win.show());

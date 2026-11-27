@@ -296,7 +296,7 @@ export default function PlayerPage({ source, id, episode, title, position, local
       </div>
 
       <p className="player-hint">
-        在线播放由本机解析；已下载的剧集请到「下载」页点「播放本地」，速度更快也不吃网络。
+        在线播放由本机解析；已下载的剧集在「我的 · 下载」里点「播放本地」，速度更快也不吃网络。
       </p>
     </div>
   );

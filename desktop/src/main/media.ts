@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import type { DownloadTask } from '../shared/types';
 import { ffmpegAvailable, lanAddress, userDataDir } from './paths';
-import { fetchBinary, fetchBinaryFast } from './http';
+import { fetchBinary, fetchBinaryFast, requestJson } from './http';
 import { serverModules } from './server-modules';
 import { playSource } from './huangguo';
 import * as remoteSite from './remote-site';
@@ -30,20 +30,20 @@ let server: http.Server | null = null;
 let port = 0;
 const token = crypto.randomBytes(16).toString('hex');
 
-const streamJobs = new Map<string, Promise<{ hls?: string; file?: string }>>();
+const streamJobs = new Map<string, Promise<PlayTarget>>();
 const HLSTIMEOUT = 15000;
 
 /**
  * 解析结果缓存（10 分钟）。一集播放期间播放器会发好几次请求（探测 + Range），
  * 每次都重新拉 videoDetail + videoModel 不但慢，还容易被源站风控。
  */
-const resolvedCache = new Map<string, { value: { hls?: string; file?: string }; at: number }>();
+const resolvedCache = new Map<string, { value: PlayTarget; at: number }>();
 const RESOLVE_TTL = 10 * 60 * 1000;
 
 /** 私密源播放地址缓存：prepare 预热过一次，/hg/ 首请求就不用再等源站 */
 const hgCache = new Map<string, { url: string; referer: string; at: number }>();
 
-function cachedResolve(key: string): { hls?: string; file?: string } | null {
+function cachedResolve(key: string): PlayTarget | null {
   const hit = resolvedCache.get(key);
   if (!hit) return null;
   if (Date.now() - hit.at > RESOLVE_TTL) {
@@ -465,36 +465,70 @@ async function proxyRemote(req: http.IncomingMessage, res: http.ServerResponse, 
   });
 }
 
-/** 红果单集取流：没加密就代理原流；CENC 加密的先用 ffmpeg 解密封装成 mp4 再发。 */
-async function hongguoStream(seriesId: string, episode: number): Promise<{ hls?: string; file?: string }> {
+/** 红果单集取流的三种结果：m3u8（走代理重写）、本地 mp4（解密后）、远端直链（明文 mp4） */
+type PlayTarget = { hls?: string; file?: string; direct?: string };
+
+interface PlayDirectResult {
+  main_url?: string;
+  backup_url?: string;
+  definition?: string;
+  encrypt?: { key?: string } | null;
+  error?: string;
+}
+
+/**
+ * 向后端要一集的直链与内容密钥。
+ *
+ * 桌面端以前是自己在本地调 hongguo-app.js 的 videoDetail/videoModel，那两条都依赖
+ * 镜像里的 hongguo-fetch（127.0.0.1:18098）—— 桌面端根本没带这个服务，
+ * 于是每次播放都是 ECONNREFUSED，所有剧都播不了。站方 2026-11-23 之后也不再接受
+ * 移植签名，本地算不出来，只能问后端（后端跑着完整的签名链）。
+ *
+ * 先按普通短剧问；502 再按 UGC 合集（PUGC 分组）问一次 —— 这两类在站方是两套语义。
+ */
+async function backendPlayDirect(server: string, seriesId: string, episode: number): Promise<PlayDirectResult> {
+  const query = new URLSearchParams({ series_id: seriesId, episode: String(episode) });
+  let first: unknown = null;
+  try {
+    const data = await requestJson<PlayDirectResult>(server, `/api/hongguo/play-direct?${query.toString()}`, { timeoutMs: 60000 });
+    if (data?.main_url) return data;
+  } catch (error) {
+    first = error;
+  }
+  query.set('album', '1');
+  try {
+    const data = await requestJson<PlayDirectResult>(server, `/api/hongguo/play-direct?${query.toString()}`, { timeoutMs: 60000 });
+    if (data?.main_url) return data;
+  } catch (error) {
+    if (!first) first = error;
+  }
+  const message = first instanceof Error ? first.message : '后端没有返回播放地址';
+  throw new Error(`取流失败：${message}`);
+}
+
+/** 红果单集取流：明文 mp4 直接给远端直链；m3u8 交代理；CENC 加密的先用 ffmpeg 解密封装。 */
+async function hongguoStream(seriesId: string, episode: number): Promise<PlayTarget> {
   const key = `rg-${seriesId}-${episode}`;
   const known = cachedResolve(key);
   if (known) return known;
-  const existing = streamJobs.get(key) as Promise<{ hls?: string; file?: string }> | undefined;
+  const existing = streamJobs.get(key) as Promise<PlayTarget> | undefined;
   if (existing) return existing;
 
-  const job = (async () => {
+  const job = (async (): Promise<PlayTarget> => {
     const startedAt = Date.now();
-    const { hgApp } = serverModules();
-    const info = await hgApp.videoDetail(seriesId);
-    const vid = Array.isArray(info?.vids) ? info.vids[episode - 1] : '';
-    if (!vid) throw new Error('这一集没有取到 vid');
-    const model = await hgApp.videoModel(vid);
-    if (!model?.url) throw new Error('这一集没有取到播放地址');
+    const current = session();
+    if (!current?.server) {
+      throw new Error('红果取流要用到 Veyra 后端：请先在「设置」里填好服务器地址并登录');
+    }
+    const model = await backendPlayDirect(current.server, seriesId, episode);
+    const mainUrl = String(model.main_url || '');
 
-    let result: { hls?: string; file?: string };
-    if (!model.key) {
-      // 明文流：m3u8 交给 hls.js，mp4 直接落盘（支持 Range 拖动）
-      if (/\.m3u8(\?|$)/i.test(model.url)) {
-        result = { hls: model.url };
-      } else {
-        const file = path.join(cacheDir(), `${key}.mp4`);
-        if (!(fs.existsSync(file) && fs.statSync(file).size > 1024)) {
-          const buffer = await fetchBinary(model.url, 60000, { Referer: 'https://www.hongguoduanju.com/', 'User-Agent': 'Mozilla/5.0' });
-          fs.writeFileSync(file, buffer);
-        }
-        result = { file };
-      }
+    let result: PlayTarget;
+    if (!model.encrypt?.key) {
+      /* 明文：m3u8 走本机代理（hls.js 带不了 Referer），mp4 直接交给播放器。
+         明文 mp4 以前是先整集下载再播 —— 一集几百 MB，十几秒没反应，
+         看着就像「点了播放没动静」。直链是签过名的，不需要 Referer。 */
+      result = /\.m3u8(\?|$)/i.test(mainUrl) ? { hls: mainUrl } : { direct: mainUrl };
     } else {
       // CENC 加密：整集先解密转封装成普通 mp4，之后每次播放都是本地文件（秒开、可拖）
       const file = path.join(cacheDir(), `${key}.mp4`);
@@ -502,7 +536,7 @@ async function hongguoStream(seriesId: string, episode: number): Promise<{ hls?:
         await new Promise<void>((resolve, reject) => {
           execFile(
             ffmpegAvailable(),
-            ['-y', '-decryption_key', model.key, '-i', model.url, '-c', 'copy', '-movflags', '+faststart', file],
+            ['-y', '-decryption_key', String(model.encrypt?.key), '-i', mainUrl, '-c', 'copy', '-movflags', '+faststart', file],
             { timeout: 10 * 60 * 1000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 },
             (error) => {
               if (!error) return resolve();
@@ -518,7 +552,7 @@ async function hongguoStream(seriesId: string, episode: number): Promise<{ hls?:
     }
 
     resolvedCache.set(key, { value: result, at: Date.now() });
-    console.log(`[media] 解析完成 ${key}（${result.file ? '本地 mp4' : 'm3u8'}，${Date.now() - startedAt}ms）`);
+    console.log(`[media] 解析完成 ${key}（${result.direct ? '远端直链' : result.file ? '本地 mp4' : 'm3u8'}，${Date.now() - startedAt}ms）`);
     return result;
   })().finally(() => streamJobs.delete(key));
 
@@ -791,6 +825,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const [, , seriesId, episode] = url.pathname.split('/');
     try {
       const target = await hongguoStream(seriesId, Number(episode) || 1);
+      if (target.direct) {
+        res.writeHead(302, { Location: target.direct });
+        res.end();
+        return;
+      }
       if (target.hls) {
         const body = await fetchBinary(target.hls, HLSTIMEOUT, { Referer: 'https://www.hongguoduanju.com/', 'User-Agent': 'Mozilla/5.0' });
         const playlist = rewritePlaylist(body.toString('utf8'), target.hls, 'https://www.hongguoduanju.com/');
@@ -867,12 +906,12 @@ export async function resolveKind(source: 'hongguo' | 'huangguo', seriesId: stri
       const found = await playSource(seriesId, episode);
       kind = /\.m3u8(\?|$)/i.test(found.url) ? 'hls' : 'file';
     } else {
-      const { hgApp } = serverModules();
-      const info = await hgApp.videoDetail(seriesId);
-      const vid = Array.isArray(info?.vids) ? info.vids[episode - 1] : '';
-      const model = vid ? await hgApp.videoModel(vid) : null;
+      /* 红果：问后端。以前在本机调 videoDetail/videoModel，两条都依赖
+         127.0.0.1:18098 的 hongguo-fetch，桌面端没带这个服务，必然失败。 */
+      const current = session();
+      const model = current?.server ? await backendPlayDirect(current.server, seriesId, episode) : null;
       // 有 key 说明是 CENC 加密，服务端会先解成 mp4；否则看源地址后缀
-      kind = model?.key ? 'file' : /\.m3u8(\?|$)/i.test(String(model?.url || '')) ? 'hls' : 'file';
+      kind = model?.encrypt?.key ? 'file' : /\.m3u8(\?|$)/i.test(String(model?.main_url || '')) ? 'hls' : 'file';
     }
   } catch {
     /* 探测失败按默认走，播放器自己还有兜底 */

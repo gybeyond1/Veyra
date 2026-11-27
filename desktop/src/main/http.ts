@@ -215,12 +215,14 @@ export function limitConcurrency<T>(items: T[], size: number, worker: (item: T, 
  * 红果/黄果的边缘节点会按 TLS 指纹拦 Node 客户端，curl 反而正常；
  * Windows 10 1803 起自带 curl.exe，打包时另外附带一份，不依赖用户环境。
  */
-function curlArgs(url: string, timeoutMs: number, headers?: Record<string, string>): string[] {
+function curlArgs(url: string, timeoutMs: number, headers?: Record<string, string>, noProxy = false): string[] {
   const args = ['-s', '-L', '-m', String(Math.max(3, Math.round(timeoutMs / 1000)))];
-  // 「仅代理」模式：所有外网请求都走用户填的代理；本地回环（自家后端）永远直连
+  // 「仅代理」模式：外网请求走用户填的代理；本地回环（自家后端）永远直连。
+  // noProxy 给红果（公开源）的抓取用 —— 网络模式是「私密内容」的设置，
+  // 以前代理一挂，红果首页/详情跟着全空，看着像公开内容也坏了。
   const settings = readSettings();
   const local = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])/i.test(url);
-  if (settings.proxyMode === 2 && settings.proxy && !local) {
+  if (!noProxy && settings.proxyMode === 2 && settings.proxy && !local) {
     args.push('-x', settings.proxy.trim());
   }
   const custom = headers || {};
@@ -233,11 +235,11 @@ function curlArgs(url: string, timeoutMs: number, headers?: Record<string, strin
   return args;
 }
 
-export function fetchText(url: string, timeoutMs = 10000, headers?: Record<string, string>): Promise<string> {
+export function fetchText(url: string, timeoutMs = 10000, headers?: Record<string, string>, noProxy = false): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(
       'curl',
-      curlArgs(url, timeoutMs, headers),
+      curlArgs(url, timeoutMs, headers, noProxy),
       { maxBuffer: 12 * 1024 * 1024, windowsHide: true },
       (error, stdout) => {
         if (error) {

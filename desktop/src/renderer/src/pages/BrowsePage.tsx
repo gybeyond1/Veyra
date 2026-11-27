@@ -3,6 +3,12 @@ import type { CategoryPayload, SeriesCard } from '@shared/types';
 import { call, errorText } from '../api';
 import SeriesTile from '../components/SeriesTile';
 
+/**
+ * 上一次的搜索结果。从侧栏点「搜索」时组件会重新挂载，模块级变量还留着，
+ * 先把上次那批铺上再等新数据 —— 以前每次进来都是空屏 + 骨架，看着像搜索被清了。
+ */
+let lastSearch: { key: string; items: SeriesCard[] } = { key: '', items: [] };
+
 interface Props {
   mode?: 'category' | 'search';
   seed?: string;
@@ -15,7 +21,9 @@ export default function BrowsePage({ mode = 'category', seed = '', source, onOpe
   const [slug, setSlug] = useState('');
   const [page, setPage] = useState(1);
   const [tags, setTags] = useState<{ name: string; slug: string; type: string }[]>([]);
-  const [items, setItems] = useState<SeriesCard[]>([]);
+  const [items, setItems] = useState<SeriesCard[]>(() =>
+    mode === 'search' && seed ? (lastSearch.key === `${source}:${seed}` ? lastSearch.items : []) : [],
+  );
   const [query, setQuery] = useState(seed);
   const [submitted, setSubmitted] = useState(seed);
   const [loading, setLoading] = useState(false);
@@ -72,6 +80,8 @@ export default function BrowsePage({ mode = 'category', seed = '', source, onOpe
         if (!alive) return;
         setItems(data.items);
         setHasMore(data.hasMore);
+        // 记住这批结果：下次从侧栏进来先显示它，直到新的搜索覆盖
+        if (mode === 'search' && submitted) lastSearch = { key: `${source}:${submitted}`, items: data.items };
       })
       .catch((issue) => alive && setError(errorText(issue)))
       .finally(() => alive && setLoading(false));
@@ -143,7 +153,7 @@ export default function BrowsePage({ mode = 'category', seed = '', source, onOpe
         </div>
       )}
 
-      {loading ? (
+      {loading && !(mode === 'search' && items.length) ? (
         <div className="grid">
           {Array.from({ length: 12 }).map((_, index) => (
             <div key={index} className="tile-skeleton" />

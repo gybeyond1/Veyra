@@ -124,7 +124,11 @@ function parseTags(section, type) {
   for (const row of section.selectorList || []) {
     if (String(row.row_id) !== '1') continue;
     for (const entry of row.items || []) {
-      const slug = text(entry.selector_item_id), name = text(entry.show_name);
+      // 站方给的 selector_item_id 本身可能已经带 short:/comic: 前缀（实测已带）。
+      // 直接再加一遍会变成 short:short:romance，normalizeQuery 只拆一层，
+      // 剩下的 slug 含冒号过不了校验，点分类就是「无效题材 slug」。
+      const slug = text(entry.selector_item_id).replace(/^(short|comic):/, '');
+      const name = text(entry.show_name);
       const ids = entry.category_json_ids;
       if (!/^[a-z0-9-]{1,80}$/.test(slug) || !name || !Array.isArray(ids) || !ids.length || seen.has(slug)) continue;
       seen.add(slug); items.push({ slug: `${type}:${slug}`, name, group: type });
@@ -329,11 +333,32 @@ function createHongguoContent(fetchText) {
     return parseCategory(html, normalized);
   }
   async function home() {
-    const [recommend, newest] = await Promise.all([category({ type: 'short', page: 1 }), category({ type: 'comic', page: 1 })]);
+    /* 短剧、漫剧各拉各的，谁成功用谁。
+       以前是 Promise.all：漫剧榜单解析不出来（站方会延后下发，回「延期数据尚未解析」）
+       就把整个首页变成 500，分类页明明是好的 —— 桌面端首页「加载失败」就是这么来的。
+       两个都挂才抛错，抛的也还是原来那条原因，方便排查。 */
+    const [shortResult, comicResult] = await Promise.allSettled([
+      category({ type: 'short', page: 1 }),
+      category({ type: 'comic', page: 1 }),
+    ]);
+    const pick = (result) => (result.status === 'fulfilled' ? result.value : null);
+    const recommend = pick(shortResult);
+    const newest = pick(comicResult);
+    if (!recommend && !newest) {
+      const reason =
+        (shortResult.status === 'rejected' && shortResult.reason) ||
+        (comicResult.status === 'rejected' && comicResult.reason) ||
+        new Error('首页暂无内容');
+      throw reason;
+    }
+    const items = recommend && recommend.items.length
+      ? recommend.items
+      : (newest ? newest.items : []);
     return {
-      items: recommend.items, slides: recommend.items.slice(0, 5),
-      homepageRecommend: recommend.items, homepageNewest: newest.items,
-      recommend, newest,
+      items, slides: items.slice(0, 5),
+      homepageRecommend: recommend ? recommend.items : items,
+      homepageNewest: newest ? newest.items : items,
+      recommend: recommend || newest, newest: newest || recommend,
     };
   }
   async function tags() {

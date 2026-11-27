@@ -21,7 +21,11 @@ export function serverModules() {
   const hgApp = req('./hongguo-app.js');
   const contentModule = req('./hongguo-content.js');
   const downloader = req('./downloader.js');
-  const content = contentModule.createHongguoContent((url: string, timeoutMs: number) => fetchText(url, timeoutMs));
+  // 红果是公开源：抓取强制直连，不吃「私密网络模式」的代理。
+  // 否则用户在私密模式里选了代理，代理不通时红果首页/详情一起变空。
+  const content = contentModule.createHongguoContent((url: string, timeoutMs: number) =>
+    fetchText(url, timeoutMs, undefined, true),
+  );
   cached = { hgApp, content, contentModule, downloader };
   return cached;
 }

@@ -1,11 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { SeriesCard } from '@shared/types';
+import type { DownloadTask, RemoteTask, SeriesCard } from '@shared/types';
 import { call, errorText } from '../api';
 import Cover from '../components/Cover';
+import DownloadsPage from './DownloadsPage';
 
 interface Props {
   source: 'hongguo' | 'huangguo';
   onOpen: (id: string, fallback: { title: string; cover: string }) => void;
+  /** 下载任务：下载页并进「我的」，三个 tab 并排 */
+  tasks: DownloadTask[];
+  remote: RemoteTask[];
+  onRefresh: () => void;
+  onPlayLocal: (task: DownloadTask) => void;
+  onPlayRemote: (task: RemoteTask) => void;
+  notify: (text: string, tone?: 'info' | 'error') => void;
 }
 
 interface LibraryItem {
@@ -37,12 +45,12 @@ function progressText(item: LibraryItem): string {
   return `第 ${episode} 集 · ${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
-export default function LibraryPage({ source, onOpen }: Props) {
+export default function LibraryPage({ source, onOpen, tasks, remote, onRefresh, onPlayLocal, onPlayRemote, notify }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [bookmarks, setBookmarks] = useState<LibraryItem[]>([]);
   const [history, setHistory] = useState<LibraryItem[]>([]);
-  const [tab, setTab] = useState<'history' | 'bookmarks'>('history');
+  const [tab, setTab] = useState<'history' | 'bookmarks' | 'downloads'>('history');
 
   useEffect(() => {
     let alive = true;
@@ -82,9 +90,21 @@ export default function LibraryPage({ source, onOpen }: Props) {
         <button type="button" className={tab === 'bookmarks' ? 'active' : ''} onClick={() => setTab('bookmarks')}>
           收藏 {stats.bookmarks > 0 ? `(${stats.bookmarks})` : ''}
         </button>
+        <button type="button" className={tab === 'downloads' ? 'active' : ''} onClick={() => setTab('downloads')}>
+          下载 {tasks.length > 0 ? `(${tasks.length})` : ''}
+        </button>
       </div>
 
-      {loading ? (
+      {tab === 'downloads' ? (
+        <DownloadsPage
+          tasks={tasks}
+          remote={remote}
+          onRefresh={onRefresh}
+          onPlay={onPlayLocal}
+          onPlayRemote={onPlayRemote}
+          notify={notify}
+        />
+      ) : loading ? (
         <div className="grid">
           {Array.from({ length: 10 }).map((_, index) => (
             <div key={index} className="tile-skeleton" />

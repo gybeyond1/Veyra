@@ -2,11 +2,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { CategoryPayload, HomePayload, SeriesDetail, SeriesCard } from '../shared/types';
 import { serverModules } from './server-modules';
-import { fetchText } from './http';
+import { fetchText, requestJson } from './http';
 import * as huangguo from './huangguo';
 import * as remoteSite from './remote-site';
 import type { ContentSource } from './source';
 import { playUrl, prepare, remoteSitePlayUrl } from './media';
+import { session } from './session';
 import { userDataDir } from './paths';
 
 const SITE = 'https://hongguoduanju.com';
@@ -160,8 +161,9 @@ export async function detail(source: ContentSource, id: string): Promise<SeriesD
     return payload;
   }
 
-  const { hgApp, contentModule } = serverModules();
-  const html = await fetchText(`${SITE}/detail/${encodeURIComponent(seriesId)}`, 12000);
+  const { contentModule } = serverModules();
+  /* 详情页 2026-11 起只认 query 形式；/detail/<id> 一律 404。 */
+  const html = await fetchText(`${SITE}/detail?series_id=${encodeURIComponent(seriesId)}`, 12000, undefined, true);
 
   let loader: any = {};
   try {
@@ -176,11 +178,27 @@ export async function detail(source: ContentSource, id: string): Promise<SeriesD
 
   let vids = rawEpisodes.map((ep) => String(ep?.vid || ep?.video_id || '')).filter(Boolean);
   if (!vids.length) {
+    /* 网页版只收录部分片源，UGC 合集和待播剧在网页详情里是空壳。
+       以前在本机调 hongguo-app 的 videoDetail，那条依赖 127.0.0.1:18098，
+       桌面端没有这个服务 —— 所有这类剧详情都是 0 集。改成问后端。 */
     try {
-      const det = await hgApp.videoDetail(seriesId);
-      if (Array.isArray(det?.vids)) vids = det.vids.map((v: unknown) => String(v));
+      const current = session();
+      if (current?.server) {
+        const detail = await requestJson<{ vids?: string[]; raw?: any; album?: boolean; unavailable?: boolean }>(
+          current.server,
+          `/api/web/hongguo/detail?id=${encodeURIComponent(seriesId)}`,
+          { timeoutMs: 30000 },
+        );
+        if (Array.isArray(detail?.vids)) vids = detail.vids.map((v: unknown) => String(v));
+        if (detail?.raw) {
+          const remote = detail.raw.detail_page || detail.raw.detailPage || {};
+          const info = remote.seriesDetail || {};
+          if (!page.series_title && info.series_name) (page as any).series_title = info.series_name;
+          if (!page.series_cover && info.series_cover) (page as any).series_cover = info.series_cover;
+        }
+      }
     } catch (error) {
-      console.warn('[catalog.detail] vid 兜底失败', (error as Error).message);
+      console.warn('[catalog.detail] 后端兜底失败', (error as Error).message);
     }
   }
 

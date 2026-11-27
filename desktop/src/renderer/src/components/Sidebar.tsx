@@ -23,18 +23,6 @@ const items: { key: View; label: string; icon: JSX.Element }[] = [
     ),
   },
   {
-    key: 'category',
-    label: '分类',
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-        <rect x="4" y="4" width="7" height="7" rx="1.5" />
-        <rect x="13" y="4" width="7" height="7" rx="1.5" />
-        <rect x="4" y="13" width="7" height="7" rx="1.5" />
-        <rect x="13" y="13" width="7" height="7" rx="1.5" />
-      </svg>
-    ),
-  },
-  {
     key: 'search',
     label: '搜索',
     icon: (
@@ -50,16 +38,6 @@ const items: { key: View; label: string; icon: JSX.Element }[] = [
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
         <path d="M6 4.5h9.5a2 2 0 0 1 2 2V20l-6.5-3.6L4.5 20V6.5a2 2 0 0 1 1.5-2z" strokeLinejoin="round" />
-      </svg>
-    ),
-  },
-  {
-    key: 'downloads',
-    label: '下载',
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-        <path d="M12 4v11m0 0 4-4m-4 4-4-4" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M5 19h14" strokeLinecap="round" />
       </svg>
     ),
   },
@@ -98,7 +76,7 @@ export default function Sidebar({
           >
             <span className="nav-icon">{item.icon}</span>
             <span>{item.label}</span>
-            {item.key === 'downloads' && activeDownloads > 0 && (
+            {item.key === 'library' && activeDownloads > 0 && (
               <span className="nav-badge">{activeDownloads}</span>
             )}
           </button>

@@ -33,7 +33,7 @@ function looksLikeChallenge(html: string): boolean {
   return /Just a moment|challenge-platform|cf-browser-verification|Attention Required/i.test(html);
 }
 
-async function load(pathname: string, referer = '/'): Promise<{ html: string; site: string }> {
+async function load(pathname: string, referer = '/', minLength = 200): Promise<{ html: string; site: string }> {
   let last: Error | null = null;
   // 通道是显式选择，不做自动兜底：直连/代理模式下失败就报错，避免用户以为在走代理其实走了后端
   const mode = Number(readSettings().proxyMode) || 3;
@@ -42,7 +42,7 @@ async function load(pathname: string, referer = '/'): Promise<{ html: string; si
     for (const site of SITES) {
       try {
         const html = await fetchText(site + pathname, 15000, { Referer: `${REFERER}${referer}`, 'User-Agent': UA });
-        if (html && html.length > 200 && !looksLikeChallenge(html)) return { html, site };
+        if (html && html.length > minLength && !looksLikeChallenge(html)) return { html, site };
         throw new Error(html && looksLikeChallenge(html) ? '源站风控拦截' : '页面内容为空');
       } catch (error) {
         last = error as Error;
@@ -63,7 +63,7 @@ async function load(pathname: string, referer = '/'): Promise<{ html: string; si
           20000,
           { Referer: `${REFERER}${referer}`, 'User-Agent': UA },
         );
-        if (html && html.length > 200 && !looksLikeChallenge(html)) return { html, site };
+        if (html && html.length > minLength && !looksLikeChallenge(html)) return { html, site };
         throw new Error('后端通道返回的内容不可用');
       } catch (error) {
         last = error as Error;
@@ -336,13 +336,16 @@ export async function playSource(id: string, episode: number): Promise<{ url: st
     (Array.isArray(data.videoSrcList) ? text(data.videoSrcList[0]) : '') ||
     text((data.epPlaySrcs as Record<string, string> | undefined)?.[String(episode)]);
   if (!src) {
-    // 2026-11 改版：详情页的 videoSrc 留空，播放地址改由独立接口下发
-    const { html: apiBody } = await load(`/api/videos/${id}/play?ep=${episode}`, `/video/${id}/`);
+    /* 2026-11 改版：详情页的 videoSrc 留空，播放地址改由独立接口下发。
+       这个接口回的是 JSON，短的时候不到 200 字 —— 用页面那套「至少 200 字」的
+       校验会把它当成空页面丢掉，表现就是「详情能开、一点播放就说没有地址」。
+       这里单独放宽下限，失败时把原文带进错误里，别再只回一句「没有取到」。 */
+    const { html: apiBody } = await load(`/api/videos/${id}/play?ep=${episode}`, `/video/${id}/`, 20);
     try {
       const payload = JSON.parse(apiBody) as { data?: { video_url?: string } };
       src = text(payload?.data?.video_url);
     } catch {
-      src = '';
+      throw new Error('播放地址接口返回的不是 JSON：' + String(apiBody || '').slice(0, 120));
     }
   }
   if (!src) throw new Error('这一集没有取到播放地址');
