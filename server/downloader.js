@@ -134,8 +134,30 @@ function loadTasks() {
       }
       t.updatedAt = Date.now();
     }
+    if (t.status === 'ready') syncReadyCount(t);
   }
   storeDirty = true;
+  // 修正过的集数直接写回盘，别每次重启都再算一遍（也顺手把老数据里的脏值带出去）
+  scheduleFlush();
+}
+
+/**
+ * ready 任务里对外显示的集数，统一以「每集是否真的落盘」为准。
+ * 老版本用下载循环里的计数器，补下 / 断点续传 / 重启恢复的分集不计入，
+ * 结果就是同一张卡片上出现「222/222 集 · 已下载全部集」和「221/222 集」并存。
+ */
+function syncReadyCount(t) {
+  if (!t || !Array.isArray(t.episodes)) return;
+  // 老数据里没有 _ok 字段就别乱改，免得把正确的数字抹成 0
+  if (t.episodes.every(ep => ep._ok === undefined)) return;
+  const ok = t.episodes.filter(ep => ep._ok).length;
+  const total = t.episodes.length;
+  const p = t.progress || (t.progress = {});
+  p.episode = ok;
+  p.total = total;
+  if (typeof p.detail === 'string') {
+    p.detail = p.detail.replace(/已下载 \d+\/\d+ 集/, `已下载 ${ok}/${total} 集`);
+  }
 }
 /** 按 work 目录分集文件重建任务每集状态：文件在=成功保留，缺失=失败待补下。 */
 function rescanTaskFiles(t) {
@@ -1681,16 +1703,22 @@ async function runTask(task) {
   /* App 源整条没起来 = 分集接口没给我们 episode_id，最可能的原因是后端没配 HG_SIGNER。
      把这句话写进任务详情，用户不用翻容器日志也能知道该改什么。 */
   const signerHint = task._appVids ? '' : '；没有拿到分集列表，请确认 docker-compose.yml 里配了 HG_SIGNER 并启动了 hongguo-signer';
+  // 已完成集数以磁盘为准。downloaded 那个计数器只在「本循环真的下完一集」时 +1，
+  // 补下 / 断点续传 / 重启恢复的分集不会计入，于是出现 doneCount=222 而这里还是 221 的自相矛盾。
+  const okCount = task.episodes.filter(ep => ep._ok).length;
+  task.progress.episode = okCount;
+  task.progress.total = task.episodes.length;
+
   if (failedCount > 0) {
     // 失败原因写进 task.error：不写的话界面上只有一句"下载中"，看上去就是卡住了
     const nums = task.failedEpisodes.slice(0, 10).map(f => `第${f.index}集`).join('、');
     const more = failedCount > 10 ? ' 等' : '';
     const why = String(task.failedEpisodes[0].error || '未知原因').split('\n')[0].slice(0, 80);
     task.error = `${failedCount} 集失败：${nums}${more}（${why}）。点「重试失败集」只补这几集，已下好的不动`;
-    task.progress = { phase: 'ready', episode: downloaded, total: task.episodes.length, percent: 100, detail: `已下载 ${downloaded}/${task.episodes.length} 集，失败 ${failedCount} 集${sourceNote}，可重试失败集或先合并成功部分${signerHint}` };
+    task.progress = { phase: 'ready', episode: okCount, total: task.episodes.length, percent: 100, detail: `已下载 ${okCount}/${task.episodes.length} 集，失败 ${failedCount} 集${sourceNote}，可重试失败集或先合并成功部分${signerHint}` };
   } else {
     task.error = '';
-    task.progress = { phase: 'ready', episode: task.episodes.length, total: task.episodes.length, percent: 100, detail: `已下载 ${task.episodes.length} 集${sourceNote}，待合并` };
+    task.progress = { phase: 'ready', episode: okCount, total: task.episodes.length, percent: 100, detail: `已下载 ${okCount}/${task.episodes.length} 集${sourceNote}，待合并` };
   }
   // 失败/中断留下的 .enc 中间文件：留在剧集目录里就是一排打不开的文件
   cleanEncFiles(dir);
