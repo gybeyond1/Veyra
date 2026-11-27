@@ -34,9 +34,9 @@ const KIND_TEXT: Record<RemoteTask['kind'], string> = {
 /**
  * 「我的 → 下载」。
  *
- * 以前这里是两张长条列表（本机任务 / 其它设备），和「最近在看」「收藏」的封面格子完全两个样子，
- * 明明是同一层的三个 tab，切换过去像进了另一个页面。现在本机任务也用同一套封面卡片，
- * 其余设备的成品留在下面一小段，不抢主视觉。
+ * 和「最近在看」「收藏」同一套封面卡片：本机任务带进度条、状态角标和 目录/重试/合并/删除；
+ * 其它设备（服务器 / 手机 / 电视 / 另一台电脑）的成品也进同一个网格，只保留「来源 + 集数 + 在线播放」，
+ * 因为进度和合并发生在它们自己那边，这边能做的只有播。
  */
 export default function DownloadsPage({ tasks, remote, onRefresh, onPlay, onPlayRemote, notify }: Props) {
   async function act(label: string, job: () => Promise<unknown>) {
@@ -49,11 +49,11 @@ export default function DownloadsPage({ tasks, remote, onRefresh, onPlay, onPlay
     }
   }
 
-  const playing = remote.filter((task) => task.playUrl);
+  const empty = tasks.length === 0 && remote.length === 0;
 
   return (
     <>
-      {tasks.length === 0 ? (
+      {empty ? (
         <div className="empty-block">
           <h3>还没有下载任务</h3>
           <p>去详情页点「下载」选几集，下完会自动合并成一个文件。</p>
@@ -155,59 +155,50 @@ export default function DownloadsPage({ tasks, remote, onRefresh, onPlay, onPlay
               </div>
             );
           })}
-        </div>
-      )}
 
-      {remote.length > 0 && (
-        <section className="task-section">
-          <header className="task-section-head">
-            <h2>其它设备</h2>
-            <span>
-              {remote.length} 个下载记录
-              {playing.length ? ` · ${playing.length} 个可在线播放` : ''}
-            </span>
-          </header>
-          <div className="task-list remote">
-            {remote.map((task) => {
-              const percent =
-                task.status === 'done' || task.status === 'ready'
-                  ? 100
-                  : Math.max(0, Math.min(100, task.percent || 0));
-              return (
-                <article key={task.key} className={`task remote ${task.status}`}>
-                  <div className="task-cover">
-                    <Cover src={task.cover} alt={task.title} />
-                  </div>
-                  <div className="task-body">
-                    <header>
-                      <h3 title={task.title}>{task.title}</h3>
-                      <span className={`source-badge ${task.kind}`} title={task.deviceName}>
-                        {KIND_TEXT[task.kind]}
-                        {task.kind !== 'nas' && task.deviceName ? ` · ${task.deviceName}` : ''}
-                      </span>
-                      <span className={`status ${task.status}`}>{STATUS_TEXT[task.status] || task.status || '—'}</span>
-                    </header>
-                    <div className="progress">
-                      <div className="progress-bar" style={{ width: `${percent}%` }} />
-                    </div>
-                    <p className="task-detail">
-                      {task.totalCount ? `${task.doneCount}/${task.totalCount} 集` : task.episodeCount ? `全 ${task.episodeCount} 集` : ''}
-                    </p>
-                  </div>
-                  <div className="task-actions">
-                    {task.playUrl ? (
-                      <button type="button" className="primary small" onClick={() => onPlayRemote(task)}>
-                        在线播放
-                      </button>
-                    ) : (
-                      <span className="remote-hint">{task.hint || '暂不可播'}</span>
-                    )}
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        </section>
+          {remote.map((task) => {
+            const playable = Boolean(task.playUrl);
+            const where = KIND_TEXT[task.kind] + (task.kind !== 'nas' && task.deviceName ? ` · ${task.deviceName}` : '');
+            // 设备名已经在封面右上角，副标题只留状态和集数，别顶成省略号
+            const subtitle = [
+              STATUS_TEXT[task.status] || task.status || '',
+              task.totalCount ? `${task.doneCount}/${task.totalCount} 集` : task.episodeCount ? `全 ${task.episodeCount} 集` : '',
+            ].filter(Boolean).join(' · ');
+
+            return (
+              <div key={task.key} className="tile tile-task tile-remote">
+                <div
+                  className="tile-art"
+                  role="button"
+                  tabIndex={0}
+                  title={playable ? `在线播放（${where}）` : task.hint || `${where} 暂不可播`}
+                  onClick={() => (playable ? onPlayRemote(task) : undefined)}
+                  onKeyDown={(event) => {
+                    if (playable && (event.key === 'Enter' || event.key === ' ')) onPlayRemote(task);
+                  }}
+                >
+                  <Cover src={task.cover} alt={task.title} />
+                  {/* 进度和合并都发生在对方设备上，这里不画进度条，只报状态 */}
+                  <span className="tile-badge">{STATUS_TEXT[task.status] || task.status || '—'}</span>
+                  <span className="tile-more" title={where}>
+                    {KIND_TEXT[task.kind]}
+                  </span>
+                  {playable ? (
+                    <span className="tile-play">
+                      <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M8 5.5v13l11-6.5z" />
+                      </svg>
+                    </span>
+                  ) : (
+                    <span className="tile-offline">{task.hint || '暂不可播'}</span>
+                  )}
+                </div>
+                <p className="tile-title">{task.title}</p>
+                <p className="tile-sub">{subtitle}</p>
+              </div>
+            );
+          })}
+        </div>
       )}
     </>
   );

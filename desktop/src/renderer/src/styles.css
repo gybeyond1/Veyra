@@ -680,13 +680,36 @@ input::placeholder {
   backdrop-filter: blur(6px);
   transition: opacity 0.18s ease;
 }
-.tile-task:hover .tile-more,
-.tile-task:focus-within .tile-more {
+.tile-task:not(.tile-remote):hover .tile-more,
+.tile-task:not(.tile-remote):focus-within .tile-more {
   opacity: 0;
 }
-.tile-task:hover .tile-badge,
-.tile-task:focus-within .tile-badge {
+/* 本机任务悬停时让位给操作条；其它设备的角标要一直看得见 */
+.tile-task:not(.tile-remote):hover .tile-badge,
+.tile-task:not(.tile-remote):focus-within .tile-badge {
   opacity: 0;
+}
+/* 其它设备的卡片：右上角是设备来源（服务器/手机/电视），不是「···」 */
+.tile-remote .tile-more {
+  font-size: 11px;
+  letter-spacing: 0;
+  padding: 2px 7px;
+  line-height: 16px;
+  border-radius: 7px;
+}
+.tile-offline {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: rgba(8, 11, 15, 0.72);
+  color: #b9c2cf;
+  font-size: 11.5px;
+  max-width: 86%;
+  text-align: center;
+  backdrop-filter: blur(6px);
 }
 
 .tile-skeleton,

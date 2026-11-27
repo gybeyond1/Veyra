@@ -91,7 +91,7 @@ export default function LibraryPage({ source, onOpen, tasks, remote, onRefresh, 
           收藏 ({stats.bookmarks})
         </button>
         <button type="button" className={tab === 'downloads' ? 'active' : ''} onClick={() => setTab('downloads')}>
-          下载 ({tasks.length})
+          下载 ({tasks.length + remote.length})
         </button>
       </div>
 
