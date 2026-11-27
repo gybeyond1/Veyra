@@ -1444,7 +1444,7 @@ document.getElementById('btn-dl-confirm').onclick=async()=>{
       closeDownloadLayer();
     }else{
       const r=await fetch('/api/download/tasks',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},AUTH()),
-        body:JSON.stringify({source:'hongguo',title:_detail.title,seriesId:String(_detail.seriesId),episodes})});
+        body:JSON.stringify({userId:dlAccountId,source:'hongguo',title:_detail.title,seriesId:String(_detail.seriesId),episodes})});
       const d=await r.json().catch(()=>({}));
       if(!r.ok)throw new Error(d.error||('HTTP '+r.status));
       st.textContent='已提交，共 '+episodes.length+' 集（NAS 自主取流下载）';

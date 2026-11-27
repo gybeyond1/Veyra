@@ -1177,7 +1177,11 @@ function downloadActor(req) {
   const user = session && users[session.userId];
   if (!user) return null;
   session.lastSeen = Date.now();
-  return { owner: user.id, isAdmin: false, userId: user.id, user };
+  /* 账号体系里的 role=admin 也是管理员，看全部任务。
+     以前这里写死 isAdmin:false，只认管理台密码会话，
+     于是 WebUI 建的任务（owner='admin'）在管理员手机上一条都看不到，
+     反过来管理台却能看到手机建的任务 —— 两头不对称。 */
+  return { owner: user.id, isAdmin: user.role === 'admin', userId: user.id, user };
 }
 
 function requireDownloadAuth(req, res, next) {
@@ -1188,9 +1192,15 @@ function requireDownloadAuth(req, res, next) {
 }
 app.post('/api/download/tasks', requireDownloadAuth, (req, res) => {
   try {
+    /* 管理台代账号建任务时必须落到那个账号名下：WebUI 的下载弹窗会选「下到谁的账号」，
+       以前这个 userId 只用在设备/存储分支，NAS 分支一律挂在 admin 名下，
+       导致被选中的账号在手机端永远看不到这条任务。 */
+    let owner = req.actor.owner;
+    const asUser = String((req.body && (req.body.userId || req.body.owner)) || '').trim();
+    if (req.actor.isAdmin && asUser && users[asUser]) owner = asUser;
     const task = downloader.createTask({
       source: req.body.source, title: req.body.title, seriesId: req.body.seriesId,
-      episodes: req.body.episodes, owner: req.actor.owner, cover: req.body.cover,
+      episodes: req.body.episodes, owner, cover: req.body.cover,
     });
     res.json({ task });
   } catch (e) { res.status(400).json({ error: e.message }); }
@@ -1377,7 +1387,9 @@ app.post('/api/admin/download/dispatch', requireAdmin, (req, res) => {
   try {
     const body = req.body || {};
     const userId = String(body.userId || '').trim();
-    const actor = { owner: ADMIN_OWNER, isAdmin: true, userId, user: null };
+    /* 归属给被选中的账号，而不是固定的 'admin'：
+       管理台只是「代这个账号下」，下完该账号的手机/电脑端要能看到这条任务。 */
+    const actor = { owner: userId || ADMIN_OWNER, isAdmin: true, userId, user: null };
     res.json(dispatchDownload(actor, body));
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
