@@ -68,18 +68,24 @@ final class HongguoDirect {
     private static final String REGISTER = "https://log5-applog-lf.fqnovel.com/service/2/device_register/"
             + "?tt_data=a&cronet_version=8d40f833_2026-03-03&ttnet_version=4.2.243.31-douyin&use_store_region_cookie=1";
     private static final String REGISTER_UA = "com.phoenix.read/72232 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3)";
-    /** 官方播放器的头形态：Android 12 / PGT-AN10，与 v5 签名里的设备描述一致。 */
-    private static final String PLAYBACK_UA = "com.phoenix.read/73932 (Linux; U; Android 12; zh_CN_#Hans;"
-            + " PGT-AN10; Build/V417IR;tt-ok/3.12.13.20)";
+    /** 官方播放器的头形态：74532 / 25053RT47C，与 v5 签名里的设备描述一致。 */
+    private static final String PLAYBACK_UA = "com.phoenix.read/74532 (Linux; U; Android 16; zh_CN; 25053RT47C;"
+            + " Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)";
     /** video_tab 只认这台机型的头（与 hongguoTV 0.16.12 实网验证一致）。 */
     private static final String TAB_UA = "com.phoenix.read/73932 (Linux; U; Android 16; zh_CN; 25053RT47C;"
             + " Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)";
-    private static final String VERSION_NAME = "7.4.3.32";
+    /**
+     * 2026-11-27：站方按 App 版本过滤，74332 的请求即使签名完全正确也只回 200 + 0 字节。
+     * 74532 是当前线上版本，同样的 medusa 能正常返回模型（29 集样本实测）。
+     */
+    private static final String VERSION_NAME = "7.4.5.32";
     /**
      * 3 是官方 App 的档位，只下发 bytevc2（手机/TV 的 MediaCodec 都解不了），
      * 部分分集干脆回空正文。1 才是「协商兼容档位」，会正常给 h264/hevc。
      */
     private static final int PLAYER_LEVEL = 1;
+    /** 74532 profile 的取模档位：4 = 官方客户端档，实测 1080p HEVC。 */
+    private static final int MODEL_LEVEL = 4;
     private static final MediaType JSON = MediaType.get("application/json; charset=UTF-8");
     private static final MediaType OCTET = MediaType.get("application/octet-stream;tt-data=a");
     /** 与 ttEncrypt 同一个盐（客户端协议常量）。 */
@@ -285,7 +291,7 @@ final class HongguoDirect {
                    主接口刚整片空过就先走第 2 层：省两次注定空的请求，也少一次风控暴露。 */
                 boolean preferTab = !background
                         && System.currentTimeMillis() - primaryEmptyAt < PRIMARY_EMPTY_TTL_MS;
-                StreamInfo info = preferTab ? null : fetchModel(vid, device);
+                StreamInfo info = preferTab ? null : fetchModel(vid, device, album);
                 if (info == null && !background) {
                     if (!preferTab) primaryEmptyAt = System.currentTimeMillis();
                     /* 备用层各自兜住异常：tab 打不通不能把「换 b 域」这条也一起掐死。 */
@@ -298,14 +304,14 @@ final class HongguoDirect {
                 if (info == null && !background && preferTab) {
                     /* 刚才只是「近期主接口空」，仍要给它一次机会：可能已经恢复。 */
                     try {
-                        info = fetchModel(vid, device);
+                        info = fetchModel(vid, device, album);
                     } catch (Exception primaryError) {
                         errors.add("主接口重试：" + describe(primaryError));
                     }
                 }
                 if (info == null && !background) {
                     try {
-                        info = fetchModelFrom(HOSTS[1], vid, device);
+                        info = fetchModelFrom(HOSTS[1], vid, device, album);
                     } catch (Exception altError) {
                         errors.add("备用域名：" + describe(altError));
                     }
@@ -333,9 +339,9 @@ final class HongguoDirect {
         lastAllEmptyAt = System.currentTimeMillis();
         if (++consecutiveEmpty >= 3) dropIdentity();
 
-        /* 本地三层全空：交给 Veyra 后端。那边跑 openhongguo-signer（unidbg + App 自带
-           libmetasec_ml.so），签名是站方认的那一份；2026-11-24 起本地这套移植签名
-           无论哪一档常量都只回 200 + 空正文。 */
+        /* 本地三层全空：交给 Veyra 后端兜底。
+           2026-11-27 起本地签名已能取到模型（74532 profile + 完整设备信封），
+           正常情况下走不到这里；只有上游临时封禁 / 出口 IP 被限流时才靠后端。 */
         StreamInfo remote = fetchFromBackend(vid, album);
         if (remote != null) {
             lastAllEmptyAt = 0L;
@@ -359,12 +365,10 @@ final class HongguoDirect {
     /**
      * 兜底取址：问 Veyra 后端要直链与内容密钥。
      *
-     * 2026-11-24 起站方只接受 App 自带 {@code libmetasec_ml.so} 产出的播放签名，
-     * 本地这套移植签名（v04.06.04 / v04.10.03 两档都试过）一律回 HTTP 200 + 空正文。
-     * 后端跑 openhongguo-signer，用同一份 so 签名，取到的直链和密钥与本地同构，
-     * 这里直接转成 StreamInfo 交回本地播放器。
-     *
-     * 只在本地三层全失败后调用；后端没配、连不上或返回异常时返回 null，
+     * 正常顺序是本地签名优先（74532 profile + 完整设备信封，实测 1080p bytevc1 可取）。
+     * 只有在本地三层全空、或本地刚被上游连续判空时才走这里：
+     * 后端的取流二进制跑在 NAS 出口上，和手机的 IP / 设备画像不同，
+     * 本地被限流时它往往还能拿到地址。后端没配、连不上或返回异常都返回 null，
      * 不改变原有失败文案。
      */
     private static StreamInfo fetchFromBackend(String vid, boolean album) {
@@ -558,9 +562,9 @@ final class HongguoDirect {
         }
         String url = "";
         for (Object[] layer : new Object[][]{
-                {"本地主接口 v5", (LayerTask) () -> fetchModel(vid, device)},
+                {"本地主接口 v5", (LayerTask) () -> fetchModel(vid, device, false)},
                 {"本地 video_tab", (LayerTask) () -> fetchTab(vid, device)},
-                {"本地备用域名", (LayerTask) () -> fetchModelFrom(HOSTS[1], vid, device)}}) {
+                {"本地备用域名", (LayerTask) () -> fetchModelFrom(HOSTS[1], vid, device, false)}}) {
             JSONObject row = probeLayer((String) layer[0], (LayerTask) layer[1]);
             layers.put(row);
             if (url.isEmpty() && row.optBoolean("ok")) url = row.optString("url", "");
@@ -898,14 +902,14 @@ final class HongguoDirect {
     // ---------------- 取址请求 ----------------
 
     /** v5 取址：注册身份 + v5 签名 + gzip 正文，单次请求。 */
-    private static StreamInfo fetchModel(String vid, Device device) throws Exception {
+    private static StreamInfo fetchModel(String vid, Device device, boolean album) throws Exception {
         try {
-            return fetchModelFrom(HOSTS[0], vid, device);
+            return fetchModelFrom(HOSTS[0], vid, device, album);
         } catch (IOException network) {
             /* a 节点连不上或回了 HTTP 错误才换 b。空正文（返回 null）属于身份判定，
                换节点一样空，白多一次请求只会加重风控。 */
             if (HOSTS.length < 2) throw network;
-            return fetchModelFrom(HOSTS[1], vid, device);
+            return fetchModelFrom(HOSTS[1], vid, device, album);
         }
     }
 
@@ -914,13 +918,15 @@ final class HongguoDirect {
         LinkedHashMap<String, String> values = new LinkedHashMap<>();
         values.put("aid", "8662");
         values.put("app_name", "novelread");
-        values.put("version_code", "74332");
+        values.put("version_code", "74532");
         values.put("version_name", VERSION_NAME);
-        values.put("channel", "vivo_8662_64");
+        values.put("channel", "update_64");
         values.put("device_platform", "android");
-        values.put("device_type", "PGT-AN10");
-        values.put("os_version", "12");
-        values.put("update_version_code", "74332");
+        values.put("device_type", "25053RT47C");
+        values.put("device_brand", "Redmi");
+        values.put("os_version", "16");
+        values.put("os_api", "36");
+        values.put("update_version_code", "74532");
         values.put("iid", device.iid);
         values.put("cdid", device.cdid);
         values.put("device_id", device.deviceId);
@@ -938,24 +944,24 @@ final class HongguoDirect {
         values.put("ssmix", "a");
         values.put("_rticket", String.valueOf(now));
         values.put("cdid", device.cdid);
-        values.put("channel", "vivo_8662_64");
+        values.put("channel", "update_64");
         values.put("aid", "8662");
         values.put("app_name", "novelread");
-        values.put("version_code", "74332");
+        values.put("version_code", "74532");
         values.put("version_name", VERSION_NAME);
-        values.put("manifest_version_code", "74332");
-        values.put("update_version_code", "74332");
-        values.put("resolution", "1200*2670");
-        values.put("dpi", "460");
-        values.put("device_type", "PGT-AN10");
-        values.put("device_brand", "HONOR");
+        values.put("manifest_version_code", "74532");
+        values.put("update_version_code", "74532");
+        values.put("resolution", "1280*2772");
+        values.put("dpi", "520");
+        values.put("device_type", "25053RT47C");
+        values.put("device_brand", "Redmi");
         values.put("language", "zh");
-        values.put("os_api", "31");
-        values.put("os_version", "12");
+        values.put("os_api", "36");
+        values.put("os_version", "16");
         values.put("ac", "wifi");
         values.put("host_abi", "arm64-v8a");
         values.put("dragon_device_type", "phone");
-        values.put("pv_player", "74332");
+        values.put("pv_player", "74532");
         values.put("compliance_status", "0");
         values.put("need_personal_recommend", "1");
         values.put("player_so_load", "1");
@@ -965,16 +971,19 @@ final class HongguoDirect {
         return values;
     }
 
-    private static StreamInfo fetchModelFrom(String host, String vid, Device device) throws Exception {
+    private static StreamInfo fetchModelFrom(String host, String vid, Device device, boolean album) throws Exception {
         String endpoint = host + PLAYER_PATH;
         long now = System.currentTimeMillis();
         LinkedHashMap<String, String> values = playerQuery(device, now);
 
-        String payload = "{\"biz_param\":{\"detail_page_version\":0,\"device_level\":" + PLAYER_LEVEL + ","
+        /* 分组按内容类型走：普通短剧 1004，UGC 合集 1001（PUGC）。
+           合集用 1004 只会回空正文或 101000，本地取流一直卡在这一步。 */
+        String group = album ? "1001" : "1004";
+        String payload = "{\"biz_param\":{\"detail_page_version\":0,\"device_level\":" + MODEL_LEVEL + ","
                 + "\"disable_digg_stat\":false,\"disable_video_relate_book\":false,"
                 + "\"need_all_video_definition\":true,\"need_mp4_align\":false,"
                 + "\"use_os_player\":false,\"use_server_dns\":false,\"video_platform\":1024},"
-                + "\"mixed_video_id_map\":{\"1004\":[\"" + vid + "\"]},\"dr_scene\":\"player\"}";
+                + "\"mixed_video_id_map\":{\"" + group + "\":[\"" + vid + "\"]},\"dr_scene\":\"player\"}";
         byte[] body = gzip(payload.getBytes(StandardCharsets.UTF_8));
 
         HongguoV5.Signed signed = HongguoV5.signPlayback(endpoint, values, body, now);

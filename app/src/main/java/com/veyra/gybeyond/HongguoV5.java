@@ -516,6 +516,13 @@ final class HongguoV5 {
             return bytes(tag, value.getBytes(StandardCharsets.UTF_8));
         }
 
+        /** fixed32：设备信封里 f16..f21 这六项在官方客户端是 float 0，用 wire type 5。 */
+        Proto f32(int tag, float value) {
+            emit(out, varint(((long) tag << 3) | 5));
+            emit(out, le32(Float.floatToRawIntBits(value)));
+            return this;
+        }
+
         Proto bytes(int tag, byte[] value) {
             if (value == null || value.length == 0) return this;
             emit(out, varint(((long) tag << 3) | 2));
@@ -606,25 +613,42 @@ final class HongguoV5 {
         byte[] bodyHash = body == null ? new byte[16] : md5(body);
         byte[] digest = hashF13(queryHash, bodyHash, ts);
 
-        byte[] flags = new byte[8];
+        byte[] flags = hex("4480000000000000");
         String version = identity.get("version_name");
         String deviceId = identity.get("device_id");
         String deviceType = identity.get("device_type");
         String osVersion = identity.get("os_version");
         String channel = identity.get("channel");
+        String brand = identity.get("device_brand");
+        if (brand == null || brand.isEmpty()) brand = "HONOR";
+        /* 进程令牌 25 字符：A + 24 字符 base64url 进程 nonce（官方 v04.10.03 的 f5 / f16）。 */
+        String deviceToken = "A" + processNonce;
+        int envLaunch = 100 + RANDOM.nextInt(21);
+        int envPid = 10001 + RANDOM.nextInt(2000);
 
+        /* 设备信封按官方客户端 v04.10.03 补到字段 38（36 个字段）。
+           2026-11-25 站方收紧校验后，只带十几个字段的设备子消息会回 200 + 0 字节。
+           这里保留 register 默认值（-888888 / 3 / !notset! / 4 等）与进程元数据。 */
         byte[] deviceInfo = new Proto()
                 .sint(1, 1).sint(2, 2).text(3, "8662").text(4, deviceId)
-                .text(5, processNonce).text(6, "!noperm!")
-                .text(12, "Asia/Shanghai,8").text(13, "zh_CN")
-                .text(22, osVersion).sint(25, processStarted)
-                .text(30, deviceType).text(31, "HONOR")
-                .text(32, deviceType).text(34, "HONOR")
+                .text(5, deviceToken).text(6, "!noperm!")
+                .sint(7, -888888).sint(8, -888888).sint(9, 3).sint(10, -888888)
+                .text(11, "!notset!").text(12, "Asia/Shanghai,8").text(13, "zh_CN").sint(14, 4)
+                .f32(16, 0f).f32(17, 0f).f32(18, 0f).f32(19, 0f).f32(20, 0f).f32(21, 0f)
+                .text(22, osVersion).sint(23, 41).sint(24, 36)
+                .sint(25, processStarted).sint(26, processStarted).sint(27, processStarted)
+                .sint(28, System.currentTimeMillis())
+                .sint(29, -1)
+                .text(30, deviceType).text(31, brand).text(32, deviceType).text(33, deviceType)
+                .text(34, brand).text(35, brand).text(36, brand).sint(38, 31)
                 .done();
 
         byte[] env = new Proto()
-                .text(6, "v04.10.03.04-bugfix").text(8, channel)
-                .bytes(12, deviceInfo).text(14, version)
+                .sint(1, envLaunch).sint(2, 247235599).sint(3, 247235596).sint(5, 7)
+                .text(6, "v04.10.03.04-bugfix").sint(7, envPid).text(8, channel)
+                .bytes(12, deviceInfo)
+                .bytes(13, new Proto().sint(1, ts).sint(2, -2).sint(4, 200).done())
+                .text(14, version)
                 .done();
 
         byte[] message = new Proto()
@@ -633,8 +657,9 @@ final class HongguoV5 {
                 .text(8, "v04.10.03-ml-android").sint(9, 0x040a0300L)
                 .bytes(10, flags).sint(12, ts).bytes(13, digest)
                 .bytes(14, slice(queryHash, 0, 6))
-                .bytes(15, new Proto().sint(1, 1).sint(2, 1).sint(3, 1).sint(5, 1).done())
-                .sint(17, ts).text(20, "none").sint(21, 369)
+                .bytes(15, new Proto().sint(1, 305).sint(2, 4).sint(3, 694367).sint(5, 1621072674L).done())
+                .text(16, deviceToken)
+                .sint(17, ts).text(20, "none").sint(21, 312)
                 .bytes(23, env)
                 .text(24, "{\"cmr\":16777216,\"cmr2\":16777216,\"un_h\":11,\"vpn\":0,\"kd\":0,"
                         + "\"dyn\":\"\",\"do\":1,\"tk\":true}")
