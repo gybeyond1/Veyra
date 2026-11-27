@@ -1915,11 +1915,13 @@ async function submitDownloadTo(target, remoteId) {
   }
 }
 
+/* 设置主界面。私密内容源的切换只保留在「黄果网络通道」弹窗里（第一项「内容源」），
+   这里不再单独放一个入口 —— 两处打开的是同一个弹窗，重复一项只会让人以为设了两个东西。 */
 function renderSettings() {
   content.innerHTML = `<div class="settings-page"><button type="button" class="listing-back" data-back="1">${icon('back')} 返回我的</button><h1>设置</h1>
     ${window.renderAppearance ? window.renderAppearance() : ''}
     <section><button type="button" class="settings-link" data-account-management="1"><span><strong>账号管理</strong><small>${state.account.loggedIn ? esc(state.account.username) : '登录或注册账号'}</small></span>${icon('arrow')}</button></section>
-    ${privateMode() ? `<section><button type="button" class="settings-link" data-source-open><span><strong>私密内容源</strong><small data-source-summary>${esc((state.privateSite && state.privateSite.name) || '黄果')}</small></span>${icon('arrow')}</button></section>` : ''}
+
     <section><button type="button" class="settings-link" data-proxy-open><span><strong>黄果网络通道</strong><small data-proxy-summary>${esc(proxySummaryText())}</small></span>${icon('arrow')}</button></section>
     <section><button type="button" class="settings-link" data-diagnose-open><span><strong>链路检测</strong><small>测本地取址 / 后端 / 视频流各自通不通、多快</small></span>${icon('arrow')}</button></section>
     <section><button type="button" class="settings-link" data-remote-open><span><strong>远程服务器</strong><small data-remote-summary>${esc(remoteSummaryText())}</small></span>${icon('arrow')}</button></section>
