@@ -251,10 +251,16 @@ const handlers: { [K in ApiName]: (...args: any[]) => any } = {
 
   'player.mpvAvailable': () => Boolean(mpv.available()),
 
-  'player.mpvPlay': async (payload: { url: string; title?: string; start?: number }) => {
+  'player.mpvPlay': async (payload: { url: string; title?: string; start?: number; decryptionKey?: string }) => {
     if (!payload?.url) throw new Error('播放地址为空');
     const start = Number(payload.start) || 0;
-    return mpv.play({ url: payload.url, title: payload.title, start, parent: mainWindow });
+    return mpv.play({
+      url: payload.url,
+      title: payload.title,
+      start,
+      decryptionKey: typeof payload.decryptionKey === 'string' ? payload.decryptionKey : undefined,
+      parent: mainWindow,
+    });
   },
 
   'player.mpvControl': (action: string, value?: number) => mpv.control(action, value),

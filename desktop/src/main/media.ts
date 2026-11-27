@@ -465,8 +465,15 @@ async function proxyRemote(req: http.IncomingMessage, res: http.ServerResponse, 
   });
 }
 
-/** 红果单集取流的三种结果：m3u8（走代理重写）、本地 mp4（解密后）、远端直链（明文 mp4） */
-type PlayTarget = { hls?: string; file?: string; direct?: string };
+/**
+ * 红果单集的四种结果：
+ *  - hls        m3u8，走本机代理重写
+ *  - direct     明文 mp4，直接给远端直链
+ *  - file       已经在磁盘上的 mp4（历史缓存 / 已下载）
+ *  - enc        远端 CENC 直链 + 内容密钥：**不预先下载整集**，交给播放器边下边解
+ *               （手机端 ExoPlayer 就是这么播的，所以它五六秒就出画面）
+ */
+type PlayTarget = { hls?: string; file?: string; direct?: string; enc?: { url: string; key: string } };
 
 interface PlayDirectResult {
   main_url?: string;
@@ -530,25 +537,18 @@ async function hongguoStream(seriesId: string, episode: number): Promise<PlayTar
          看着就像「点了播放没动静」。直链是签过名的，不需要 Referer。 */
       result = /\.m3u8(\?|$)/i.test(mainUrl) ? { hls: mainUrl } : { direct: mainUrl };
     } else {
-      // CENC 加密：整集先解密转封装成普通 mp4，之后每次播放都是本地文件（秒开、可拖）
+      /* CENC 加密：以前是先用 ffmpeg 把整集下载完、解密成 mp4，再交给播放器。
+         一集几百 MB，家里宽带也要几十秒，播放器在这段时间里一个字节都拿不到 ——
+         这就是「点了播放四十秒才出画面」。
+
+         现在和手机端一致：直接把直链和密钥交给播放器，边下边解边播。只有本地
+         已经有解好的成品文件（之前播放留下的）才走文件，那时可以随意拖进度。 */
       const file = path.join(cacheDir(), `${key}.mp4`);
-      if (!(fs.existsSync(file) && fs.statSync(file).size > 1024)) {
-        await new Promise<void>((resolve, reject) => {
-          execFile(
-            ffmpegAvailable(),
-            ['-y', '-decryption_key', String(model.encrypt?.key), '-i', mainUrl, '-c', 'copy', '-movflags', '+faststart', file],
-            { timeout: 10 * 60 * 1000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 },
-            (error) => {
-              if (!error) return resolve();
-              const text = (error as NodeJS.ErrnoException).code === 'ENOENT'
-                ? `找不到 ffmpeg（${ffmpegAvailable()}），安装包不完整，请重新下载安装`
-                : '解密转封装失败：' + error.message;
-              reject(new Error(text));
-            },
-          );
-        });
+      if (fs.existsSync(file) && fs.statSync(file).size > 1024) {
+        result = { file };
+      } else {
+        result = { enc: { url: mainUrl, key: String(model.encrypt.key) } };
       }
-      result = { file };
     }
 
     resolvedCache.set(key, { value: result, at: Date.now() });
@@ -563,27 +563,83 @@ async function hongguoStream(seriesId: string, episode: number): Promise<PlayTar
 /**
  * 播放前先把「要播的东西」准备好。
  *
- * 关键点：红果加密集是先用 ffmpeg 整集解密成 mp4 的，这一步没做完之前
- * 媒体服务不会回任何响应头，浏览器里的 <video> 就会一直空白转圈（等太久还会
- * 直接报错）。所以这里先等解密完成，再把地址交给渲染层 —— 播放器拿到地址时
- * 文件已经在磁盘上，第一个请求毫秒级返回，不会再出现「点了没反应」。
+ * 只有 m3u8 和「已解好的文件」需要预处理；CENC 加密的集不再等整集下载 ——
+ * 直接返回 kind='stream' + 直链密钥，由播放器边下边解（`/rg/...&stream=1` 会把
+ * ffmpeg 的流式解密结果按 fragmented mp4 吐出来）。
  */
 export async function prepare(
   source: 'hongguo' | 'huangguo',
   seriesId: string,
   episode: number,
   h264: boolean,
-): Promise<'hls' | 'file'> {
+): Promise<{ kind: 'hls' | 'file' | 'stream'; enc?: { url: string; key: string } }> {
   if (source === 'huangguo') {
     // 私密源要换一次播放地址（带 Referer）/ 可能走后端代理，先热一遍，播放器就不用等
     const found = await playSource(seriesId, episode);
     hgCache.set(`hg-${seriesId}-${episode}`, { ...found, at: Date.now() });
-    return /\.m3u8(\?|$)/i.test(found.url) ? 'hls' : 'file';
+    return { kind: /\.m3u8(\?|$)/i.test(found.url) ? 'hls' : 'file' };
   }
   const target = await hongguoStream(seriesId, episode);
+  if (target.enc) return { kind: 'stream', enc: target.enc };
   // 这台机器放不了 H.265：先把转码做完再交地址，别让播放器对着黑屏干等
   if (target.file && h264) await ensureH264(target.file);
-  return target.hls ? 'hls' : 'file';
+  return { kind: target.hls ? 'hls' : 'file' };
+}
+
+/**
+ * 边下边解：ffmpeg 从远端拉 CENC 数据、按密钥解密，把 fragmented mp4 写进响应。
+ *
+ * 关键在 `frag_keyframe+empty_moov`：moov 前置并且按关键帧分片，播放器拿到第一片
+ * 就能解码出画面，不用等整个文件下完（这就是手机端五六秒出画面的原因）。
+ * 代价是 chunked 流没有总长度、不支持 Range，拖动进度条会失效；想随意拖就点
+ * 「原片直放」让 mpv 直连（带密钥、可 seek）。
+ */
+async function streamDecrypt(res: http.ServerResponse, enc: { url: string; key: string }, needH264: boolean): Promise<void> {
+  const args = ['-hide_banner', '-loglevel', 'error', '-decryption_key', enc.key, '-i', enc.url];
+  if (needH264) {
+    // Chromium 没有 H.265 解码器：边转边播。编码器按可用列表挑（libx264 优先，
+    // 有的机器只有 nvenc/qsv），先把首帧抢出来
+    const encoders = await listEncoders();
+    if (!encoders.length) throw new Error('这个 ffmpeg 没有 H.264 编码器，放不了 H.265 视频');
+    const encoder = encoders[0];
+    args.push('-c:v', encoder);
+    if (encoder === 'libx264') args.push('-preset', 'veryfast', '-crf', '23');
+    args.push('-vf', 'scale=-2:min(1280\\,ih)', '-c:a', 'aac', '-b:a', '128k');
+  } else {
+    args.push('-c', 'copy');
+  }
+  args.push('-movflags', 'frag_keyframe+empty_moov+default_base_moof', '-f', 'mp4', 'pipe:1');
+
+  const proc = spawn(ffmpegAvailable(), args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  let stderr = '';
+  proc.stderr?.on('data', (chunk: Buffer) => {
+    stderr = (stderr + chunk.toString()).slice(-2000);
+  });
+  res.writeHead(200, {
+    'Content-Type': 'video/mp4',
+    'Cache-Control': 'no-store',
+    'Access-Control-Allow-Origin': '*',
+  });
+  proc.stdout?.pipe(res);
+  // 换集 / 关掉播放页：把 ffmpeg 一起收掉，别在后台继续拉流
+  res.on('close', () => {
+    try {
+      if (!proc.killed) proc.kill();
+    } catch {
+      /* 已经退出 */
+    }
+  });
+  proc.on('error', (error) => {
+    console.warn('[media] 流式解密启动失败：', error.message);
+    if (!res.writableEnded) res.end();
+  });
+  proc.on('exit', (code) => {
+    if (code !== 0 && code !== null) {
+      const last = stderr.split('\n').map((line) => line.trim()).filter(Boolean).pop() || '';
+      console.warn(`[media] 流式解密退出 ${code} ${last}`);
+    }
+    if (!res.writableEnded) res.end();
+  });
 }
 
 function sendFile(req: http.IncomingMessage, res: http.ServerResponse, file: string, type: string): void {
@@ -837,6 +893,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         res.end(playlist);
         return;
       }
+      if (target.enc) {
+        /* 远端 CENC：ffmpeg 边下边解，fragmented mp4 直接写进响应。
+           首帧只要拿到第一个关键帧就出，不再等整集下完。 */
+        return streamDecrypt(res, target.enc, url.searchParams.get('h264') === '1');
+      }
       if (url.searchParams.get('h264') === '1') {
         return sendFile(req, res, await ensureH264(target.file!), 'video/mp4');
       }
@@ -879,9 +940,14 @@ export function info(): { port: number; token: string; lan: string } {
   return { port, token, lan: port ? `http://${lanAddress()}:${port}` : '' };
 }
 
-export function playUrl(source: 'hongguo' | 'huangguo', seriesId: string, episode: number, h264 = false): string {
+export function playUrl(source: 'hongguo' | 'huangguo', seriesId: string, episode: number, h264 = false, stream = false): string {
   const kind = source === 'huangguo' ? 'hg' : 'rg';
-  return mediaUrl(`/${kind}/${encodeURIComponent(seriesId)}/${episode}${h264 ? '?h264=1' : ''}`);
+  const query = new URLSearchParams();
+  if (h264) query.set('h264', '1');
+  // stream=1：这集是 CENC 加密的，别等整集落盘，边下边解直接出流
+  if (stream) query.set('stream', '1');
+  const qs = query.toString();
+  return mediaUrl(`/${kind}/${encodeURIComponent(seriesId)}/${episode}${qs ? `?${qs}` : ''}`);
 }
 
 /** 接口型源：三档网络模式都在本机媒体服务里收口，渲染层拿到的永远是 127.0.0.1 */

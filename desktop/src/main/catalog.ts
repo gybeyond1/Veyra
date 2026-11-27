@@ -222,16 +222,19 @@ export async function detail(source: ContentSource, id: string): Promise<SeriesD
 }
 
 /**
- * 播放地址：统一交给本机媒体服务。红果加密的先解密落盘再返回，避免播放器空等。
- * hevcOk 由渲染层告诉主进程（这台机器的 Chromium 能不能直接解 H.265）；
- * 放不了就先把这集转成 H.264 再给地址。
+ * 播放地址：统一交给本机媒体服务。
+ *
+ * CENC 加密的集不再等整集解密落盘 —— 返回 kind='stream' 和远端直链 + 密钥，
+ * 内置播放器走本机 `/rg/…&stream=1`（ffmpeg 边下边解出 fragmented mp4），
+ * 有 mpv 的话渲染层会直接用 decrypt 里的地址交给 mpv（可拖动）。
+ * hevcOk 由渲染层告诉主进程（这台机器的 Chromium 能不能直接解 H.265）。
  */
 export async function play(
   source: ContentSource,
   id: string,
   episode: number,
   hevcOk = false,
-): Promise<{ url: string; kind: 'hls' | 'file' }> {
+): Promise<{ url: string; kind: 'hls' | 'file' | 'stream'; decrypt?: { url: string; key: string } }> {
   if (!id) throw new Error('缺少剧集 id');
   const number = Math.max(1, Number(episode) || 1);
   // 接口型源：三档网络模式都交给本机媒体服务。
@@ -241,6 +244,7 @@ export async function play(
     return { url: remoteSitePlayUrl(remoteSite.site(), id, number), kind: 'hls' };
   }
   const needH264 = !hevcOk;
-  const kind = await prepare(source, id, number, needH264);
-  return { url: playUrl(source, id, number, needH264 && kind === 'file'), kind };
+  const prepared = await prepare(source, id, number, needH264);
+  const url = playUrl(source, id, number, needH264, prepared.kind === 'stream');
+  return { url, kind: prepared.kind, decrypt: prepared.enc };
 }

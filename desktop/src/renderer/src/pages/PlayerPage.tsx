@@ -42,8 +42,15 @@ export default function PlayerPage({ source, id, episode, title, position, local
   const [rawUrl, setRawUrl] = useState('');
   /** 这台机器有没有带 mpv（有就能原片直放，彻底不转码） */
   const [nativeOk, setNativeOk] = useState(false);
+  /**
+   * 这一集是 CENC 加密的：后端给了远端直链和内容密钥。
+   * 有它就能把地址直接交给 mpv 边下边解（可拖进度），不用等整集落盘。
+   */
+  const [decrypt, setDecrypt] = useState<{ url: string; key: string } | null>(null);
   /** 滚轮切集的上一次触发时间：一次拨动会连发好几帧 wheel，必须节流 */
   const wheelAt = useRef(0);
+  /** 加密集：地址秒回但首帧还要等，loading 遮罩先别撤 */
+  const holdLoading = useRef(false);
 
   useEffect(() => {
     call<boolean>('player.mpvAvailable')
@@ -97,6 +104,8 @@ export default function PlayerPage({ source, id, episode, title, position, local
     setLoading(true);
     setError('');
     setUrl('');
+    setDecrypt(null);
+    holdLoading.current = false;
 
     // 别的设备上的成品：本机能解 H.265 就原样播（零转码、可随意拖进度）；
     // 本机解不了就直接走转码版，不要先黑屏失败一次再回退
@@ -114,12 +123,16 @@ export default function PlayerPage({ source, id, episode, title, position, local
 
     const job = localTaskId
       ? call<{ url: string; rawUrl?: string }>('downloads.play', { id: localTaskId, index: 0, hevc: hevcOk })
-      : call<{ url: string; kind: 'hls' | 'file' }>('catalog.play', { source, id, episode, hevc: hevcOk });
+      : call<{ url: string; kind: 'hls' | 'file' | 'stream'; decrypt?: { url: string; key: string } }>('catalog.play', { source, id, episode, hevc: hevcOk });
     job
       .then((result) => {
         if (!alive) return;
-        const nextKind = (result as { kind?: 'hls' | 'file' }).kind;
+        const nextKind = (result as { kind?: 'hls' | 'file' | 'stream' }).kind;
         setKind(nextKind === 'hls' ? 'hls' : 'file');
+        const encrypted = (result as { decrypt?: { url: string; key: string } }).decrypt || null;
+        setDecrypt(encrypted);
+        // 加密集的地址是秒回的，遮罩要留到第一帧出来（loadeddata 那边才撤）
+        holdLoading.current = Boolean(encrypted);
         setUrl(result.url);
         setRawUrl((result as { rawUrl?: string }).rawUrl || result.url);
       })
@@ -127,7 +140,7 @@ export default function PlayerPage({ source, id, episode, title, position, local
         if (alive) setError(errorText(issue));
       })
       .finally(() => {
-        if (alive) setLoading(false);
+        if (alive && !holdLoading.current) setLoading(false);
       });
     return () => {
       alive = false;
@@ -165,6 +178,9 @@ export default function PlayerPage({ source, id, episode, title, position, local
       void video.play().catch(() => undefined);
     };
     video.addEventListener('loadedmetadata', onLoaded, { once: true });
+    // 边下边解时地址是秒回的，遮罩不能跟着地址一起收 —— 等第一帧真的解出来再撤
+    const onReady = () => setLoading(false);
+    video.addEventListener('loadeddata', onReady);
 
     // 远端成品如是 H.265：有声音、进度在走，但 videoWidth 永远是 0。
     // 这里一旦发现「能播但没画面」，就切到媒体服务的转码版重来一次。
@@ -179,8 +195,13 @@ export default function PlayerPage({ source, id, episode, title, position, local
     };
     const onPictureError = () => {
       setLoading(false);
-      if (!remoteUrl || remoteFallback) return;
-      if (video.error && video.error.code === 4) setRemoteFallback(true);
+      if (remoteUrl) {
+        if (!remoteFallback && video.error && video.error.code === 4) setRemoteFallback(true);
+        return;
+      }
+      // 加密流边下边解失败（密钥过期 / ffmpeg 起不来）：把原因摆出来，别一直转圈
+      const code = video.error?.code;
+      setError(code === 4 ? '这一集解不出来，密钥可能已过期，点「重试」重新取一次地址' : '这一集播放失败，点「重试」再试一次');
     };
     video.addEventListener('loadeddata', checkPicture);
     video.addEventListener('error', onPictureError);
@@ -199,6 +220,7 @@ export default function PlayerPage({ source, id, episode, title, position, local
     return () => {
       window.clearInterval(timer);
       video.removeEventListener('ended', onEnded);
+      video.removeEventListener('loadeddata', onReady);
       video.removeEventListener('loadeddata', checkPicture);
       video.removeEventListener('error', onPictureError);
       if (hls) hls.destroy();
@@ -231,21 +253,23 @@ export default function PlayerPage({ source, id, episode, title, position, local
 
   /** 交给 mpv：不吃 Chromium 的解码能力，H.265 原片硬解，零转码 */
   const openNative = async () => {
-    const target = rawUrl || url;
+    // 加密的集直接把远端直链和密钥交给 mpv：它内置的 ffmpeg 能边下边解，
+    // 不用等本机 ffmpeg 把整集解密成文件，还能随意拖进度条
+    const target = decrypt?.url || rawUrl || url;
     if (!target) return;
     try {
       const saved = Number(localStorage.getItem(`pos:${source}:${id}:${episode}`) || 0);
       // 交给 mpv 之后把内置播放器停下，不然两路声音一起响
       videoRef.current?.pause();
-      await call('player.mpvPlay', { url: target, title, start: saved });
+      await call('player.mpvPlay', { url: target, title, start: saved, decryptionKey: decrypt?.key });
       notify('已用原生内核打开：原片直放，不转码', 'info');
     } catch (issue) {
       notify(errorText(issue), 'error');
     }
   };
 
-  // 只有本地成品和其它设备上的成品能交给 mpv；在线流是加密的，它解不了
-  const canNative = nativeOk && Boolean(localTaskId || remoteUrl);
+  // 本地成品、其它设备的成品、以及加密的在线集（带密钥）都能交给 mpv
+  const canNative = nativeOk && Boolean(localTaskId || remoteUrl || decrypt);
 
   return (
     <div className="page player-page" onWheel={onWheel}>
@@ -305,7 +329,12 @@ export default function PlayerPage({ source, id, episode, title, position, local
                     {canNative ? '不想等的话，点右上角「原片直放」，用原生内核硬解，零转码。' : ''}
                   </p>
                 ) : (
-                  waited >= 3 && <p className="player-loading-sub">首次播放要先解密，通常几秒</p>
+                  waited >= 3 && (
+                    <p className="player-loading-sub">
+                      这集是加密的，正在边下边解，通常几秒出画面
+                      {canNative ? '；要拖进度条就点右上角「原片直放」' : ''}
+                    </p>
+                  )
                 )}
               </div>
             )}

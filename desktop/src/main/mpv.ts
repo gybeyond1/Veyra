@@ -130,6 +130,11 @@ export interface PlayOptions {
   /** 秒，从上次看到的位置接着放 */
   start?: number;
   parent?: BrowserWindow | null;
+  /**
+   * CENC 内容密钥（hex）。给了就让 mpv 自己边下边解 —— 它内置的 ffmpeg 的 mov
+   * 解复用器认 `decryption_key`，所以不用先把整集下载解密成文件。
+   */
+  decryptionKey?: string;
 }
 
 export interface PlayResult {
@@ -257,6 +262,11 @@ export async function play(options: PlayOptions): Promise<PlayResult> {
     url,
   ];
   if (options.start && options.start > 5) args.splice(args.length - 2, 0, `--start=${Math.floor(options.start)}`);
+  if (options.decryptionKey) {
+    // 红果的 CENC 集：交给 mpv 自己解，不预下载整集。选项走 libavformat 的
+    // mov 解复用器（decryption_key），和命令行 ffmpeg -decryption_key 同一个东西。
+    args.splice(args.length - 2, 0, `--demuxer-lavf-o=decryption_key=${options.decryptionKey}`);
+  }
 
   proc = spawn(binary, args, { stdio: 'ignore', windowsHide: true });
   const child = proc;
