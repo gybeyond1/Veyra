@@ -831,10 +831,22 @@ input::placeholder {
   display: flex;
   gap: 12px;
   max-width: 640px;
+  /* 输入框和按钮同高：input 撑开行高，按钮跟着拉伸，别各算各的 */
+  align-items: stretch;
 }
 .search-bar input {
+  /* flex:1 但不许把按钮挤扁；min-width:0 让长关键词在框内滚动而不是撑破布局 */
+  flex: 1;
+  min-width: 0;
   padding: 11px 14px;
   font-size: 15px;
+}
+.search-bar button {
+  /* 不参与收缩 + 禁止折行：之前被压到「一个字宽」，才有了上「搜」下「索」 */
+  flex: none;
+  white-space: nowrap;
+  padding: 0 22px;
+  font-size: 14px;
 }
 
 .pager {
