@@ -3545,7 +3545,13 @@ document.addEventListener('click', function (event) {
   }
   var card = target.closest('[data-id]');
   if (card && card.dataset.id) {
-    var sameId = String((state.detail && state.detail.id) || '') === card.dataset.id;
+    /* 这个判断只服务于详情页里的制作方 / 系列组浮层：那里会画出「当前这一季」，
+       点它应该只收层。离开详情后 state.detail 还是上一部（go() 不清它），
+       于是从热播榜 / 真人版 / 观看记录返回列表，点刚看过的那部会命中这里、
+       什么都不做 —— 看着就是「这部剧点不进去，点别的都正常」。
+       加 route 判断：列表页永远不算「点的是当前这一季」。 */
+    var sameId = state.route === 'detail'
+      && String((state.detail && state.detail.id) || '') === card.dataset.id;
     var backKey = relatedGroup ? (groupReturnKey || 'producer') : 'producer';
     if (sameId) {
       if (relatedGroup) closeRelatedGroup();
