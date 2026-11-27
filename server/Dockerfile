@@ -30,12 +30,14 @@ RUN npm ci --omit=dev --no-audit --no-fund --prefer-offline
 COPY . ./
 
 # 本地取流服务：红果签名（Gorgon/Argus/Ladon/Medusa）与 CENC 密钥派生都由这个 Go 二进制负责。
-# 二进制随源码一起 COPY 进来（fetch/），这里只按构建架构建个软链，不重复占空间。
-# 2026-11-25：旧播放接口必须携带 x-medusa（设备布局 field 21 = 369），缺它回空 200；
-# 修复见 openhongguo#25。该头现在是「把请求交给签名服务重签」的开关，删了反而拿不到地址。
-ARG TARGETARCH=amd64
-RUN ln -sf /app/fetch/hongguo-fetch-linux-${TARGETARCH} /usr/local/bin/hongguo-fetch \
-    && chmod +x /app/fetch/hongguo-fetch-linux-${TARGETARCH} \
+# 二进制随源码一起 COPY 进来（fetch/ 下 amd64 与 arm64 各一份，共约 11 MB）。
+#
+# 2026-11-27：不再用 ARG TARGETARCH 在构建期建软链。
+# 默认值 amd64 + buildx 缓存/本地无 --platform 构建时 TARGETARCH 为空，
+# 会静默落回 amd64 —— arm64 镜像里 /usr/local/bin/hongguo-fetch 指向 x86 二进制，
+# 启动直接 `Exec format error`，取流全挂（issue #13）。
+# 改成两个都 chmod，由入口脚本按 uname -m 选，构建参数丢了也不会错。
+RUN chmod +x /app/fetch/hongguo-fetch-linux-amd64 /app/fetch/hongguo-fetch-linux-arm64 \
     && chmod +x /app/docker-entrypoint.sh
 
 ENV PORT=8080
