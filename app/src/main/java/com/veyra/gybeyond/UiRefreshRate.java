@@ -12,6 +12,9 @@ final class UiRefreshRate {
     private UiRefreshRate() {}
 
     static void apply(Activity activity, View content) {
+        // Android 5.x 没有高刷，也没有 Display.getMode()（API 23）。老电视包直接跳过，
+        // 别为了一个 60Hz 屏去调用 23 才有的方法。
+        if (Build.VERSION.SDK_INT < 23) return;
         Display display = activity.getWindowManager().getDefaultDisplay();
         Display.Mode current = display.getMode();
         float preferred = 0f;

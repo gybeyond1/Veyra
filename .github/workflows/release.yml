@@ -115,10 +115,14 @@ jobs:
           # 有 flavor 之后产物会多一层 flavor 目录（outputs/apk/<flavor>/release/），用 find 兜住两种结构
           PHONE_APK="Veyra-${TAG#v}.apk"
           TV_APK="Veyra-TV-${TAG#v}.apk"
+          # 老电视包（Android 5.1 / minSdk 22）：单独一个渠道，别和正式电视包混。
+          LEGACY_APK="Veyra-TV-Legacy-${TAG#v}.apk"
           cp "$(find app/build/outputs/apk -name 'app-mobile-release.apk' | head -1)" "$PHONE_APK"
           cp "$(find app/build/outputs/apk -name 'app-tv-release.apk' | head -1)" "$TV_APK"
+          cp "$(find app/build/outputs/apk -name 'app-tvlegacy-release.apk' | head -1)" "$LEGACY_APK"
           echo "PHONE_APK=$PHONE_APK" >> $GITHUB_ENV
           echo "TV_APK=$TV_APK" >> $GITHUB_ENV
+          echo "LEGACY_APK=$LEGACY_APK" >> $GITHUB_ENV
           # 后端镜像：构建 → 推 Hub（amd64 + arm64 合成一个 manifest list）→ 再拉回本地导出两个离线包。
           # buildx 的产物留在 builder 里，docker save 拿不到，所以必须先 pull 回来。
           IMG="${{ secrets.DOCKERHUB_USERNAME }}/veyra-backend:latest"
@@ -148,8 +152,8 @@ jobs:
 
           echo "AMD64_TGZ=veyra-backend-${VER}-amd64.tar.gz" >> $GITHUB_ENV
           echo "ARM64_TGZ=veyra-backend-${VER}-arm64.tar.gz" >> $GITHUB_ENV
-          ls -la "$PHONE_APK" "$TV_APK" "veyra-backend-${VER}-amd64.tar.gz" "veyra-backend-${VER}-arm64.tar.gz"
-          sha256sum "$PHONE_APK" "$TV_APK"
+          ls -la "$PHONE_APK" "$TV_APK" "$LEGACY_APK" "veyra-backend-${VER}-amd64.tar.gz" "veyra-backend-${VER}-arm64.tar.gz"
+          sha256sum "$PHONE_APK" "$TV_APK" "$LEGACY_APK"
 
       - name: Create Release
         env:
@@ -180,6 +184,7 @@ jobs:
             gh release upload "$TAG" \
               "$PHONE_APK" \
               "$TV_APK" \
+              "$LEGACY_APK" \
               "$AMD64_TGZ" \
               "$ARM64_TGZ" \
               --clobber
@@ -188,6 +193,7 @@ jobs:
             gh release create "$TAG" \
               "$PHONE_APK" \
               "$TV_APK" \
+              "$LEGACY_APK" \
               "$AMD64_TGZ" \
               "$ARM64_TGZ" \
               --title "Veyra $TAG" \
@@ -197,6 +203,7 @@ jobs:
             gh release create "$TAG" \
               "$PHONE_APK" \
               "$TV_APK" \
+              "$LEGACY_APK" \
               "$AMD64_TGZ" \
               "$ARM64_TGZ" \
               --title "Veyra $TAG" \

@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="zh-CN" data-device="tv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>Veyra TV</title>
+<!-- 电视端独立页面：不加载 app.css / 玻璃 / 转场 / 主题那几套，只有这一个样式表。
+     老电视包（Android 5.1）的 System WebView 只有 Chromium 37~43：没有 CSS 变量（49）、
+     没有 grid（57），tv.css 进去整页全白。这里在解析期选样式表，老内核换
+     tv-legacy.css（变量已内联、grid 换成 flex，由 scripts/build-tv-legacy.py 生成）。 -->
+<script>
+(function () {
+  var ok = false;
+  try {
+    ok = !!(window.CSS && CSS.supports
+      && CSS.supports('color', 'var(--x)')
+      && CSS.supports('display', 'grid'));
+  } catch (e) { ok = false; }
+  document.write('<link rel="stylesheet" href="' + (ok ? 'tv.css' : 'tv-legacy.css') + '">');
+})();
+</script>
+<script>
+/* 等比缩放：1rem = 10px @ 1920×1080 设计稿。
+   放在 head 里、样式表之后立刻执行，避免首帧按 10px 排一次再跳。
+   只用老内核都认的 API（clientWidth / clientHeight / fontSize），
+   不依赖 vw、min()、clamp()。 */
+(function () {
+  function apply() {
+    var w = document.documentElement.clientWidth || window.innerWidth || 1920;
+    var h = document.documentElement.clientHeight || window.innerHeight || 1080;
+    var s = Math.min(w / 1920, h / 1040);
+    if (!isFinite(s) || !(s > 0)) s = 1;
+    s = Math.max(0.35, Math.min(3, s));
+    document.documentElement.style.fontSize = (10 * s) + 'px';
+    document.documentElement.setAttribute('data-scale', s.toFixed(2));
+  }
+  window.__tvApplyScale = apply;
+  apply();
+  window.addEventListener('resize', function () { setTimeout(apply, 60); });
+  window.addEventListener('orientationchange', function () { setTimeout(apply, 120); });
+})();
+</script>
+</head>
+<body>
+<div id="app">
+  <!-- 背景层：当前选中作品的海报做模糊底，替代原来那片纯黑 -->
+  <div id="tv-bg" aria-hidden="true"><img id="tv-bg-img" alt=""><span class="veil"></span></div>
+  <!-- 顶栏：分类胶囊 + 搜索/最近/设置，常驻吸顶，不跟内容一起滚。
+       从 #stage 里搬出来的原因：海报往上滚时要在「那一行下面一点」渐隐消失，
+       而渐隐靠的是 #stage 上的 mask —— mask 会作用到子树，顶栏留在里面就会被一起淡掉。 -->
+  <div id="topbar"></div>
+  <main id="stage"><div id="view"></div></main>
+
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <div id="login" hidden>
+    <section class="login-box">
+      <h1>登录电视</h1>
+      <p id="login-tip">用手机上的 Veyra 扫下面的二维码，账号直接同步过来</p>
+      <div id="login-qr" class="login-qr" hidden></div>
+      <button id="login-retry" class="btn" type="button" data-focusable data-key="login:retry">显示二维码</button>
+    </section>
+  </div>
+
+  <div id="account" hidden>
+    <section class="account-box" id="account-box">
+      <h1 id="account-name">未登录</h1>
+      <p id="account-sub">登录后可同步收藏与观看记录</p>
+      <p class="account-version" id="account-version">版本 —</p>
+      <div class="account-actions">
+        <button id="account-theme" class="btn" type="button" data-focusable data-key="acct:theme">主题设置</button>
+        <button id="account-perf" class="btn" type="button" data-focusable data-key="acct:perf">高性能模式 · 关</button>
+        <button id="account-privacy" class="btn" type="button" data-focusable data-key="acct:privacy">私密模式</button>
+        <button id="account-diag" class="btn" type="button" data-focusable data-key="acct:diag">链路检测</button>
+        <button id="account-update" class="btn" type="button" data-focusable data-key="acct:update">检查更新</button>
+        <button id="account-logout" class="btn" type="button" data-focusable data-key="acct:logout">退出登录</button>
+      </div>
+    </section>
+
+    <!-- 私密模式二级页：原来摊在主面板上的三项收进来，逻辑一字未改。
+         进入私密模式要动态码；内容源与网络通道只影响私密内容。 -->
+    <section class="account-box privacy-box" id="privacy-box" hidden>
+      <h1>私密模式</h1>
+      <p id="privacy-sub">进入需要动态码；内容源与网络通道只影响私密内容，随时可以切回公开。</p>
+      <div class="account-actions">
+        <button id="account-mode" class="btn" type="button" data-focusable data-key="acct:mode">进入私密模式</button>
+        <button id="account-source" class="btn" type="button" data-focusable data-key="acct:source">私密内容源</button>
+        <button id="account-proxy" class="btn" type="button" data-focusable data-key="acct:proxy">黄果网络通道</button>
+        <button id="account-privacy-back" class="btn ghost" type="button" data-focusable data-key="acct:privacy-back">返回</button>
+      </div>
+    </section>
+  </div>
+
+  <!-- 私密内容源：黄果走端侧三通道，其余源由后端解析；遥控器可直接选 -->
+  <div id="source" hidden>
+    <section class="proxy-box">
+      <h1>私密内容源</h1>
+      <p class="proxy-sub">黄果在本机解析（直连/代理/后端）；剧果/野果等由服务器解析，切完自动刷新首页。</p>
+      <div class="source-list" id="source-list"></div>
+      <div class="proxy-actions">
+        <button id="source-close" class="btn ghost" type="button" data-focusable data-key="source:close">关闭</button>
+      </div>
+    </section>
+  </div>
+
+  <!-- 私密内容的网络通道：直连 / 代理 / 后端转发三选一，逻辑跟手机端完全一致 -->
+  <div id="proxy" hidden>
+    <section class="proxy-box">
+      <h1>私密网络模式</h1>
+      <p class="proxy-sub">只对私密内容生效，对所选内容源全部有效；公开内容永远直连，选完立即生效。</p>
+      <div class="proxy-modes" id="proxy-modes">
+        <button class="proxy-mode" type="button" data-proxy-mode="1" data-focusable data-key="proxy:1">
+          <strong>仅直连</strong><small>用电视自己的网络，走系统 VPN / 全局代理</small>
+        </button>
+        <button class="proxy-mode" type="button" data-proxy-mode="2" data-focusable data-key="proxy:2">
+          <strong>仅代理</strong><small>走下面填的代理地址；黄果用本机，其它源由后端走同一地址</small>
+        </button>
+        <button class="proxy-mode" type="button" data-proxy-mode="3" data-focusable data-key="proxy:3">
+          <strong>走后端转发</strong><small>全部经后端中转（仅管理员与特权组）</small>
+        </button>
+      </div>
+      <div class="proxy-addr">
+        <label for="proxy-address">代理地址</label>
+        <div class="proxy-input" data-focusable data-key="proxy:addr" tabindex="0">
+          <input id="proxy-address" type="text" placeholder="host:port，比如 192.168.31.108:7893" autocomplete="off">
+        </div>
+        <div class="proxy-qr-row">
+          <div class="proxy-qr" id="proxy-qr"></div>
+          <p class="proxy-cap">遥控器不好打字<br>手机扫码 → 粘贴代理地址<br>自动填进来并保存</p>
+        </div>
+      </div>
+      <div class="proxy-actions">
+        <button id="proxy-save" class="btn" type="button" data-focusable data-key="proxy:save">保存地址</button>
+        <button id="proxy-close" class="btn ghost" type="button" data-focusable data-key="proxy:close">关闭</button>
+      </div>
+    </section>
+  </div>
+
+  <!-- 链路检测：本地取址 / NAS 后端 / 视频流各测一次，逐行给出通断与耗时。
+       跟手机端设置里那颗「链路检测」是同一套原生接口，只是这边用遥控器操作。 -->
+  <div id="diag" hidden>
+    <section class="proxy-box diag-box">
+      <h1>链路检测</h1>
+      <p class="proxy-sub" id="diag-sub">点「开始检测」，分别测试本地取址、NAS 后端、视频流三条链路，逐行给出通断与耗时。</p>
+      <div class="diag-list" id="diag-list"></div>
+      <div class="proxy-actions">
+        <button id="diag-run" class="btn" type="button" data-focusable data-key="diag:run">开始检测</button>
+        <button id="diag-close" class="btn ghost" type="button" data-focusable data-key="diag:close">关闭</button>
+      </div>
+    </section>
+  </div>
+
+  <div id="theme" hidden>
+    <section class="theme-box">
+      <h1>主题颜色</h1>
+      <p class="theme-sub" id="theme-sub">固定底色，不跟着首页海报换图，遥控器怎么按都不卡</p>
+      <div class="theme-cols">
+        <div class="theme-col-left">
+          <div class="theme-grid" id="theme-grid"></div>
+          <div class="theme-actions">
+            <button id="theme-close" class="btn ghost" type="button" data-focusable data-key="theme:close">关闭</button>
+          </div>
+        </div>
+
+        <!-- 只在选中「高性能模式」时出现：背景海报的滤镜参数，左右键直接调 -->
+        <div class="hero-tune" id="hero-tune" hidden>
+          <div class="hero-tune-head">
+            <h2 id="tune-title">海报背景参数</h2>
+            <span id="tune-hint">选中一行后按 ← → 调节，自动保存</span>
+          </div>
+          <!-- 只在选中「自定义」时出现：手机扫码上传自己的图 -->
+          <div class="bg-qr" id="bg-qr" hidden></div>
+          <div class="hero-rows" id="hero-rows"></div>
+          <div class="hero-preview">
+            <div class="hero-preview-bg">
+              <img id="hero-preview-img" alt="">
+              <i class="hero-preview-veil" id="hero-preview-veil"></i>
+              <span class="hero-preview-title" id="preview-title">剧名效果预览</span>
+            </div>
+            <span class="hero-preview-cap">实时预览</span>
+          </div>
+          <div class="hero-tune-actions">
+            <button class="btn ghost" type="button" data-focusable data-key="tune:reset" data-tune-reset="1">恢复默认</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- 私密内容动态码：每次进入都要输 6 位，不记住 -->
+  <div id="otp" hidden>
+    <section class="otp-box">
+      <h1>输入动态码</h1>
+      <p class="otp-sub">私密内容每次进入都要验证，输完 6 位自动提交</p>
+      <div class="otp-cells" id="otp-cells"></div>
+      <p class="otp-error" id="otp-error"></p>
+      <div class="otp-keys" id="otp-keys"></div>
+    </section>
+  </div>
+
+  <!-- 更新：只在「我的 → 检查更新」里出现，装的一定是电视包（原生按渠道挑附件并校验包名） -->
+  <div id="tv-update" hidden>
+    <section class="update-box">
+      <h1 id="tv-update-title">发现新版本</h1>
+      <p id="tv-update-sub"></p>
+      <p id="tv-update-notes" hidden></p>
+      <div id="tv-update-progress" hidden>
+        <div class="update-track"><i id="tv-update-fill"></i></div>
+        <span id="tv-update-percent">0%</span>
+      </div>
+      <div class="update-actions">
+        <button id="tv-update-install" class="btn primary" type="button" data-focusable data-key="upd:install">立即更新</button>
+        <button id="tv-update-later" class="btn ghost" type="button" data-focusable data-key="upd:later">稍后</button>
+      </div>
+    </section>
+  </div>
+</div>
+<script src="tv-polyfill.js"></script>
+<script src="intro.js"></script>
+<script src="vendor/qrcode.js"></script>
+<script src="tv.js"></script>
+</body>
+</html>

@@ -10,8 +10,8 @@ android {
         applicationId 'com.veyra.gybeyond'
         minSdk 26
         targetSdk 36
-        versionCode 542
-        versionName "0.31.54"
+        versionCode 543
+        versionName "0.31.55"
         testInstrumentationRunner 'com.veyra.gybeyond.PlaybackTestRunner'
     }
 
@@ -28,6 +28,7 @@ android {
             dimension 'form'
             resValue "string", "app_name", "Veyra"
             buildConfigField "boolean", "TV", "false"
+            buildConfigField "boolean", "LEGACY", "false"
         }
         tv {
             dimension 'form'
@@ -36,6 +37,40 @@ android {
             // 桌面/应用列表里叫 Veyra TV，跟手机版分得开
             resValue "string", "app_name", "Veyra TV"
             buildConfigField "boolean", "TV", "true"
+            buildConfigField "boolean", "LEGACY", "false"
+        }
+        // 老电视包（Android 5.1 / API 22），单独一个 flavor，正式 tv 包完全不动。
+        //
+        // 为什么要单独一个包：2015 年前后的创维（Hi3751）、海信那批机器系统还停在
+        // 5.1，minSdk 26 直接 INSTALL_FAILED_OLDER_SDK；而且它们的 System WebView 只有
+        // Chromium 37~43，既没有 CSS 变量也没有 grid，tv.css 进去是白屏。
+        // 这个包：minSdk 22 + media3 停在 1.4.1（1.5 起要求 23）+ 一份内联变量、flex 排版的
+        // tv-legacy.css（运行时按 CSS.supports 自动切换）+ 渲染失败时用原生层报环境。
+        // 包名后缀 .tvlegacy，可以和正式电视包装在同一台机器上对比。
+        tvlegacy {
+            dimension 'form'
+            applicationIdSuffix '.tvlegacy'
+            minSdk 22
+            resValue "string", "app_name", "Veyra TV 老电视版"
+            buildConfigField "boolean", "TV", "true"
+            buildConfigField "boolean", "LEGACY", "true"
+        }
+    }
+
+    // 老电视包的 assets：tv 的全量 + tvlegacy 的覆盖文件（tv.html / tv-polyfill.js / tv-legacy.css）
+    def tvLegacyAssetsDir = layout.buildDirectory.dir('tvlegacy-assets').get().asFile.path
+    tasks.register('syncTvLegacyAssets', Sync) {
+        // 同名文件允许重复：后一个 from 覆盖前一个（tvlegacy 的三个文件盖住 tv 的同名文件）
+        duplicatesStrategy = DuplicatesStrategy.INCLUDE
+        from 'src/tv/assets'
+        from 'src/tvlegacy/assets'
+        into tvLegacyAssetsDir
+    }
+    // assets 目录是任务产物，AGP 的 merge / lint / package 都会读它，必须显式声明依赖，
+    // 否则 Gradle 9 直接判 implicit dependency 报错。
+    tasks.configureEach { task ->
+        if (task.name.toLowerCase().contains('tvlegacy') && task.name != 'syncTvLegacyAssets') {
+            task.dependsOn 'syncTvLegacyAssets'
         }
     }
 
@@ -47,6 +82,20 @@ android {
     sourceSets {
         mobile { jniLibs.srcDirs = ['src/mobile/jniLibs'] }
         tv { jniLibs.srcDirs = [] }
+        // 老电视包共用 tv 的全部页面与脚本，只在同名文件上覆盖：
+        // tv.html（解析期选样式表）、tv-polyfill.js（补 closest）、tv-legacy.css。
+        // 前面的目录优先，所以 src/tvlegacy/assets 里的同名文件赢。
+        tvlegacy {
+            jniLibs.srcDirs = []
+            // Java / res 直接复用 tv 源集（BingeEngine、TvTheme、电视图标都在那边），
+            // 只覆盖 assets 里那三个文件。不复制一份代码，避免两边各修一半。
+            java.srcDirs = ['src/tv/java']
+            res.srcDirs = ['src/tv/res']
+            // assets 不能像 res 那样「同名后者覆盖」—— AGP 会直接报 Duplicate resources。
+            // 先用 Sync 把 tv 的整份资源铺到 build/tvlegacy-assets，再把 tvlegacy 里的
+            // 三个覆盖文件盖上去，老电视包只认这一个目录。
+            assets.srcDirs = [tvLegacyAssetsDir]
+        }
     }
 
     signingConfigs {
@@ -122,14 +171,26 @@ dependencies {
     implementation 'com.squareup.okhttp3:okhttp:4.10.0'
     implementation 'org.bouncycastle:bcprov-jdk18on:1.80.2'
     implementation 'org.jetbrains.kotlin:kotlin-stdlib:2.2.10'
-    implementation 'androidx.webkit:webkit:1.17.1'
     androidTestImplementation 'androidx.test:runner:1.7.0'
     androidTestImplementation 'junit:junit:4.13.2'
     implementation 'androidx.core:core:1.7.0'
     implementation 'org.jsoup:jsoup:1.23.2'
-    implementation 'androidx.media3:media3-exoplayer:1.11.1'
-    implementation 'androidx.media3:media3-exoplayer-hls:1.11.1'
-    implementation 'androidx.media3:media3-ui:1.11.1'
+    // media3 版本按形态分开：正式 tv / mobile 用 1.11.1，老电视包停在 1.4.1
+    // （1.5 起 minSdk 提到 23，Android 5.1 装不上）。两版 API 的差异只有
+    // DefaultLoadControl.getAllocator()，EpisodeLoadControl 里用反射兼容。
+    // webkit 只用到 WebViewAssetLoader（1.0 就有）。1.17 要求 minSdk 24，老电视包停 1.7。
+    tvImplementation 'androidx.webkit:webkit:1.17.1'
+    mobileImplementation 'androidx.webkit:webkit:1.17.1'
+    tvlegacyImplementation 'androidx.webkit:webkit:1.7.0'
+    tvImplementation 'androidx.media3:media3-exoplayer:1.11.1'
+    tvImplementation 'androidx.media3:media3-exoplayer-hls:1.11.1'
+    tvImplementation 'androidx.media3:media3-ui:1.11.1'
+    mobileImplementation 'androidx.media3:media3-exoplayer:1.11.1'
+    mobileImplementation 'androidx.media3:media3-exoplayer-hls:1.11.1'
+    mobileImplementation 'androidx.media3:media3-ui:1.11.1'
+    tvlegacyImplementation 'androidx.media3:media3-exoplayer:1.4.1'
+    tvlegacyImplementation 'androidx.media3:media3-exoplayer-hls:1.4.1'
+    tvlegacyImplementation 'androidx.media3:media3-ui:1.4.1'
     // 扫码登录电视：只用 zxing 的纯 Java 解码核心（约 600KB），不拖 appcompat。
     // 电视包没有相机，这些依赖只进手机/平板。
     mobileImplementation 'com.google.zxing:core:3.5.3'

@@ -71,7 +71,7 @@ const DEFAULT_MIRRORS = [
 ];
 
 /** 只有这两个渠道的包会被缓存和分发。 */
-const CHANNELS = ['mobile', 'tv', 'desktop'];
+const CHANNELS = ['mobile', 'tv', 'tvlegacy', 'desktop'];
 /** 发版必须齐的渠道：桌面端安装包可以后补，不能因此让手机/电视的更新卡住。 */
 const REQUIRED_CHANNELS = ['mobile', 'tv'];
 
@@ -99,6 +99,9 @@ function compareVersion(a, b) {
 
 /** 渠道 → 附件名。约定优于配置：发布流水线一直用这两个名字。 */
 function fileName(channel, version) {
+  /* 老电视包（Android 5.1 / minSdk 22）单独一个渠道，名字必须排在 Veyra-TV-* 之前
+     匹配不上：只靠 assets 排序取包的老客户端会把它当成电视包下走。 */
+  if (channel === 'tvlegacy') return `Veyra-TV-Legacy-${version}.apk`;
   if (channel === 'tv') return `Veyra-TV-${version}.apk`;
   if (channel === 'desktop') return `Veyra-Desktop-${version}.exe`;
   return `Veyra-${version}.apk`;
@@ -109,6 +112,10 @@ function matchesChannel(channel, name) {
   const value = String(name || '');
   if (channel === 'desktop') return /\.exe$/i.test(value) && /desktop/i.test(value);
   if (!value.endsWith('.apk')) return false;
+  const legacy = /tv[-_.]?legacy/i.test(value);
+  if (channel === 'tvlegacy') return legacy;
+  // Veyra-TV-Legacy-*.apk 也带 tv 记号，必须先排掉，否则会被当成正式电视包
+  if (legacy) return false;
   return /(^|[-_.])tv([-_.]|$)/i.test(value) === (channel === 'tv');
 }
 

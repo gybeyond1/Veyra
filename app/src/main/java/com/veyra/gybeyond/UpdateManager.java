@@ -34,6 +34,8 @@ final class UpdateManager {
     private static final Pattern VERSION = Pattern.compile("\\d+\\.\\d+\\.\\d+");
     /** 附件名里单独出现的 tv 记号：Veyra-TV-0.24.3.apk / veyra.tv.apk / veyra_tv_x.apk 都算。 */
     private static final Pattern TV_MARK = Pattern.compile("(?i)(^|[-_.])tv([-_.]|$)");
+    /** 老电视包（Android 5.1）的附件名：Veyra-TV-Legacy-0.31.55.apk。 */
+    private static final Pattern LEGACY_MARK = Pattern.compile("(?i)tv[-_.]?legacy");
     private static final long AUTO_INTERVAL_MS = 12 * 60 * 60 * 1000L;
 
     interface Progress { void onPercent(int percent); }
@@ -66,15 +68,24 @@ final class UpdateManager {
         tvBuild = lite || this.context.getPackageName().endsWith(".tv");
     }
 
-    private String channel() { return tvBuild ? "tv" : "mobile"; }
+    private String channel() {
+        // 老电视包是独立渠道：它的安装包和正式电视包不是同一个（minSdk 22），
+        // 混在一个渠道里会把装不上的包推给对方。
+        if (BuildConfig.LEGACY) return "tvlegacy";
+        return tvBuild ? "tv" : "mobile";
+    }
 
     /** 附件名是不是电视包：名字里单独出现 tv 记号才算。 */
     static boolean isTvAsset(String assetName) {
         return TV_MARK.matcher(assetName).find();
     }
 
-    /** 附件名是否属于本渠道：带 tv 记号的只给电视，不带的只给手机。 */
+    /** 附件名是否属于本渠道：带 tv 记号的只给电视，不带的只给手机，legacy 的只给老电视包。 */
     private boolean matchesChannel(String assetName) {
+        boolean legacy = LEGACY_MARK.matcher(assetName).find();
+        if (BuildConfig.LEGACY) return legacy;
+        // Veyra-TV-Legacy-*.apk 也含 tv 记号，必须先排掉，否则正式电视包会把它当成自己的
+        if (legacy) return false;
         return isTvAsset(assetName) == tvBuild;
     }
 

@@ -28,8 +28,41 @@ final class EpisodeLoadControl extends DefaultLoadControl {
 
     @Override public boolean shouldContinueLoading(LoadControl.Parameters parameters) {
         if (standby && (parameters.bufferedDurationUs >= STANDBY_BUFFER_US
-                || getAllocator(parameters.playerId).getTotalBytesAllocated() >= STANDBY_BYTES)) return false;
+                || allocatedBytes(parameters) >= STANDBY_BYTES)) return false;
         return super.shouldContinueLoading(parameters);
+    }
+
+    /**
+     * 已经占用的字节数。
+     *
+     * media3 1.4（老电视包）的 getAllocator() 不带参数，1.11（正式 tv / mobile）要传
+     * PlayerId。两个版本同时编在一个工程里，编译期无法写成一种调用，所以走反射：
+     * 先试带参数的，找不到再退回无参的。两版返回的都是 DefaultAllocator。
+     */
+    private long allocatedBytes(LoadControl.Parameters parameters) {
+        try {
+            try {
+                Object playerId = parameters.getClass().getField("playerId").get(parameters);
+                java.lang.reflect.Method method = DefaultLoadControl.class
+                        .getDeclaredMethod("getAllocator", Class.forName("androidx.media3.common.PlayerId"));
+                method.setAccessible(true);
+                return total(method.invoke(this, playerId));
+            } catch (NoSuchMethodException | NoSuchFieldException | ClassNotFoundException ignored) {
+                /* 换无参版本 */
+            }
+            java.lang.reflect.Method method = DefaultLoadControl.class.getDeclaredMethod("getAllocator");
+            method.setAccessible(true);
+            return total(method.invoke(this));
+        } catch (Exception error) {
+            return 0;
+        }
+    }
+
+    private static long total(Object allocator) {
+        if (allocator instanceof androidx.media3.exoplayer.upstream.DefaultAllocator) {
+            return ((androidx.media3.exoplayer.upstream.DefaultAllocator) allocator).getTotalBytesAllocated();
+        }
+        return 0;
     }
 
     @Override public boolean shouldStartPlayback(LoadControl.Parameters parameters) {

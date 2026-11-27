@@ -16,8 +16,15 @@ if not compiler.is_file():
 output = Path(args.output)
 output.parent.mkdir(parents=True, exist_ok=True)
 sources = sorted((root / "third_party/hongguo/src").rglob("*.kt"))
-studio_java = home.parents[2] / "jbr/bin/java.exe"
-java = str(studio_java) if studio_java.is_file() else "java"
+# Android Studio 自带 JBR；Linux 上 KOTLIN_HOME 常直接指向 kotlinc，没有 jbr 那一层，
+# 取 parents[2] 会直接 IndexError。取不到就用 PATH 里的 java。
+java = "java"
+try:
+    studio_java = home.parents[2] / "jbr/bin/java.exe"
+    if studio_java.is_file():
+        java = str(studio_java)
+except IndexError:
+    pass
 subprocess.run([java, "-Dfile.encoding=UTF-8", "-cp", str(home / "lib/*"),
                 "org.jetbrains.kotlin.cli.jvm.K2JVMCompiler", "-no-stdlib", "-no-reflect",
                 "-jvm-target", "17", "-classpath", args.classpath,

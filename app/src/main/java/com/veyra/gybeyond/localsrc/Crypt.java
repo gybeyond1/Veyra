@@ -3,7 +3,7 @@ package com.veyra.gybeyond.localsrc;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.security.MessageDigest;
-import java.util.Base64;
+import com.veyra.gybeyond.Base64Compat;
 import java.util.zip.GZIPInputStream;
 
 import javax.crypto.Cipher;
@@ -110,16 +110,16 @@ public final class Crypt {
     }
 
     public static String base64(byte[] data) {
-        return Base64.getEncoder().encodeToString(data);
+        return Base64Compat.getEncoder().encodeToString(data);
     }
 
     public static byte[] unb64(String value) {
         String clean = value == null ? "" : value.trim().replace("\n", "").replace("\r", "");
         try {
-            return Base64.getDecoder().decode(clean);
+            return Base64Compat.getDecoder().decode(clean);
         } catch (Exception error) {
             try {
-                return Base64.getUrlDecoder().decode(clean);
+                return Base64Compat.getUrlDecoder().decode(clean);
             } catch (Exception ignored) {
                 throw new IllegalArgumentException("base64 解码失败");
             }

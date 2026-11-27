@@ -5,7 +5,6 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -93,7 +92,7 @@ final class HongguoV5 {
     static {
         byte[] raw = new byte[18];
         RANDOM.nextBytes(raw);
-        PROCESS_NONCE = Base64.getUrlEncoder().withoutPadding().encodeToString(raw);
+        PROCESS_NONCE = Base64Compat.getUrlEncoder().withoutPadding().encodeToString(raw);
     }
 
     private HongguoV5() { }
@@ -594,7 +593,7 @@ final class HongguoV5 {
             emit(out, le64(a));
             emit(out, le64(b));
         }
-        return Base64.getEncoder().encodeToString(out.toByteArray());
+        return Base64Compat.getEncoder().encodeToString(out.toByteArray());
     }
 
     // ---------------- Medusa（v5） ----------------
@@ -689,7 +688,7 @@ final class HongguoV5 {
         byte[] out = concat(
                 concat(prefix, new byte[]{(byte) nonce, (byte) (nonce >>> 8), 0, 1}),
                 encrypted);
-        return Base64.getEncoder().encodeToString(out);
+        return Base64Compat.getEncoder().encodeToString(out);
     }
 
     static byte[] slice(byte[] data, int from, int to) {
@@ -844,7 +843,7 @@ final class HongguoV5 {
     }
 
     static String base64(byte[] data) {
-        return java.util.Base64.getEncoder().encodeToString(data);
+        return Base64Compat.getEncoder().encodeToString(data);
     }
 
     /**

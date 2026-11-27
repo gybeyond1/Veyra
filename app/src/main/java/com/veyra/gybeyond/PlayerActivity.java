@@ -2577,6 +2577,14 @@ public final class PlayerActivity extends Activity {
                 ? landscapeSeek : seekBar;
     }
 
+    /**
+     * 系统有没有关掉动画。ValueAnimator.areAnimatorsEnabled() 是 API 26 才有的，
+     * Android 5.1 的老电视包上直接调用会 NoSuchMethodError —— 播放页第一次出控制条就崩。
+     */
+    private static boolean animatorsEnabled() {
+        return Build.VERSION.SDK_INT < 26 || ValueAnimator.areAnimatorsEnabled();
+    }
+
     private float[] miniToSeekGeometry(SeekBar target) {
         int[] miniPoint = new int[2];
         int[] seekPoint = new int[2];
@@ -2613,7 +2621,7 @@ public final class PlayerActivity extends Activity {
         miniProgress.post(() -> {
             if (token != controlTransitionToken || !controlsShown) return;
             updateMiniProgressFill();
-            if (!ValueAnimator.areAnimatorsEnabled()) {
+            if (!animatorsEnabled()) {
                 controls.setAlpha(1);
                 target.setAlpha(1);
                 miniProgress.setVisibility(View.GONE);
@@ -2658,7 +2666,7 @@ public final class PlayerActivity extends Activity {
             miniProgress.setTranslationY(geometry[1]);
             miniProgress.setScaleX(geometry[2]);
             miniProgress.setScaleY(1.5f);
-            if (!ValueAnimator.areAnimatorsEnabled()) {
+            if (!animatorsEnabled()) {
                 resetMiniTransform();
                 controls.setVisibility(View.INVISIBLE);
                 target.setAlpha(1);

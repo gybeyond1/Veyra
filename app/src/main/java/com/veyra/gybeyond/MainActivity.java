@@ -70,6 +70,8 @@ public final class MainActivity extends Activity {
     private WebView webView;
     private FrameLayout root;
     private View splash;
+    /** 渲染自检失败时盖在页面上的原生说明层（只电视端用） */
+    private View renderNotice;
     private FrameLayout bingeVideoLayer;
     // 玻璃底板层：夹在原生视频层与 WebView 之间，负责把视频糊掉后透出给 WebView 里的玻璃板
     private BingeEngine bingeEngine;
@@ -629,7 +631,8 @@ public final class MainActivity extends Activity {
         if (pendingUpdateApk != null) {
             File apk = pendingUpdateApk;
             pendingUpdateApk = null;
-            if (getPackageManager().canRequestPackageInstalls()) openUpdateInstaller(apk);
+            // canRequestPackageInstalls 是 API 26 才有的；5.1 上装 APK 直接走系统安装器
+            if (Build.VERSION.SDK_INT < 26 || getPackageManager().canRequestPackageInstalls()) openUpdateInstaller(apk);
             else webView.evaluateJavascript("window.hgUpdateInstallPermissionDenied && window.hgUpdateInstallPermissionDenied()", null);
         }
         if (bingeEngine != null) bingeEngine.onResume();
@@ -1089,6 +1092,107 @@ public final class MainActivity extends Activity {
         layer.animate().alpha(0f).setDuration(220).withEndAction(() -> {
             try { root.removeView(layer); } catch (Exception ignored) { }
         }).start();
+    }
+
+    /**
+     * 电视端渲染自检：页面加载完 4 秒后 #view 里还是空的，就在原生层把环境信息铺出来。
+     *
+     * 为什么要这个：Android 5.x 那批电视（创维/海信 2015 年前后）的系统 WebView 只有
+     * Chrome 37~43，连 CSS 变量都不支持，tv.css 一进去整页就是白的 —— 而 WebView 不会
+     * 报错，用户只看到白屏，我们连内核版本都问不到。这里用原生 View 盖一层，
+     * 至少能一眼看出是「装不上」「白屏」「网络不通」里的哪一种。
+     */
+    private void watchTvRender() {
+        if (!BuildConfig.LEGACY || webView == null) return;
+        final WebView view = webView;
+        hotHandler.postDelayed(() -> {
+            if (isDestroyed() || webView != view) return;
+            view.evaluateJavascript(
+                    "(function(){try{return String(document.querySelectorAll('#view *').length)}catch(e){return '-1'}}())",
+                    value -> {
+                        if (isDestroyed() || webView != view) return;
+                        int count = -1;
+                        try { count = Integer.parseInt(String.valueOf(value).replace("\"", "").trim()); }
+                        catch (Exception ignored) { }
+                        if (count <= 0) showRenderFailure();
+                    });
+        }, 4000);
+    }
+
+    private void showRenderFailure() {
+        if (root == null || renderNotice != null || isDestroyed()) return;
+        float density = getResources().getDisplayMetrics().density;
+        String ua = "";
+        try { ua = webView.getSettings().getUserAgentString(); } catch (Exception ignored) { }
+        String chrome = "";
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("Chrome/(\\d+)").matcher(ua);
+        if (matcher.find()) chrome = matcher.group(1);
+
+        int pad = Math.round(28 * density);
+        android.widget.LinearLayout box = new android.widget.LinearLayout(this);
+        box.setOrientation(android.widget.LinearLayout.VERTICAL);
+        box.setBackgroundColor(0xFF17181A);
+        box.setPadding(pad, pad, pad, pad);
+
+        android.widget.TextView title = new android.widget.TextView(this);
+        title.setText("界面没有加载出来");
+        title.setTextColor(0xFFE7E9EB);
+        title.setTextSize(22);
+        box.addView(title);
+
+        StringBuilder detail = new StringBuilder();
+        detail.append("Android ").append(android.os.Build.VERSION.RELEASE)
+                .append("（API ").append(android.os.Build.VERSION.SDK_INT).append("）\n");
+        detail.append("机型：").append(android.os.Build.MANUFACTURER).append(' ').append(android.os.Build.MODEL).append('\n');
+        detail.append("内核：Chromium ").append(chrome.isEmpty() ? "未知" : chrome).append('\n');
+        detail.append("UA：").append(ua).append('\n');
+        android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
+        detail.append("屏幕：").append(metrics.widthPixels).append('×').append(metrics.heightPixels)
+                .append(" @").append(metrics.densityDpi).append("dpi");
+
+        android.widget.TextView body = new android.widget.TextView(this);
+        body.setText(detail.toString());
+        body.setTextColor(0xFFB9C2CF);
+        body.setTextSize(13);
+        body.setPadding(0, Math.round(14 * density), 0, Math.round(18 * density));
+        body.setTextIsSelectable(true);
+        box.addView(body);
+
+        android.widget.TextView hint = new android.widget.TextView(this);
+        hint.setText(chrome.isEmpty() || parseIntSafe(chrome) < 57
+                ? "这台电视的网页内核太老（需要 Chromium 57 以上）。两条路：\n"
+                + "1）在电视上装一个新版「Android System WebView」（Android 5 最高可升到 95），装完重启再打开；\n"
+                + "2）接一个电视盒子 / 用手机投屏。"
+                : "内核版本看起来够用，更可能是网络或后端没连上。点下面的「重试」，或检查设置里的服务器地址。");
+        hint.setTextColor(0xFFE7E9EB);
+        hint.setTextSize(14);
+        box.addView(hint);
+
+        android.widget.Button retry = new android.widget.Button(this);
+        retry.setText("重试");
+        retry.setOnClickListener(v -> {
+            View layer = renderNotice;
+            renderNotice = null;
+            if (layer != null) { try { root.removeView(layer); } catch (Exception ignored) { } }
+            if (webView != null) webView.loadUrl(uiUrl());
+            watchTvRender();
+        });
+        android.widget.LinearLayout.LayoutParams retryParams =
+                new android.widget.LinearLayout.LayoutParams(
+                        android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                        android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+        retryParams.topMargin = Math.round(16 * density);
+        box.addView(retry, retryParams);
+
+        android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+        scroll.setBackgroundColor(0xFF17181A);
+        scroll.addView(box);
+        renderNotice = scroll;
+        root.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
+    }
+
+    private static int parseIntSafe(String value) {
+        try { return Integer.parseInt(value); } catch (Exception ignored) { return 0; }
     }
 
     /** Shift 单按当返回：按下时先记一笔，期间按了别的键就作废，抬起时才触发。 */
