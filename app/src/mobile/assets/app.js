@@ -1558,7 +1558,9 @@ function downloadTaskRow(task, kind) {
   // 来源标识（红果 App 源 / 网页源保底）来自后端 ready detail，前端直接展示
   const srcNote = task.detail && task.detail.includes('（') ? ((task.detail.match(/（([^）]*)）/) || [])[1] || '') : '';
   // NAS 任务部分失败：ready（下载完成）或 failed（重启中断/失败）都可只重下失败集，已下载分集保留不动
-  const canRetryFailed = task.status === 'ready' || (task.status === 'failed' && !(task.error || '').includes('合并失败'));
+  // 下载途中也能只补失败集：后端会先把当前这一轮停下来，再只重下失败的那些集
+  const canRetryFailed = task.status === 'ready' || task.status === 'downloading'
+    || (task.status === 'failed' && !(task.error || '').includes('合并失败'));
   const retryFailedBtn = !running && kind === 'nas' && canRetryFailed && failedList.length > 0
     ? `<button type="button" class="dl-cancel dl-retry" data-dl-retry-failed="nas" data-dl-id="${esc(task.id)}">重试失败${failedList.length}集</button>` : '';
   // 手动合并：下载完成（ready，含部分失败）或合并失败（分集保留）时显示合并按钮，等用户点合并才合并

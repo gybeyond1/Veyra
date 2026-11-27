@@ -120,6 +120,8 @@ function loadTasks() {
   // 重启后把未完成任务标记为中断，并按分集文件实际存在情况重建成功/失败清单：
   // 已下载的分集（work_<id>/epNNN.mp4）保留，重启/升级后重试失败集只补缺失的集，不会整季重下
   for (const t of Object.values(tasks)) {
+    // 老版本留下的一排「第NN集.enc」：中间文件，一律清掉
+    cleanEncFiles(taskDir(t));
     const interrupted = t.status === 'downloading' || t.status === 'merging' || t.status === 'queued';
     // 旧版本遗留的 failed 任务（无 failedEpisodes 字段）：同样按分集文件重建失败清单，使「重试失败集」可用
     const legacyFailed = t.status === 'failed' && !Array.isArray(t.failedEpisodes) && !String(t.error || '').includes('合并失败');
@@ -139,6 +141,8 @@ function loadTasks() {
 function rescanTaskFiles(t) {
   const dir = taskDir(t);
   t.failedEpisodes = [];
+  // 上次被强杀留下的 .enc（半截密文）没有任何用处，先清掉
+  cleanEncFiles(dir);
   if (!fs.existsSync(dir)) {
     for (const ep of t.episodes) { ep._ok = false; ep.failed = false; }
     return;
@@ -179,6 +183,14 @@ function taskDir(t) {
 function epName(i) { return `第${String(i).padStart(2, '0')}集.mp4`; }
 /** 分集密文文件名：第01集.enc（下载中间文件，解密后删除） */
 function epEncName(i) { return `第${String(i).padStart(2, '0')}集.enc`; }
+/** 清掉任务目录里的密文中间文件：下载失败/被中断时会留在剧集目录，用户看到就是一排打不开的文件 */
+function cleanEncFiles(dir) {
+  try {
+    for (const name of fs.readdirSync(dir)) {
+      if (name.endsWith('.enc')) fs.rmSync(path.join(dir, name), { force: true });
+    }
+  } catch { /* 目录不存在 */ }
+}
 /** 合并产物名：直接用剧名（用户要求「就叫剧名」），不带 _全N集 后缀。
  *  同名产物已存在时由调用方决定覆盖，不做 (2) 递增——同一部剧重复合并就是替换旧成片。 */
 function mergedName(t) {
@@ -191,7 +203,9 @@ function safeJoin(base, name) {
 }
 function httpGet(url, headers, onData, onEnd, onError) {
   const mod = url.startsWith('https:') ? https : http;
-  const req = mod.get(url, { headers }, res => {
+  // agent:false —— 每个请求新开一条连接。Node 18+ 全局 agent 默认 keep-alive，
+  // 复用一条已被 CDN 关掉的空闲连接会直接 read ECONNRESET（8 集同时挂在开头几 MB 就是这个）
+  const req = mod.get(url, { headers, agent: false }, res => {
     if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
       res.resume();
       httpGet(new URL(res.headers.location, url).toString(), headers, onData, onEnd, onError);
@@ -204,9 +218,14 @@ function httpGet(url, headers, onData, onEnd, onError) {
     }
     res.on('data', onData);
     res.on('end', onEnd);
+    // 对端中途掐线时 res 会单独报错：不接住 Promise 永不 settle，表现就是任务"卡着"、
+    // 既不报错也不往下走（用户看到的就是这个）
+    res.on('aborted', () => onError(new Error('连接被对端中断')));
+    res.on('error', err => onError(err));
   });
   req.on('error', onError);
-  req.setTimeout(60_000, () => req.destroy(new Error('下载超时')));
+  // 空闲 20 秒没数据就当这条连接废了换个地址；以前 60 秒 × 3 次 × 多个地址能干等十几分钟
+  req.setTimeout(20_000, () => req.destroy(new Error('下载超时（20 秒无数据）')));
   return req;
 }
 function downloadFile(url, destPath, headers, progressCb, signal) {
@@ -1468,18 +1487,24 @@ async function runTask(task) {
     return h;
   };
   const signal = { aborted: false };
+  task._signal = signal;   // 外部（重试失败集 / 删除）要能叫停这一轮
   const AUTO_RETRY_ROUNDS = 2; // 初始 1 轮 + 自动补 2 轮（每轮重新取流）
+  let stallRounds = 0;         // 连着几轮一集都没补上：说明不是偶发抖动，别再无谓地耗
   let downloaded = 0;
   for (let round = 0; round <= AUTO_RETRY_ROUNDS; round++) {
+    const okBefore = task.episodes.filter(ep => ep._ok).length;
     const queue = task.episodes.map((ep, idx) => ({ ep, idx })).filter(item => !item.ep._ok);
     if (queue.length === 0) break;
-    if (round > 0) {
-      task.progress.detail = `自动重试第 ${round} 轮（剩余 ${queue.length} 集）`;
-      touch(task);
-    }
+    // 红果 App 源 CDN 对同 IP 并发极敏感：一上来 8~10 条并发会被整片掐断（用户这批就是 8 条同时 ECONNRESET）。
+    // 首轮压到 3 条，重试轮降到 2 条；纯网页源照旧。
+    const limit = task._appVids ? Math.max(2, Math.min(CONCURRENCY, round === 0 ? 3 : 2)) : CONCURRENCY;
+    task.progress.detail = round === 0
+      ? `下载中（并发 ${limit} 集，共 ${queue.length} 集待下）`
+      : `自动重试第 ${round} 轮（剩余 ${queue.length} 集，并发 ${limit}）`;
+    touch(task);
     const workers = [];
     let next = 0;
-    for (let w = 0; w < Math.min(CONCURRENCY, queue.length); w++) {
+    for (let w = 0; w < Math.min(limit, queue.length); w++) {
       workers.push((async () => {
         while (!signal.aborted) {
           const item = queue[next++];
@@ -1488,10 +1513,10 @@ async function runTask(task) {
           /* 文件名用真实集号：第 3 集就存成「第03集.mp4」，跨批次下载才能靠集号凑成完整一季 */
           const plainFile = safeJoin(dir, epName(ep.index)); // 明文分集
           task.progress.episode = ep.index;
-          task.progress.detail = `下载第 ${ep.index} 集（${idx + 1}/${queue.length}）`;
-          touch(task);
           let attempt = 0;
-          while (attempt <= RETRIES && !signal.aborted) {
+          // 单集最多耗 6 分钟：地址全废时别让一集把整个任务拖成「永远下不完」
+          const epDeadline = Date.now() + 6 * 60 * 1000;
+          while (attempt <= RETRIES && !signal.aborted && Date.now() < epDeadline) {
             try {
               const started = Date.now();
               // 红果 App 取流：手里没有地址才去取（有地址说明预热/上一轮拿到了，别重复打配额）
@@ -1575,13 +1600,15 @@ async function runTask(task) {
               ep._ok = true;
               downloaded++;
               task.progress.percent = Math.min(98, Math.round(downloaded / task.episodes.length * 100));
-              task.progress.detail = `已下载 ${downloaded}/${task.episodes.length} 集`;
+              task.progress.detail = `已下载 ${downloaded}/${task.episodes.length} 集${(task.failedEpisodes || []).length ? `（失败 ${task.failedEpisodes.length} 集，继续补）` : ''}`;
               touch(task);
               if (downloadCost > REDOWNLOAD_TIMEOUT_MS) throw new Error('播放地址超时失效，请重新提交');
               break;
             } catch (err) {
               fs.rmSync(safeJoin(dir, epEncName(ep.index)), { force: true });
               fs.rmSync(plainFile, { force: true });
+              // 主动停下（用户点了「重试失败集」/ 取消）：别把地址清掉，重排后直接接着下
+              if (signal.aborted) break;
               /* 地址可能被 CDN 判过期（403）或取流本身返回空。清掉它，
                  下一次尝试才会重新取流换新地址，而不是拿着死链重试。 */
               ep.url = '';
@@ -1595,11 +1622,12 @@ async function runTask(task) {
                 console.log(`[download] ${task.title} 第 ${ep.index} 集失败(已重试 ${RETRIES} 次): ${err.message}`);
                 if (!task.failedEpisodes) task.failedEpisodes = [];
                 if (!task.failedEpisodes.some(f => f.index === ep.index)) task.failedEpisodes.push({ index: ep.index, error: err.message });
-                task.progress.detail = `第 ${ep.index} 集失败（将自动重试）`;
+                task.progress.detail = `第 ${ep.index} 集失败：${String(err.message || '').split('\n')[0].slice(0, 40)}（稍后自动补下）`;
                 touch(task);
                 break;
               }
-              await new Promise(r => setTimeout(r, 1500 * attempt));
+              // 退避 1s / 2s / 4s：连着打会被 CDN 直接掐连接，停一下成功率明显更高
+              await new Promise(r => setTimeout(r, Math.min(4000, 1000 * Math.pow(2, attempt - 1))));
             }
           }
         }
@@ -1608,10 +1636,42 @@ async function runTask(task) {
     await Promise.all(workers);
     if (task.status === 'canceled') return;
     const remaining = task.episodes.filter(ep => !ep._ok).length;
+    const okNow = task.episodes.filter(ep => ep._ok).length;
+    if (okNow === okBefore) {
+      stallRounds++;
+      if (stallRounds >= 2) {
+        console.log(`[download] ${task.title} 连续 ${stallRounds} 轮没有任何进展，停止自动重试（剩余失败集可手动重试）`);
+        break;
+      }
+      // 一点进展都没有：先晾源站几秒，别连着打（CDN 风控会越打越狠）
+      await new Promise(r => setTimeout(r, 3000));
+    } else {
+      stallRounds = 0;
+    }
     if (remaining === 0 || round >= AUTO_RETRY_ROUNDS) break;
   }
   signal.aborted = true;
   if (task.status === 'canceled') return;
+
+  // 用户在下载途中点了「重试失败集」：这一轮先停，重新排回队列，只补没下的集
+  if (task._retryRequested) {
+    task._retryRequested = false;
+    task.status = 'queued';
+    task.error = '';
+    startTask(task);
+    return;
+  }
+
+  // 以「分集文件到底在不在」重建失败清单：被中止/超时/异常的集都算失败，
+  // 不能只信 catch 里那几条记录（并发被打断时它会漏）
+  const prevFailed = new Map((task.failedEpisodes || []).map(f => [f.index, f]));
+  task.failedEpisodes = [];
+  task.episodes.forEach(ep => {
+    if (ep._ok) { ep.failed = false; return; }
+    ep.failed = true;
+    const old = prevFailed.get(ep.index);
+    task.failedEpisodes.push({ index: ep.index, error: ep.error || (old && old.error) || '未下载完成' });
+  });
 
   // 手动合并：下载完成后保留分集，等待用户在下载管理里点「合并」再合并（不再自动合并）
   task.status = 'ready';
@@ -1622,10 +1682,19 @@ async function runTask(task) {
      把这句话写进任务详情，用户不用翻容器日志也能知道该改什么。 */
   const signerHint = task._appVids ? '' : '；没有拿到分集列表，请确认 docker-compose.yml 里配了 HG_SIGNER 并启动了 hongguo-signer';
   if (failedCount > 0) {
+    // 失败原因写进 task.error：不写的话界面上只有一句"下载中"，看上去就是卡住了
+    const nums = task.failedEpisodes.slice(0, 10).map(f => `第${f.index}集`).join('、');
+    const more = failedCount > 10 ? ' 等' : '';
+    const why = String(task.failedEpisodes[0].error || '未知原因').split('\n')[0].slice(0, 80);
+    task.error = `${failedCount} 集失败：${nums}${more}（${why}）。点「重试失败集」只补这几集，已下好的不动`;
     task.progress = { phase: 'ready', episode: downloaded, total: task.episodes.length, percent: 100, detail: `已下载 ${downloaded}/${task.episodes.length} 集，失败 ${failedCount} 集${sourceNote}，可重试失败集或先合并成功部分${signerHint}` };
   } else {
+    task.error = '';
     task.progress = { phase: 'ready', episode: task.episodes.length, total: task.episodes.length, percent: 100, detail: `已下载 ${task.episodes.length} 集${sourceNote}，待合并` };
   }
+  // 失败/中断留下的 .enc 中间文件：留在剧集目录里就是一排打不开的文件
+  cleanEncFiles(dir);
+  delete task._signal;   // 这一轮结束了，别把这个对象写进 downloads.json
   touch(task);
   flushStore(true);
 }
@@ -1747,6 +1816,14 @@ function retryFailedEpisodes(id, owner, isAdmin) {
   const t = tasks[id];
   if (!t) return null;
   if (!isAdmin && t.owner && t.owner !== owner) return null;
+  // 正在下载时也能点：先把这一轮停下来，等它退出后自动重排（只补失败集）
+  if (t.status === 'downloading') {
+    t._retryRequested = true;
+    if (t._signal) t._signal.aborted = true;
+    t.progress = { ...(t.progress || {}), detail: '正在停止当前下载，随后只重试失败集…' };
+    touch(t);
+    return publicTask(t);
+  }
   if (t.status !== 'ready' && t.status !== 'failed') throw new Error('当前状态不可重试失败集');
   const failed = (t.failedEpisodes || []).filter(f => f && f.index);
   if (failed.length === 0) throw new Error('没有失败分集');
@@ -1823,8 +1900,9 @@ function publicTask(t) {
     upload: t.upload || null,
     percent: p.percent || (t.status === 'done' ? 100 : 0),
     detail: p.detail || (t.status === 'done' ? '完成' : ''),
-    doneCount: t.status === 'done' ? t.episodes.length
-      : (failedEpisodes.length > 0 ? t.episodes.length - failedEpisodes.length : done),
+    // 已完成集数只认真正落盘的分集：以前用「总集数 - 失败集数」，
+    // 会把还没轮到的集也算成已完成（显示 214/222 却只下了一集）
+    doneCount: t.status === 'done' ? t.episodes.length : t.episodes.filter(ep => ep._ok).length,
     totalCount: total,
   };
 }

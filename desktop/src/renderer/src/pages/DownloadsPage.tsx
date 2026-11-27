@@ -80,7 +80,7 @@ export default function DownloadsPage({ tasks, remote, onRefresh, onPlay, onPlay
                   className="tile-art"
                   role="button"
                   tabIndex={0}
-                  title={finished ? '播放本地文件' : subtitle}
+                  title={[finished ? '播放本地文件' : subtitle, failed > 0 ? task.error : ''].filter(Boolean).join('\n')}
                   onClick={() => (finished ? onPlay(task) : undefined)}
                   onKeyDown={(event) => {
                     if (finished && (event.key === 'Enter' || event.key === ' ')) onPlay(task);
