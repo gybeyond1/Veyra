@@ -42,6 +42,8 @@ export default function PlayerPage({ source, id, episode, title, position, local
   const [rawUrl, setRawUrl] = useState('');
   /** 这台机器有没有带 mpv（有就能原片直放，彻底不转码） */
   const [nativeOk, setNativeOk] = useState(false);
+  /** 滚轮切集的上一次触发时间：一次拨动会连发好几帧 wheel，必须节流 */
+  const wheelAt = useRef(0);
 
   useEffect(() => {
     call<boolean>('player.mpvAvailable')
@@ -211,6 +213,22 @@ export default function PlayerPage({ source, id, episode, title, position, local
   const next = index >= 0 ? numbers[index + 1] : undefined;
   const prev = index > 0 ? numbers[index - 1] : undefined;
 
+  /**
+   * 滚轮切集：向下滚下一集，向上滚上一集。
+   * 600ms 内只认一次 —— 触控板/滚轮一次拨动会连着发好几个 wheel 事件，
+   * 不节流就会一口气跳过五六集。本地成品和其它设备的成品是单个文件，不切。
+   */
+  const onWheel = (event: React.WheelEvent) => {
+    if (localTaskId || remoteUrl) return;
+    if (Math.abs(event.deltaY) < 8) return;
+    const now = Date.now();
+    if (now - wheelAt.current < 600) return;
+    const target = event.deltaY > 0 ? next : prev;
+    if (!target) return;
+    wheelAt.current = now;
+    onEpisode(target);
+  };
+
   /** 交给 mpv：不吃 Chromium 的解码能力，H.265 原片硬解，零转码 */
   const openNative = async () => {
     const target = rawUrl || url;
@@ -230,7 +248,7 @@ export default function PlayerPage({ source, id, episode, title, position, local
   const canNative = nativeOk && Boolean(localTaskId || remoteUrl);
 
   return (
-    <div className="page player-page">
+    <div className="page player-page" onWheel={onWheel}>
       <header className="player-head">
         <button type="button" className="ghost back" onClick={onClose}>
           ← 返回
@@ -296,7 +314,7 @@ export default function PlayerPage({ source, id, episode, title, position, local
       </div>
 
       <p className="player-hint">
-        在线播放由本机解析；已下载的剧集在「我的 · 下载」里点「播放本地」，速度更快也不吃网络。
+        在线播放由本机解析；滚轮上下可以切换上一集 / 下一集。已下载的剧集在「我的 · 下载」里点「播放本地」，速度更快也不吃网络。
       </p>
     </div>
   );

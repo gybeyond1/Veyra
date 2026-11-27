@@ -17,6 +17,11 @@ extraResources:
     to: server
     filter:
       - '*.js'
+  # 托盘图标：Windows 托盘要真实的 ico 文件（asar 里的取不到）
+  - from: resources/icon.ico
+    to: icon.ico
+  - from: resources/icon.png
+    to: icon.png
   # 自带 ffmpeg（含 ffprobe），不依赖用户机器上装没装
   - from: node_modules/ffmpeg-static
     to: ffmpeg

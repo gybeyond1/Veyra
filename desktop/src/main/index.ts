@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, shell } from 'electron';
+import { app, BrowserWindow, Menu, Tray, nativeImage, shell } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { installFileLogger } from './log';
@@ -20,6 +20,9 @@ if (!gotLock) {
 }
 
 let mainWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
+/** 只有走「退出」才会真的结束进程；点 ✕ 只是把窗口收进托盘 */
+let quitting = false;
 
 function windowStateFile(): string {
   return path.join(userDataDir, 'window.json');
@@ -43,6 +46,71 @@ function saveWindowState(win: BrowserWindow): void {
 }
 
 const PROJECT_URL = 'https://github.com/gybeyond1/Veyra';
+
+/**
+ * 托盘图标。
+ *
+ * 打包后图标在 resources 根下（electron-builder 的 extraResources），开发时在 desktop/resources；
+ * 两边都找不到就给一个空图，至少不要因为图标缺失让主进程起不来。
+ */
+function trayIcon(): Electron.NativeImage {
+  const candidates = app.isPackaged
+    ? [path.join(process.resourcesPath, 'icon.ico'), path.join(process.resourcesPath, 'icon.png')]
+    : [path.join(__dirname, '../../resources/icon.ico'), path.join(__dirname, '../../resources/icon.png')];
+  for (const file of candidates) {
+    try {
+      if (!fs.existsSync(file)) continue;
+      const image = nativeImage.createFromPath(file);
+      if (!image.isEmpty()) return image;
+    } catch {
+      /* 换下一个候选 */
+    }
+  }
+  return nativeImage.createEmpty();
+}
+
+/** 从托盘/二开把窗口叫回来 */
+function showWindow(): void {
+  if (!mainWindow) {
+    void createWindow();
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  if (!mainWindow.isVisible()) mainWindow.show();
+  mainWindow.focus();
+}
+
+function createTray(): void {
+  if (tray) return;
+  try {
+    tray = new Tray(trayIcon());
+  } catch (error) {
+    console.error('[tray] 创建托盘图标失败', error);
+    return;
+  }
+  tray.setToolTip('Veyra · 点开继续用，右键退出');
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: '打开主界面', click: () => showWindow() },
+      {
+        label: '打开下载目录',
+        click: () => {
+          void shell.openPath(readSettings().downloadDir);
+        },
+      },
+      { type: 'separator' },
+      {
+        label: '退出 Veyra',
+        click: () => {
+          quitting = true;
+          app.quit();
+        },
+      },
+    ]),
+  );
+  tray.on('click', () => showWindow());
+  tray.on('double-click', () => showWindow());
+}
 
 function buildMenu(): void {
   const template: Electron.MenuItemConstructorOptions[] = [
@@ -125,6 +193,27 @@ async function createWindow(): Promise<void> {
 
   if (saved.maximized) win.maximize();
 
+  /* 点 ✕ 不退出：窗口收进托盘，下载、投屏、媒体服务都继续跑。
+     真要退出走托盘右键或菜单「文件 → 退出」（那条会先设 quitting）。 */
+  let toldTray = false;
+  win.on('close', (event) => {
+    if (quitting) return;
+    event.preventDefault();
+    saveWindowState(win);
+    win.hide();
+    if (!toldTray) {
+      toldTray = true;
+      try {
+        tray?.displayBalloon({
+          title: 'Veyra 还在后台',
+          content: '点右下角托盘图标可以重新打开；要完全退出请右键托盘图标。',
+        });
+      } catch {
+        /* 系统不支持气泡通知就算了 */
+      }
+    }
+  });
+
   win.once('ready-to-show', () => win.show());
   win.on('resize', () => saveWindowState(win));
   win.on('move', () => saveWindowState(win));
@@ -145,9 +234,8 @@ async function createWindow(): Promise<void> {
 }
 
 app.on('second-instance', () => {
-  if (!mainWindow) return;
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.focus();
+  // 收进托盘后再双击 exe：把已有窗口叫回来，别开第二个
+  showWindow();
 });
 
 app.whenReady().then(async () => {
@@ -169,6 +257,7 @@ app.whenReady().then(async () => {
 
   registerIpc();
   buildMenu();
+  createTray();
   try {
     await startMedia();
     startDevice();
@@ -188,6 +277,7 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
+  // 窗口被真正销毁（退出流程）时才有必要停后台服务；收进托盘时窗口只是隐藏
   stopProgressLoop();
   stopDevice();
   stopMedia();
@@ -197,5 +287,10 @@ app.on('window-all-closed', () => {
 
 // 主进程被强杀时也要收掉 mpv 进程，别留一个黑窗口在外面
 app.on('before-quit', () => {
+  quitting = true;
+  if (tray) {
+    tray.destroy();
+    tray = null;
+  }
   stopMpv();
 });
