@@ -13,21 +13,24 @@ import java.util.concurrent.TimeUnit;
 /**
  * 黄果 AI（server/sources/huangguoai.js 的端侧版）。
  *
- * 站点把接口收敛到 POST /api/edge/request，body 里写要代理的 path，
- * 真正的请求由它自己发出 —— 所以这里不用处理签名，只要探活选镜像。
+ * 站点把接口收敛到一个边缘入口：POST /api/edge/request，
+ * body 里写要代理的 path，真正的请求由它自己发出 —— 所以这里不用处理签名，只要探活选镜像。
+ *
+ * 2026-11 起站点换域名、关边缘入口、改播放接口，这三处都跟服务端版本对齐：
+ *   · 活着的门牌是 huangguoai.io / huangguodrama.io（0624.gitiecgad.cc 已不解析）；
+ *   · 播放地址改成 POST /api/videos/:id/episodes/:n/playback（老的 GET /play 只剩空 video_url）；
+ *   · 分类只剩 ai-duanju / ai-manju（ai-huanlian 超时、ai-mogai 返回 410）。
  */
 public final class HuangguoAi implements LocalSource {
 
     private static final String[] MIRRORS = {
             "https://huangguoai.io",
-            "https://0624.gitiecgad.cc",
+            "https://huangguodrama.io",
     };
 
     private static final String[][] AI_CATEGORIES = {
             {"ai-duanju", "AI 短剧"},
             {"ai-manju", "AI 漫剧"},
-            {"ai-huanlian", "AI 换脸"},
-            {"ai-mogai", "AI 魔改"},
     };
 
     private static final ExecutorService POOL = Executors.newFixedThreadPool(3);
@@ -141,6 +144,41 @@ public final class HuangguoAi implements LocalSource {
                 + (lastError == null ? "" : "（" + lastError.getMessage() + "）"));
     }
 
+    /** 同样的探活/换镜像逻辑，但发 POST（播放取址接口只收 POST + JSON）。 */
+    private JSONObject edgePost(String path, JSONObject payload) throws Exception {
+        Exception lastError = null;
+        for (int round = 0; round < 2; round++) {
+            String host = ensureBase();
+            try {
+                java.util.Map<String, String> headers = Net.headers(
+                        "Accept", "application/json",
+                        "Accept-Language", "zh-CN,zh;q=0.9",
+                        "Content-Type", "application/json",
+                        "Origin", host,
+                        "Referer", host + "/",
+                        "User-Agent", "Mozilla/5.0 (Linux; Android 11) AppleWebKit/537.36 "
+                                + "(KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36");
+                Net.Res res = Net.postJson(host + path, headers,
+                        payload == null ? "{}" : payload.toString(), 20000, 8L << 20);
+                if (res.status < 200 || res.status >= 300) throw new IllegalStateException("接口返回 " + res.status);
+                JSONObject envelope = new JSONObject(res.text());
+                if (!"1".equals(envelope.optString("status"))) {
+                    String message = envelope.optString("msg", "接口没有返回数据");
+                    throw new IllegalStateException(message.length() > 120 ? message.substring(0, 120) : message);
+                }
+                Object data = envelope.opt("data");
+                if (data instanceof JSONObject) return (JSONObject) data;
+                if (data instanceof JSONArray) return new JSONObject().put("items", data);
+                return new JSONObject();
+            } catch (Exception error) {
+                lastError = error;
+                base = "";
+            }
+        }
+        throw new IllegalStateException("黄果 AI 线路暂不可用"
+                + (lastError == null ? "" : "（" + lastError.getMessage() + "）"));
+    }
+
     /* ---------------- 映射 ---------------- */
 
     private String absolute(String value) {
@@ -176,7 +214,8 @@ public final class HuangguoAi implements LocalSource {
                 : (finished ? "全 " + episodes + " 集" : "更新至 " + episodes + " 集");
         String name = category == null || category.isEmpty() ? "AI 短剧" : category;
         return new JSONObject()
-                .put("id", row.optString("id", ""))
+                // 排行榜给的是 video_id，列表接口给 id：少认一个字段，热门榜就整页空白
+                .put("id", firstNonEmpty(row.optString("id", ""), row.optString("video_id", "")))
                 .put("title", cut(row.optString("title", ""), 200))
                 .put("cover", absolute(row.optString("cover", "")))
                 .put("description", cut(row.optString("description", ""), 4000))
@@ -190,6 +229,12 @@ public final class HuangguoAi implements LocalSource {
     private static String cut(String value, int max) {
         String text = value == null ? "" : value.trim();
         return text.length() <= max ? text : text.substring(0, max);
+    }
+
+    private static String firstNonEmpty(String first, String second) {
+        String a = first == null ? "" : first.trim();
+        if (!a.isEmpty()) return a;
+        return second == null ? "" : second.trim();
     }
 
     private JSONObject list(String path, int page, int size, String category) throws Exception {
@@ -381,8 +426,14 @@ public final class HuangguoAi implements LocalSource {
             if (item != null && item.optInt("number") == number) exists = true;
         }
         if (!exists) throw new IllegalStateException("这一集不存在");
-        JSONObject data = edge("/api/videos/" + enc(detailId) + "/play?ep=" + number + "&page_texts=0");
-        String url = absolute(data.optString("video_url", data.optString("video_url_hevc", "")));
+        // 2026-11 起播放地址只从 playback 接口下发；旧的 GET /play 还在，但 video_url 恒为空
+        JSONObject data = edgePost("/api/videos/" + enc(detailId) + "/episodes/" + number + "/playback",
+                new JSONObject());
+        JSONObject streams = data.optJSONObject("streams");
+        String url = "";
+        if (streams != null) url = firstNonEmpty(streams.optString("main", ""), streams.optString("hevc", ""));
+        if (url.isEmpty()) url = firstNonEmpty(data.optString("video_url", ""), data.optString("video_url_hevc", ""));
+        url = absolute(url);
         if (!url.matches("(?i)^https?://.*")) throw new IllegalStateException("黄果 AI 没有给出播放地址");
         return new JSONObject()
                 .put("url", url)

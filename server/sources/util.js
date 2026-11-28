@@ -146,9 +146,78 @@ function requestViaProxy(url, options = {}, proxyUrl) {
   });
 }
 
-/** 有代理走代理，没代理走原生 keep-alive 直连。 */
-function requestVia(url, options = {}, proxyUrl = '') {
-  return proxyUrl ? requestViaProxy(url, options, proxyUrl) : request(url, options);
+/**
+ * 强制走 curl 的抓取（不管有没有代理）。
+ *
+ * 为什么单开一个：黄果系站点按 TLS 指纹（ClientHello/JA3）风控，
+ * Node 原生 https 在部分出口上不是 400 就是干等（实测 8 秒无响应），
+ * 而 curl 的握手特征更接近浏览器，同一台机器同一时刻就能通。
+ * 这就是「手机上能看、后端体检全红」的根因 —— 手机走的是 curl/原生播放器。
+ * 代价是每次请求起一个进程，只用在这几个源的元数据请求（首页/详情/播放地址）上。
+ */
+function requestCurl(url, options = {}, proxyUrl = '') {
+  const { requestThroughProxy } = require('../proxy-fetch');
+  const { assertPublicUrl } = require('../ssrf-guard');
+  const { method = 'GET', headers = {}, timeout = 20000, maxBytes = 8 << 20, redirects = 5, body } = options;
+  const clean = { ...headers };
+  // curl 自己解压，别要求 gzip（否则拿到的是压缩字节没人解）
+  delete clean['Accept-Encoding'];
+  const sent = body === undefined || body === null ? null : (typeof body === 'string' ? body : JSON.stringify(body));
+  if (sent !== null) clean['Content-Type'] = clean['Content-Type'] || 'application/json';
+  return new Promise((resolve, reject) => {
+    requestThroughProxy(
+      url,
+      proxyUrl,
+      { headers: clean, timeout, maxBytes, redirects, method, body: sent, guard: assertPublicUrl },
+      (error, result) => {
+        if (error) return reject(error);
+        resolve({
+          status: result.status,
+          headers: result.headers || {},
+          body: result.body,
+          text: () => result.body.toString('utf8'),
+        });
+      }
+    );
+  });
+}
+
+/** Node 侧失败里哪些值得再用 curl 试一次：TLS 指纹被拒、连接被重置、干等超时 */
+function worthCurlRetry(error) {
+  const text = String((error && error.message) || error || '');
+  return /ECONNRESET|ECONNREFUSED|EPIPE|socket hang up|TLS|SSL|handshake|请求超时|EAI_AGAIN|ETIMEDOUT|other side closed|aborted/i.test(text);
+}
+
+/* 管理台配的后端代理：由 sources/index.js 在 mount 时注册，provider 不用自己拿配置 */
+let proxyProvider = null;
+function setBackendProxy(fn) {
+  proxyProvider = typeof fn === 'function' ? fn : null;
+}
+
+/**
+ * 有代理走代理，没代理走原生 keep-alive 直连。
+ * options.fallbackCurl 为真时（默认），Node 侧被风控/重置会再用 curl 打一次 ——
+ * 这类站点认的是 TLS 特征，换客户端就能过，比直接报错有用得多。
+ * options.backendProxy 为真时，没显式给代理就走管理台配置的后端代理
+ * （帝果这种按出口 IP 拦的站，只能这么救）。
+ */
+async function requestVia(url, options = {}, proxyUrl) {
+  const { fallbackCurl = true, backendProxy = false, ...rest } = options;
+  let via = proxyUrl === undefined ? '' : proxyUrl;
+  if (!via && backendProxy && proxyProvider) {
+    try {
+      via = String(proxyProvider() || '').trim();
+    } catch {
+      via = '';
+    }
+  }
+  if (via) return requestViaProxy(url, rest, via);
+  try {
+    return await request(url, rest);
+  } catch (error) {
+    if (!fallbackCurl || !worthCurlRetry(error)) throw error;
+    return requestCurl(url, rest, '');
+  }
 }
 
 /** GET JSON：非 2xx 或不是 JSON 都抛错，调用方决定怎么兜底。 */
@@ -283,7 +352,9 @@ function baseUrlOf(req) {
 
 module.exports = {
   request,
+  requestCurl,
   requestVia,
+  setBackendProxy,
   getJSON,
   cached,
   cacheGet,

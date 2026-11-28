@@ -11,7 +11,7 @@
  * 所以失败时要把「连不上」和「解析失败」分开报，别让用户以为是剧坏了。
  */
 
-const { request, cached } = require('./util');
+const { request, requestVia, cached } = require('./util');
 
 const SITE = 'https://www.dsd.com.se';
 const UA =
@@ -58,10 +58,13 @@ function absolute(raw, base) {
 
 async function page(path) {
   const url = /^https?:/i.test(path) ? path : `${SITE}${path.startsWith('/') ? '' : '/'}${path}`;
-  const res = await request(url, {
+  // 帝果按出口 IP 拦：机房/宽带公网 IP 一律超时，只有走管理台配的后端代理才回页面。
+  // backendProxy 让 util 自己取配置，provider 不碰设置层。
+  const res = await requestVia(url, {
     headers: { 'User-Agent': UA, Accept: 'text/html,application/xhtml+xml', 'Accept-Language': 'zh-CN,zh;q=0.9' },
-    timeout: 8000,
+    timeout: 12000,
     maxBytes: 6 << 20,
+    backendProxy: true,
   }).catch((error) => {
     throw new Error(`帝果连不上（${error.message}）——这个站会按出口 IP 拦截，服务器访问不了时需要走代理`);
   });

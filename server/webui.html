@@ -663,7 +663,7 @@ function renderHeroSlides(items){
   clearHero();heroSlides=(items||[]).slice(0,5);if(!heroSlides.length)return;
   const hero=document.getElementById('hero-wrap');hero.style.display='block';
   const draw=()=>{
-    const item=heroSlides[heroIndex],src=item.cover?coverSrc(item.cover):'';
+    const item=heroSlides[heroIndex],src=item.cover?(mode==='public'?coverSrc(item.cover):sourceCover(item.cover)):'';
     hero.innerHTML='<div class="hero-card"><img src="'+src+'" alt="" onerror="fallbackCover(this)"><div class="hero-copy"><h2>'+escapeHtml(item.title)+'</h2><span>查看作品 ▸</span></div></div><div class="hero-dots">'+heroSlides.map((_,i)=>'<button type="button" aria-label="第 '+(i+1)+' 项" data-hero-index="'+i+'" class="'+(i===heroIndex?'active':'')+'"></button>').join('')+'</div>';
     hero.querySelector('.hero-card').onclick=()=>{_items=heroSlides;openDetail(heroIndex)};
     hero.querySelectorAll('[data-hero-index]').forEach(b=>b.onclick=()=>{heroIndex=Number(b.dataset.heroIndex);draw()});
@@ -914,6 +914,14 @@ function coverSrc(cover){
   if(/^https?:\/\//i.test(cover))return cover;
   return '/api/huangguo-proxy?url='+encodeURIComponent(cover);
 }
+// 接口型源的封面：一律经后端代理取。
+// 黄果系的封面图是 AES-CBC 密文（170KB 乱码），浏览器直连源站只能看到破图，
+// 后端 /api/huangguo-proxy 会解密后再回图。
+function sourceCover(cover){
+  if(!cover)return '';
+  if(!/^https?:\/\//i.test(cover))return coverSrc(cover);
+  return hgProxy(cover);
+}
 // 封面加载兜底：后端代理转发失败时降级直连原始 URL，仍失败则灰底占位
 function fallbackCover(img){
   const cur=img.getAttribute('src')||'';
@@ -928,7 +936,7 @@ function renderGrid(items,target){
   if(host===grid)_items=rows;
   if(!rows.length){host.innerHTML='<div class="loading">暂无内容</div>';return}
   host.innerHTML=rows.map((it,i)=>{
-    const src=it.cover?(mode==='public'?coverSrc(it.cover):(remotePrivate()?it.cover:proxyUrl(it.cover))):'';
+    const src=it.cover?(mode==='public'?coverSrc(it.cover):sourceCover(it.cover)):'';
     return '<div class="card-poster" data-i="'+i+'">'+
       '<img class="poster-img" src="'+src+'" loading="lazy" onerror="fallbackCover(this)"'+(src?'':' style="background:#1a1e26"')+'>'+
       '<div class="poster-title">'+escapeHtml(it.title)+'</div>'+
@@ -980,7 +988,7 @@ function openDetail(i){
   document.getElementById('d-badge').textContent=it.badge||'';
   const img=document.getElementById('d-poster');
   img.onerror=()=>fallbackCover(img);
-  img.src=it.cover?(mode==='public'?coverSrc(it.cover):(remotePrivate()?it.cover:proxyUrl(it.cover))):'';
+  img.src=it.cover?(mode==='public'?coverSrc(it.cover):sourceCover(it.cover)):'';
   document.getElementById('ep-list').innerHTML='<div class="loading" style="padding:20px">正在获取选集…</div>';
   document.getElementById('player-wrap').classList.remove('open');
   document.getElementById('dl-status').textContent='';

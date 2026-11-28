@@ -13,10 +13,11 @@ public final class LocalSources {
     /** id / 名称 / 一句话描述 / 内容类型。顺序即「私密内容源」弹窗里的顺序。 */
     public static final String[][] CATALOG = {
             {"cloudfront", "黄果旧版", "旧 API 剧库 · 分类与搜索", "短剧"},
-            {"huangguoai", "黄果 AI", "AI 短剧 · 漫剧 · 换脸 · 热门榜", "AI 短剧"},
-            {"huangdou", "黄豆短剧", "黄豆原创 · 每日上新", "短剧"},
+            {"huangguoai", "黄果 AI", "AI 短剧 · 漫剧 · 热门榜", "AI 短剧"},
             {"dsd", "帝果", "帝果剧库 · 分类齐全", "短剧"},
             {"huangju", "剧果", "热门 · 最新 · 分类短剧", "短剧"},
+            // 黄豆：主域 tideember.cc 的 DNS 记录已经没了，整站下线，
+            // 列在这里只是给人一个点了必失败的选项。实现留在 Huangdou.java，域名回来再加回。
     };
 
     public static boolean supports(String site) {

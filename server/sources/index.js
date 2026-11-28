@@ -14,7 +14,7 @@
  * recommend / newest / episodes[].number|url），所以前端数据层不用改，只加"切源"。
  */
 
-const { request, requestVia, cached, issueToken, readToken, rewritePlaylist, baseUrlOf } = require('./util');
+const { request, requestVia, setBackendProxy, cached, issueToken, readToken, rewritePlaylist, baseUrlOf } = require('./util');
 const { assertPublicUrl } = require('../ssrf-guard');
 
 const providers = [
@@ -22,8 +22,9 @@ const providers = [
   require('./jinguoduanju'),
   require('./cloudfront'),
   require('./huangguoai'),
-  require('./huangdou'),
   require('./dsd'),
+  // 黄豆：主域 tideember.cc 的 DNS 记录已经没了（ENOTFOUND），整站下线，
+  //      留着只会在切源列表里给人一个点了必失败的选项。实现留在 huangdou.js，域名回来再加回。
   // 野果：流只认手机自带 VPN 的出口（机房 IP 被源站风控），后端直连/代理一律取不到分片，
   //      留着只会让人点进去空等，先下架，实现留在 yeguo.js 里。
   // 禁果：正片要 VIP，普通账号只给试看，同样下架，实现留在 jinguo.js 里。
@@ -259,6 +260,9 @@ function mount(app, deps) {
   const auth = deps.gate || deps.auth;
   const needUser = (req, res) => (req.user ? true : (res.status(401).json({ error: '请先登录' }), false));
 
+  // 把「管理台/设置里配的后端代理」交给 provider：帝果这类按出口 IP 拦的源只能靠它
+  setBackendProxy(() => (deps && deps.getProxy ? deps.getProxy() : ''));
+
   // 源清单：客户端据此渲染"切源"列表
   app.get('/api/sources', auth, (req, res) => {
     if (!needUser(req, res)) return;
@@ -328,7 +332,10 @@ function mount(app, deps) {
     if (info.cookie) headers.Cookie = info.cookie;
 
     const fetchText = async (url) => {
-      const response = await request(url, { headers, maxBytes: MEDIA_MAX, timeout: 20000 });
+      // 用 requestVia：Node 被源站按 TLS 指纹重置时自动换 curl 再打一次。
+      // 体检是"到底能不能播"的证据，不能因为抓清单用的客户端不对就判源死刑
+      //（禁果的 CDN 就是 Node get 到 ECONNRESET、curl 一秒 200）。
+      const response = await requestVia(url, { headers, maxBytes: MEDIA_MAX, timeout: 20000 }, '');
       if (response.status !== 200) throw new Error(`源站返回 ${response.status}`);
       return response.text();
     };
@@ -360,7 +367,7 @@ function mount(app, deps) {
     const keyUri = keyLine && /URI="([^"]+)"/.exec(keyLine);
     if (keyUri) {
       await run('解密密钥', async () => {
-        const response = await request(new URL(keyUri[1], baseUrl).toString(), { headers, maxBytes: 8192, timeout: 20000 });
+        const response = await requestVia(new URL(keyUri[1], baseUrl).toString(), { headers, maxBytes: 8192, timeout: 20000 }, '');
         if (response.status !== 200) throw new Error(`源站返回 ${response.status}`);
         if (response.body.length !== 16) throw new Error(`返回 ${response.body.length} 字节，应为 16`);
         return { detail: '16 字节，AES-128 正常' };
@@ -370,7 +377,7 @@ function mount(app, deps) {
     const segment = firstUriOf(playlist);
     if (segment) {
       await run('分片', async () => {
-        const response = await request(new URL(segment, baseUrl).toString(), { headers, maxBytes: MEDIA_MAX, timeout: 25000 });
+        const response = await requestVia(new URL(segment, baseUrl).toString(), { headers, maxBytes: MEDIA_MAX, timeout: 25000 }, '');
         if (response.status !== 200) throw new Error(`源站返回 ${response.status}`);
         return { detail: `${(response.body.length / 1024).toFixed(0)}KB` };
       }, false);
