@@ -198,16 +198,32 @@ async function stream(req, res, deps) {
     return last;
   };
 
+  /*
+   * 「后端转发」默认是后端直连取流；帝果这类源站按出口 IP 拦机房，
+   * 直连可能直接超时/重置（抛错），也可能回 5xx。管理台配了后端代理时，
+   * 这两种都要再经代理试一次 —— 用户点的是「最稳」那一档，
+   * 不该因为少绕一层代理就整集全黑。
+   */
+  const relayProxy = () => {
+    if (proxy || !deps || typeof deps.getProxy !== 'function') return '';
+    try {
+      return safeProxy(deps.getProxy() || '');
+    } catch {
+      return '';
+    }
+  };
+
   let upstream;
   try {
-    upstream = await fetchMedia(proxy);
-    /*
-     * 「后端转发」默认是后端直连取流；帝果这类源站按出口 IP 拦机房，
-     * 直连必然 5xx/超时。管理台配了后端代理时再经它试一次 ——
-     * 用户点的是「最稳」那一档，不该因为少绕一层代理就全黑。
-     */
-    if (upstream && upstream.status >= 500 && !proxy && deps && deps.getProxy) {
-      const fallback = safeProxy(deps.getProxy());
+    try {
+      upstream = await fetchMedia(proxy);
+    } catch (error) {
+      const fallback = relayProxy();
+      if (!fallback) throw error;
+      upstream = await fetchMedia(fallback);
+    }
+    if (upstream && upstream.status >= 500 && !proxy) {
+      const fallback = relayProxy();
       if (fallback) upstream = await fetchMedia(fallback);
     }
     /*
