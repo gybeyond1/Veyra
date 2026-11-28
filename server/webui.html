@@ -1100,12 +1100,22 @@ function attachPlayer(url,onReady,onFatal){
     if(onFatal){const retry=onFatal;onFatal=null;retry();return}
     toast('播放失败（错误码 '+(player.error?player.error.code:'?')+'），可在 ⚙ 里切换 直连/后端转发 通道再试');
   };
-  // m3u8 判断：直接 .m3u8 或经 hgProxy 代理的 URL（其 url 参数内是带 ?auth_key 的 m3u8，
-  // encodeURIComponent 后 ? 变 %3F 导致 /\.m3u8(\?|$)/ 匹配不到 → 必须识别代理路径，否则走原生播放报错误码4）
-  if(/\.m3u8(\?|$)/i.test(url)||url.indexOf('/api/huangguo-proxy?')>=0){
+  /*
+   * m3u8 判定三路，缺一条就会掉进原生 <video>：
+   *  1) 地址本身带 .m3u8
+   *  2) hgProxy 代理（url 参数里的 ? 被 encodeURIComponent 成 %3F，后缀匹配不到）
+   *  3) 私密源的后端流地址 /api/sources/stream?t=…（令牌形态，整个 URL 没有任何后缀）
+   * 第 3 条是这次黑屏的根因：Android 版 Chrome/国产壳浏览器自带一套 HLS 实现，
+   * 能解析清单、能报出总时长，但解不了带 EXT-X-KEY 的 TS 分片 —— 表现就是
+   * 「8:29 显示出来了、进度条 0:00、画面全黑」。这种半残实现必须绕开，统一交给 hls.js。
+   */
+  const isHls=/\.m3u8(\?|$)/i.test(url)||url.indexOf('/api/huangguo-proxy?')>=0
+    ||url.indexOf('/api/sources/stream')>=0||url.indexOf('/api/sources/play')>=0;
+  if(isHls){
     if(!window.Hls){toast('hls.js 未加载'+(window.__hlsFailed?'（本地脚本加载失败，请刷新页面）':'（请刷新页面）')+'，点击播放前请确认网络正常');player.src=url;player.play().catch(()=>{});return}
     if(!Hls.isSupported()){toast('当前浏览器不支持 MSE/HLS 播放');player.src=url;player.play().catch(()=>{});return}
     _hls=new Hls({maxBufferLength:30});
+    window.__playerMode='hls';
     _hls.loadSource(url);
     _hls.attachMedia(player);
     _hls.on(Hls.Events.ERROR,(e,data)=>{
@@ -1121,6 +1131,7 @@ function attachPlayer(url,onReady,onFatal){
     });
     player.play().catch(()=>{});
   }else{
+    window.__playerMode='native';
     player.src=url;
     player.play().catch(()=>{});
   }

@@ -234,7 +234,12 @@ async function stream(req, res) {
       });
     }
     const body = rewritePlaylist(text, target.toString(), (absolute) =>
-      `${baseUrlOf(req)}/api/sources/stream?t=${key}&u=${encodeURIComponent(absolute)}`
+      /*
+       * 播放列表带 .m3u8 后缀：ExoPlayer / 各家播放器都先看后缀再选 HLS 解复用器，
+       * 纯 ?t=令牌形式的地址会被当成未知流交给 ProgressiveMediaSource，直接播不出来。
+       * 分片保持 /stream（本来就不是 m3u8，后缀反而误导）。
+       */
+      `${baseUrlOf(req)}${/\.m3u8?(\?|$)/i.test(absolute) ? '/api/sources/play.m3u8' : '/api/sources/stream'}?t=${key}&u=${encodeURIComponent(absolute)}`
     );
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');
@@ -275,6 +280,26 @@ function mount(app, deps) {
    * 不用再靠「黑屏」「转圈」这类描述去猜，也省掉「是不是你没更新」的来回。
    */
   const DIAG_UA = 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36';
+
+  /**
+   * 解一段 AES-128-CBC 分片，用来确认「密钥 / IV 真的能对上」。
+   * HLS 分片一般带 PKCS7 填充，但有些打包器不填 —— 两种都试，全失败才算密钥错。
+   * IV 缺省按规范用媒体序列号，首片即全 0。
+   */
+  function decryptFirstSegment(data, key, iv) {
+    const ivBuf = iv && iv.length === 16 ? iv : Buffer.alloc(16, 0);
+    for (const padding of [true, false]) {
+      try {
+        const decipher = require('crypto').createDecipheriv('aes-128-cbc', key, ivBuf);
+        decipher.setAutoPadding(padding);
+        const plain = Buffer.concat([decipher.update(data), decipher.final()]);
+        if (plain.length) return plain;
+      } catch {
+        /* 换另一种填充策略再试 */
+      }
+    }
+    return null;
+  }
 
   async function diagnose(provider, budgetMs) {
     const deadline = Date.now() + budgetMs;
@@ -363,24 +388,51 @@ function mount(app, deps) {
       playlist = text;
     }
 
+    let keyBuf = null;
+    let keyIv = null;
     const keyLine = playlist.split('\n').find((line) => line.startsWith('#EXT-X-KEY') && !/METHOD=NONE/.test(line));
     const keyUri = keyLine && /URI="([^"]+)"/.exec(keyLine);
     if (keyUri) {
+      const ivText = keyLine && /IV=0x([0-9a-fA-F]+)/.exec(keyLine);
+      if (ivText) keyIv = Buffer.from(ivText[1].padEnd(32, '0').slice(0, 32), 'hex');
       await run('解密密钥', async () => {
         const response = await requestVia(new URL(keyUri[1], baseUrl).toString(), { headers, maxBytes: 8192, timeout: 20000 }, '');
         if (response.status !== 200) throw new Error(`源站返回 ${response.status}`);
         if (response.body.length !== 16) throw new Error(`返回 ${response.body.length} 字节，应为 16`);
+        keyBuf = response.body;
         return { detail: '16 字节，AES-128 正常' };
       }, false);
     }
 
+    let segmentBody = null;
     const segment = firstUriOf(playlist);
     if (segment) {
       await run('分片', async () => {
         const response = await requestVia(new URL(segment, baseUrl).toString(), { headers, maxBytes: MEDIA_MAX, timeout: 25000 }, '');
         if (response.status !== 200) throw new Error(`源站返回 ${response.status}`);
+        segmentBody = response.body;
         return { detail: `${(response.body.length / 1024).toFixed(0)}KB` };
       }, false);
+    }
+
+    /*
+     * 只验「分片有多大」是不够的：清单能解析、时长能算出来、分片也 200，
+     * 但密钥/IV 不对时画面照样全黑 —— 这正是「有总时长、进度条不动」的典型。
+     * 所以这里真解一次首分片，看结果是不是合法 TS（188 字节对齐、每包 0x47）
+     * 或 fMP4（ftyp 盒）。解不开就直接把原因写进诊断，不用再靠猜。
+     */
+    if (segmentBody && keyBuf && keyBuf.length === 16) {
+      await run('首片解密', async () => {
+        const plain = decryptFirstSegment(segmentBody, keyBuf, keyIv);
+        if (!plain) throw new Error('AES 解密失败：密钥或 IV 与分片不匹配');
+        const isTs = plain.length > 188 * 2 && plain[0] === 0x47 && plain[188] === 0x47 && plain[376] === 0x47;
+        const isMp4 = plain.slice(4, 8).toString('latin1') === 'ftyp';
+        if (!isTs && !isMp4) throw new Error('解密后既不是 TS 也不是 fMP4，密钥不对');
+        return { detail: `${isTs ? 'TS' : 'fMP4'} 可解码，${(plain.length / 1024).toFixed(0)}KB` };
+      }, false);
+    } else if (segmentBody && !keyBuf && segmentBody.length > 188 && segmentBody[0] === 0x47) {
+      // 没加密：直接看是不是 TS
+      await run('首片可解码', async () => ({ detail: '未加密 TS，188 字节对齐' }), false);
     }
     return steps;
   }
@@ -529,7 +581,7 @@ function mount(app, deps) {
           episode: number,
           title: info.title || '',
           cover: info.cover || '',
-          source: `${baseUrlOf(req)}/api/sources/stream?t=${token}`,
+          source: `${baseUrlOf(req)}/api/sources/play.m3u8?t=${token}`,
           net: NET_BACKEND,
           fallback: true,
           notice,
@@ -571,7 +623,7 @@ function mount(app, deps) {
         episode: number,
         title: info.title || '',
         cover: info.cover || '',
-        source: `${baseUrlOf(req)}/api/sources/stream?t=${token}`,
+        source: `${baseUrlOf(req)}/api/sources/play.m3u8?t=${token}`,
         net,
         nextUrl: '',
       });
@@ -624,6 +676,8 @@ function mount(app, deps) {
 
   // 媒体（m3u8 + 分片）：不需要 auth，靠令牌本身鉴权（播放器不会带 Bearer）
   app.get('/api/sources/stream', (req, res) => stream(req, res).catch(() => res.status(500).end()));
+  // 同一个处理器的 .m3u8 别名：给只会看后缀选解复用器的播放器（ExoPlayer、部分电视端）
+  app.get('/api/sources/play.m3u8', (req, res) => stream(req, res).catch(() => res.status(500).end()));
 }
 
 module.exports = { mount, list };
