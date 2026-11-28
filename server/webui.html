@@ -370,7 +370,7 @@ video{width:100%;border-radius:10px;background:#000}
   <div id="gate-err" style="color:var(--err);font-size:13px"></div>
 </div>
 
-<script src="intro.js?v=0.31.71"></script>
+<script src="intro.js?v=0.31.72"></script>
 <script>
 let mode='public', adminToken=localStorage.getItem('veyraAdmin')||'';
 const AUTH=()=>({Authorization:'Bearer '+adminToken});
@@ -770,13 +770,19 @@ async function loadPrivateCatalog(append,force){
     catalogNextPage=(append&&!incoming.length)?null:(data.nextPage||null);
     grid.classList.remove('app-grid');grid.style.display='grid';renderGrid(catalogItems);
     if(!append)cachePut(key,catalogItems,catalogNextPage);
+    // 必须先落 loading 再刷哨兵：updateCatalogSentinel 读到 catalogLoading=true 就只写
+    // 「正在加载更多…」且不重新 observe —— 之前就是卡在这一行，第二页永远不来
+    catalogLoading=false;
     updateCatalogSentinel();
   }catch(e){
     if(epoch!==catalogEpoch)return;
+    catalogLoading=false;
     if(append){toast('加载更多失败：'+e.message);}
     else if(catalogItems.length){toast('刷新失败，显示的是上次缓存')}
     else grid.innerHTML='<div class="loading">加载失败: '+escapeHtml(e.message)+'</div>';
     sentinel.hidden=!catalogItems.length;
+    // 失败也要把哨兵放回去，否则这一页之后再也不会有下一次自动翻页
+    updateCatalogSentinel();
   }finally{
     if(epoch===catalogEpoch)catalogLoading=false;
   }

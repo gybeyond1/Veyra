@@ -12,9 +12,19 @@ const privateMode = () => contentSource === 'huangguo';
 const currentSiteId = () => (state.privateSite && state.privateSite.id) || '';
 /*
  * 片单只看当前源：观看历史/收藏/下载都带了 site（写入时记的私密源 id）。
- * 没带 site 的是这次改动之前的老记录 —— 那时还没记源，照常显示，不能因为升级就把人看过的历史藏起来。
+ *
+ * 没带 site 的是「记源」之前留下的老记录，谁都认不出来源 —— 以前为了不丢历史
+ * 让它们在每个源里都显示，结果就是黄果的「继续观看」写着帝果的剧。
+ * 现在一律只认精确匹配：宁可老记录不显示，也不能串源。
  */
 function inCurrentSite(entry) {
+  if (!privateMode()) return true;
+  const site = entry && entry.site;
+  return Boolean(site) && site === currentSiteId();
+}
+/* 远端任务（NAS / 电脑 / 电视）：后端建任务时根本没记 site，一律不显示等于把整页清空。
+   记了 site 的仍按当前源过滤；没记的只能照常显示（这些任务本来就不分源）。 */
+function inCurrentSiteRemote(entry) {
   if (!privateMode()) return true;
   const site = entry && entry.site;
   return !site || site === currentSiteId();
@@ -131,7 +141,10 @@ contentReady.then(async () => {
   await loadPrivateCats().catch(() => {});
   if (state.privateCats.length === before) return;
   if (state.route === 'home' && state.home) renderHome();
-  else if (state.route === 'category') goCategory(state.tab, Math.min(state.sub[state.tab], state.privateCats.length - 1));
+  else if (state.route === 'category') {
+    const list = categoryIds[state.tab] || [];
+    goCategory(state.tab, Math.min(state.sub[state.tab], Math.max(0, list.length - 1)));
+  }
 });
 
 async function loadPrivateCats(force) {
@@ -146,15 +159,86 @@ async function loadPrivateCats(force) {
       .map(item => ({ slug: String(item.slug), name: String(item.name || item.slug) }));
     if (!cats.length) return state.privateCats;
     state.privateCats = cats;
-    categoryIds.adult = cats.map(c => c.slug);
-    categoryIds.ai = cats.map(c => c.slug);
-    cats.forEach(c => { CATEGORY_NAMES[c.slug] = c.name; });
-    const adultLabel = document.querySelector('[data-nav="adult"] > span:last-child');
-    const aiLabel = document.querySelector('[data-nav="ai"] > span:last-child');
-    if (adultLabel) adultLabel.textContent = cats[0].name;
-    if (aiLabel) aiLabel.textContent = (cats[1] || cats[0]).name;
+    applyPrivateCats();
   } catch (ignore) { /* 源站分类拿不到就沿用「全部 / 最新」 */ }
   return state.privateCats;
+}
+
+/* 分类落到两套二级 tab 上：与 WebUI 的「剧场 / AI 专区」同一分发（前两个 / 后两个） */
+function applyPrivateCats() {
+  const cats = asArray(state.privateCats);
+  if (!cats.length) return;
+  const first = cats.slice(0, 2).map(c => c.slug);
+  const second = cats.slice(2, 4).map(c => c.slug);
+  categoryIds.adult = first;
+  categoryIds.ai = second.length ? second : first;
+  cats.forEach(c => { CATEGORY_NAMES[c.slug] = c.name; });
+  const adultLabel = document.querySelector('[data-nav="adult"] > span:last-child');
+  const aiLabel = document.querySelector('[data-nav="ai"] > span:last-child');
+  if (adultLabel) adultLabel.textContent = cats[0].name;
+  if (aiLabel) aiLabel.textContent = (cats[1] || cats[0]).name;
+}
+
+/* ---------------- 私密首页快照 ----------------
+ * 私密源的首页要先问后端、后端再问源站，慢的时候七八秒；每次切源都白屏等一次
+ * 完全不能接受。这里按源各存一份「两个分类 + 各自第一页」的快照：
+ *   进页面 → 立刻用快照画出来 → 后台拉新的 → 有变化才替换，没变化就保持原样。
+ * 只有本地 localStorage，不跨设备、不影响公开模式。
+ */
+const PRIVATE_HOME_PREFIX = 'veyra-private-home:';
+function privateHomeKey() { return PRIVATE_HOME_PREFIX + (currentSiteId() || 'default'); }
+function trimHomeItems(list) {
+  return asArray(list).slice(0, 24).map(item => ({
+    id: String(item.id || ''), title: item.title || '', cover: item.cover || '',
+    episodeLabel: item.episodeLabel || '', score: item.score || '',
+    description: item.description || '', category: item.category || ''
+  })).filter(item => item.id);
+}
+function readPrivateHomeCache() {
+  try {
+    const data = JSON.parse(localStorage.getItem(privateHomeKey()) || 'null');
+    if (!data || !asArray(data.groups).length) return null;
+    const groups = data.groups
+      .filter(group => group && group.slug && asArray(group.items).length)
+      .map(group => ({ slug: String(group.slug), name: String(group.name || group.slug), items: asArray(group.items) }));
+    return groups.length ? { groups } : null;
+  } catch (ignore) { return null; }
+}
+function writePrivateHomeCache() {
+  const groups = asArray(state.home && state.home.cats);
+  if (!groups.length) return;
+  try {
+    localStorage.setItem(privateHomeKey(), JSON.stringify({
+      at: Date.now(),
+      groups: groups.map(group => ({ slug: group.slug, name: group.name, items: trimHomeItems(group.items) }))
+    }));
+  } catch (ignore) { /* 配额满就不缓存，不影响这次浏览 */ }
+}
+function privateHomeFrom(groups) {
+  const cats = asArray(groups).filter(group => group && asArray(group.items).length);
+  const first = cats[0] || { items: [] };
+  const second = cats[1] || { items: [] };
+  return {
+    cats,
+    featured: asArray(first.items).slice(0, 5).map(item => ({ ...item, description: item.description || item.title })),
+    items: cats.reduce((all, group) => all.concat(asArray(group.items)), []),
+    homepageRecommend: asArray(first.items),
+    homepageNewest: asArray(second.items),
+    recommend: { items: asArray(first.items), nextPage: null },
+    newest: { items: asArray(second.items), nextPage: null }
+  };
+}
+/* 老缓存/预取里可能只有 homepageRecommend / homepageNewest，没带 cats：按当前分类名补成两组 */
+function privateHomeGroups(data) {
+  const cats = asArray(data && data.cats);
+  if (cats.length) return cats;
+  const names = asArray(state.privateCats);
+  const groups = [];
+  const recommend = asArray(data && (data.homepageRecommend || (data.recommend && data.recommend.items)));
+  const newest = asArray(data && (data.homepageNewest || (data.newest && data.newest.items)));
+  if (recommend.length) groups.push({ slug: (names[0] || {}).slug || '', name: (names[0] || {}).name || '推荐', items: recommend });
+  if (newest.length) groups.push({ slug: (names[1] || names[0] || {}).slug || '', name: (names[1] || names[0] || {}).name || '最新', items: newest });
+  return groups;
 }
 
 let routeToken = 0;
@@ -1105,12 +1189,22 @@ function renderHome() {
   const slides = homeSlides();
   const index = Math.min(state.banner, Math.max(0, slides.length - 1));
   const selected = slides[index] || {};
+  /*
+   * 私密首页的两块内容 = 当前源站的两个分类（剧果「成人 / 都市」、禁果「最新 / 最热」、
+   * 黄果旧版「晃过原创大作 / 果果女神日记」、黄果 AI「AI 短剧 / AI 漫剧」、帝果「独家精选 / 中文字幕」）。
+   * 以前这里是写死的「精选推荐 / 最近上新」，还拿的是源站首页混排，跟 WebUI 的 tab 对不上。
+   */
+  const groups = privateMode() ? privateHomeGroups(data) : [];
+  const sections = privateMode()
+    // 私密：两块就是两个源站分类，不互相补位（补进来的会是另一个分类的剧，标题就对不上了）
+    ? groups.map(group => section(group.name, asArray(group.items), 'cat:' + group.slug)).join('')
+    : section('精选推荐', fillSection(asArray(data.homepageRecommend).length ? asArray(data.homepageRecommend) : asArray(data.recommend?.items).slice(0, 12), [asArray(data.items), asArray(data.homepageNewest), asArray(data.newest?.items), asArray(data.recommend?.items)], 5), 'recommend')
+      + section('热门漫剧', asArray(data.homepageNewest).length ? asArray(data.homepageNewest) : asArray(data.newest?.items).slice(0, 12), 'newest');
   content.innerHTML = `<div class="home-page"><div class="hero" data-hero="1">${heroSlide(selected, index, slides.length)}</div>
       <div class="hero-dots">${slides.map((_, i) => `<i class="${i === index ? 'active' : ''}" data-slide="${i}"></i>`).join('')}</div>
       ${homeTagBar()}
       <div class="home-continue">${continueWatchingMarkup()}</div>
-      ${section('精选推荐', fillSection(asArray(data.homepageRecommend).length ? asArray(data.homepageRecommend) : asArray(data.recommend?.items).slice(0, 12), [asArray(data.items), asArray(data.homepageNewest), asArray(data.newest?.items), asArray(data.recommend?.items)], 5), 'recommend')}
-      ${section(privateMode() ? '最近上新' : '热门漫剧', asArray(data.homepageNewest).length ? asArray(data.homepageNewest) : asArray(data.newest?.items).slice(0, 12), 'newest')}</div>`;
+      ${sections}</div>`;
   hydrateImages();
   slides.forEach(item => { if (item.cover) getCover(item.cover).catch(() => {}); });
   scheduleBannerAuto();
@@ -1329,7 +1423,7 @@ function commitDownloadList(list, phone, nas, opts = {}) {
   const phoneTasks = visiblePhone.map(t => Object.assign({}, t, { kind: 'phone' }));
   // 手机转发任务关联的 NAS 任务不在下载页单独显示（由"下载到手机"触发，属内部步骤；主动下载到 NAS 的任务正常显示）
   const forwardNas = new Set(phone.filter(t => t.nasTaskId).map(t => String(t.nasTaskId)));
-  const nasTasks = nas.filter(t => !forwardNas.has(String(t.id)) && (!t.source || t.source === contentSource) && inCurrentSite(t)).map(t => Object.assign({}, t, { kind: (t.kind === 'desktop' || t.kind === 'tv' || t.kind === 'android') ? t.kind : 'nas' }));
+  const nasTasks = nas.filter(t => !forwardNas.has(String(t.id)) && (!t.source || t.source === contentSource) && inCurrentSiteRemote(t)).map(t => Object.assign({}, t, { kind: (t.kind === 'desktop' || t.kind === 'tv' || t.kind === 'android') ? t.kind : 'nas' }));
   state.deviceTasks = nasTasks.filter(t => t.kind === 'desktop' || t.kind === 'tv' || t.kind === 'android');
   list.innerHTML = renderDownloadList([...phoneTasks, ...nasTasks]);
   hydrateImages();   // 下载封面是 data-cover，必须补 src 才出图（之前缺这步 → 灰块）
@@ -2268,7 +2362,7 @@ async function pickPrivateSite(id, name) {
     closeSourcePop();
     toast(`已切换到 ${state.privateSite.name}`);
     await goHome();
-    loadPrivateCats().then(cats => { if (cats.length && state.route === 'home') renderHome(); }).catch(() => {});
+    loadPrivateCats().then(cats => { if (cats.length && state.route === 'home' && state.home) renderHome(); }).catch(() => {});
   } catch (error) { toast(error.message || '切换失败', true); }
 }
 window.__veyraSourceBack = () => { if (sourcePop && !sourcePop.hidden) { closeSourcePop(); return true; } return false; };
@@ -3043,7 +3137,10 @@ function renderListing() {
   const tagTitle = privateMode() ? `#${tagName}` : `${listing.slug?.startsWith('comic:') ? '漫剧' : '短剧'} · ${tagName}`;
   const title = listing.kind === 'tag-list' ? tagTitle : listing.kind === 'recommend' ? '精选推荐' : privateMode() ? '最近上新' : '热门漫剧';
   const backLabel = listing.kind === 'tag-list' && state.listingReturn?.route === 'tags' ? '返回全部类型' : '返回首页';
-  content.innerHTML = `<div class="listing-page"><button class="listing-back" type="button" data-back="1">${icon('back')} ${backLabel}</button>
+  /* 私密模式不放「返回首页」：底栏就在下面，返回键也能退，顶上再压一行入口只会
+     把第一行海报挤下去（用户原话：我自己会返回）。 */
+  const backButton = privateMode() ? '' : `<button class="listing-back" type="button" data-back="1">${icon('back')} ${backLabel}</button>`;
+  content.innerHTML = `<div class="listing-page">${backButton}
     <h1>${esc(title)}</h1><p>已显示 ${listing.items.length} 部作品</p>
     ${listing.items.length ? `<div class="search-grid listing-grid">${listing.items.map(itemCard).join('')}</div>` : '<div class="empty-state">这个标签下暂无作品</div>'}
     <div class="listing-footer">${listingFooter()}</div></div>`;
@@ -3894,6 +3991,7 @@ async function goHome() {
   const adopted = swipeAdopting; swipeAdopting = false;   // 滑动已把首页真实 DOM 放好了就别再画一遍
   stopBannerAuto();
   setRoute('home'); state.tab = 'home'; setNav('home');
+  if (privateMode()) { await goHomePrivate(token, adopted); return; }
   const refreshing = api('home');
   const [cached, library] = await Promise.all([api('cached', { key: 'home' }).catch(() => null), api('library').catch(() => null)]);
   if (token !== routeToken) return;
@@ -3911,6 +4009,63 @@ async function goHome() {
     else refreshMissingImages([...asArray(fresh.featured), ...asArray(fresh.recommend?.items), ...asArray(fresh.newest?.items)]);
     if (changed) toast('更新成功');
   } catch (error) { if (!state.home && token === routeToken) renderError(error, 'home'); }
+}
+
+/*
+ * 私密首页：快照优先。
+ *   1. 先读本源的本地快照，立刻画出来（切源、冷启动都不再白屏）；
+ *   2. 再拉分类 + 两个分类的第一页；
+ *   3. 有新内容才替换，拉失败/空结果就保持快照不动。
+ */
+async function goHomePrivate(token, adopted) {
+  const snapshot = readPrivateHomeCache();
+  if (snapshot) {
+    if (!state.privateCats.length) {
+      state.privateCats = snapshot.groups.map(group => ({ slug: group.slug, name: group.name }));
+      applyPrivateCats();
+    }
+    state.home = privateHomeFrom(snapshot.groups);
+  }
+  const library = await api('library').catch(() => null);
+  if (token !== routeToken) return;
+  state.library = library;
+  if (state.home) {
+    if (adopted) { try { hydrateImages(); scheduleBannerAuto(); } catch (ignore) { } }
+    else renderHome();
+  } else renderSkeleton();
+
+  try {
+    const cats = await loadPrivateCats();
+    if (token !== routeToken) return;
+    const picks = asArray(cats).slice(0, 2);
+    if (!picks.length) {
+      // 分类接口挂了：退回源站首页混排（至少不是空白页），标题用通用名
+      const fallback = await api('home').catch(() => null);
+      if (token !== routeToken || !fallback) return;
+      const fresh = privateHomeFrom(privateHomeGroups(fallback));
+      if (!asArray(fresh.cats).length) return;
+      const changed = !state.home || homeSignature(state.home) !== homeSignature(fresh);
+      state.home = fresh;
+      if (changed) renderHome();
+      return;
+    }
+    const pages = await Promise.all(picks.map(cat =>
+      api('category', { id: cat.slug, page: 1 }).catch(() => null)));
+    if (token !== routeToken) return;
+    const groups = picks
+      .map((cat, index) => ({ slug: cat.slug, name: cat.name, items: asArray(pages[index] && pages[index].items) }))
+      .filter(group => group.items.length);
+    // 两个分类都空：源站这次没给内容，保留快照，不要把首页清空
+    if (!groups.length) return;
+    const fresh = privateHomeFrom(groups);
+    const changed = !state.home || homeSignature(state.home) !== homeSignature(fresh);
+    state.home = fresh;
+    if (changed) renderHome();
+    else if (state.library) updateContinueWatching();
+    writePrivateHomeCache();
+  } catch (error) {
+    if (token === routeToken && !state.home) renderError(error, 'home');
+  }
 }
 
 async function goTags() {
@@ -3987,7 +4142,9 @@ async function openListing(kind) {
   if (String(kind || '').indexOf('cat:') === 0) {
     const slug = String(kind).slice(4);
     const index = Math.max(0, asArray(state.privateCats).findIndex(cat => cat.slug === slug));
-    await goCategory('adult', index);
+    // 分类分到「剧场（前两个）/ AI 专区（后两个）」，与 WebUI 的 tab 一一对应
+    const tab = index < 2 ? 'adult' : 'ai';
+    await goCategory(tab, index < 2 ? index : index - 2);
     return;
   }
   if (kind !== 'recommend' && kind !== 'newest') return;
@@ -4586,6 +4743,13 @@ document.addEventListener('submit', async event => {
 // next = 底层面板，装目标页 DOM（优先页面缓存，秒出；无缓存给骨架）。
 // 提交才真正路由，取消零副作用 —— 没有异步渲染竞态，也不会卡在半路。
 const DOCK_ORDER = ['home', 'adult', 'ai', 'library'];
+/*
+ * 私密模式底栏只有「首页 / 我的」两个按钮（.dock 在 private 下收成两列，adult/ai 被隐藏）。
+ * 整页横滑必须用同一份顺序，否则从首页往右滑还能滑进被藏掉的分类页 —— 那个页面
+ * 连入口都没有，看着就是「乱七八糟的另一个页面」。
+ */
+const PRIVATE_DOCK_ORDER = ['home', 'library'];
+function dockOrder() { return privateMode() ? PRIVATE_DOCK_ORDER : DOCK_ORDER; }
 const LIBRARY_TABS = ['history', 'bookmarks', 'downloads'];
 const SWIPE_MIN_PX = 40;        // 快速甩动的最短位移
 const SWIPE_MIN_RATIO = 0.22;   // 或拖过屏宽 22%
@@ -4677,12 +4841,19 @@ async function swipePrefetch(keyOrFn, prepare, render) {
 async function swipePrefetchAll() {
   if (swipePrefetchBusy || document.hidden || state.route === 'detail') return;
   const homeJob = ['home', async () => {
+    // 私密首页的数据是我们自己按「两个源站分类」拼的，本地快照就是它的缓存：
+    // 不用再去问后端那个已经不再用于渲染的 /home（慢，而且形态对不上）
+    if (privateMode()) {
+      const snapshot = readPrivateHomeCache();
+      const library = await api('library').catch(() => null) || state.library;
+      return { home: snapshot ? privateHomeFrom(snapshot.groups) : state.home, library };
+    }
     const cached = await api('cached', { key: 'home' }).catch(() => null);
     const home = cached?.data || await withTimeout(api('home'), 8000).catch(() => null);
     if (!home) return null;
     const library = await api('library').catch(() => null) || state.library;
     return { home, library };
-  }, (data) => { state.home = data.home; state.library = data.library; renderHome(); }];
+  }, (data) => { if (data.home) state.home = data.home; state.library = data.library; renderHome(); }];
   const categoryJobs = [];
   for (const tab of ['adult', 'ai']) {
     (categoryIds[tab] || []).forEach((id, index) => {
@@ -4887,15 +5058,21 @@ function swipeResolve(delta) {
       build: () => swipeBuildCached(key) || swipeBuildSkeleton(key),
     };
   }
-  const index = DOCK_ORDER.indexOf(state.route === 'category' ? state.tab : state.route);
-  const next = DOCK_ORDER[index + delta];
+  const order = dockOrder();
+  const routeKey = state.route === 'category' ? state.tab : state.route;
+  const index = order.indexOf(routeKey);
+  // 私密模式里分类页是首页自己的一层，不在底栏顺序里：从它横滑不切页，只做上面的子项切换
+  if (index < 0) return null;
+  const next = order[index + delta];
   if (!next) return null;
   const key = next === 'library' ? 'library:' + state.libraryTab
     : next === 'home' ? 'home' : 'category:' + next + ':' + (state.sub[next] || 0);
   return {
     mode: 'page',       // 底栏页之间：整页平移
     key,
-    step: [index, index + delta], // 底栏透镜与页面共用同一滑动进度
+    /* 私密的底栏只有两个按钮，按钮下标和这份顺序对不上；透镜让它落位时自己跳过去，
+       不做跟手插值，免得从藏掉的「分类」按钮位置上滑过去 */
+    step: privateMode() ? null : [index, index + delta],
     go: () => navigateDock(next),
     build: () => swipeBuildCached(key) || swipeBuildSkeleton(key),
   };
@@ -5166,8 +5343,10 @@ function swipeSettleBack() {
 scroll.addEventListener('touchstart', event => {
   touching = true;
   const touch = event.touches[0];
-  if (!touch || swiping || swipeBlocked() || document.querySelector('.card-transition-stage')
-    || !DOCK_ORDER.includes(state.route === 'category' ? state.tab : state.route)) {
+  const routeKey = state.route === 'category' ? state.tab : state.route;
+  // 私密模式的分类页不参与整页横滑，但页内两个分类 tab 仍要能横滑切换
+  const swipeable = dockOrder().includes(routeKey) || (privateMode() && state.route === 'category');
+  if (!touch || swiping || swipeBlocked() || document.querySelector('.card-transition-stage') || !swipeable) {
     swipeStart = null;
     return;
   }
@@ -5648,7 +5827,12 @@ function refreshCurrentDownloads() {
   }
   if (event.target.closest('[data-all-tags]')) { goTags(); return; }
   const privateCat = event.target.closest('[data-private-cat]');
-  if (privateCat) { goCategory('adult', Number(privateCat.dataset.privateCat) || 0); return; }
+  if (privateCat) {
+    const catIndex = Number(privateCat.dataset.privateCat) || 0;
+    // 源站分类分到「剧场（前两个）/ AI 专区（后两个）」，跟 WebUI 的二级 tab 一致
+    goCategory(catIndex < 2 ? 'adult' : 'ai', catIndex < 2 ? catIndex : catIndex - 2);
+    return;
+  }
   const tagChoice = event.target.closest('[data-tag-slug]');
   if (tagChoice) { goTag(tagChoice.dataset.tagSlug, tagChoice.dataset.tagName); return; }
   const sub = event.target.closest('[data-sub]');

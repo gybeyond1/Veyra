@@ -416,13 +416,14 @@ final class DownloadManager {
         // 手机下载按内容模式隔离：红果（公开）与黄果（私密）的任务互不出现在对方列表里。
         // 任务 source 字段就是下载时的模式（hongguo | huangguo），旧记录同样适用。
         String active = ContentMode.get(context).active();
-        // 私密模式再按源细分：五个私密源共用 source=huangguo，老任务没有 site 就照常显示
+        // 私密模式再按源细分：五个私密源共用 source=huangguo。
+        // 只认精确匹配 —— 没有 site 的老任务分不清是哪个源下的，显示出来就是串源。
         String activeSite = ContentMode.PRIVATE.equals(active) ? PrivateSite.get(context) : "";
         JSONArray out = new JSONArray();
         synchronized (tasks) {
             for (Task t : tasks) {
                 if (!active.equals(t.source)) continue;
-                if (!activeSite.isEmpty() && !t.site.isEmpty() && !activeSite.equals(t.site)) continue;
+                if (!activeSite.isEmpty() && !activeSite.equals(t.site)) continue;
                 out.put(t.snapshot());
             }
         }

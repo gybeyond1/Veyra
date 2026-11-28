@@ -294,12 +294,21 @@ final class AppStore {
             }
             for (String key : removed) progress.remove(key);
         }
+        /* 云端记录是别的设备（或更早版本）上传的，可能没带 site。直接覆盖会把本地记着
+           的源 id 抹掉 —— 之后这条记录在私密模式的每个源里都认不出来，等于凭空消失。
+           先把本地的 site 补回去再落盘。 */
+        JSONObject localBookmarks = object("bookmarks");
+        if (bookmarks != null) for (java.util.Iterator<String> keys = bookmarks.keys(); keys.hasNext();) {
+            String id = keys.next();
+            keepSite(bookmarks.optJSONObject(id), localBookmarks.optJSONObject(id));
+        }
         if (history != null) for (java.util.Iterator<String> keys = history.keys(); keys.hasNext();) {
             String id = keys.next();
             JSONObject item = history.optJSONObject(id);
             if (item == null) continue;
             String key = id + ":" + item.optInt("episode", 1);
             JSONObject existing = progress.optJSONObject(key);
+            keepSite(item, existing);
             if (existing == null || item.optLong("updatedAt") >= existing.optLong("updatedAt")) progress.put(key, item);
         }
         trimProgress(progress);
@@ -309,6 +318,15 @@ final class AppStore {
                 .putString(scoped("bookmarkDeleted"), merged.optJSONObject("bookmarkDeleted") == null ? "{}" : merged.getJSONObject("bookmarkDeleted").toString())
                 .putString(scoped("historyDeleted"), historyDeleted == null ? "{}" : historyDeleted.toString())
                 .apply();
+    }
+
+    /** 云端来的记录没带 site 时，沿用本地同一条记录记下的源。 */
+    private static void keepSite(JSONObject incoming, JSONObject local) {
+        if (incoming == null || local == null) return;
+        if (incoming.has("site") || !local.has("site")) return;
+        String site = local.optString("site");
+        if (site == null || site.isEmpty()) return;
+        try { incoming.put("site", site); } catch (Exception ignored) { }
     }
 
     synchronized void clearHistory() {
