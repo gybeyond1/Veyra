@@ -14,7 +14,7 @@
  * recommend / newest / episodes[].number|url），所以前端数据层不用改，只加"切源"。
  */
 
-const { request, requestVia, setBackendProxy, cached, issueToken, readToken, rewritePlaylist, baseUrlOf, decryptHuangguoCover } = require('./util');
+const { requestVia, setBackendProxy, cached, issueToken, readToken, rewritePlaylist, baseUrlOf, decryptHuangguoCover } = require('./util');
 const { assertPublicUrl } = require('../ssrf-guard');
 
 /*
@@ -25,17 +25,18 @@ const coverCache = new Map();
 const COVER_TTL = 10 * 60 * 1000;
 const COVER_MAX = 240;
 
+/*
+ * 私密源清单 —— 只保留这五个，顺序即客户端「切源」弹窗里的顺序。
+ * 下架过的（黄豆 tideember.cc 已无 DNS、野果只认手机出口、禁果正片要 VIP）
+ * 实现已删除，别再往这里加「留着当备胎」的代码：留着的选项点了必失败，
+ * 用户只会以为整个私密模式坏了。
+ */
 const providers = [
   require('./huangju'),
   require('./jinguoduanju'),
   require('./cloudfront'),
   require('./huangguoai'),
   require('./dsd'),
-  // 黄豆：主域 tideember.cc 的 DNS 记录已经没了（ENOTFOUND），整站下线，
-  //      留着只会在切源列表里给人一个点了必失败的选项。实现留在 huangdou.js，域名回来再加回。
-  // 野果：流只认手机自带 VPN 的出口（机房 IP 被源站风控），后端直连/代理一律取不到分片，
-  //      留着只会让人点进去空等，先下架，实现留在 yeguo.js 里。
-  // 禁果：正片要 VIP，普通账号只给试看，同样下架，实现留在 jinguo.js 里。
 ];
 const byId = new Map(providers.map((item) => [item.id, item]));
 
@@ -136,7 +137,7 @@ function playlistUris(text) {
  * 媒体代理：令牌里带着源地址、Referer、Cookie，客户端只认令牌。
  * 分片地址同样走这里，所以 m3u8 重写时把令牌原样带上。
  */
-async function stream(req, res) {
+async function stream(req, res, deps) {
   const token = readToken(String(req.query.t || ''));
   if (!token) return res.status(404).json({ error: '播放地址已过期，请重新点开这一集' });
 
@@ -176,21 +177,38 @@ async function stream(req, res) {
   // 「仅代理」的令牌带着代理地址，播放列表 / 密钥 / 分片全部经它出去
   const proxy = token.proxy || '';
 
+  /*
+   * 清单/分片取一次就 502 太脆：源站前面挂着好几层 CDN，偶发 5xx 和连接重置
+   * 都出现过（用户那边点一下就红，回头再点又好了）。这里对 5xx 与连接错误
+   * 重试两轮，4xx 不重试 —— 403/404 重试多少次都一样，只会让用户多等。
+   */
+  const fetchMedia = async (via) => {
+    let last = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (attempt) await new Promise((resolve) => setTimeout(resolve, 400));
+      try {
+        const response = await requestVia(target.toString(), { headers, timeout: 25000, maxBytes: MEDIA_MAX }, via);
+        if (response.status < 500) return response;
+        last = response;
+      } catch (error) {
+        last = error;
+      }
+    }
+    if (last instanceof Error) throw last;
+    return last;
+  };
+
   let upstream;
   try {
+    upstream = await fetchMedia(proxy);
     /*
-     * 清单/分片取一次就 502 太脆：源站前面挂着好几层 CDN，偶发 5xx 和连接重置
-     * 都出现过（用户那边点一下就红，回头再点又好了）。这里对 5xx 与连接错误
-     * 重试两轮，4xx 不重试 —— 403/404 重试多少次都一样，只会让用户多等。
+     * 「后端转发」默认是后端直连取流；帝果这类源站按出口 IP 拦机房，
+     * 直连必然 5xx/超时。管理台配了后端代理时再经它试一次 ——
+     * 用户点的是「最稳」那一档，不该因为少绕一层代理就全黑。
      */
-    for (let attempt = 0; ; attempt += 1) {
-      try {
-        upstream = await requestVia(target.toString(), { headers, timeout: 25000, maxBytes: MEDIA_MAX }, proxy);
-        if (upstream.status < 500 || attempt >= 2) break;
-      } catch (error) {
-        if (attempt >= 2) throw error;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 400));
+    if (upstream && upstream.status >= 500 && !proxy && deps && deps.getProxy) {
+      const fallback = safeProxy(deps.getProxy());
+      if (fallback) upstream = await fetchMedia(fallback);
     }
     /*
      * 野果这类源的播放地址带十几秒有效的签名，用户点开暂停一会儿再播就会 403。
@@ -324,6 +342,25 @@ function mount(app, deps) {
     return null;
   }
 
+  /*
+   * 体检用的抓取：先直连，被 5xx 或连接错误挡回来时经管理台的后端代理再来一次。
+   * 帝果这类站直连必挂，体检要能如实反映「走代理是通的」，否则用户只会看到一整排红。
+   */
+  const probe = async (url, options) => {
+    let last = null;
+    try {
+      last = await requestVia(url, options, '');
+    } catch (error) {
+      last = error;
+    }
+    if (last instanceof Error || last.status >= 500) {
+      const fallback = safeProxy((deps && deps.getProxy && deps.getProxy()) || '');
+      if (fallback) return requestVia(url, options, fallback);
+      if (last instanceof Error) throw last;
+    }
+    return last;
+  };
+
   async function diagnose(provider, budgetMs) {
     const deadline = Date.now() + budgetMs;
     const steps = [];
@@ -383,7 +420,7 @@ function mount(app, deps) {
       // 用 requestVia：Node 被源站按 TLS 指纹重置时自动换 curl 再打一次。
       // 体检是"到底能不能播"的证据，不能因为抓清单用的客户端不对就判源死刑
       //（禁果的 CDN 就是 Node get 到 ECONNRESET、curl 一秒 200）。
-      const response = await requestVia(url, { headers, maxBytes: MEDIA_MAX, timeout: 20000 }, '');
+      const response = await probe(url, { headers, maxBytes: MEDIA_MAX, timeout: 20000 });
       if (response.status !== 200) throw new Error(`源站返回 ${response.status}`);
       return response.text();
     };
@@ -419,7 +456,7 @@ function mount(app, deps) {
       const ivText = keyLine && /IV=0x([0-9a-fA-F]+)/.exec(keyLine);
       if (ivText) keyIv = Buffer.from(ivText[1].padEnd(32, '0').slice(0, 32), 'hex');
       await run('解密密钥', async () => {
-        const response = await requestVia(new URL(keyUri[1], baseUrl).toString(), { headers, maxBytes: 8192, timeout: 20000 }, '');
+        const response = await probe(new URL(keyUri[1], baseUrl).toString(), { headers, maxBytes: 8192, timeout: 20000 });
         if (response.status !== 200) throw new Error(`源站返回 ${response.status}`);
         if (response.body.length !== 16) throw new Error(`返回 ${response.body.length} 字节，应为 16`);
         keyBuf = response.body;
@@ -431,7 +468,7 @@ function mount(app, deps) {
     const segment = firstUriOf(playlist);
     if (segment) {
       await run('分片', async () => {
-        const response = await requestVia(new URL(segment, baseUrl).toString(), { headers, maxBytes: MEDIA_MAX, timeout: 25000 }, '');
+        const response = await probe(new URL(segment, baseUrl).toString(), { headers, maxBytes: MEDIA_MAX, timeout: 25000 });
         if (response.status !== 200) throw new Error(`源站返回 ${response.status}`);
         segmentBody = response.body;
         return { detail: `${(response.body.length / 1024).toFixed(0)}KB` };
@@ -687,18 +724,48 @@ function mount(app, deps) {
       res.setHeader('Cache-Control', 'private, max-age=600');
       return res.end(hit.body);
     }
+    const provider = byId.get(String(req.params.source || '')) || null;
+    /*
+     * 取不到图时的退路：帝果这类站的图床只认住宅/手机出口，机房 IP 直接掐。
+     * 后端怎么试都不成时把原始地址还给浏览器，让图从用户自己的网络出去 ——
+     * 这正是「手机上能看、WebUI 一片无封面」的差别所在。
+     */
+    const handOverToClient = () => {
+      if (provider && provider.coverDirect) {
+        res.setHeader('Cache-Control', 'no-store');
+        return res.redirect(302, target.toString());
+      }
+      return res.status(404).end();
+    };
     try {
       // 封面 CDN 的防盗链规则两派都有：有的认 Referer，有的只要带 Referer 就 403
       // （黄果旧版那张图就是后者）。所以先裸取，被拒了再补源站 Referer 重试一次。
-      const fetchCover = (referer) =>
-        request(target.toString(), {
-          headers: { Accept: 'image/*,*/*', ...(referer ? { Referer: `${target.origin}/` } : {}) },
-          timeout: 15000,
-          maxBytes: 8 << 20,
-        });
-      let upstream = await fetchCover(false);
-      if (upstream.status === 401 || upstream.status === 403) upstream = await fetchCover(true);
-      if (upstream.status < 200 || upstream.status >= 300) return res.status(502).json({ error: `封面返回 ${upstream.status}` });
+      // 三次都失败再走管理台的后端代理（帝果按出口 IP 拦，只有代理能治）。
+      const fetchCover = async (referer, viaBackendProxy) => {
+        try {
+          return await requestVia(
+            target.toString(),
+            {
+              headers: { Accept: 'image/*,*/*', ...(referer ? { Referer: `${target.origin}/` } : {}) },
+              timeout: viaBackendProxy ? 12000 : 15000,
+              maxBytes: 8 << 20,
+              backendProxy: viaBackendProxy,
+            },
+            ''
+          );
+        } catch {
+          // 连接层直接失败（超时/重置）也要能走到代理那一档，不能在这里抛死
+          return null;
+        }
+      };
+      let upstream = await fetchCover(false, false);
+      if (upstream && (upstream.status === 401 || upstream.status === 403)) upstream = await fetchCover(true, false);
+      if (!upstream || upstream.status < 200 || upstream.status >= 300) upstream = await fetchCover(true, true);
+      if (!upstream || upstream.status < 200 || upstream.status >= 300) {
+        const status = upstream ? upstream.status : 0;
+        if (status) res.setHeader('X-Veyra-Error', encodeURIComponent(`封面返回 ${status}`));
+        return handOverToClient();
+      }
       /*
        * 黄果旧版的封面是 AES 密文（响应头还给成 binary/octet-stream），直接转发必破图：
        * 浏览器拿到一堆乱码当图片渲染，控制台一片红，用户看到的就是"封面加载不出来"。
@@ -713,7 +780,7 @@ function mount(app, deps) {
         (body[0] === 0x47 && body[1] === 0x49) ||
         (body[0] === 0x52 && body[1] === 0x49)
       );
-      if (!looksImage) return res.status(404).end();
+      if (!looksImage) return handOverToClient();
       const type = String(upstream.headers['content-type'] || '');
       const sniff = body.length > 3 && body[0] === 0xff && body[1] === 0xd8 ? 'image/jpeg'
         : body.length > 8 && body[0] === 0x89 && body[1] === 0x50 && body[2] === 0x4e && body[3] === 0x47 ? 'image/png'
@@ -724,14 +791,15 @@ function mount(app, deps) {
       coverCache.set(cacheKey, { body, type: sniff, expires: Date.now() + COVER_TTL });
       res.end(body);
     } catch (error) {
+      if (provider && provider.coverDirect) return handOverToClient();
       res.status(502).json({ error: error.message || '封面下载失败' });
     }
   });
 
   // 媒体（m3u8 + 分片）：不需要 auth，靠令牌本身鉴权（播放器不会带 Bearer）
-  app.get('/api/sources/stream', (req, res) => stream(req, res).catch(() => res.status(500).end()));
+  app.get('/api/sources/stream', (req, res) => stream(req, res, deps).catch(() => res.status(500).end()));
   // 同一个处理器的 .m3u8 别名：给只会看后缀选解复用器的播放器（ExoPlayer、部分电视端）
-  app.get('/api/sources/play.m3u8', (req, res) => stream(req, res).catch(() => res.status(500).end()));
+  app.get('/api/sources/play.m3u8', (req, res) => stream(req, res, deps).catch(() => res.status(500).end()));
 }
 
 module.exports = { mount, list };

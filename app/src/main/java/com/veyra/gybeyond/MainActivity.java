@@ -1325,29 +1325,36 @@ public final class MainActivity extends Activity {
           }
           ProxySettings.setMode(this, args.optInt("value", ProxySettings.MODE_BACKEND)); return true;
         }
-        // 私密源清单：端侧能解析的排前面（不依赖后端，手机直接连源站），
-        // 其余由后端下发的再补在后面。后端连不上源站时，这几个源照样能用。
+        // 私密源清单：以 LocalSources.SITES 为唯一准绳 —— 顺序、条目数都跟后端 providers 对齐，
+        // 后端下发了同名源就沿用它的名字/描述（改文案不用发版），后端不可达就用本地兜底。
+        // 不在这里「顺手把后端多出来的源补上」：弹窗里多一个点进去必失败的选项，比少一个更糟。
         if ("private-sites".equals(action)) {
-            JSONArray sources = new JSONArray();
-            java.util.Set<String> seen = new java.util.HashSet<>();
-            for (String[] row : com.veyra.gybeyond.localsrc.LocalSources.CATALOG) {
-                seen.add(row[0]);
-                sources.put(new JSONObject().put("id", row[0]).put("name", row[1])
-                        .put("description", row[2]).put("content", row[3]).put("local", true));
-            }
+            JSONObject remote = null;
             try {
-                JSONObject remote = account.getJson("api/sources");
-                JSONArray rows = remote.optJSONArray("sources");
-                for (int i = 0; rows != null && i < rows.length(); i++) {
-                    JSONObject row = rows.optJSONObject(i);
-                    if (row == null) continue;
-                    String id = row.optString("id", "");
-                    if (id.isEmpty() || seen.contains(id)) continue;
-                    seen.add(id);
-                    sources.put(row);
-                }
+                remote = account.getJson("api/sources");
             } catch (Exception ignore) {
-                // 后端不可达就只用端侧那几个，功能不至于全空
+                // 后端不可达：下面用本地清单兜底，端侧能解析的源照常能用
+            }
+            JSONArray remoteRows = remote == null ? null : remote.optJSONArray("sources");
+            JSONArray sources = new JSONArray();
+            for (String[] row : com.veyra.gybeyond.localsrc.LocalSources.SITES) {
+                String id = row[0];
+                JSONObject entry = new JSONObject()
+                        .put("id", id).put("name", row[1])
+                        .put("description", row[2]).put("content", row[3])
+                        .put("local", com.veyra.gybeyond.localsrc.LocalSources.supports(id));
+                for (int i = 0; remoteRows != null && i < remoteRows.length(); i++) {
+                    JSONObject item = remoteRows.optJSONObject(i);
+                    if (item == null || !id.equals(item.optString("id", ""))) continue;
+                    String name = item.optString("name", "");
+                    String description = item.optString("description", "");
+                    String content = item.optString("content", "");
+                    if (!name.isEmpty()) entry.put("name", name);
+                    if (!description.isEmpty()) entry.put("description", description);
+                    if (!content.isEmpty()) entry.put("content", content);
+                    break;
+                }
+                sources.put(entry);
             }
             return new JSONObject().put("sources", sources);
         }

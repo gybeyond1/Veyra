@@ -20,12 +20,30 @@ final class PrivateSite {
 
     static String get(Context context) {
         String id = prefs(context).getString(KEY_ID, "");
-        return id == null || id.trim().isEmpty() ? HUANGGUO : id.trim();
+        String value = id == null ? "" : id.trim();
+        if (value.isEmpty() || HUANGGUO.equals(value)) return HUANGGUO;
+        /*
+         * 下架掉的源（黄豆没 DNS、野果只认手机出口、禁果正片要 VIP）留在设置里
+         * 会让整个私密模式「加载失败」。这里当场换成清单里第一个，并把选择写回去 ——
+         * 用户下次进私密模式就不用再手动切一次。
+         */
+        if (!com.veyra.gybeyond.localsrc.LocalSources.known(value)) {
+            String[] first = com.veyra.gybeyond.localsrc.LocalSources.SITES[0];
+            set(context, first[0], first[1]);
+            return first[0];
+        }
+        return value;
     }
 
     static String name(Context context) {
+        String id = get(context);
         String name = prefs(context).getString(KEY_NAME, "");
-        return name == null || name.trim().isEmpty() ? "黄果" : name.trim();
+        if (!com.veyra.gybeyond.localsrc.LocalSources.known(id)) {
+            return name == null || name.trim().isEmpty() ? "黄果" : name.trim();
+        }
+        // 清单里的源用本地清单的名字：历史设置里存的旧名字（比如改过名的）不再生效
+        String local = com.veyra.gybeyond.localsrc.LocalSources.nameOf(id);
+        return local.isEmpty() ? (name == null ? "" : name.trim()) : local;
     }
 
     static boolean isBuiltin(Context context) {

@@ -2,70 +2,79 @@
 /**
  * 帝果（www.dsd.com.se，苹果 CMS 模板站）
  *
- * 接口是纯 HTML，没有 JSON API：
- *   · 目录页：a.video-item / a.video-surface，链接形如 /index.php/vod/play/id/123/sid/1/nid/1.html
- *   · 详情页：播放列表里的 sid/nid 就是分集坐标，标题/封面在 og: 标签里
- *   · 播放页：内嵌 player_aaaa = {...}，url 字段按 encrypt（0 明文 / 1 URL 编码 / 2 base64+URL 编码）
+ * 接口是纯 HTML，没有 JSON API，而且这站有三处和「标准苹果 CMS」不一样 ——
+ * 端侧 Dsd.java 是踩完坑的版本，这里逐条对齐（WebUI 之前按教科书解析，所以整站全瞎）：
  *
- * 这个站对数据中心出口不友好（Cloudflare 前置 + 对部分机房 IP 直接 reset），
- * 所以失败时要把「连不上」和「解析失败」分开报，别让用户以为是剧坏了。
+ *  1. 没有真正的详情页。详情和第一集播放页是同一张
+ *     /index.php/vod/play/id/x/sid/1/nid/1.html；去抓 /vod/detail/id/x.html
+ *     只会拿到一张空模板 —— 这就是「详情页没有解析到分集」的根因。
+ *  2. 播放页正文由 JS 注入，服务端 HTML 里常常既没有分集列表、也没有 player_aaaa。
+ *     所以「扫不到分集」是常态：按单集正片处理，媒体地址用封面反推
+ *     （…/FNS-206/1.jpg → …/FNS-206/1000k/index.m3u8）。
+ *  3. 媒体地址要经 /addons/vplayer/?url=<路径> 换一次签名（返回 aaencode 编码的
+ *     vPath），Referer 也必须换成 /addons/vplayer/，否则分片 403。
+ *
+ * 另外这站对数据中心出口不友好（Cloudflare 前置 + 按机房 IP 直接 reset），
+ * 所以元数据请求全部走 backendProxy；失败时把「连不上」和「解析失败」分开报。
  */
 
-const { request, requestVia, cached } = require('./util');
+const { requestVia, cached } = require('./util');
 
-const SITE = 'https://www.dsd.com.se';
+const SITE = (process.env.DSD_SITE || 'https://www.dsd.com.se').replace(/\/+$/, '');
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
-const VOD = /\/vod\/(play|detail|type|show|search)\/id\/(\d+)(?:\/sid\/(\d+))?(?:\/nid\/(\d+))?/;
+/* ---------------- 小工具 ---------------- */
+
+function digits(value) {
+  return String(value == null ? '' : value).replace(/\D/g, '');
+}
+
+function clean(value) {
+  return String(value == null ? '' : value).replace(/\s+/g, ' ').trim();
+}
 
 /**
- * 从任意播放页链接里抠出 (剧 id, sid, 集号)。
- *
- * 苹果 CMS 的地址有好几种写法，站点换一次主题就可能换一种：
- *   /index.php/vod/play/id/123/sid/1/nid/2.html   ← 原始模板
- *   /vod/play/123-1-2.html                       ← 静态化
- *   /vod/play/id/123/sid/1/nid/2/                ← 末尾斜杠
- *   /index.php?m=vod-play-id-123-sid-1-nid-2.html
- *   /vodplay/123-1-2.html                        ← 变种
- * 之前只认第一种，站点一换皮就整页「没有解析到分集」，所以这里一次覆盖全。
+ * 卡片整段文本兜底：切掉播放量、时长、集数标签，别让它们混进剧名。
+ * 例：「剧名 452346次 02:07:40」→「剧名」。
  */
-function parsePlayHref(href, key) {
-  if (!href) return null;
-  const patterns = [
-    /\/vod\/play\/id\/(\d+)\/sid\/(\d+)\/nid\/(\d+)/i,
-    /\/vod-?play\/(\d+)-(\d+)-(\d+)/i,
-    /\/vod\/play\/(\d+)\/(\d+)\/(\d+)/i,
-    /[?&]id=(\d+)[^#]*?[?&]sid=(\d+)[^#]*?[?&]nid=(\d+)/i,
-    /vod-play-id-(\d+)-sid-(\d+)-nid-(\d+)/i,
-  ];
-  for (const pattern of patterns) {
-    const hit = pattern.exec(href);
-    if (!hit) continue;
-    if (key && hit[1] !== String(key)) continue;
-    const number = Number(hit[3]);
-    if (!number) continue;
-    return { id: String(hit[1]), sid: Number(hit[2]) || 1, number };
+function tidy(raw) {
+  let value = clean(raw);
+  if (!value) return '';
+  value = value.replace(/^\s*在线播放\s*/i, '');
+  value = value.replace(/\s*第\s*\d+\s*集.*$/i, '');
+  value = value.replace(/\s*[-|_]\s*(高清资源|懂色帝|在线观看|免费观看).*$/i, '');
+  value = value.replace(/\s*\|\s*www\.[^\s|]+.*$/i, '');
+  for (let i = 0; i < 6; i += 1) {
+    const before = value;
+    value = value.replace(/\s*(更新至|全|共|已完结)\s*\d+\s*集\s*/gi, ' ');
+    value = value.replace(/\s*\d+(\.\d+)?\s*(万|亿)?\s*次\s*$/, '');
+    value = value.replace(/\s*\d{1,2}:\d{2}(:\d{2})?\s*$/, '');
+    value = value.replace(/^\s*(\d+(\.\d+)?\s*(万|亿)?\s*次|\d{1,2}:\d{2}(:\d{2})?)\s*/, '');
+    value = value.replace(/^[\\|\s]+/, '');
+    value = value.replace(/\\/g, ' ');
+    value = value.replace(/\s{2,}/g, ' ').trim();
+    if (value === before) break;
   }
-  return null;
+  return value.trim();
 }
 
 const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
 
 function text(html) {
-  return String(html || '')
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (all, name) => {
-      if (name[0] === '#') {
-        const code = name[1] === 'x' || name[1] === 'X' ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10);
-        return Number.isFinite(code) ? String.fromCodePoint(code) : all;
-      }
-      return ENTITIES[name.toLowerCase()] !== undefined ? ENTITIES[name.toLowerCase()] : all;
-    })
-    .replace(/\s+/g, ' ')
-    .trim();
+  return clean(
+    String(html || '')
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (all, name) => {
+        if (name[0] === '#') {
+          const code = name[1] === 'x' || name[1] === 'X' ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10);
+          return Number.isFinite(code) ? String.fromCodePoint(code) : all;
+        }
+        return ENTITIES[name.toLowerCase()] !== undefined ? ENTITIES[name.toLowerCase()] : all;
+      })
+  );
 }
 
 function attrs(source) {
@@ -80,32 +89,82 @@ function absolute(raw, base) {
   const value = String(raw || '').trim();
   if (!value || /^data:/i.test(value)) return '';
   try {
-    const url = new URL(value, base);
+    const url = new URL(value, base || SITE + '/');
     return /^https?:$/.test(url.protocol) ? url.toString() : '';
   } catch {
     return '';
   }
 }
 
-async function page(path) {
-  const url = /^https?:/i.test(path) ? path : `${SITE}${path.startsWith('/') ? '' : '/'}${path}`;
-  // 帝果按出口 IP 拦：机房/宽带公网 IP 一律超时，只有走管理台配的后端代理才回页面。
-  // backendProxy 让 util 自己取配置，provider 不碰设置层。
-  const res = await requestVia(url, {
-    headers: { 'User-Agent': UA, Accept: 'text/html,application/xhtml+xml', 'Accept-Language': 'zh-CN,zh;q=0.9' },
-    timeout: 12000,
-    maxBytes: 6 << 20,
-    backendProxy: true,
-  }).catch((error) => {
-    throw new Error(`帝果连不上（${error.message}）——这个站会按出口 IP 拦截，服务器访问不了时需要走代理`);
-  });
-  if (res.status < 200 || res.status >= 300) throw new Error(`帝果返回 ${res.status}`);
-  const body = res.text();
-  if (!/<\s*(html|body|div|a)\b/i.test(body)) throw new Error('帝果返回的不是页面');
-  return { url, html: body };
+function backgroundUrl(style) {
+  const hit = /url\(\s*["']?([^"')]+)/i.exec(String(style || ''));
+  return hit ? hit[1].trim() : '';
 }
 
-/* ---------------- 解析 ---------------- */
+/* ---------------- 路由：兼容 /index.php、.html、?query 三种写法 ---------------- */
+
+function routeOf(reference) {
+  const value = String(reference || '').trim();
+  if (!value) return null;
+  let url;
+  try {
+    url = new URL(value, SITE + '/');
+  } catch {
+    return null;
+  }
+  if (!/^(www\.)?dsd\.com\.se$/i.test(url.hostname)) return null;
+  let path = url.pathname || '';
+  if (path.startsWith('/index.php')) path = path.slice('/index.php'.length);
+  path = path.replace(/\/+$/, '');
+  if (/\.html$/i.test(path)) path = path.slice(0, -5);
+  const parts = path.replace(/^\/+/, '').split('/');
+  if (parts.length < 2 || parts[0] !== 'vod') return null;
+  const action = parts[1];
+  if (!['play', 'detail', 'type', 'show', 'search'].includes(action)) return null;
+  const params = {};
+  for (let i = 2; i + 1 < parts.length; i += 2) if (parts[i]) params[parts[i]] = parts[i + 1];
+  for (const [key, val] of url.searchParams) if (!(key in params)) params[key] = val;
+  return {
+    action,
+    get: (key) => String(params[key] || ''),
+    int: (key) => Number(digits(params[key])) || 0,
+    params,
+  };
+}
+
+/* ---------------- 抓页面 ---------------- */
+
+/**
+ * Referer 必须带：这站的播放页有防盗链，不带 Referer 的请求会被对端直接掐断
+ * （看起来像「连不上」，其实站点是通的）。
+ */
+async function page(path, referer) {
+  const url = /^https?:/i.test(path) ? path : `${SITE}${String(path).startsWith('/') ? '' : '/'}${path}`;
+  let res;
+  try {
+    res = await requestVia(
+      url,
+      {
+        headers: {
+          'User-Agent': UA,
+          Accept: 'text/html,application/xhtml+xml',
+          'Accept-Language': 'zh-CN,zh;q=0.9',
+          Referer: referer || `${SITE}/`,
+        },
+        timeout: 14000,
+        maxBytes: 6 << 20,
+        backendProxy: true,
+      },
+      ''
+    );
+  } catch (error) {
+    throw new Error(`帝果连不上（${error.message}）——这个站会按出口 IP 拦截，服务器访问不了时需要在管理台配好后端代理`);
+  }
+  if (res.status < 200 || res.status >= 300) throw new Error(`帝果返回 ${res.status}`);
+  const html = res.text();
+  if (!/<\s*(html|body|div|a)\b/i.test(html)) throw new Error('帝果返回的不是页面');
+  return { url, html };
+}
 
 function anchors(html) {
   const out = [];
@@ -115,70 +174,125 @@ function anchors(html) {
   return out;
 }
 
-function classOf(attr) {
-  return String(attr.class || '').toLowerCase();
-}
+/** 卡片标题优先从子节点取，直接取 <a> 文本会连播放量、时长一起吃进来。 */
+const TITLE_NODES = ['video-desc', 'surface-title', 'video-title', 'video-name', 'title'];
 
-function coverFrom(block, base) {
-  const img = /<img\b([^>]*)>/i.exec(block);
-  if (img) {
-    const map = attrs(img[1]);
-    for (const key of ['data-src', 'data-original', 'data-echo', 'src']) {
-      const value = absolute(map[key], base);
-      if (value) return value;
-    }
-  }
-  const style = /style\s*=\s*("[^"]*"|'[^']*')/i.exec(block);
-  if (style) {
-    const found = /url\(\s*["']?([^"')]+)/i.exec(style[1]);
-    if (found) return absolute(found[1], base);
+function textByClass(inner, names) {
+  for (const name of names) {
+    const pattern = new RegExp(
+      `<(\\w+)[^>]*\\bclass\\s*=\\s*["'][^"']*\\b${name}\\b[^"']*["'][^>]*>([\\s\\S]*?)<\\/\\1>`,
+      'i'
+    );
+    const hit = pattern.exec(inner);
+    if (!hit) continue;
+    const value = text(hit[2]);
+    if (value) return value;
   }
   return '';
 }
 
+function cardCover(link) {
+  // 封面可能就挂在 <a> 自己的 background-image 上（这站首页就是）
+  const own = backgroundUrl(link.attr.style);
+  if (own) return absolute(own, SITE + '/');
+  const pattern = /<img\b([^>]*)>/gi;
+  let hit;
+  while ((hit = pattern.exec(link.inner))) {
+    const map = attrs(hit[1]);
+    for (const key of ['data-src', 'data-original', 'data-echo', 'src']) {
+      const value = String(map[key] || '').trim();
+      if (!value || /^data:/i.test(value)) continue;
+      // 懒加载占位图（logo、lazy.gif）不是封面
+      if (key === 'src' && !value.includes('/upload') && !value.startsWith('/video')) continue;
+      return absolute(value, SITE + '/');
+    }
+  }
+  const nested = /<(div|span|a)\b([^>]*)>/gi;
+  while ((hit = nested.exec(link.inner))) {
+    const hitUrl = backgroundUrl(attrs(hit[2]).style);
+    if (hitUrl) return absolute(hitUrl, SITE + '/');
+  }
+  return '';
+}
+
+/**
+ * 列表卡片的封面/标题按 id 存着：播放页正文由 JS 注入，服务端 HTML 里常常连
+ * og:image 都没有，而封面是唯一能反推媒体地址的线索
+ * （…/FNS-206/1.jpg → …/FNS-206/1000k/index.m3u8）。
+ */
+const coverMemo = new Map();
+const titleMemo = new Map();
+const MEMO_MAX = 300;
+
+function memoSet(map, key, value) {
+  if (!key || !value) return;
+  if (map.size >= MEMO_MAX && !map.has(key)) map.delete(map.keys().next().value);
+  map.set(key, value);
+}
+
+function remember(id, title, cover) {
+  if (!id) return;
+  memoSet(titleMemo, id, title);
+  memoSet(coverMemo, id, cover);
+}
+
+/* ---------------- 目录 ---------------- */
+
 function cards(html, base) {
   const items = [];
   const seen = new Set();
-  for (const anchor of anchors(html)) {
-    const cls = classOf(anchor.attr);
-    if (!/video-item|video-surface/.test(cls)) continue;
-    const href = absolute(anchor.attr.href, base);
-    if (!href) continue;
-    const match = VOD.exec(href);
-    if (!match || !/play|detail/.test(match[1])) continue;
-    const id = match[2];
-    if (seen.has(id)) continue;
-    const title = text(anchor.inner).replace(/^(VIP|会员|独播|新剧)\s*/i, '').slice(0, 200) || text(anchor.attr.title);
-    if (!title) continue;
+  let links = anchors(html).filter((item) => /video-item|video-surface/.test(String(item.attr.class || '').toLowerCase()));
+  if (!links.length) links = anchors(html);
+  for (const link of links) {
+    const href = absolute(link.attr.href, base);
+    const route = href && routeOf(href);
+    if (!route || !/play|detail/.test(route.action)) continue;
+    const id = route.get('id');
+    if (!id || seen.has(id)) continue;
+
+    let title = textByClass(link.inner, TITLE_NODES);
+    if (!title) title = clean(link.attr.title);
+    if (!title) {
+      const img = /<img\b([^>]*)>/i.exec(link.inner);
+      if (img) title = clean(attrs(img[1]).alt);
+    }
+    if (!title) title = tidy(text(link.inner));
+    title = tidy(title).replace(/^(VIP|会员|独播|新剧)\s*/i, '');
+    if (!title || title.length > 80) continue;
+
     seen.add(id);
-    const episodes = Number((/\d+\s*集/.exec(text(anchor.inner)) || [])[0]?.replace(/\D/g, '')) || 0;
+    const total = /(?:全|更新至|共|已完结)\s*(\d+)\s*集/.exec(clean(text(link.inner)));
+    const label = total ? `全 ${total[1]} 集` : '';
+    const cover = cardCover(link);
+    remember(id, title, cover);
     items.push({
       id,
-      title,
-      cover: coverFrom(anchor.inner, base),
+      title: title.slice(0, 200),
+      cover,
       description: '',
       score: '',
-      episodeLabel: episodes ? `全 ${episodes} 集` : '',
+      episodeLabel: label,
       category: '短剧',
       tags: [],
-      status: episodes ? 'finished' : '',
+      status: label ? 'finished' : '',
     });
   }
   return items;
 }
 
-function categories(html, base) {
+function categoriesOf(html, base) {
   const list = [{ id: '', name: '全部' }];
   const seen = new Set(['']);
   for (const anchor of anchors(html)) {
     const href = absolute(anchor.attr.href, base);
-    const match = href && /\/vod\/type\/id\/(\d+)/.exec(href);
+    const route = href && routeOf(href);
+    if (!route || route.action !== 'type') continue;
+    const id = route.get('id');
     const name = text(anchor.inner);
-    if (!match || !name || name.length > 12) continue;
-    if (seen.has(match[1])) continue;
-    seen.add(match[1]);
-    list.push({ id: match[1], name });
-    if (list.length >= 20) break;
+    if (!id || !name || name.length > 12 || seen.has(id)) continue;
+    seen.add(id);
+    list.push({ id, name });
+    if (list.length >= 24) break;
   }
   return list;
 }
@@ -187,47 +301,38 @@ function pageCount(html, base) {
   let max = 1;
   for (const anchor of anchors(html)) {
     const href = absolute(anchor.attr.href, base);
-    const match = href && /\/page\/(\d+)/.exec(href);
-    if (match) max = Math.max(max, Number(match[1]) || 1);
+    const hit = href && /\/page\/(\d+)/.exec(href);
+    if (hit) max = Math.max(max, Number(hit[1]) || 1);
   }
   return max;
 }
 
-/* ---------------- 对外接口 ---------------- */
-
 async function loadCategories() {
   return cached('dsd:categories', 6 * 3600 * 1000, async () => {
     const home = await page('/');
-    const list = categories(home.html, home.url);
+    const list = categoriesOf(home.html, home.url);
     if (list.length <= 1) throw new Error('帝果没有返回分类');
     return list;
   });
 }
 
-async function loadList(path, pageNumber) {
-  const target = path.replace(/\{page\}/g, String(pageNumber));
-  const data = await page(target);
+async function defaultCategory() {
+  const list = await loadCategories();
+  const hit = list.find((item) => item.id);
+  if (!hit) throw new Error('帝果没有返回分类');
+  return hit.id;
+}
+
+async function loadList(categoryId, pageNumber) {
+  const data = await page(`/index.php/vod/type/id/${categoryId}/page/${pageNumber}.html`);
   const items = cards(data.html, data.url);
   if (!items.length && pageNumber === 1) throw new Error('帝果目录没有解析到内容');
   const total = pageCount(data.html, data.url);
   return { items, nextPage: pageNumber < total ? pageNumber + 1 : null };
 }
 
-async function categoriesList() {
-  return loadCategories();
-}
-
-async function list(pageNumber) {
-  return loadList('/index.php/vod/show/id/1.html', pageNumber);
-}
-
 async function home_() {
-  const first = await list(1).catch(async (error) => {
-    // 连不上就别再换入口试第二遍：两次 8 秒叠加会把首页拖死
-    if (/连不上/.test(error.message)) throw error;
-    const data = await page('/');
-    return { items: cards(data.html, data.url), nextPage: null };
-  });
+  const first = await loadList(await defaultCategory(), 1);
   return {
     featured: first.items.slice(0, 5).map((item) => ({ ...item, description: item.description || item.title })),
     items: first.items,
@@ -240,9 +345,8 @@ async function home_() {
 
 async function category(slug, pageNumber) {
   const list_ = await loadCategories();
-  const hit = list_.find((item) => item.id === String(slug));
-  if (!hit) return list(pageNumber);
-  return loadList(hit.id ? `/index.php/vod/type/id/${hit.id}.html` : '/index.php/vod/show/id/1.html', pageNumber);
+  const id = list_.some((item) => item.id && item.id === String(slug)) ? String(slug) : await defaultCategory();
+  return loadList(id, Math.max(1, Number(pageNumber) || 1));
 }
 
 async function search(keyword, pageNumber) {
@@ -251,22 +355,28 @@ async function search(keyword, pageNumber) {
   const data = await page(`/index.php/vod/search.html?wd=${encodeURIComponent(word)}&page=${pageNumber}`);
   let items = cards(data.html, data.url);
   if (!items.length) {
-    // 部分模板的搜索结果不带 video-item 类名，退化成正则直接扫链接
+    // 部分模板的搜索结果不带 video-item 类名，退化成正则扫链接
     const seen = new Set();
     items = [];
-    const pattern = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
-    let hit;
-    while ((hit = pattern.exec(data.html))) {
-      const map = attrs(hit[1]);
-      const href = absolute(map.href, data.url);
-      const match = href && /\/vod\/(?:detail|play)\/id\/(\d+)/.exec(href);
-      if (!match || seen.has(match[1])) continue;
-      const title = text(hit[2]);
+    for (const anchor of anchors(data.html)) {
+      const href = absolute(anchor.attr.href, data.url);
+      const route = href && routeOf(href);
+      if (!route || !/detail|play/.test(route.action)) continue;
+      const id = route.get('id');
+      if (!id || seen.has(id)) continue;
+      const title = tidy(text(anchor.inner));
       if (!title || title.length > 60) continue;
-      seen.add(match[1]);
+      seen.add(id);
       items.push({
-        id: match[1], title, cover: '', description: '', score: '',
-        episodeLabel: '', category: '短剧', tags: [], status: '',
+        id,
+        title,
+        cover: '',
+        description: '',
+        score: '',
+        episodeLabel: '',
+        category: '短剧',
+        tags: [],
+        status: '',
       });
     }
   }
@@ -274,116 +384,566 @@ async function search(keyword, pageNumber) {
   return { items, nextPage: pageNumber < total ? pageNumber + 1 : null };
 }
 
-async function detail(id) {
-  const key = String(id).replace(/\D/g, '');
-  if (!key) throw new Error('无效剧集');
-  return cached(`dsd:detail:${key}`, 10 * 60 * 1000, async () => {
-    const data = await page(`/index.php/vod/detail/id/${key}.html`);
-    const html = data.html;
-    const og = (name) => {
-      const hit = new RegExp(`<meta[^>]+(?:property|name)=["']${name}["'][^>]+content=["']([^"']*)["']`, 'i').exec(html)
-        || new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]+(?:property|name)=["']${name}["']`, 'i').exec(html);
-      return hit ? text(hit[1]) : '';
-    };
-    let title = og('og:title') || og('title');
-    if (!title) {
-      const h1 = /<h1\b[^>]*>([\s\S]*?)<\/h1>/i.exec(html);
-      title = h1 ? text(h1[1]) : '';
-    }
-    const cover = absolute(og('og:image'), data.url);
+/* ---------------- 播放器参数 ---------------- */
 
-    const episodes = [];
-    const seen = new Set();
-    for (const anchor of anchors(html)) {
-      const href = absolute(anchor.attr.href, data.url);
-      if (!href) continue;
-      const hit = parsePlayHref(href, key);
-      if (!hit || seen.has(hit.number)) continue;
-      seen.add(hit.number);
-      episodes.push({ number: hit.number, sid: hit.sid, title: text(anchor.inner) || `第 ${hit.number} 集` });
+/** 括号配对要自己数，正则会被嵌套对象截断。 */
+function objectAt(source, start) {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < source.length; i += 1) {
+    const char = source[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === '"') inString = false;
+      continue;
     }
-    episodes.sort((a, b) => a.number - b.number);
-    /*
-     * 页面把播放列表交给 JS 渲染时，HTML 里一条 /vod/play 链接都没有。
-     * 这时按页面写的「共 N 集 / 更新至 N 集」拿总集数，再探一次 sid=1 能不能开出播放页 ——
-     * 苹果 CMS 的 nid 就是集号，探测通过就能把整季补齐，比直接报「没有分集」有用。
-     */
-    if (!episodes.length) {
-      const countHit = /(?:共|全)\s*(\d{1,4})\s*集|更新至\s*(\d{1,4})\s*集/.exec(text(html));
-      const total = countHit ? Number(countHit[1] || countHit[2]) : 0;
-      if (total > 0 && total <= 2000) {
-        const probe = await page(`/index.php/vod/play/id/${key}/sid/1/nid/1.html`).catch(() => null);
-        if (probe && probe.html && /player_aaaa/.test(probe.html)) {
-          for (let n = 1; n <= total; n += 1) episodes.push({ number: n, sid: 1, title: `第 ${n} 集` });
-        }
+    if (char === '"') inString = true;
+    else if (char === '{') depth += 1;
+    else if (char === '}') {
+      depth -= 1;
+      if (depth === 0) return source.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+/** 这站还有 player_bbb 之类，取第一个 id+url 齐的。 */
+function player(html) {
+  const scripts = [];
+  const pattern = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
+  let hit;
+  while ((hit = pattern.exec(html))) scripts.push(hit[1]);
+  if (!scripts.length) scripts.push(html);
+  for (const body of scripts) {
+    if (!body || !body.includes('player_')) continue;
+    const assign = /\bplayer_[A-Za-z0-9_]+\s*=\s*/g;
+    let from = 0;
+    let match;
+    while ((match = assign.exec(body))) {
+      from = assign.lastIndex;
+      const brace = body.indexOf('{', from);
+      if (brace < 0) break;
+      const json = objectAt(body, brace);
+      if (!json) continue;
+      try {
+        const candidate = JSON.parse(json.replace(/\\'/g, "'"));
+        if (candidate && candidate.id !== undefined && candidate.url !== undefined) return candidate;
+      } catch {
+        /* 不是合法 JSON，继续找下一个 */
       }
     }
-    if (!episodes.length) {
-      /*
-       * 报错要能直接定位：把页面上真实出现的 /vod/ 链接抓几条出来，
-       * 下次主题再换写法，看这串就知道该往哪个格式上补。
-       */
-      const samples = [];
-      for (const anchor of anchors(html)) {
-        const href = String(anchor.attr.href || '');
-        if (href && /vod|play/i.test(href) && samples.length < 3 && !samples.includes(href)) samples.push(href.slice(0, 80));
-      }
-      const hint = samples.length ? `；页面链接样例：${samples.join(' | ')}` : '；页面里没有任何播放链接（可能需要登录/被反爬拦了）';
-      throw new Error('帝果详情页没有解析到分集' + hint);
+  }
+  return null;
+}
+
+function playPath(key, sid, nid) {
+  return `${SITE}/index.php/vod/play/id/${key}/sid/${sid}/nid/${nid}.html`;
+}
+
+/** 封面反推媒体地址：/video1/<组>/<番号>/1.jpg → /video1/<组>/<番号>/1000k/index.m3u8 */
+function mediaFromCover(cover) {
+  if (!cover) return '';
+  try {
+    const url = new URL(cover);
+    if (!/^\/video\d*\/.*\/1\.(jpg|jpeg|png|webp)$/i.test(url.pathname)) return '';
+    const dir = url.pathname.slice(0, url.pathname.lastIndexOf('/'));
+    return `${url.protocol}//${url.host}${dir}/1000k/index.m3u8`;
+  } catch {
+    return '';
+  }
+}
+
+/** 整页兜底：JS 里只要拼过 m3u8，正则就能捞出来。 */
+function mediaInPage(html, base) {
+  if (!html) return '';
+  const source = html.replace(/\\\//g, '/');
+  const pattern = /https?:\/\/[^"'\s<>()\\]+\.m3u8[^"'\s<>()\\]*/gi;
+  let hit;
+  while ((hit = pattern.exec(source))) {
+    const value = absolute(hit[0], base);
+    if (/^https?:\/\/.*\.m3u8(\?.*)?$/i.test(value)) return value;
+  }
+  return '';
+}
+
+/* ---------------- vplayer 签名（aaencode） ---------------- */
+
+function mediaPath(address) {
+  try {
+    const url = new URL(address);
+    return url.pathname + (url.search || '');
+  } catch {
+    return address;
+  }
+}
+
+const AA_HEAD = /\(ﾟДﾟ\)\s*\['_'\]\s*\(\s*\(ﾟДﾟ\)\s*\['_'\]/;
+const AA_TAIL = /\+\s*\(ﾟДﾟ\)\s*\[\s*ﾟoﾟ\s*\]/g;
+const AA_SPLIT = /\(ﾟДﾟ\)\s*\[\s*ﾟεﾟ\s*\]\+/;
+
+function skipSpace(source, pos) {
+  while (pos.i < source.length && /\s/.test(source[pos.i])) pos.i += 1;
+}
+
+function factor(source, pos) {
+  skipSpace(source, pos);
+  if (pos.i >= source.length) throw new Error('eof');
+  const char = source[pos.i];
+  if (char === '(') {
+    pos.i += 1;
+    const value = expr(source, pos);
+    skipSpace(source, pos);
+    if (source[pos.i] !== ')') throw new Error(')');
+    pos.i += 1;
+    return value;
+  }
+  if (char === '-') {
+    pos.i += 1;
+    return -factor(source, pos);
+  }
+  if (!/[0-9]/.test(char)) throw new Error('digit');
+  const start = pos.i;
+  while (pos.i < source.length && /[0-9]/.test(source[pos.i])) pos.i += 1;
+  return parseInt(source.slice(start, pos.i), 10);
+}
+
+function term(source, pos) {
+  let value = factor(source, pos);
+  for (;;) {
+    skipSpace(source, pos);
+    const op = source[pos.i];
+    if (op !== '*' && op !== '/' && op !== '%') return value;
+    pos.i += 1;
+    const right = factor(source, pos);
+    if (right === 0 && op !== '*') throw new Error('div0');
+    value = op === '*' ? value * right : op === '/' ? Math.trunc(value / right) : value % right;
+  }
+}
+
+function expr(source, pos) {
+  let value = term(source, pos);
+  for (;;) {
+    skipSpace(source, pos);
+    const op = source[pos.i];
+    if (op !== '+' && op !== '-') return value;
+    pos.i += 1;
+    const right = term(source, pos);
+    value = op === '+' ? value + right : value - right;
+  }
+}
+
+function evalInt(source) {
+  const pos = { i: 0 };
+  try {
+    const value = expr(source, pos);
+    skipSpace(source, pos);
+    return pos.i === source.length ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function splitTop(value) {
+  const parts = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    const char = value[i];
+    if (char === '(') depth += 1;
+    else if (char === ')') {
+      if (depth > 0) depth -= 1;
+    } else if (char === '+' && depth === 0) {
+      const part = value.slice(start, i).trim();
+      if (part) parts.push(part);
+      start = i + 1;
     }
-    return {
-      id: key,
+  }
+  const tail = value.slice(start).trim();
+  if (tail) parts.push(tail);
+  return parts;
+}
+
+function aaDigit(part) {
+  let value = String(part || '').trim();
+  if (!value) return null;
+  if (value.includes('(oﾟｰﾟo)')) return 'u';
+  if (value.includes('(ﾟДﾟ).ﾟΘﾟﾉ')) return 'b';
+  value = value
+    .split('(c^_^o)').join('0')
+    .split('(ﾟΘﾟ)').join('1')
+    .split('(o^_^o)').join('3')
+    .split('(ﾟｰﾟ)').join('4');
+  const number = evalInt(value);
+  return number === null ? null : String(number);
+}
+
+function aaDecode(raw) {
+  const head = AA_HEAD.exec(raw);
+  if (!head) return null;
+  const body = raw.slice(head.index);
+  let end = -1;
+  AA_TAIL.lastIndex = 0;
+  let tail;
+  while ((tail = AA_TAIL.exec(body))) end = tail.index;
+  if (end < 0) return null;
+  const tokens = body.slice(0, end).split(AA_SPLIT);
+  let decoded = '';
+  for (let i = 1; i < tokens.length; i += 1) {
+    let value = '';
+    for (const part of splitTop(tokens[i])) {
+      const digit = aaDigit(part);
+      if (digit === null) return null;
+      value += digit;
+    }
+    if (value.startsWith('u') && value.length === 5) {
+      decoded += String.fromCharCode(parseInt(value.slice(1), 16));
+    } else if (/^[0-7]+$/.test(value)) {
+      decoded += String.fromCharCode(parseInt(value, 8));
+    }
+    if (decoded.length > 65536) return null;
+  }
+  return decoded;
+}
+
+/** vplayer 返回一段 aaencode 混淆脚本，里面 var vPath = "…" 才是签名后的路径。 */
+function signedPath(body) {
+  const script = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
+  let hit;
+  while ((hit = script.exec(body))) {
+    const block = hit[1];
+    if (!block.includes('(ﾟДﾟ)')) continue;
+    const decoded = aaDecode(block);
+    if (!decoded) continue;
+    const path = /\bvar\s+vPath\s*=\s*["']([^"']+)["']/.exec(decoded);
+    if (path) return path[1].trim();
+  }
+  return '';
+}
+
+async function sign(address, pageUrl) {
+  if (address.includes('sign=')) return address;
+  const endpoint = `${SITE}/addons/vplayer/?url=${encodeURIComponent(mediaPath(address))}&jump=`;
+  try {
+    const res = await requestVia(
+      endpoint,
+      {
+        headers: { 'User-Agent': UA, Referer: pageUrl, Accept: 'text/html,application/xhtml+xml' },
+        timeout: 10000,
+        maxBytes: 2 << 20,
+        backendProxy: true,
+      },
+      ''
+    );
+    if (res.status < 200 || res.status >= 300) return address;
+    const signed = signedPath(res.text());
+    if (!signed) return address;
+    const resolved = absolute(signed, `${SITE}/addons/vplayer/`);
+    return /^https?:\/\/.*\.(m3u8|mp4)(\?.*)?$/i.test(resolved) ? resolved : address;
+  } catch {
+    return address;
+  }
+}
+
+/* ---------------- 详情 / 分集 ---------------- */
+
+/** id → { title, cover, sid, episodes }：episode() 要用，不能只靠 detail 的缓存结果（那份不含内部字段） */
+const infoCache = new Map();
+
+function rememberInfo(key, info) {
+  if (infoCache.size >= 120 && !infoCache.has(key)) infoCache.delete(infoCache.keys().next().value);
+  infoCache.set(key, info);
+}
+
+/** 纯解析：页面拿到手之后的活。 */
+function parseDetail(key, data, playerObj) {
+  const html = data.html;
+  const vod = playerObj && playerObj.vod_data && typeof playerObj.vod_data === 'object' ? playerObj.vod_data : null;
+
+  let title = vod ? clean(vod.vod_name || '') : '';
+  if (!title) {
+    const heading = /<div[^>]*class\s*=\s*["'][^"']*video-info[^"']*["'][^>]*>[\s\S]*?<h1\b[^>]*>([\s\S]*?)<\/h1>/i.exec(html)
+      || /<h1\b[^>]*>([\s\S]*?)<\/h1>/i.exec(html);
+    title = heading ? clean(text(heading[1])) : '';
+  }
+  if (!title) title = meta(html, 'og:title');
+  if (!title) {
+    const docTitle = /<title\b[^>]*>([\s\S]*?)<\/title>/i.exec(html);
+    title = docTitle ? clean(text(docTitle[1])) : '';
+  }
+  if (!title) title = titleMemo.get(key) || '';
+  title = tidy(title);
+
+  let cover = playerObj ? String(playerObj.poster || '').trim() : '';
+  if (!cover) cover = meta(html, 'og:image');
+  if (!cover) cover = coverOf(html);
+  // 列表上的封面才是 /video1/<组>/<番号>/1.jpg 那种能反推播放地址的图，
+  // 详情页的 og:image 常常是裁过的缩略图，只用来兜底
+  const cachedCover = coverMemo.get(key) || '';
+  if ((!cover || !cover.includes('/video')) && cachedCover) cover = cachedCover;
+  cover = absolute(cover, data.url);
+
+  // 分集：同一个播放页里所有 /vod/play/id/{key}/sid/../nid/.. 链接；多线路只留集数最多的那条
+  const byLine = new Map();
+  const labels = new Map();
+  for (const anchor of anchors(html)) {
+    const href = absolute(anchor.attr.href, data.url);
+    const route = href && routeOf(href);
+    if (!route || route.action !== 'play') continue;
+    if (digits(route.get('id')) !== key) continue;
+    const sid = route.int('sid');
+    const nid = route.int('nid');
+    if (sid <= 0 || nid <= 0) continue;
+    if (!byLine.has(sid)) {
+      byLine.set(sid, new Map());
+      labels.set(sid, new Map());
+    }
+    const line = byLine.get(sid);
+    if (!line.has(nid)) {
+      line.set(nid, href);
+      labels.get(sid).set(nid, clean(text(anchor.inner)));
+    }
+  }
+
+  let bestSid = 0;
+  let bestCount = 0;
+  for (const [sid, line] of byLine) {
+    if (line.size > bestCount) {
+      bestCount = line.size;
+      bestSid = sid;
+    }
+  }
+  /*
+   * 这站是「一片一 id」：列表里每条的链接都是 sid/1/nid/1.html，播放页正文又由 JS 注入，
+   * 服务端 HTML 里根本不会出现分集列表。所以「扫不到分集」是常态，不是错误 ——
+   * 直接当单集正片处理，媒体地址由 episode() 用封面反推。
+   */
+  /*
+   * 没有播放链接时还有两条路：
+   *   · player_aaaa.vod_data.vod_play_url —— 苹果 CMS 的标准「分集清单」，
+   *     「第01集$https://…m3u8#第02集$…」这种；有它就能给出真正的选集，而不是只有一集「正片」。
+   *   · 都没有就按单集正片处理（这站「一片一 id」是常态），媒体地址由封面反推。
+   */
+  const directEpisodes = !bestSid ? episodesFromVodUrl(vod) : [];
+  if (directEpisodes.length) {
+    const info = {
       title: title.slice(0, 200) || `帝果 ${key}`,
       cover,
-      description: og('og:description'),
+      sid: 1,
+      episodes: directEpisodes,
+    };
+    rememberInfo(key, info);
+    return {
+      id: key,
+      title: info.title,
+      cover,
+      description: (vod ? clean(vod.vod_blurb || '') : '') || meta(html, 'og:description'),
       score: '',
       tags: [],
-      episodeLabel: `共 ${episodes.length} 集`,
-      episodes: episodes.map((item) => ({ number: item.number, url: `${SITE}/index.php/vod/play/id/${key}/sid/${item.sid}/nid/${item.number}.html` })),
-      _episodes: episodes,
+      episodeLabel: `共 ${directEpisodes.length} 集`,
+      episodes: directEpisodes.map((item) => ({ number: item.number, url: item.direct })),
+      _episodes: directEpisodes,
     };
+  }
+  if (!bestSid) {
+    const sid = playerObj ? Math.max(1, Number(playerObj.sid) || 1) : 1;
+    const nid = playerObj ? Math.max(1, Number(playerObj.nid) || 1) : 1;
+    bestSid = sid;
+    byLine.set(sid, new Map([[nid, data.url]]));
+    labels.set(sid, new Map([[nid, '']]));
+    bestCount = 1;
+  }
+
+  const line = byLine.get(bestSid);
+  const label = labels.get(bestSid);
+  const episodes = [...line.keys()].sort((a, b) => a - b).map((nid) => ({
+    number: nid,
+    sid: bestSid,
+    title: (label.get(nid) || (line.size === 1 ? '正片' : `第 ${nid} 集`)).slice(0, 60),
+  }));
+  if (!episodes.length || !bestCount) throw new Error('帝果详情页没有解析到分集');
+
+  const description = vod ? clean(vod.vod_blurb || '') : '';
+  const info = {
+    title: title.slice(0, 200) || `帝果 ${key}`,
+    cover,
+    sid: bestSid,
+    episodes,
+  };
+  rememberInfo(key, info);
+
+  return {
+    id: key,
+    title: info.title,
+    cover,
+    description: description || meta(html, 'og:description'),
+    score: '',
+    tags: [],
+    episodeLabel: `共 ${episodes.length} 集`,
+    episodes: episodes.map((item) => ({ number: item.number, url: playPath(key, item.sid, item.number) })),
+    _episodes: episodes,
+  };
+}
+
+/** 苹果 CMS 的分集清单：`第01集$地址#第02集$地址`，多线路用 $$$ 分隔，取第一条。 */
+function episodesFromVodUrl(vod) {
+  const raw = vod && typeof vod.vod_play_url === 'string' ? vod.vod_play_url : '';
+  if (!raw) return [];
+  const first = raw.split('$$$')[0];
+  return first
+    .split('#')
+    .map((part, index) => {
+      const at = part.indexOf('$');
+      const name = at >= 0 ? part.slice(0, at) : '';
+      const url = at >= 0 ? part.slice(at + 1) : part;
+      if (!/^https?:\/\//i.test(url)) return null;
+      // 这里的标签本来就是「第01集」，别过 tidy（它会把整段当成集数标签切掉）
+      return { number: index + 1, sid: 1, title: (clean(name) || `第 ${index + 1} 集`).slice(0, 60), direct: url };
+    })
+    .filter(Boolean);
+}
+
+function meta(html, name) {
+  const pattern = new RegExp(
+    `<meta[^>]+(?:property|name)\\s*=\\s*["']${name}["'][^>]*content\\s*=\\s*["']([^"']*)["']`,
+    'i'
+  );
+  const reversed = new RegExp(
+    `<meta[^>]+content\\s*=\\s*["']([^"']*)["'][^>]*(?:property|name)\\s*=\\s*["']${name}["']`,
+    'i'
+  );
+  const hit = pattern.exec(html) || reversed.exec(html);
+  return hit ? clean(text(hit[1])) : '';
+}
+
+function coverOf(html) {
+  const pattern = /<img\b([^>]*)>/gi;
+  let hit;
+  while ((hit = pattern.exec(html))) {
+    const map = attrs(hit[1]);
+    for (const key of ['data-src', 'data-original', 'data-echo', 'src']) {
+      const value = String(map[key] || '').trim();
+      if (!value || /^data:/i.test(value)) continue;
+      return absolute(value, SITE + '/');
+    }
+  }
+  const style = /style\s*=\s*("([^"]*)"|'([^']*)')/gi;
+  while ((hit = style.exec(html))) {
+    const found = backgroundUrl(hit[2] || hit[3] || '');
+    if (found) return absolute(found, SITE + '/');
+  }
+  return '';
+}
+
+async function detail(id) {
+  const key = digits(id);
+  if (!key) throw new Error('无效剧集');
+  return cached(`dsd:detail:${key}`, 10 * 60 * 1000, async () => {
+    // 这个站的「详情页」就是第一集播放页；sid 实际可能不是 1，从页面里拿
+    let data = null;
+    let playerObj = null;
+    let failure = null;
+    try {
+      data = await page(playPath(key, 1, 1));
+      playerObj = player(data.html);
+    } catch (error) {
+      failure = error;
+    }
+    if (playerObj && digits(playerObj.id) !== key) playerObj = null;
+    if (!data || !playerObj) {
+      try {
+        const fallback = await page(`/index.php/vod/detail/id/${key}.html`);
+        const fallbackPlayer = player(fallback.html);
+        if (!playerObj || (fallbackPlayer && digits(fallbackPlayer.id) === key)) {
+          data = fallback;
+          if (fallbackPlayer) playerObj = fallbackPlayer;
+        }
+      } catch (error) {
+        if (!data) throw failure || error;
+      }
+    }
+    if (!data) throw new Error('帝果没有返回剧集页面');
+    return parseDetail(key, data, playerObj);
   });
 }
 
 async function episode(id, number) {
+  const key = digits(id);
+  if (!key) throw new Error('无效剧集');
   const info = await detail(id);
-  const hit = info._episodes.find((item) => item.number === Number(number)) || info._episodes[0];
+  const wanted = Number(number) || 1;
+  const hit = (info._episodes || []).find((item) => item.number === wanted) || (info._episodes || [])[0];
   if (!hit) throw new Error('这一集不存在');
-  const key = String(id).replace(/\D/g, '');
-  const url = `${SITE}/index.php/vod/play/id/${key}/sid/${hit.sid}/nid/${hit.number}.html`;
-  const data = await page(url);
-  const script = /player_aaaa\s*=\s*(\{[\s\S]*?\})\s*[;<\n]/.exec(data.html) || /"url"\s*:\s*"([^"]+)"/.exec(data.html);
-  if (!script) throw new Error('帝果播放页没有解析到播放器参数');
-  let media = '';
-  if (script[1] && script[1].trim().startsWith('{')) {
-    let player;
+  const pageUrl = playPath(key, hit.sid, hit.number);
+
+  let data = null;
+  let failure = null;
+  if (!hit.direct) {
     try {
-      player = JSON.parse(script[1].replace(/\\'/g, "'"));
-    } catch {
-      throw new Error('帝果播放器参数不是合法 JSON');
+      data = await page(pageUrl);
+    } catch (error) {
+      // 播放页被防盗链掐断也要能播：下面还有封面反推这条路
+      failure = error;
     }
-    media = String(player.url || '');
-    if (String(player.encrypt || '0') === '1') media = decodeURIComponent(media);
-    else if (String(player.encrypt || '0') === '2') {
-      let decoded;
+  }
+  let playerObj = data ? player(data.html) : null;
+  if (playerObj && digits(playerObj.id) !== key) playerObj = null;
+  if (playerObj && Number(playerObj.trysee) > 0) throw new Error('帝果这一集只能试看，暂未取得正片地址');
+
+  let media = hit.direct || '';
+  if (!media && playerObj) {
+    media = String(playerObj.url || '').trim();
+    const encrypt = String(playerObj.encrypt == null ? '0' : playerObj.encrypt);
+    if (encrypt === '1') {
       try {
-        decoded = Buffer.from(media, 'base64').toString('utf8');
+        media = decodeURIComponent(media);
+      } catch {
+        /* 编码坏了就按原样试 */
+      }
+    } else if (encrypt === '2') {
+      try {
+        media = decodeURIComponent(Buffer.from(media, 'base64').toString('utf8'));
       } catch {
         throw new Error('帝果播放地址编码无效');
       }
-      media = decodeURIComponent(decoded);
     }
-  } else {
-    media = script[1] || '';
+    media = absolute(media, pageUrl);
   }
-  media = absolute(media, url);
-  if (!media) throw new Error('帝果这一集没有可直接播放的地址');
+
+  /*
+   * 服务端 HTML 里没有 player_aaaa 是常态（正文由 JS 注入），这时用封面反推
+   * /1000k/index.m3u8。三个封面来源依次试：详情的、列表缓存的、播放页里翻出来的。
+   */
+  const memory = infoCache.get(key);
+  if (!media) media = mediaFromCover((memory && memory.cover) || '');
+  if (!media) media = mediaFromCover(coverMemo.get(key) || '');
+  if (!media && data) media = mediaFromCover(absolute(meta(data.html, 'og:image'), data.url) || coverOf(data.html));
+  if (!media && data) media = mediaInPage(data.html, pageUrl);
+  if (!media) {
+    throw failure || new Error(`帝果没有解析到播放地址（封面 ${brief((memory && memory.cover) || '')}）`);
+  }
+  if (!/^https?:\/\/.*\.(m3u8|mp4)(\?.*)?$/i.test(media)) throw new Error('帝果这一集不是可直接播放的媒体');
+
+  let referer = `${SITE}/`;
+  const signed = await sign(media, pageUrl);
+  if (signed !== media) {
+    media = signed;
+    referer = `${SITE}/addons/vplayer/`;
+  }
+
   return {
     url: media,
-    referer: `${SITE}/`,
-    title: info.title,
-    cover: info.cover,
+    referer,
+    title: (memory && memory.title) || info.title,
+    cover: (memory && memory.cover) || info.cover,
   };
+}
+
+function brief(value) {
+  if (!value) return '无';
+  const trimmed = String(value).replace(/^https?:\/\/[^/]+/i, '');
+  return trimmed.length > 46 ? `…${trimmed.slice(-46)}` : trimmed;
 }
 
 module.exports = {
@@ -391,10 +951,13 @@ module.exports = {
   name: '帝果',
   description: '帝果剧库 · 分类齐全',
   content: '短剧',
-  categories: categoriesList,
+  // 封面 CDN 只认住宅/手机出口，后端取不到时允许前端拿原始地址自己取
+  coverDirect: true,
+  categories: loadCategories,
   home: home_,
   category,
   search,
   detail,
   episode,
+  __test: { parseDetail, player, aaDecode, cards, mediaFromCover, routeOf, tidy, episodesFromVodUrl },
 };
