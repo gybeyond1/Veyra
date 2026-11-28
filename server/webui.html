@@ -777,12 +777,20 @@ async function loadPrivateCatalog(append,force){
   }catch(e){
     if(epoch!==catalogEpoch)return;
     catalogLoading=false;
-    if(append){toast('加载更多失败：'+e.message);}
-    else if(catalogItems.length){toast('刷新失败，显示的是上次缓存')}
-    else grid.innerHTML='<div class="loading">加载失败: '+escapeHtml(e.message)+'</div>';
-    sentinel.hidden=!catalogItems.length;
-    // 失败也要把哨兵放回去，否则这一页之后再也不会有下一次自动翻页
-    updateCatalogSentinel();
+    if(!append&&catalogItems.length){toast('刷新失败，显示的是上次缓存')}
+    else if(!append)grid.innerHTML='<div class="loading">加载失败: '+escapeHtml(e.message)+'</div>';
+    if(append){
+      // 翻页失败不能再 observe：哨兵就在视口里，重新 observe 会立刻再触发一次，
+      // 失败时就是「请求 → 报错 → 再请求」的死循环。给一颗手动重试按钮。
+      toast('加载更多失败：'+e.message);
+      sentinel.hidden=false;
+      sentinel.innerHTML='<button type="button" id="catalog-retry">加载失败，点击重试</button>';
+      const retry=document.getElementById('catalog-retry');
+      if(retry)retry.onclick=()=>loadPrivateCatalog(true);
+    }else{
+      sentinel.hidden=!catalogItems.length;
+      updateCatalogSentinel();
+    }
   }finally{
     if(epoch===catalogEpoch)catalogLoading=false;
   }
