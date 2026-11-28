@@ -918,6 +918,14 @@ async function episode(id, number) {
   const memory = infoCache.get(key);
   if (!media) media = mediaFromCover((memory && memory.cover) || '');
   if (!media) media = mediaFromCover(coverMemo.get(key) || '');
+  /*
+   * 播放页里的 vod_play_url 是第二个来源：正文由 JS 注入时 HTML 里往往只剩这一坨数据，
+   * 而它就是真正的分集直链（「第01集$https://…m3u8#…」）。按集号取，取不到取第一条。
+   */
+  if (!media && data) {
+    const listed = episodesFromVodUrl(player(data.html) && player(data.html).vod_data);
+    if (listed.length) media = (listed[Math.min(wanted, listed.length) - 1] || listed[0]).direct;
+  }
   if (!media && data) media = mediaFromCover(absolute(meta(data.html, 'og:image'), data.url) || coverOf(data.html));
   if (!media && data) media = mediaInPage(data.html, pageUrl);
   if (!media) {
@@ -929,6 +937,9 @@ async function episode(id, number) {
   const signed = await sign(media, pageUrl);
   if (signed !== media) {
     media = signed;
+    referer = `${SITE}/addons/vplayer/`;
+  } else if (/\/addons\/vplayer\//i.test(media)) {
+    // 没能换到签名、但地址还在 vplayer 目录下：这一层的防盗链认的就是这个 Referer
     referer = `${SITE}/addons/vplayer/`;
   }
 
@@ -953,6 +964,16 @@ module.exports = {
   content: '短剧',
   // 封面 CDN 只认住宅/手机出口，后端取不到时允许前端拿原始地址自己取
   coverDirect: true,
+  // 页面和媒体是两套风控：详情页能取到，不代表分片能取到。
+  // 这个站的媒体服务器对机房出口回 403，取流必须和管理台代理走同一条路。
+  mediaProxy: true,
+  /*
+   * 浏览器直连必然播不了：媒体域既按出口 IP 拦，也没有 CORS 头。
+   * 所以 WebUI 选「仅直连」时自动降级成后端转发，并把原因告诉用户；
+   * 手机/电视带 carry=1 时仍按「仅直连」下发真实地址（本机网关能贴 Referer）。
+   */
+  noDirect: true,
+  noDirectReason: '帝果的媒体服务器只认住宅/手机出口，浏览器直连取不到流，已自动走后端转发',
   categories: loadCategories,
   home: home_,
   category,

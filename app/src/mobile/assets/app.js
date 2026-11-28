@@ -70,20 +70,21 @@ const state = {
   /* 详情→详情（制作方作品、相关作品）的返回栈：返回先退栈回到上一部剧 */
   detailStack: [], detailProducer: null, epGroup: 0, epPickerOpen: false
 };
-/* 当前私密源：黄果走端侧三通道，其余源由后端网关解析。
+/* 当前私密源：清单只有剧果 / 禁果短剧 / 黄果旧版 / 黄果 AI / 帝果 五个，与后端一致。
    必须在 contentReady 赋值「之前」发请求 —— contentReady 还没就绪时 api 才直接下发，
    否则回调里再调 api 会等 contentReady 自己，直接死锁。 */
-const privateSiteReady = api('private-site').catch(() => ({ id: 'huangguo', name: '黄果' }));
+const FIRST_SITE = { id: 'huangju', name: '剧果' };
+const privateSiteReady = api('private-site').catch(() => FIRST_SITE);
 contentReady = Promise.all([api('content-status'), privateSiteReady]).then(([status, site]) => {
   contentSource = status.source || 'hongguo';
   state.privateUnlocked = Boolean(status.unlocked);
-  state.privateSite = site && site.id ? site : { id: 'huangguo', name: '黄果' };
+  state.privateSite = site && site.id ? site : FIRST_SITE;
   // 启动即拉取黄果网络通道（避免重启后 state.proxyMode 未初始化导致下载误判手机直连）
   try { api('get-proxy-mode').then(v => { state.proxyMode = Number(v) || 3; }).catch(() => {}); } catch (ignore) {}
   document.title = 'Veyra';
-  if (privateMode() && state.privateSite && state.privateSite.id && state.privateSite.id !== 'huangguo') {
-    /* 接口型源没有黄果那套"成人/漫剧 + 分类"结构：
-       一级仍是两个 tab，但内容换成「全部 / 最新」，具体题材走「全部类型」页（后端分类）。 */
+  if (privateMode()) {
+    /* 私密源都是接口型：没有公开源那套"剧场/漫剧 + 热门榜"结构，
+       一级仍是两个 tab，但内容换成「全部 / 最新」，具体题材走「全部类型」页（源站分类）。 */
     categoryIds.adult = ['', 'new'];
     categoryIds.ai = ['', 'new'];
     CATEGORY_NAMES[''] = '全部';
@@ -2120,8 +2121,8 @@ var proxyPop = null;
 function buildProxyPopHtml() {
   return `<div class="appearance-pop account-pop proxy-pop" role="dialog" aria-modal="true" aria-labelledby="proxy-title">
     <div class="appearance-head"><h2 id="proxy-title">私密网络模式</h2></div>
-    <p class="appearance-note">只对私密模式生效，且对所选内容源全部有效：黄果走本机通道，剧果/野果等由服务器按同一模式取流。公开内容永远直连。</p>
-    ${privateMode() ? `<button type="button" class="site-option proxy-source-row" data-source-open><strong>内容源 · ${esc((state.privateSite && state.privateSite.name) || '黄果')}</strong><small>点此切换黄果 / 剧果 / 帝果 / 黄豆 …</small></button>` : ''}
+    <p class="appearance-note">只对私密模式生效：五个私密源都按这一档取流（仅直连 / 仅代理 / 走后端转发）。公开内容永远直连。</p>
+    ${privateMode() ? `<button type="button" class="site-option proxy-source-row" data-source-open><strong>内容源 · ${esc((state.privateSite && state.privateSite.name) || FIRST_SITE.name)}</strong><small>剧果 / 禁果短剧 / 黄果旧版 / 黄果 AI / 帝果</small></button>` : ''}
     <div class="settings-storage">${privateMode() ? '<button type="button" data-return-public>返回红果（公开模式）</button>' : '<button type="button" data-enter-private>进入私密模式</button>'}</div>
     <div class="proxy-test-row">
       <input id="proxy-address" class="settings-input" type="text" placeholder="代理地址 host:port，如 192.168.31.108:7893" value="${esc(state.proxy || '')}" autocomplete="off" aria-label="代理地址">
@@ -2154,13 +2155,19 @@ function ensureSourcePop() {
   return sourcePop;
 }
 function buildSourcePopHtml() {
-  const current = (state.privateSite && state.privateSite.id) || 'huangguo';
-  /* 黄果是内置源（端侧解析 + 三通道），永远排第一；其余是后端网关支持的源 */
-  const rows = [{ id: 'huangguo', name: '黄果', description: '视频 · AI · 旧版（直连 / 代理 / 后端）' }]
-    .concat(asArray(state.privateSites));
+  const current = (state.privateSite && state.privateSite.id) || FIRST_SITE.id;
+  /* 清单只有一份：后端 /api/sources 下发的，原生层再按同一份顺序兜底。
+     不在前端「顺手补一个黄果」—— 多一个点进去必失败的选项，比少一个更糟。 */
+  const rows = asArray(state.privateSites);
+  if (!rows.length) {
+    return `<div class="appearance-pop account-pop proxy-pop" role="dialog" aria-modal="true" aria-labelledby="source-title">
+      <div class="appearance-head"><h2 id="source-title">私密内容源</h2></div>
+      <p class="appearance-note">没拉到源清单，检查后端连接后重新打开本页。</p>
+    </div>`;
+  }
   return `<div class="appearance-pop account-pop proxy-pop" role="dialog" aria-modal="true" aria-labelledby="source-title">
     <div class="appearance-head"><h2 id="source-title">私密内容源</h2></div>
-    <p class="appearance-note">黄果旧版 / 黄果 AI / 黄豆 / 帝果 / 剧果 都在手机上直接取数，请求走你自己的网络，不经过服务器；其余源仍由服务器解析。切完自动刷新首页。</p>
+    <p class="appearance-note">剧果 / 禁果短剧 / 黄果旧版 / 黄果 AI / 帝果 —— 与网页端同一份清单。列表与播放都走后端解析，切完自动刷新首页。</p>
     <div class="site-list">${rows.map(row => `<button type="button" class="site-option${row.id === current ? ' is-active' : ''}" data-site-id="${esc(row.id)}" data-site-name="${esc(row.name)}"><strong>${esc(row.name)}</strong><small>${esc(row.description || '')}</small></button>`).join('')}</div>
   </div>`;
 }
@@ -2182,7 +2189,7 @@ function closeSourcePop() {
 }
 async function pickPrivateSite(id, name) {
   if (!id) return;
-  if (id === ((state.privateSite && state.privateSite.id) || 'huangguo')) { closeSourcePop(); return; }
+  if (id === ((state.privateSite && state.privateSite.id) || FIRST_SITE.id)) { closeSourcePop(); return; }
   try {
     const result = await api('private-site', { id, name });
     state.privateSite = { id: (result && result.id) || id, name: (result && result.name) || name };

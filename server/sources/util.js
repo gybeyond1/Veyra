@@ -97,6 +97,8 @@ function request(url, options = {}) {
             status: res.statusCode,
             headers: res.headers,
             body: buffer,
+            // 最终地址（跟完跳转后的那一跳）：清单/分片的相对路径要按它解析
+            url: target.toString(),
             text: () => buffer.toString('utf8'),
           });
         });
@@ -139,6 +141,8 @@ function requestViaProxy(url, options = {}, proxyUrl) {
           status: result.status,
           headers: result.headers || {},
           body: result.body,
+          // 最后一跳的绝对地址：302 到别的目录/主机时，相对分片要按它解析
+          url: result.url,
           text: () => result.body.toString('utf8'),
         });
       }
@@ -188,6 +192,8 @@ function curlOnce(url, options = {}, proxyUrl = '', insecure = false) {
           status: result.status,
           headers: result.headers || {},
           body: result.body,
+          // 最后一跳的绝对地址：302 到别的目录/主机时，相对分片要按它解析
+          url: result.url,
           text: () => result.body.toString('utf8'),
         });
       }

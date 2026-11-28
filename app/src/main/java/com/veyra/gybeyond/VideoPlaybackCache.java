@@ -32,13 +32,13 @@ final class VideoPlaybackCache {
     }
 
     static MediaSource.Factory sources(Context context) {
-        // 黄果 HLS 播放按通道模式实时选择：仅代理 → 经配置代理；直连/走后端 → 系统栈直连。
-        // 后端转发时 source 本身就是后端代理 URL（直连后端即可）；红果 MP4 走 HongguoPlayback，不受影响。
-        // 接口型源（剧果/野果/…）的「仅代理」由后端代走代理取流，客户端必须直连后端，
-        // 否则会变成"客户端套代理去连后端"，代理只对源站有效时直接连不上。
-        String proxy = "huangguo".equals(PrivateSite.get(context))
-                && ProxySettings.mode(context) == ProxySettings.MODE_PROXY
-                ? ProxySettings.address(context) : null;
+        /*
+         * 私密源的播放地址统一由后端签发（含「仅代理」那一档：后端经代理取流），
+         * 客户端只跟后端说话，绝不自己再套一层代理 —— 否则会变成「客户端套代理去连后端」，
+         * 代理只对源站有效时直接连不上。
+         * 端侧兜底播放走本机回环网关（127.0.0.1），同样不经这里。
+         */
+        String proxy = null;
         // 直连模式下源站要 Referer + 签名 Cookie，后端把这套头随播放地址一起下发，
         // 这里取当前这一集的凭据贴到清单 / 分片 / 密钥的每条请求上，否则第一步就 403。
         ChannelHttpDataSource.Factory upstream = new ChannelHttpDataSource.Factory(proxy)

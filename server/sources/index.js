@@ -214,15 +214,23 @@ async function stream(req, res, deps) {
   };
 
   let upstream;
+  let tried = '';
   try {
     try {
       upstream = await fetchMedia(proxy);
+      tried = proxy ? '代理' : '直连';
     } catch (error) {
       const fallback = relayProxy();
       if (!fallback) throw error;
+      tried = (proxy ? '代理' : '直连') + '失败，改走代理';
       upstream = await fetchMedia(fallback);
     }
-    if (upstream && upstream.status >= 500 && !proxy) {
+    /*
+     * 403/401 和 5xx 一样要换通道再试：帝果的媒体服务器对机房出口回的是 403
+     * （页面走代理能取，分片直连就被拦），只盯 5xx 会让人以为「明明能加载封面却播不了」。
+     */
+    const blocked = (response) => response && (response.status >= 500 || response.status === 401 || response.status === 403);
+    if (blocked(upstream) && !proxy) {
       const fallback = relayProxy();
       if (fallback) upstream = await fetchMedia(fallback);
     }
@@ -251,14 +259,35 @@ async function stream(req, res, deps) {
     return res.end();
   }
   if (upstream.status < 200 || upstream.status >= 300) {
-    res.setHeader('X-Veyra-Error', encodeURIComponent(`上游返回 ${upstream.status}`));
-    return res.status(502).json({ error: `上游返回 ${upstream.status}` });
+    let reason = `上游返回 ${upstream.status}（${tried}）`;
+    /*
+     * 403 且一条代理都没有时，问题不在播放器也不在解析：源站按出口 IP 拦了这台机器。
+     * 不说清楚的话，用户只会反复点播放，然后觉得「这功能是坏的」。
+     */
+    if ((upstream.status === 401 || upstream.status === 403) && !relayProxy() && !proxy) {
+      reason += '：源站按出口 IP 拦截，这台服务器的网络取不到流。到「设置 → 网络」配一个后端代理（用手机或住宅出口）再试';
+    }
+    res.setHeader('X-Veyra-Error', encodeURIComponent(reason));
+    return res.status(502).json({ error: reason, upstream: upstream.status });
   }
 
+  /*
+   * 判定和重写都要用「最后一跳」的地址。帝果这类源给的是跳转地址：
+   * /addons/vplayer/?… 302 到真正的 HLS 目录，分片在清单里是相对路径。
+   * 拿第一跳的 URL 当 base，相对路径就会解析到 /addons/ 下面，整集分片全 404 ——
+   * 表现正是「清单能取到、进度条不走」。
+   */
+  const mediaUrl = (() => {
+    try {
+      return new URL(upstream.url || target.toString());
+    } catch {
+      return target;
+    }
+  })();
   const type = String(upstream.headers['content-type'] || '');
   const isPlaylist =
     /mpegurl/i.test(type) ||
-    /\.m3u8?(\?|#|$)/i.test(target.pathname) ||
+    /\.m3u8?(\?|#|$)/i.test(mediaUrl.pathname) ||
     upstream.text().slice(0, 16).includes('#EXTM3U');
 
   if (isPlaylist) {
@@ -270,7 +299,7 @@ async function stream(req, res, deps) {
     const hosts = new Set(allowed);
     for (const uri of playlistUris(text)) {
       try {
-        hosts.add(new URL(uri, target).origin);
+        hosts.add(new URL(uri, mediaUrl).origin);
       } catch {
         /* 相对地址解析失败就当没有 */
       }
@@ -290,7 +319,7 @@ async function stream(req, res, deps) {
         proxy: token.proxy,
       });
     }
-    const body = rewritePlaylist(text, target.toString(), (absolute) =>
+    const body = rewritePlaylist(text, mediaUrl.toString(), (absolute) =>
       /*
        * 播放列表带 .m3u8 后缀：ExoPlayer / 各家播放器都先看后缀再选 HLS 解复用器，
        * 纯 ?t=令牌形式的地址会被当成未知流交给 ProgressiveMediaSource，直接播不出来。
@@ -307,7 +336,7 @@ async function stream(req, res, deps) {
   const contentRange = upstream.headers['content-range'];
   if (contentRange) res.setHeader('Content-Range', String(contentRange));
   res.setHeader('Accept-Ranges', 'bytes');
-  res.setHeader('Content-Type', mediaType(target.pathname, type));
+  res.setHeader('Content-Type', mediaType(mediaUrl.pathname, type));
   res.setHeader('Content-Length', String(upstream.body.length));
   res.setHeader('Cache-Control', 'no-store');
   res.end(upstream.body);
@@ -377,15 +406,32 @@ function mount(app, deps) {
     return last;
   };
 
+  /*
+   * 每一步都套一层硬超时。原因很实在：体检是「点一下就想知道结果」的功能，
+   * 某个源站卡死时，光靠 request 自己的 timeout 一层层叠上去，整个接口能拖到
+   * 反代先超时 —— 浏览器拿到的是一张 504 的 HTML 错误页，JSON.parse 直接抛
+   * 「Unexpected token '<'」。用户看到的是「体检失败」，其实后端还在跑。
+   * 有硬超时就能保证：接口一定在预算内返回 JSON，超时的那一步如实写进步骤里。
+   */
+  function withTimeout(promise, ms, label) {
+    let timer;
+    const guard = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label}超时（${Math.round(ms / 1000)}s 没响应）`)), Math.max(1000, ms));
+    });
+    promise.catch(() => {}); // 超时后原请求的拒绝不该变成 unhandledRejection
+    return Promise.race([promise, guard]).finally(() => clearTimeout(timer));
+  }
+
   async function diagnose(provider, budgetMs) {
     const deadline = Date.now() + budgetMs;
     const steps = [];
     const push = (name, ok, started, detail) => steps.push({ name, ok, ms: Date.now() - started, detail: String(detail || '') });
     const run = async (name, fn, required) => {
-      if (Date.now() > deadline) throw Object.assign(new Error('体检总时长超限'), { steps });
+      const left = deadline - Date.now();
+      if (left <= 800) throw Object.assign(new Error('体检总时长超限（前面几步已经用完预算）'), { steps });
       const started = Date.now();
       try {
-        const result = await fn();
+        const result = await withTimeout(fn(), Math.min(15000, left), name);
         push(name, true, started, result && result.detail);
         return result && result.value;
       } catch (error) {
@@ -436,7 +482,7 @@ function mount(app, deps) {
       // 用 requestVia：Node 被源站按 TLS 指纹重置时自动换 curl 再打一次。
       // 体检是"到底能不能播"的证据，不能因为抓清单用的客户端不对就判源死刑
       //（禁果的 CDN 就是 Node get 到 ECONNRESET、curl 一秒 200）。
-      const response = await probe(url, { headers, maxBytes: MEDIA_MAX, timeout: 20000 });
+      const response = await probe(url, { headers, maxBytes: MEDIA_MAX, timeout: 10000 });
       if (response.status !== 200) throw new Error(`源站返回 ${response.status}`);
       return response.text();
     };
@@ -472,7 +518,7 @@ function mount(app, deps) {
       const ivText = keyLine && /IV=0x([0-9a-fA-F]+)/.exec(keyLine);
       if (ivText) keyIv = Buffer.from(ivText[1].padEnd(32, '0').slice(0, 32), 'hex');
       await run('解密密钥', async () => {
-        const response = await probe(new URL(keyUri[1], baseUrl).toString(), { headers, maxBytes: 8192, timeout: 20000 });
+        const response = await probe(new URL(keyUri[1], baseUrl).toString(), { headers, maxBytes: 8192, timeout: 10000 });
         if (response.status !== 200) throw new Error(`源站返回 ${response.status}`);
         if (response.body.length !== 16) throw new Error(`返回 ${response.body.length} 字节，应为 16`);
         keyBuf = response.body;
@@ -484,7 +530,7 @@ function mount(app, deps) {
     const segment = firstUriOf(playlist);
     if (segment) {
       await run('分片', async () => {
-        const response = await probe(new URL(segment, baseUrl).toString(), { headers, maxBytes: MEDIA_MAX, timeout: 25000 });
+        const response = await probe(new URL(segment, baseUrl).toString(), { headers, maxBytes: MEDIA_MAX, timeout: 12000 });
         if (response.status !== 200) throw new Error(`源站返回 ${response.status}`);
         segmentBody = response.body;
         return { detail: `${(response.body.length / 1024).toFixed(0)}KB` };
@@ -523,7 +569,7 @@ function mount(app, deps) {
       const started = Date.now();
       let steps = [];
       try {
-        steps = await diagnose(provider, site ? 60000 : 25000);
+        steps = await diagnose(provider, site ? 35000 : 22000);
       } catch (error) {
         steps = error.steps || steps;
       }
@@ -642,7 +688,8 @@ function mount(app, deps) {
       if (net === NET_DIRECT && provider.noDirect && !carry) {
         // 这个源只能后端代取（比如剧果的 CloudFront 签名 Cookie 浏览器带不上），
         // 与其让用户看到莫名 403，不如自动降级并说明原因
-        const notice = `${provider.name}的播放要签名 Cookie，当前环境带不上，已自动走后端转发`;
+        const notice = provider.noDirectReason
+          || `${provider.name}的播放要签名 Cookie，当前环境带不上，已自动走后端转发`;
         const token = issueToken(req.user.id, {
           url: info.url,
           referer: info.referer,
@@ -657,7 +704,7 @@ function mount(app, deps) {
           episode: number,
           title: info.title || '',
           cover: info.cover || '',
-          source: `${baseUrlOf(req)}/api/sources/play.m3u8?t=${token}`,
+          source: `${baseUrlOf(req)}${/\\.mp4(\\?|$)/i.test(info.url) ? '/api/sources/stream' : '/api/sources/play.m3u8'}?t=${token}`,
           net: NET_BACKEND,
           fallback: true,
           notice,
@@ -683,6 +730,13 @@ function mount(app, deps) {
         });
       }
 
+      /*
+       * 有些源的「页面」和「媒体」是两套风控：帝果的详情页只是让你看，真取分片时
+       * 机房出口一律 403/超时。这类源声明 mediaProxy，令牌里直接预置管理台代理 ——
+       * 与其让播放器先吃一次 403 再回退（用户看到的是黑屏闪一下），不如一开始就走对的路。
+       * 没配代理时仍走直连，下面的取流兜底还会再试一次。
+       */
+      const mediaProxy = proxy || (provider.mediaProxy ? safeProxy(deps && deps.getProxy ? deps.getProxy() : '') : '');
       const token = issueToken(req.user.id, {
         url: info.url,
         referer: info.referer,
@@ -692,14 +746,15 @@ function mount(app, deps) {
         // 供 provider.refresh 重新签发（野果的播放地址只有十几秒有效）
         id,
         episode: number,
-        proxy,
+        proxy: mediaProxy || undefined,
       });
       res.json({
         id,
         episode: number,
         title: info.title || '',
         cover: info.cover || '',
-        source: `${baseUrlOf(req)}/api/sources/play.m3u8?t=${token}`,
+        // 后缀决定播放器怎么解：mp4 挂 .m3u8 会被当 HLS 解析，直接报 manifest 错误
+        source: `${baseUrlOf(req)}${/\\.mp4(\\?|$)/i.test(info.url) ? '/api/sources/stream' : '/api/sources/play.m3u8'}?t=${token}`,
         net,
         nextUrl: '',
       });

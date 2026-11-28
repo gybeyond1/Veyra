@@ -1420,7 +1420,7 @@ function gridMarkup(items, emptyText) {
 }
 
 /* ---------------- 分类：和安卓端一致，按内容源取真实分类 id ---------------- */
-/* 接口型源（剧果/野果/帝果…）的分类由后端给：先「全部 / 最新」，
+/* 私密源的分类由源站给：先「全部 / 最新」，
    后面接源站自己的题材分类。黄果保持原来四个固定分类。 */
 var siteCats = [['', '全部'], ['new', '最新']];
 
@@ -3827,15 +3827,20 @@ function selectProxyMode(value) {
 }
 
 /* ---------------- 私密内容源 ----------------
-   黄果是端侧解析（三通道），其余源走后端网关。
+   清单只有五个：剧果 / 禁果短剧 / 黄果旧版 / 黄果 AI / 帝果，与网页端、手机端同一份。
+   以前这里也硬塞了一个「黄果」当第一项，结果是列表里多一个点了必失败的选项。
    切完清掉 feed 缓存并回首页，遥控器不用再做别的。 */
 function renderSourceList(sources) {
   if (!sourceListEl) return;
-  var rows = [{ id: 'huangguo', name: '黄果', description: '视频 · AI · 旧版（直连 / 代理 / 后端）' }];
+  var rows = [];
   for (var i = 0; i < sources.length; i++) {
     var row = sources[i] || {};
     if (!row.id || row.id === 'huangguo') continue;
     rows.push({ id: row.id, name: row.name || row.id, description: row.description || '' });
+  }
+  if (!rows.length) {
+    sourceListEl.innerHTML = '<p style="font-size:1.7rem;color:var(--muted)">没拉到源清单，检查后端连接后重开本页</p>';
+    return;
   }
   var html = '';
   for (var j = 0; j < rows.length; j++) {

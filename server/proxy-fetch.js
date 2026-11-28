@@ -142,7 +142,8 @@ function requestThroughProxy(targetUrl, proxyUrl, opts, done) {
           if (idx > 0) respHeaders[line.slice(0, idx).trim().toLowerCase()] = line.slice(idx + 1).trim();
         }
       } catch { /* 无响应头时忽略 */ }
-      finish(null, { status: code, headers: Object.assign({ 'content-type': contentType }, respHeaders), body });
+      // url 是「最后一跳」的绝对地址：清单 302 到别的目录/主机时，相对分片必须按它解析
+      finish(null, { status: code, headers: Object.assign({ 'content-type': contentType }, respHeaders), body, url: current });
     });
   };
 

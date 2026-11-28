@@ -1149,8 +1149,14 @@ function attachPlayer(url,onReady,onFatal){
          * 再问一次后端，把真正原因（上游 403 / 连接超时 / 地址过期）换成人话显示。
          */
         if(/manifestLoadError|levelLoadError/i.test(details)){
-          fetch(url,{cache:'no-store'}).then(r=>r.ok?null:r.json()).then(j=>{
-            if(j&&j.error)toast('播放失败：'+j.error);
+          fetch(url,{cache:'no-store'}).then(async r=>{
+            if(r.ok)return;
+            /* 后端把「直连还是代理、上游给了什么」写在响应头和 JSON 里，一并取出来 */
+            let msg='';
+            const hdr=r.headers.get('X-Veyra-Error');
+            if(hdr){try{msg=decodeURIComponent(hdr)}catch(e){msg=hdr}}
+            try{const j=await readJson(r);msg=j.error||msg}catch(e){msg=msg||e.message}
+            if(msg)toast('播放失败：'+msg);
           }).catch(()=>{});
         }
       }
@@ -1822,6 +1828,25 @@ document.getElementById('btn-otp-unbind-confirm').onclick=async()=>{
 document.getElementById('btn-admin-logout').onclick=()=>{adminToken='';localStorage.removeItem('veyraAdmin');location.reload()};
 
 // ---- 私密源诊断面板 ----
+/*
+ * 后端返回的不是 JSON 时（反代 504 的 HTML 错误页、旧镜像 404、容器没起），
+ * 别让 JSON.parse 抛出「Unexpected token '<'」这种谁也看不懂的话 ——
+ * 把状态码和页面标题翻成人话，用户照着就能判断是「等一等」还是「去 pull 镜像」。
+ */
+async function readJson(response){
+  const text=await response.text();
+  if(!text||!text.trim())throw new Error('后端没有返回内容（HTTP '+response.status+'）');
+  try{return JSON.parse(text)}catch(ignore){}
+  const title=/<title[^>]*>([\s\S]*?)<\/title>/i.exec(text);
+  const html=/<(!doctype|html)\b/i.test(text);
+  let hint='返回的不是 JSON（HTTP '+response.status+'）';
+  if(response.status===504)hint='后端在超时前没回话：反代/网关先断开了（后端可能还在跑体检）';
+  else if(response.status===502)hint='反代连不上后端（容器没起 / 端口不对）';
+  else if(response.status===404)hint='后端没有这个接口（多半还是旧镜像，pull 一下）';
+  else if(html)hint='返回的是网页而不是数据（多半是反代错误页）';
+  throw new Error(hint+(title?'：'+title[1].replace(/\s+/g,' ').trim().slice(0,60):''));
+}
+
 let _lastPrivatePlayUrl=''; // 最近一次私密播放地址（原始源 URL）
 document.getElementById('btn-admin-diagnose').onclick=async()=>{
   document.getElementById('diag-overlay').classList.add('open');
@@ -1897,14 +1922,14 @@ document.getElementById('btn-admin-diagnose').onclick=async()=>{
   body.textContent=lines.join('\n');
   try{
     const listRes=await fetch('/api/sources',{headers:AUTH()});
-    const listData=await listRes.json();
+    const listData=await readJson(listRes);
     if(!listRes.ok)throw new Error(listData.error||('HTTP '+listRes.status));
     for(const site of (listData.sources||[])){
       lines.push('\n· '+site.name+' 体检中…');
       body.textContent=lines.join('\n');
       try{
         const r=await fetch('/api/sources/diag?site='+encodeURIComponent(site.id),{headers:AUTH()});
-        const d=await r.json();
+        const d=await readJson(r);
         if(!r.ok)throw new Error(d.error||('HTTP '+r.status));
         const item=(d.results||[])[0];
         if(!item)throw new Error('没有返回结果');
