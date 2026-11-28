@@ -105,6 +105,8 @@ final class DownloadManager {
         volatile String nasTaskId = "";   // 转发模式：NAS 后端任务 id
         /** 「下载到远程服务器」选的服务器 id：下载完成（合并完）后自动排一次上传；空 = 只落本机。 */
         volatile String remoteId = "";
+        /** 私密源 id（hongguo 模式为空）：私密模式五个源共用 source=huangguo，靠它区分。 */
+        volatile String site = "";
         /** 调试模式（私密模式专用）：只把 TS 分片+KEY+playlist 下全并打包导出，**不做自动合并**。
          *  用来取「单集黑屏」那集的原始素材，交给开发者离线分析（产物在 Download/Veyra/剧名/第NN集_调试包.zip）。 */
         volatile boolean keepRaw = false;
@@ -123,7 +125,7 @@ final class DownloadManager {
                         .put("status", status).put("doneCount", doneCount).put("totalCount", totalCount)
                         .put("percent", percent).put("detail", detail)
                         .put("nasTaskId", nasTaskId).put("keepRaw", keepRaw)
-                        .put("remoteId", remoteId)
+                        .put("remoteId", remoteId).put("site", site)
                         .put("pulled", pulledIndexes())
                         .put("output", output).put("error", error).put("debug", debug).put("createdAt", createdAt);
             } catch (Exception e) { return new JSONObject(); }
@@ -153,6 +155,7 @@ final class DownloadManager {
                             .put("detail", t.detail).put("output", t.output).put("error", t.error).put("debug", t.debug)
                             .put("nasTaskId", t.nasTaskId)
                             .put("remoteId", t.remoteId)
+                            .put("site", t.site)
                             .put("keepRaw", t.keepRaw)
                             .put("episodes", t.episodes)
                             .put("createdAt", t.createdAt));
@@ -203,6 +206,7 @@ final class DownloadManager {
                 t.debug = o.optString("debug", "");
                 t.nasTaskId = o.optString("nasTaskId", "");
                 t.remoteId = o.optString("remoteId", "");
+                t.site = o.optString("site", "");
                 t.keepRaw = o.optBoolean("keepRaw", false);
                 // 恢复分集列表（episodes 为 final JSONArray，用 put 拷贝），否则重试恢复的任务分集数=0
                 JSONArray saved = o.optJSONArray("episodes");
@@ -401,6 +405,7 @@ final class DownloadManager {
         task.keepRaw = keepRaw;
         task.cover = cover == null ? "" : cover;
         task.remoteId = remoteId == null ? "" : remoteId;
+        task.site = "huangguo".equals(source) ? PrivateSite.get(context) : "";
         tasks.add(0, task);
         persist();
         pool.execute(() -> run(task));
@@ -411,8 +416,16 @@ final class DownloadManager {
         // 手机下载按内容模式隔离：红果（公开）与黄果（私密）的任务互不出现在对方列表里。
         // 任务 source 字段就是下载时的模式（hongguo | huangguo），旧记录同样适用。
         String active = ContentMode.get(context).active();
+        // 私密模式再按源细分：五个私密源共用 source=huangguo，老任务没有 site 就照常显示
+        String activeSite = ContentMode.PRIVATE.equals(active) ? PrivateSite.get(context) : "";
         JSONArray out = new JSONArray();
-        synchronized (tasks) { for (Task t : tasks) if (active.equals(t.source)) out.put(t.snapshot()); }
+        synchronized (tasks) {
+            for (Task t : tasks) {
+                if (!active.equals(t.source)) continue;
+                if (!activeSite.isEmpty() && !t.site.isEmpty() && !activeSite.equals(t.site)) continue;
+                out.put(t.snapshot());
+            }
+        }
         return out;
     }
 

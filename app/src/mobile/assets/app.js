@@ -8,6 +8,17 @@ let contentSource = 'hongguo';
 let contentReady;
 const bridgeInstance = Date.now() + '-' + Math.random().toString(36).slice(2);
 const privateMode = () => contentSource === 'huangguo';
+/* 当前私密源 id：切源后整个页面会 reload，所以启动时读一次就固定了 */
+const currentSiteId = () => (state.privateSite && state.privateSite.id) || '';
+/*
+ * 片单只看当前源：观看历史/收藏/下载都带了 site（写入时记的私密源 id）。
+ * 没带 site 的是这次改动之前的老记录 —— 那时还没记源，照常显示，不能因为升级就把人看过的历史藏起来。
+ */
+function inCurrentSite(entry) {
+  if (!privateMode()) return true;
+  const site = entry && entry.site;
+  return !site || site === currentSiteId();
+}
 window.NativeCallbacks = {
   resolve(id, value) { callbacks.get(id)?.resolve(value); callbacks.delete(id); },
   reject(id, message) { callbacks.get(id)?.reject(new Error(message)); callbacks.delete(id); }
@@ -68,7 +79,9 @@ const state = {
   sourceGroup: '', sourceQueue: [], previous: null, compactHeld: false,
   detailProgress: null,
   /* 详情→详情（制作方作品、相关作品）的返回栈：返回先退栈回到上一部剧 */
-  detailStack: [], detailProducer: null, epGroup: 0, epPickerOpen: false
+  detailStack: [], detailProducer: null, epGroup: 0, epPickerOpen: false,
+  /* 当前私密源自己的分类（源站给的，与 WebUI 的二级 tab 同一份） */
+  privateCats: []
 };
 /* 当前私密源：清单只有剧果 / 禁果短剧 / 黄果旧版 / 黄果 AI / 帝果 五个，与后端一致。
    必须在 contentReady 赋值「之前」发请求 —— contentReady 还没就绪时 api 才直接下发，
@@ -82,9 +95,11 @@ contentReady = Promise.all([api('content-status'), privateSiteReady]).then(([sta
   // 启动即拉取黄果网络通道（避免重启后 state.proxyMode 未初始化导致下载误判手机直连）
   try { api('get-proxy-mode').then(v => { state.proxyMode = Number(v) || 3; }).catch(() => {}); } catch (ignore) {}
   document.title = 'Veyra';
+  document.documentElement.dataset.mode = privateMode() ? 'private' : 'public';
   if (privateMode()) {
-    /* 私密源都是接口型：没有公开源那套"剧场/漫剧 + 热门榜"结构，
-       一级仍是两个 tab，但内容换成「全部 / 最新」，具体题材走「全部类型」页（源站分类）。 */
+    /* 私密源都是接口型，分类由源站给（剧果「成人/都市」、禁果「最新/最热」…）：
+       先用「全部 / 最新」占位，启动后 loadPrivateCats() 拉到真实分类再重绘 ——
+       和 WebUI 私密模式那两组二级 tab 用的是同一个 /categories 接口。 */
     categoryIds.adult = ['', 'new'];
     categoryIds.ai = ['', 'new'];
     CATEGORY_NAMES[''] = '全部';
@@ -108,6 +123,39 @@ contentReady = Promise.all([api('content-status'), privateSiteReady]).then(([sta
   }
   return status;
 });
+
+/* 私密源分类：源站自己那套（与 WebUI 同源）。拿到后重绘当前页面一次。 */
+contentReady.then(async () => {
+  if (!privateMode()) return;
+  const before = state.privateCats.length;
+  await loadPrivateCats().catch(() => {});
+  if (state.privateCats.length === before) return;
+  if (state.route === 'home' && state.home) renderHome();
+  else if (state.route === 'category') goCategory(state.tab, Math.min(state.sub[state.tab], state.privateCats.length - 1));
+});
+
+async function loadPrivateCats(force) {
+  if (!privateMode()) return [];
+  if (state.privateCats.length && !force) return state.privateCats;
+  try {
+    const data = await api('tags');
+    const cats = asArray(data && data.items)
+      // 和 WebUI 一致：'全部' / '最新' / '热门榜' 是通用入口，不算源站分类
+      .filter(item => item && item.slug && ['', 'new', 'hot'].indexOf(String(item.slug)) < 0)
+      .slice(0, 4)
+      .map(item => ({ slug: String(item.slug), name: String(item.name || item.slug) }));
+    if (!cats.length) return state.privateCats;
+    state.privateCats = cats;
+    categoryIds.adult = cats.map(c => c.slug);
+    categoryIds.ai = cats.map(c => c.slug);
+    cats.forEach(c => { CATEGORY_NAMES[c.slug] = c.name; });
+    const adultLabel = document.querySelector('[data-nav="adult"] > span:last-child');
+    const aiLabel = document.querySelector('[data-nav="ai"] > span:last-child');
+    if (adultLabel) adultLabel.textContent = cats[0].name;
+    if (aiLabel) aiLabel.textContent = (cats[1] || cats[0]).name;
+  } catch (ignore) { /* 源站分类拿不到就沿用「全部 / 最新」 */ }
+  return state.privateCats;
+}
 
 let routeToken = 0;
 let toastTimer;
@@ -680,9 +728,18 @@ function section(title, items, kind = '') {
   return `<section class="film-section"><div class="section-heading"><h2>${esc(title)}</h2></div><div class="film-row">${cells.join('')}</div></section>`;
 }
 function homeTagBar() {
-  const choices = privateMode() ? popularTags : publicPopularTags;
+  if (privateMode()) {
+    /*
+     * 私密源首页的分类条 = 当前源自己的分类（剧果「成人 / 都市」、禁果「最新 / 最热」…），
+     * 和 WebUI 私密模式的二级 tab 完全一致。以前这里用的是公开源那套「都市/校园/古风」，
+     * 在禁果、帝果上点进去多半是空列表。
+     */
+    const cats = asArray(state.privateCats);
+    return `<nav class="home-tags" aria-label="按类型浏览"><button type="button" class="all-tags-link" data-all-tags="1">全部类型 ${icon('arrow')}</button>
+      <div class="home-tag-scroll">${cats.map((cat, index) => `<button type="button" class="home-tag" data-private-cat="${index}">${esc(cat.name)}</button>`).join('')}</div></nav>`;
+  }
   return `<nav class="home-tags" aria-label="按类型浏览"><button type="button" class="all-tags-link" data-all-tags="1">全部类型 ${icon('arrow')}</button>
-    <div class="home-tag-scroll">${choices.map(([slug, name]) => `<button type="button" class="home-tag" data-tag-slug="${slug}" data-tag-name="${name}">${name}</button>`).join('')}</div></nav>`;
+    <div class="home-tag-scroll">${publicPopularTags.map(([slug, name]) => `<button type="button" class="home-tag" data-tag-slug="${slug}" data-tag-name="${name}">${name}</button>`).join('')}</div></nav>`;
 }
 
 function homeSignature(data) {
@@ -875,7 +932,13 @@ function campaignArtwork(item) {
 function homeSlides() {
   const featured = asArray(state.home?.featured);
   const videos = featured.length ? featured : asArray(state.home?.recommend?.items).slice(0, 5);
-  return [...activeCampaigns().map(item => ({ ...item, kind: 'campaign', cover: '' })), ...videos];
+  /*
+   * 私密模式只轮播当前源的内容。庆祝页那类运营位是公开首页的东西，
+   * 以前不管什么模式都排在第一位 —— 切到禁果也会先放一张「国庆庆祝页」，
+   * 看着就像轮播串源了。
+   */
+  const campaigns = privateMode() ? [] : activeCampaigns().map(item => ({ ...item, kind: 'campaign', cover: '' }));
+  return [...campaigns, ...videos];
 }
 function campaignSlide(item, index, count) {
   return '<div class="hero-slide hero-campaign" data-index="' + index + '">'
@@ -986,7 +1049,7 @@ async function changeBanner(targetIndex, direction, automatic = false) {
   finally { bannerChanging = false; scheduleBannerAuto(); }
 }
 function continueWatchingItem() {
-  return asArray(state.library?.progress)[0] || null;
+  return asArray(state.library?.progress).find(inCurrentSite) || null;
 }
 function continueWatchingMarkup() {
   const item = continueWatchingItem();
@@ -1091,9 +1154,9 @@ function categoryId() {
 }
 function compactMarkup() {
   if (!privateMode()) return '';
-  const adult = state.tab === 'adult';
-  const tabs = privateMode() ? (adult ? ['成人短剧', '成人漫剧'] : ['AI换脸', 'AI魔改']) : tabNames(state.tab);
-  return `<strong>${privateMode() ? (adult ? '成人剧场' : 'AI专区') : (adult ? '短剧' : '漫剧')}</strong><div class="compact-tabs" role="tablist">${tabs.map((name, index) => `<button type="button" role="tab" aria-selected="${index === state.sub[state.tab]}" data-sub="${index}" class="${index === state.sub[state.tab] ? 'selected' : ''}">${name}</button>`).join('')}</div>`;
+  const tabs = tabNames(state.tab);
+  const name = tabs[state.sub[state.tab]] || tabs[0] || '';
+  return `<strong>${esc(name)}</strong><div class="compact-tabs" role="tablist">${tabs.map((name, index) => `<button type="button" role="tab" aria-selected="${index === state.sub[state.tab]}" data-sub="${index}" class="${index === state.sub[state.tab] ? 'selected' : ''}">${esc(name)}</button>`).join('')}</div>`;
 }
 function updateCompact() {
   const eligible = privateMode() && state.route === 'category';
@@ -1112,7 +1175,7 @@ function renderCategory(keepCompact = false) {
   const adult = state.tab === 'adult';
   const currentId = categoryId();
   const currentName = tabNames(state.tab)[state.sub[state.tab]] || tabNames(state.tab)[0] || '';
-  const tabs = privateMode() ? (adult ? ['成人短剧', '成人漫剧'] : ['AI换脸', 'AI魔改']) : tabNames(state.tab);
+  const tabs = tabNames(state.tab);
   const items = asArray(state.category?.items);
   const lead = items[0] || null;
   const slides = privateMode() ? [] : items.slice(0, 5);
@@ -1121,8 +1184,9 @@ function renderCategory(keepCompact = false) {
   const spotlight = !privateMode() && slides.length ? `<div class="hero category-spotlight category-carousel">${categorySlide(slides[banner], banner, slides.length)}</div><div class="hero-dots">${slides.map((_, index) => `<i class="${index === banner ? 'active' : ''}" data-slide="${index}"></i>`).join('')}</div>` : lead ? `<div class="category-spotlight"><img data-cover="${esc(lead.cover)}" alt=""><div class="category-spotlight-copy"><h2>${esc(lead.title)}</h2><button type="button" data-open-id="${esc(lead.id)}">查看作品 ${icon('arrow')}</button></div></div>` : '';
   /* 二级切换：私密源是两个分类；公开源是「短剧/漫剧 + 热播榜」，两边都要有入口 */
   const switcher = tabs.length > 1 ? `<div class="segmented cols-${tabs.length}" role="tablist">${tabs.map((name, index) => `<button type="button" role="tab" data-sub="${index}" aria-selected="${index === state.sub[state.tab]}" class="${index === state.sub[state.tab] ? 'selected' : ''}">${name}</button>`).join('')}</div>` : '';
-  const heading = privateMode() ? (adult ? '成人剧场' : 'AI专区') : currentName;
-  const intro = isRankId(currentId) ? '红果官方热播榜，按观看与互动综合热度排序，每日更新。' : privateMode() ? (adult ? '短剧与漫剧，走进不同的人生。' : '换脸与魔改，探索影像新可能。') : (adult ? '真人演的看了不烧心' : '探索热门漫剧。');
+  // 私密模式的标题就是源站分类名（「成人」「都市」「最新」…），不再写死「成人剧场 / AI专区」
+  const heading = privateMode() ? (currentName || '全部') : currentName;
+  const intro = isRankId(currentId) ? '红果官方热播榜，按观看与互动综合热度排序，每日更新。' : privateMode() ? '按源站分类浏览，下拉继续加载。' : (adult ? '真人演的看了不烧心' : '探索热门漫剧。');
   content.innerHTML = `<div class="category-page"><div class="category-head"><h1>${esc(heading)}</h1><p>${intro}</p></div>
     ${switcher}
     ${spotlight}
@@ -1172,8 +1236,9 @@ function libraryBodyHtml() {
   const data = state.library || { progress: [], bookmarks: [] };
   const query = state.libraryQuery.trim().toLocaleLowerCase();
   const matches = item => String(item.title || '').toLocaleLowerCase().includes(query);
-  const progress = asArray(data.progress).filter(matches);
-  const bookmarks = asArray(data.bookmarks).filter(matches);
+  // 只看当前源：私密模式下五个源的片单互不串门
+  const progress = asArray(data.progress).filter(inCurrentSite).filter(matches);
+  const bookmarks = asArray(data.bookmarks).filter(inCurrentSite).filter(matches);
   if (query) {
     return `<div class="library-results"><p class="library-count">在观看历史中找到 ${progress.length} 部，在我的收藏中找到 ${bookmarks.length} 部</p>
       <h2>观看历史</h2>${progress.length ? `<div class="history-list">${progress.map(historyCard).join('')}</div>` : '<p class="library-no-match">没有匹配的观看记录</p>'}
@@ -1259,10 +1324,12 @@ function commitDownloadList(list, phone, nas, opts = {}) {
   list.dataset.sig = sig;
   if (!opts.noTimer) syncDownloadsTimer([...phone, ...nas]);
   if (!opts.noTimer) processForwardTasks(phone, nas);   // 转发模式：NAS 完成自动拉取合并（不阻塞渲染）
-  const phoneTasks = phone.map(t => Object.assign({}, t, { kind: 'phone' }));
+  // 只显示当前私密源的任务：五个源共用「私密」这一档，不按 site 分会混在一起
+  const visiblePhone = phone.filter(inCurrentSite);
+  const phoneTasks = visiblePhone.map(t => Object.assign({}, t, { kind: 'phone' }));
   // 手机转发任务关联的 NAS 任务不在下载页单独显示（由"下载到手机"触发，属内部步骤；主动下载到 NAS 的任务正常显示）
   const forwardNas = new Set(phone.filter(t => t.nasTaskId).map(t => String(t.nasTaskId)));
-  const nasTasks = nas.filter(t => !forwardNas.has(String(t.id)) && (!t.source || t.source === contentSource)).map(t => Object.assign({}, t, { kind: (t.kind === 'desktop' || t.kind === 'tv' || t.kind === 'android') ? t.kind : 'nas' }));
+  const nasTasks = nas.filter(t => !forwardNas.has(String(t.id)) && (!t.source || t.source === contentSource) && inCurrentSite(t)).map(t => Object.assign({}, t, { kind: (t.kind === 'desktop' || t.kind === 'tv' || t.kind === 'android') ? t.kind : 'nas' }));
   state.deviceTasks = nasTasks.filter(t => t.kind === 'desktop' || t.kind === 'tv' || t.kind === 'android');
   list.innerHTML = renderDownloadList([...phoneTasks, ...nasTasks]);
   hydrateImages();   // 下载封面是 data-cover，必须补 src 才出图（之前缺这步 → 灰块）
@@ -2194,9 +2261,14 @@ async function pickPrivateSite(id, name) {
     const result = await api('private-site', { id, name });
     state.privateSite = { id: (result && result.id) || id, name: (result && result.name) || name };
     state.home = null; state.category = null; state.tags = null;
+    // 分类是源站自己的：不清掉的话会拿上一个源的分类去请求新源（列表必空）
+    state.privateCats = [];
+    categoryIds.adult = ['', 'new'];
+    categoryIds.ai = ['', 'new'];
     closeSourcePop();
     toast(`已切换到 ${state.privateSite.name}`);
-    goHome();
+    await goHome();
+    loadPrivateCats().then(cats => { if (cats.length && state.route === 'home') renderHome(); }).catch(() => {});
   } catch (error) { toast(error.message || '切换失败', true); }
 }
 window.__veyraSourceBack = () => { if (sourcePop && !sourcePop.hidden) { closeSourcePop(); return true; } return false; };
@@ -3807,7 +3879,10 @@ function setNav(tab) {
   // 刷剧形态是首页自己的记忆，切 tab 不再退出：离开首页由 syncBinge 暂停，回到首页自动 resume
   listingObserver?.disconnect();
   categoryObserver?.disconnect();
-  document.querySelectorAll('#dock [data-nav]').forEach(button => button.classList.toggle('active', button.dataset.nav === tab));
+  // 私密模式底栏只有「首页 / 我的」：分类页属于首页流程，高亮继续留在首页，
+  // 否则底栏会两个都不亮（adult/ai 那两个按钮已经被 CSS 藏掉了）
+  const activeNav = privateMode() && (tab === 'adult' || tab === 'ai') ? 'home' : tab;
+  document.querySelectorAll('#dock [data-nav]').forEach(button => button.classList.toggle('active', button.dataset.nav === activeNav));
   compact.classList.remove('visible');
   compact.inert = true;
   state.compactHeld = false;
@@ -3909,6 +3984,12 @@ async function goTagQuery(query) {
 }
 
 async function openListing(kind) {
+  if (String(kind || '').indexOf('cat:') === 0) {
+    const slug = String(kind).slice(4);
+    const index = Math.max(0, asArray(state.privateCats).findIndex(cat => cat.slug === slug));
+    await goCategory('adult', index);
+    return;
+  }
   if (kind !== 'recommend' && kind !== 'newest') return;
   const token = ++routeToken;
   rememberScreen();
@@ -5566,6 +5647,8 @@ function refreshCurrentDownloads() {
     return;
   }
   if (event.target.closest('[data-all-tags]')) { goTags(); return; }
+  const privateCat = event.target.closest('[data-private-cat]');
+  if (privateCat) { goCategory('adult', Number(privateCat.dataset.privateCat) || 0); return; }
   const tagChoice = event.target.closest('[data-tag-slug]');
   if (tagChoice) { goTag(tagChoice.dataset.tagSlug, tagChoice.dataset.tagName); return; }
   const sub = event.target.closest('[data-sub]');

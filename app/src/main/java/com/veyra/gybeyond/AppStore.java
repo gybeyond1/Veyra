@@ -18,13 +18,27 @@ final class AppStore {
     private static final int CONTENT_CACHE_LIMIT = 80;
     private final SharedPreferences preferences;
     final String source;
+    private final Context context;
 
     AppStore(Context context) {
         this(context, ContentMode.get(context).active());
     }
     AppStore(Context context, String source) {
         this.source = source;
+        this.context = context.getApplicationContext();
         preferences = context.getSharedPreferences(ContentMode.PRIVATE.equals(source) ? "huangguo-data" : "dual-data-hongguo", Context.MODE_PRIVATE);
+    }
+
+    /**
+     * 当前私密源 id（公开模式为空）。
+     *
+     * 片单本来就按模式分开存（huangguo-data / dual-data-hongguo），但私密模式里五个源
+     * 共用同一个存储 —— 不记 site 的话，禁果的观看记录会出现在帝果的「我的」里。
+     * 每次写入都现取（切源后 store 不一定会重建，缓存下来就会记到上一个源头上）。
+     * 老记录没有这个字段，读取时按「当前源」处理，不会因为升级丢历史。
+     */
+    private String site() {
+        return ContentMode.PRIVATE.equals(source) ? PrivateSite.get(context) : "";
     }
 
     private String scoped(String name) {
@@ -61,25 +75,38 @@ final class AppStore {
         return merged;
     }
 
+    /**
+     * 内容缓存键带上私密源 id。
+     *
+     * 缓存本来就按模式分库，但私密模式五个源共用一个库；分类 slug 又是各站自己的
+     * （「全部」/「最新」这种通用值谁都有），不带 site 就会把上一个源的列表画到新源上 ——
+     * 看起来像「切了源内容没变」。
+     */
+    private String cacheKey(String key) {
+        String current = site();
+        return current.isEmpty() ? key : current + ":" + key;
+    }
+
     synchronized JSONObject cached(String key) {
         try {
-            String value = preferences.getString("cache:" + key, null);
+            String value = preferences.getString("cache:" + cacheKey(key), null);
             return value == null ? null : new JSONObject(value);
         } catch (Exception ignored) { return null; }
     }
 
     synchronized void saveCache(String key, JSONObject data) throws Exception {
         JSONObject entry = new JSONObject().put("at", System.currentTimeMillis()).put("data", data);
-        String updatedKey = "cache:" + key;
+        String scopedKey = cacheKey(key);
+        String updatedKey = "cache:" + scopedKey;
         SharedPreferences.Editor editor = preferences.edit().putString(updatedKey, entry.toString());
         Map<String, Long> timestamps = new HashMap<>();
         for (Map.Entry<String, ?> saved : preferences.getAll().entrySet()) {
             String name = saved.getKey();
-            if (!name.startsWith("cache:") || "cache:home".equals(name) || name.equals(updatedKey)) continue;
+            if (!name.startsWith("cache:") || name.endsWith(":home") || "cache:home".equals(name) || name.equals(updatedKey)) continue;
             try { timestamps.put(name, new JSONObject(String.valueOf(saved.getValue())).optLong("at")); }
             catch (Exception invalid) { editor.remove(name); }
         }
-        int capacity = "home".equals(key) ? CONTENT_CACHE_LIMIT : CONTENT_CACHE_LIMIT - 1;
+        int capacity = scopedKey.endsWith("home") ? CONTENT_CACHE_LIMIT : CONTENT_CACHE_LIMIT - 1;
         if (timestamps.size() > capacity) {
             ArrayList<String> oldest = new ArrayList<>(timestamps.keySet());
             oldest.sort(Comparator.comparingLong(timestamps::get));
@@ -115,6 +142,8 @@ final class AppStore {
         saved.put("id", id);
         saved.put("title", item.optString("title"));
         saved.put("cover", item.optString("cover"));
+        String site = site();
+        if (!site.isEmpty()) saved.put("site", site);
         saved.put("addedAt", System.currentTimeMillis());
         all.put(id, saved);
         deleted.remove(id);
@@ -157,6 +186,8 @@ final class AppStore {
         item.put("position", Math.max(0, Math.min(position, duration)));
         item.put("duration", duration);
         item.put("completed", input.optBoolean("completed"));
+        String site = site();
+        if (!site.isEmpty()) item.put("site", site);
         item.put("updatedAt", System.currentTimeMillis());
         all.put(id + ":" + episode, item);
         JSONObject deleted = object("historyDeleted");

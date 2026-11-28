@@ -370,7 +370,7 @@ video{width:100%;border-radius:10px;background:#000}
   <div id="gate-err" style="color:var(--err);font-size:13px"></div>
 </div>
 
-<script src="intro.js"></script>
+<script src="intro.js?v=0.31.71"></script>
 <script>
 let mode='public', adminToken=localStorage.getItem('veyraAdmin')||'';
 const AUTH=()=>({Authorization:'Bearer '+adminToken});
@@ -405,16 +405,12 @@ document.getElementById('gate-pass').addEventListener('keydown',e=>{if(e.key==='
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.style.display='block';setTimeout(()=>t.style.display='none',2500)}
 
 document.getElementById('mode-public').onclick=()=>setMode('public');
-/* 进私密模式：先全屏放启动动画（动画自带黑底、无控件、点击无响应），播完再切 */
+/* 进私密模式：先放启动动画（图层自带黑底、无控件、点击无响应），播完再切。
+   这里刻意不再 requestFullscreen —— 全屏 API 换来的是 Chrome 的「退出全屏」提示条
+   和顶部露出的那一条页面底色；fixed+inset:0 的图层本来就铺满视口，不需要它。 */
 async function enterPrivateView(){
   if(mode==='private'){setMode('private');return}
-  var entered=false;
-  if(!document.fullscreenElement&&document.documentElement.requestFullscreen){
-    try{await document.documentElement.requestFullscreen();entered=true}catch(e){}
-  }
   try{ if(window.veyraIntro) await window.veyraIntro.play(); }catch(e){}
-  // 只为这次动画进的全屏，播完还给用户；本来就在全屏的保持原样
-  if(entered&&document.fullscreenElement){try{await document.exitFullscreen()}catch(e){}}
   setMode('private');
 }
 document.getElementById('mode-private').onclick=enterPrivateView;
@@ -455,6 +451,9 @@ document.getElementById('detail-overlay').addEventListener('click',e=>{if(e.targ
 function setMode(m){
   mode=m;view='adult';subTab=0;hgCat='';resetCatalog();
   document.getElementById('search-input').value='';searching=false;
+  // 进私密模式就拉一次源分类：以前只有打开右侧抽屉才会拉，
+  // 于是「剧场 / AI 专区」下面长期是「全部 / 最新」，跟源站分类对不上
+  if(m==='private')loadPrivateSites();
   document.getElementById('mode-public').classList.toggle('active',m==='public');
   document.getElementById('mode-private').classList.toggle('active',m==='private');
   document.querySelectorAll('.pc-nav [data-view="adult"]').forEach(b=>b.textContent=m==='public'?'短剧':'剧场');
@@ -519,14 +518,15 @@ function loadPrivateSites(){
 
 /** 拉当前源的分类，填「剧场 / AI 专区」两组 tab；换了源就重新拉 */
 function loadRemoteCats(){
-  remoteCats=[];
   if(!privateSite)return;
   siteApi('categories').then(d=>{
-    remoteCats=((d&&d.items)||[])
+    const next=((d&&d.items)||[])
       .filter(c=>c&&c.id&&['','new','hot'].indexOf(String(c.id))<0)
       .slice(0,4);
+    const changed=next.map(c=>c.id).join(',')!==remoteCats.map(c=>c.id).join(',');
+    remoteCats=next;
     // 分类回来时如果正停在这一页，重绘 tab 并重载列表（否则会一直显示「全部/最新」）
-    if(mode==='private'&&(view==='adult'||view==='ai')){
+    if(changed&&mode==='private'&&(view==='adult'||view==='ai')){
       if(subTab>1)subTab=0;
       loadView().catch(()=>{});
     }
@@ -547,7 +547,11 @@ const PUBLIC_POPULAR=[['short:romance','爱情'],['short:period','年代'],['sho
 let catalogEpoch=0,catalogItems=[],catalogNextPage=null,catalogLoading=false;
 let heroSlides=[],heroIndex=0,heroTimer=null;
 const sentinel=document.getElementById('catalog-sentinel');
-const catalogObserver=new IntersectionObserver(entries=>{if(entries.some(e=>e.isIntersecting))loadPublicCatalog(true)},{rootMargin:'360px'});
+const catalogObserver=new IntersectionObserver(entries=>{
+  if(!entries.some(e=>e.isIntersecting))return;
+  // 私密源也要分页：以前这里只会调公开源的翻页，私密页永远停在第一页
+  if(mode==='private')loadPrivateCatalog(true);else loadPublicCatalog(true);
+},{rootMargin:'360px'});
 function resetCatalog(){
   catalogEpoch++;catalogItems=[];catalogNextPage=null;catalogLoading=false;catalogObserver.disconnect();
   sentinel.hidden=true;clearHero();
@@ -721,35 +725,60 @@ function updateCatalogSentinel(){
 }
 async function loadCategoryView(force){
   if(mode==='public'){await loadPublicCatalog(false,force);return}
+  await loadPrivateCatalog(false,force);
+}
+
+/*
+ * 私密源分类列表：和公开源一样接 nextPage + 滚动到底自动翻页。
+ * 源站一页 20 条左右，以前只取第一页（cachePut 的 nextPage 直接传 null），
+ * 于是「滑到最底部就没有了」—— 用户以为是加载坏了，其实压根没发第二页请求。
+ */
+async function loadPrivateCatalog(append,force){
+  if(mode!=='private')return;
+  if(append&&(catalogLoading||!catalogNextPage))return;
+  if(!append&&view!=='adult'&&view!=='ai')return;
+  // 换分类/换源时上一页可能还在飞：这里直接把它作废（下面 ++catalogEpoch 会让它自己退出），
+  // 否则 catalogLoading 卡在 true，新分类永远发不出请求
+  if(!append)catalogLoading=false;
   const key=cacheKey();
-  const cached=force?null:cacheGet(key);
-  if(cached){
-    grid.classList.remove('app-grid');grid.style.display='grid';renderGrid(cached.items);
-  }else{
-    grid.classList.remove('app-grid');grid.innerHTML='<div class="loading">加载中…</div>';
-  }
-  const epoch=++catalogEpoch;
-  try{
-    const id=privateSubs()[view][subTab];
-    let items;
-    if(remotePrivate()){
-      const data=await siteApi('category?slug='+encodeURIComponent(id)+'&page=1');
-      items=(data.items||[]).map(x=>({id:x.id,title:x.title,cover:x.cover,description:x.description||'',badge:x.episodeLabel||'',score:x.score||''}));
-      if(epoch!==catalogEpoch)return;
-      cachePut(key,items,null);
-      grid.classList.remove('app-grid');grid.style.display='grid';renderGrid(items);
-      return;
+  const requestView=view,requestSub=subTab;
+  let epoch;
+  if(!append){
+    const cached=force?null:cacheGet(key);
+    catalogItems=[];catalogNextPage=null;
+    epoch=++catalogEpoch;
+    if(cached){
+      catalogItems=cached.items.slice();catalogNextPage=cached.nextPage||null;
+      grid.classList.remove('app-grid');grid.style.display='grid';renderGrid(catalogItems);
+      updateCatalogSentinel();
+    }else{
+      grid.classList.remove('app-grid');grid.innerHTML='<div class="loading">加载中…</div>';
     }
-    const r=await fetch(hgProxy(HUANGGUO_BASE+id+'/'));
-    if(!r.ok)throw new Error('黄果源 '+r.status+'：请在管理抽屉配置可用的 backendProxy 后端代理');
-    items=parseHuangguoHtml(await r.text());
-    if(epoch!==catalogEpoch)return;
-    cachePut(key,items,null);
-    grid.classList.remove('app-grid');grid.style.display='grid';renderGrid(items);
+  }else epoch=catalogEpoch;
+  const page=append?catalogNextPage:1;
+  catalogLoading=true;sentinel.hidden=false;sentinel.innerHTML='<span>正在加载更多…</span>';
+  try{
+    const id=privateSubs()[requestView][requestSub];
+    const data=await siteApi('category?slug='+encodeURIComponent(id)+'&page='+page);
+    if(epoch!==catalogEpoch||mode!=='private'||view!==requestView||subTab!==requestSub)return;
+    const seen=new Set(catalogItems.map(x=>String(x.id)));
+    const incoming=(data.items||[])
+      .map(x=>({id:x.id,title:x.title,cover:x.cover,description:x.description||'',badge:x.episodeLabel||'',score:x.score||''}))
+      .filter(x=>x.id&&!seen.has(String(x.id))&&seen.add(String(x.id)));
+    catalogItems=catalogItems.concat(incoming);
+    /* 翻页翻到空页就收手：有些源会一直回同一个 nextPage，照着翻下去就是无限请求 */
+    catalogNextPage=(append&&!incoming.length)?null:(data.nextPage||null);
+    grid.classList.remove('app-grid');grid.style.display='grid';renderGrid(catalogItems);
+    if(!append)cachePut(key,catalogItems,catalogNextPage);
+    updateCatalogSentinel();
   }catch(e){
     if(epoch!==catalogEpoch)return;
-    if(cached){toast('刷新失败，显示的是上次缓存')}
+    if(append){toast('加载更多失败：'+e.message);}
+    else if(catalogItems.length){toast('刷新失败，显示的是上次缓存')}
     else grid.innerHTML='<div class="loading">加载失败: '+escapeHtml(e.message)+'</div>';
+    sentinel.hidden=!catalogItems.length;
+  }finally{
+    if(epoch===catalogEpoch)catalogLoading=false;
   }
 }
 

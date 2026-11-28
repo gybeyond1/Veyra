@@ -1099,3 +1099,10 @@ html[data-legacy] .search-grid .poster.fallback,
 html[data-legacy] .detail-related-card .poster.fallback { height: 150px; padding-bottom: 0 }
 html[data-legacy] .relay-qr { position: relative; height: 0; padding-bottom: 100% }
 html[data-legacy] .relay-qr svg { position: absolute; top: 0; left: 0; width: 100%; height: 100% }
+
+/* 私密模式底栏只留「首页 / 我的」。
+   剧场 / AI 是公开源（红果）的分区，私密源没有这层结构 —— 以前点进去只有「全部 / 最新」
+   两个空壳 tab，现在分类直接放在首页，底栏不再留两个用不上的入口。 */
+html[data-mode=private] #dock{grid-template-columns:repeat(2,minmax(0,1fr))}
+html[data-mode=private] #dock [data-nav=adult],
+html[data-mode=private] #dock [data-nav=ai]{display:none}

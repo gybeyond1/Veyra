@@ -140,38 +140,54 @@ final class HongguoRepository {
                 .put("recommend", shorts).put("newest", comics);
     }
     /**
-     * 首页轮播：四个榜各取前 2 部。
+     * 首页轮播：热播 / 漫剧 / 真人 / AI 四个榜各取前 2，一共 6 张。
      *
-     * 以前只取短剧首页前 5，结果永远在放同一批真人剧，翻来覆去就是那几张海报。
-     * 四个榜（热播 / 真人 / 漫剧 / AI）并行拉第一页，各挑 2 部，轮播才看得出类型差异。
-     * 任意一个榜挂了就跳过，四个全挂再退回短剧前 5。
+     * 以前是「每个榜各塞 2 张、有几个算几个」，四个榜之间本来就有重叠
+     * （热播榜里常有真人剧，漫剧榜和 AI 榜也会互相串），8 个位置里于是出现两个重复海报。
+     * 现在按 id 去重，并且按用户看到的顺序（热播 → 漫剧 → 真人 → AI）依次补位，
+     * 满 6 张就停；某个榜老半天不回（或整榜挂掉）也不影响其余三个。
      */
     private JSONArray boardFeatured(JSONArray fallback) {
-        final String[] boards = {"hot-drama", "hot-real-drama", "hot-comic-drama", "hot-ai-drama"};
+        final String[] boards = {"hot-drama", "hot-comic-drama", "hot-real-drama", "hot-ai-drama"};
+        final int total = 6;
         java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(boards.length);
-        java.util.List<java.util.concurrent.Future<JSONArray>> jobs = new java.util.ArrayList<>();
+        java.util.Map<String, java.util.concurrent.Future<JSONArray>> jobs = new java.util.HashMap<>();
         for (final String board : boards) {
-            jobs.add(pool.submit(() -> {
+            jobs.put(board, pool.submit(() -> {
                 JSONArray picked = new JSONArray();
                 try {
                     CatalogPage page = upstream.ranking(board, 1);
-                    for (int i = 0; i < Math.min(2, page.getItems().size()); i++)
+                    /* 一个榜多备几张：前两名如果和前面的榜撞了，还能往后顺延补位 */
+                    for (int i = 0; i < Math.min(6, page.getItems().size()); i++)
                         picked.put(card(page.getItems().get(i), board));
                 } catch (Exception ignore) { /* 单个榜失败不影响其余三个 */ }
                 return picked;
             }));
         }
         JSONArray merged = new JSONArray();
-        for (java.util.concurrent.Future<JSONArray> job : jobs) {
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (String board : boards) {
+            java.util.concurrent.Future<JSONArray> job = jobs.get(board);
+            int taken = 0;
             try {
                 JSONArray part = job.get(8, java.util.concurrent.TimeUnit.SECONDS);
-                for (int i = 0; i < part.length(); i++) merged.put(part.get(i));
+                for (int i = 0; i < part.length() && taken < 2 && merged.length() < total; i++) {
+                    JSONObject item = part.optJSONObject(i);
+                    String id = item == null ? "" : item.optString("id", "");
+                    if (id.isEmpty() || !seen.add(id)) continue;
+                    merged.put(item);
+                    taken++;
+                }
             } catch (Exception ignore) { job.cancel(true); }
         }
         pool.shutdownNow();
-        if (merged.length() == 0) {
-            for (int i = 0; i < Math.min(5, fallback.length()); i++)
-                try { merged.put(fallback.get(i)); } catch (Exception ignore) { }
+        /* 有榜重复/失败导致不足 6 张时，用短剧首页补齐（同样去重） */
+        for (int i = 0; i < fallback.length() && merged.length() < total; i++) {
+            try {
+                JSONObject item = fallback.getJSONObject(i);
+                if (item.optString("id", "").isEmpty() || !seen.add(item.optString("id"))) continue;
+                merged.put(item);
+            } catch (Exception ignore) { }
         }
         return merged;
     }

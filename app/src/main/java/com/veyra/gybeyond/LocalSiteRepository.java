@@ -166,18 +166,29 @@ final class LocalSiteRepository {
         File file = new File(coverDir, key(url) + ".img");
         byte[] bytes = null;
         if (file.isFile()) bytes = java.nio.file.Files.readAllBytes(file.toPath());
+        // 缓存里躺着的也可能是以前存下来的破图（黄果旧版的乱码头），认不出来就丢掉重取
+        if (bytes != null && ImageBytes.mimeOf(bytes).isEmpty()) {
+            bytes = null;
+            file.delete();
+        }
         if (bytes == null || bytes.length < 64) {
             // 封面直连：图床多半不校验 Referer，带上反而 403（黄果旧版那个 CDN 就是这样）
             bytes = com.veyra.gybeyond.localsrc.Net.peek(url, null, 15000, 8L << 20, true);
             if (bytes == null || bytes.length < 64) throw new IllegalStateException("封面下载失败");
+            String mime = ImageBytes.mimeOf(bytes);
+            /*
+             * 黄果旧版的图床会把 JPEG 的头部几十上百字节换成乱码（服务端有专门的补头逻辑）。
+             * 端侧直连拿到这种字节时别再往上交：交给 <img> 只会是一块灰，
+             * 抛出去让上层改走服务端（那边会解/补），或者由前端显示占位。
+             */
+            if (mime.isEmpty()) throw new IllegalStateException("封面不是可识别的图片");
             try (FileOutputStream output = new FileOutputStream(file)) {
                 output.write(bytes);
             }
             trim();
+            return "data:" + mime + ";base64," + Base64.encodeToString(bytes, Base64.NO_WRAP);
         }
-        String mime = bytes[0] == (byte) 0xff ? "image/jpeg"
-                : bytes[0] == (byte) 0x89 ? "image/png"
-                : bytes[0] == 'G' ? "image/gif" : "image/webp";
+        String mime = ImageBytes.mimeOf(bytes);
         return "data:" + mime + ";base64," + Base64.encodeToString(bytes, Base64.NO_WRAP);
     }
 

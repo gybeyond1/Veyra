@@ -111,15 +111,22 @@ final class DualContentRepository {
 
     String coverData(String url) throws Exception {
         if (!privateMode()) return hongguo.coverData(url);
-        // 封面走端侧：手机出口能取到的图，服务器反倒常被图床拦；端侧取不到再让后端试
-        if (local != null) {
-            try {
-                return local.coverData(url);
-            } catch (Exception error) {
-                Log.w(TAG, "端侧封面失败，改走后端：" + error.getMessage());
-            }
+        /*
+         * 私密封面改「后端优先」。
+         *
+         * 以前是端侧优先（手机出口更不容易被图床拦），但黄果旧版/黄果 AI 的图不是普通图片：
+         * 旧版的 JPEG 头部被替换成乱码，AI 的部分图要按源站规则处理，服务端
+         * /api/sources/{site}/cover 里有一整套解密 + 补头逻辑（WebUI 就是走它，所以那边一直正常），
+         * 端侧只会把原始字节原样交给 <img> —— 表现就是「WebUI 有图，手机上全是灰块」。
+         * 现在先请后端解，后端确实拿不到（断网/源站 403 且没配代理）再退回端侧直连。
+         */
+        try {
+            return remote.coverData(url);
+        } catch (Exception error) {
+            Log.w(TAG, "后端封面失败，改走端侧直连：" + error.getMessage());
         }
-        return remote.coverData(url);
+        if (local != null) return local.coverData(url);
+        throw new IllegalStateException("封面下载失败");
     }
 
     /*

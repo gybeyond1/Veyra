@@ -170,6 +170,11 @@ final class BackendSiteRepository {
         File file = new File(coverDir, key(url) + ".img");
         byte[] bytes = null;
         if (file.isFile()) bytes = java.nio.file.Files.readAllBytes(file.toPath());
+        // 老缓存里可能是服务端还没修好时存下的乱码（黄果旧版那批），认不出来就丢掉重取
+        if (bytes != null && ImageBytes.mimeOf(bytes).isEmpty()) {
+            bytes = null;
+            file.delete();
+        }
         if (bytes == null || bytes.length < 64) {
             String encoded = URLEncoder.encode(url, "UTF-8");
             try {
@@ -181,14 +186,15 @@ final class BackendSiteRepository {
                  */
                 bytes = account.getBytes("api/sources/" + site + "/cover?redirect=1&url=" + encoded);
             }
+            String mime = ImageBytes.mimeOf(bytes);
+            if (mime.isEmpty()) throw new IllegalStateException("封面不是可识别的图片");
             try (FileOutputStream output = new FileOutputStream(file)) {
                 output.write(bytes);
             }
             trim();
+            return "data:" + mime + ";base64," + Base64.encodeToString(bytes, Base64.NO_WRAP);
         }
-        String mime = bytes[0] == (byte) 0xff ? "image/jpeg"
-                : bytes[0] == (byte) 0x89 ? "image/png"
-                : bytes[0] == 'G' ? "image/gif" : "image/webp";
+        String mime = ImageBytes.mimeOf(bytes);
         return "data:" + mime + ";base64," + Base64.encodeToString(bytes, Base64.NO_WRAP);
     }
 
