@@ -1541,6 +1541,9 @@ async function runTask(task) {
           while (attempt <= RETRIES && !signal.aborted && Date.now() < epDeadline) {
             try {
               const started = Date.now();
+              // 黄果（私密）源有自己的取流链路（playback → m3u8 → 分片），
+              // 不能先走红果的 App/网页取流：那条路对黄果取不到地址，会直接把这一集判失败
+              if (task.source !== 'huangguo') {
               // 红果 App 取流：手里没有地址才去取（有地址说明预热/上一轮拿到了，别重复打配额）
               if (ep.episodeId && !ep.url) {
                 for (const wait of [0, 6000]) {
@@ -1575,8 +1578,9 @@ async function runTask(task) {
                   throw new Error(`第 ${ep.index} 集网页源解析失败: ${e.message}`);
                 }
               }
+              }
               if (task.source === 'huangguo') {
-                // 黄果（私密）源：每集页面解析 videoSrc(m3u8) → 分片下载 → ffmpeg 封装（一次完成）
+                // 黄果（私密）源：每集解析 playback(m3u8) → 分片下载 → ffmpeg 封装（一次完成）
                 task.progress.detail = `第 ${ep.index} 集处理中`;
                 touch(task);
                 await huangguoDownloadEpisode(task.seriesId, ep.index, dir, plainFile);

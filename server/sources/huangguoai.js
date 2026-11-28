@@ -31,20 +31,36 @@ const AI_CATEGORIES = [
 
 const state = { base: '', probing: null };
 
-async function edgeAt(base, path, timeout) {
-  const res = await request(`${base}/api/edge/request`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json', Origin: base, Referer: `${base}/` },
-    body: JSON.stringify({ method: 'GET', path, body: '', content_type: '' }),
-    timeout: timeout || 20000,
+/*
+ * 2026-11 站点把 /api/edge/request 这个统一入口关了（POST 过去连不上），
+ * 但站点自己的 REST 接口全部还能直接访问：GET /api/videos/:id 给分集，
+ * POST /api/videos/:id/episodes/:ep/playback 给播放地址。
+ * 所以这里直接打 REST，不再绕边缘入口 —— 少一跳，也少一个会消失的中间层。
+ */
+const SITE_UA = 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36';
+
+async function jsonAt(base, path, options) {
+  const opt = options || {};
+  const method = opt.method || 'GET';
+  const res = await request(`${base}${path}`, {
+    method,
+    headers: {
+      'User-Agent': SITE_UA,
+      Accept: 'application/json',
+      Referer: `${base}/`,
+      Origin: base,
+      ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}),
+    },
+    body: method === 'POST' ? JSON.stringify(opt.body || {}) : undefined,
+    timeout: opt.timeout || 20000,
     maxBytes: 8 << 20,
   });
-  if (res.status < 200 || res.status >= 300) throw new Error(`镜像返回 ${res.status}`);
+  if (res.status < 200 || res.status >= 300) throw new Error(`站点返回 ${res.status}`);
   let envelope;
   try {
     envelope = JSON.parse(res.text());
   } catch {
-    throw new Error('镜像返回格式异常');
+    throw new Error('站点返回格式异常');
   }
   if (String(envelope.status) !== '1') throw new Error(String(envelope.msg || '接口没有返回数据').slice(0, 120));
   return envelope.data;
@@ -58,7 +74,7 @@ function ensureBase() {
   if (state.base) return Promise.resolve(state.base);
   if (state.probing) return state.probing;
   state.probing = Promise.any(
-    MIRRORS.map((base) => edgeAt(base, '/api/videos?page=1&size=1', 8000).then(() => base))
+    MIRRORS.map((base) => jsonAt(base, '/api/videos?page=1&size=1', { timeout: 8000 }).then(() => base))
   )
     .then((base) => {
       state.base = base;
@@ -74,18 +90,18 @@ function ensureBase() {
 }
 
 /** 请求一次；镜像中途挂掉就重新探活再来一遍 */
-async function edge(path) {
+async function edge(path, options) {
   let lastError = null;
   for (let round = 0; round < 2; round += 1) {
     const base = await ensureBase();
     try {
-      return await edgeAt(base, path);
+      return await jsonAt(base, path, options);
     } catch (error) {
       lastError = error;
       state.base = '';
     }
   }
-  throw new Error(`黄果 AI 线路暂不可用（${lastError ? lastError.message : '镜像无响应'}）`);
+  throw new Error(`黄果线路暂不可用（${lastError ? lastError.message : '镜像无响应'}）`);
 }
 
 function absolute(value) {
@@ -202,9 +218,11 @@ async function play(id, number) {
   const info = await detail(id);
   const hit = info._episodes.find((item) => item.number === number);
   if (!hit) throw new Error('这一集不存在');
-  const data = await edge(`/api/videos/${encodeURIComponent(info.id)}/play?ep=${number}&page_texts=0`);
-  const url = absolute(data.video_url || data.video_url_hevc);
-  if (!/^https?:\/\//i.test(url)) throw new Error('黄果 AI 没有给出播放地址');
+  // 2026-11 起播放地址只从 playback 接口下发（旧的 GET /play 还在，但 video_url 恒为空）
+  const data = await edge(`/api/videos/${encodeURIComponent(info.id)}/episodes/${number}/playback`, { method: 'POST', body: {} });
+  const streams = data && data.streams ? data.streams : {};
+  const url = absolute(streams.main || streams.hevc || data.video_url || data.video_url_hevc);
+  if (!/^https?:\/\//i.test(url)) throw new Error('黄果没有给出播放地址');
   return {
     url,
     referer: `${state.base}/video/${info.id}/`,
