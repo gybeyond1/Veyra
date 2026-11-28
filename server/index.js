@@ -120,6 +120,8 @@ const HUANGGUO_HOST_RE = new RegExp(
 const PROXY_STRICT = process.env.PROXY_STRICT !== '0';
 const { isPrivateHostname, assertPublicUrl } = require('./ssrf-guard');
 const proxyFetch = require('./proxy-fetch');
+// 封面解密与源网关共用一份实现（黄果旧版封面是密文，见 sources/util.js）
+const { decryptHuangguoCover } = require('./sources/util');
 
 // ---- TOTP 动态码（RFC 6238，30 秒窗口，6 位）----
 const OTP_WINDOW = 30; // 秒
@@ -894,40 +896,7 @@ function cachePut(key, body, type, ttlMs) {
   if (proxyCache.size >= MAX_CACHE_ENTRIES) { const first = proxyCache.keys().next().value; proxyCache.delete(first); }
   proxyCache.set(key, { body, type, expires: Date.now() + ttlMs });
 }
-// 黄果系封面 AES-128-CBC 解密（与 APK SiteRepository/SiteProfile 同源逻辑；密钥来自 site-default.json cover 配置）
-function decryptHuangguoCover(buf) {
-  if (!buf || buf.length < 32) return buf;
-  const isImage = (b) => b.length >= 12 && (
-    (b[0] === 0xFF && b[1] === 0xD8) ||
-    (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47 && b[4] === 0x0D && b[5] === 0x0A && b[6] === 0x1A && b[7] === 0x0A) ||
-    (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) ||
-    (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38)
-  );
-  if (isImage(buf)) return buf; // 已是有效图片（直连真图/已解密缓存）则幂等跳过
-  let out;
-  try {
-    const d = crypto.createDecipheriv('aes-128-cbc',
-      Buffer.from('f5d965df75336270', 'utf8'), Buffer.from('97b60374abc2fbe1', 'utf8'));
-    out = Buffer.concat([d.update(buf), d.final()]);
-  } catch { return buf; }
-  // 头修复：签名校验后 offset 6 XOR 0x0E（APK repairCoverHeader 同款）
-  if (out.length >= 12) {
-    const png = out[0] === 0x89 && out[1] === 0x50 && out[2] === 0x4E && out[3] === 0x47 &&
-      out[4] === 0x0D && out[5] === 0x0A && out[6] === 0x14 && out[7] === 0x0A;
-    const jpeg = out[0] === 0xFF && out[1] === 0xD8 && out[2] === 0xFF;
-    let ok = false;
-    if (png) ok = true;
-    else if (jpeg) {
-      if (out[3] === 0xE0) ok = (out[6] === 0x44 && out[7] === 0x46 && out[8] === 0x49 && out[9] === 0x46 && out[10] === 0);
-      else if (out[3] === 0xDB) ok = ((out[6] & 0xFC) === 0x0C);
-      else if (out[3] === 0xE1) ok = (out[6] === 0x4B && out[7] === 0x78 && out[8] === 0x69 && out[9] === 0x66);
-      else if (out[3] === 0xE2) ok = (out[6] === 0x47 && out[7] === 0x43 && out[8] === 0x43 && out[9] === 0x5F);
-    }
-    if (ok) out[6] ^= 0x0E;
-  }
-  return isImage(out) ? out : buf;
-}
-
+/* 封面解密在 sources/util.js（源网关和 huangguo-proxy 共用一份） */
 function kindOf(type, body) {
   const t = String(type || '').toLowerCase();
   if (t.includes('mpegurl') || t.includes('m3u8')) return 'm3u8';

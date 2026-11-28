@@ -19,6 +19,37 @@ const UA =
 
 const VOD = /\/vod\/(play|detail|type|show|search)\/id\/(\d+)(?:\/sid\/(\d+))?(?:\/nid\/(\d+))?/;
 
+/**
+ * 从任意播放页链接里抠出 (剧 id, sid, 集号)。
+ *
+ * 苹果 CMS 的地址有好几种写法，站点换一次主题就可能换一种：
+ *   /index.php/vod/play/id/123/sid/1/nid/2.html   ← 原始模板
+ *   /vod/play/123-1-2.html                       ← 静态化
+ *   /vod/play/id/123/sid/1/nid/2/                ← 末尾斜杠
+ *   /index.php?m=vod-play-id-123-sid-1-nid-2.html
+ *   /vodplay/123-1-2.html                        ← 变种
+ * 之前只认第一种，站点一换皮就整页「没有解析到分集」，所以这里一次覆盖全。
+ */
+function parsePlayHref(href, key) {
+  if (!href) return null;
+  const patterns = [
+    /\/vod\/play\/id\/(\d+)\/sid\/(\d+)\/nid\/(\d+)/i,
+    /\/vod-?play\/(\d+)-(\d+)-(\d+)/i,
+    /\/vod\/play\/(\d+)\/(\d+)\/(\d+)/i,
+    /[?&]id=(\d+)[^#]*?[?&]sid=(\d+)[^#]*?[?&]nid=(\d+)/i,
+    /vod-play-id-(\d+)-sid-(\d+)-nid-(\d+)/i,
+  ];
+  for (const pattern of patterns) {
+    const hit = pattern.exec(href);
+    if (!hit) continue;
+    if (key && hit[1] !== String(key)) continue;
+    const number = Number(hit[3]);
+    if (!number) continue;
+    return { id: String(hit[1]), sid: Number(hit[2]) || 1, number };
+  }
+  return null;
+}
+
 const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
 
 function text(html) {
@@ -266,15 +297,40 @@ async function detail(id) {
     for (const anchor of anchors(html)) {
       const href = absolute(anchor.attr.href, data.url);
       if (!href) continue;
-      const match = /\/vod\/play\/id\/(\d+)\/sid\/(\d+)\/nid\/(\d+)/.exec(href);
-      if (!match || match[1] !== key) continue;
-      const number = Number(match[3]);
-      if (!number || seen.has(number)) continue;
-      seen.add(number);
-      episodes.push({ number, sid: Number(match[2]), title: text(anchor.inner) || `第 ${number} 集` });
+      const hit = parsePlayHref(href, key);
+      if (!hit || seen.has(hit.number)) continue;
+      seen.add(hit.number);
+      episodes.push({ number: hit.number, sid: hit.sid, title: text(anchor.inner) || `第 ${hit.number} 集` });
     }
     episodes.sort((a, b) => a.number - b.number);
-    if (!episodes.length) throw new Error('帝果详情页没有解析到分集');
+    /*
+     * 页面把播放列表交给 JS 渲染时，HTML 里一条 /vod/play 链接都没有。
+     * 这时按页面写的「共 N 集 / 更新至 N 集」拿总集数，再探一次 sid=1 能不能开出播放页 ——
+     * 苹果 CMS 的 nid 就是集号，探测通过就能把整季补齐，比直接报「没有分集」有用。
+     */
+    if (!episodes.length) {
+      const countHit = /(?:共|全)\s*(\d{1,4})\s*集|更新至\s*(\d{1,4})\s*集/.exec(text(html));
+      const total = countHit ? Number(countHit[1] || countHit[2]) : 0;
+      if (total > 0 && total <= 2000) {
+        const probe = await page(`/index.php/vod/play/id/${key}/sid/1/nid/1.html`).catch(() => null);
+        if (probe && probe.html && /player_aaaa/.test(probe.html)) {
+          for (let n = 1; n <= total; n += 1) episodes.push({ number: n, sid: 1, title: `第 ${n} 集` });
+        }
+      }
+    }
+    if (!episodes.length) {
+      /*
+       * 报错要能直接定位：把页面上真实出现的 /vod/ 链接抓几条出来，
+       * 下次主题再换写法，看这串就知道该往哪个格式上补。
+       */
+      const samples = [];
+      for (const anchor of anchors(html)) {
+        const href = String(anchor.attr.href || '');
+        if (href && /vod|play/i.test(href) && samples.length < 3 && !samples.includes(href)) samples.push(href.slice(0, 80));
+      }
+      const hint = samples.length ? `；页面链接样例：${samples.join(' | ')}` : '；页面里没有任何播放链接（可能需要登录/被反爬拦了）';
+      throw new Error('帝果详情页没有解析到分集' + hint);
+    }
     return {
       id: key,
       title: title.slice(0, 200) || `帝果 ${key}`,

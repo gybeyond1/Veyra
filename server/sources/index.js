@@ -14,8 +14,16 @@
  * recommend / newest / episodes[].number|url），所以前端数据层不用改，只加"切源"。
  */
 
-const { request, requestVia, setBackendProxy, cached, issueToken, readToken, rewritePlaylist, baseUrlOf } = require('./util');
+const { request, requestVia, setBackendProxy, cached, issueToken, readToken, rewritePlaylist, baseUrlOf, decryptHuangguoCover } = require('./util');
 const { assertPublicUrl } = require('../ssrf-guard');
+
+/*
+ * 封面缓存：黄果旧版/黄果 AI 的图都在境外 CDN，单张 300~400KB，一次要 2~3 秒。
+ * 一页 20 张图、翻页回来又要重下，体验很差；图本身按 URL 是不会变的，缓存 10 分钟足够。
+ */
+const coverCache = new Map();
+const COVER_TTL = 10 * 60 * 1000;
+const COVER_MAX = 240;
 
 const providers = [
   require('./huangju'),
@@ -170,7 +178,20 @@ async function stream(req, res) {
 
   let upstream;
   try {
-    upstream = await requestVia(target.toString(), { headers, timeout: 25000, maxBytes: MEDIA_MAX }, proxy);
+    /*
+     * 清单/分片取一次就 502 太脆：源站前面挂着好几层 CDN，偶发 5xx 和连接重置
+     * 都出现过（用户那边点一下就红，回头再点又好了）。这里对 5xx 与连接错误
+     * 重试两轮，4xx 不重试 —— 403/404 重试多少次都一样，只会让用户多等。
+     */
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        upstream = await requestVia(target.toString(), { headers, timeout: 25000, maxBytes: MEDIA_MAX }, proxy);
+        if (upstream.status < 500 || attempt >= 2) break;
+      } catch (error) {
+        if (attempt >= 2) throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    }
     /*
      * 野果这类源的播放地址带十几秒有效的签名，用户点开暂停一会儿再播就会 403。
      * 根地址失效时让 provider 重新要一次，分片/子列表不重签（它们由播放列表实时下发）。
@@ -187,6 +208,7 @@ async function stream(req, res) {
       }
     }
   } catch (error) {
+    res.setHeader('X-Veyra-Error', encodeURIComponent(('上游连接失败：' + (error.message || '')).slice(0, 180)));
     return res.status(502).json({ error: '上游连接失败：' + (error.message || '') });
   }
   if (upstream.status === 416 && rangeHeader) {
@@ -195,6 +217,7 @@ async function stream(req, res) {
     return res.end();
   }
   if (upstream.status < 200 || upstream.status >= 300) {
+    res.setHeader('X-Veyra-Error', encodeURIComponent(`上游返回 ${upstream.status}`));
     return res.status(502).json({ error: `上游返回 ${upstream.status}` });
   }
 
@@ -636,8 +659,12 @@ function mount(app, deps) {
    * 封面：接口型源的封面是普通图片，客户端按 data URI 渲染，统一从后端取。
    * 只放行公网 http/https，避免被当成内网探测跳板。
    */
-  app.get('/api/sources/:source/cover', auth, async (req, res) => {
-    if (!needUser(req, res)) return;
+  /*
+   * 封面不走 Bearer：<img src> 带不上 Authorization 头，加了鉴权就等于所有私密封面
+   * 全是 401 破图。这里和 /api/huangguo-proxy 同一档：匿名可取，但只放行公网 http(s)、
+   * 有大小上限、且必须是图片（解不出来就 404，让前端走占位图）。
+   */
+  app.get('/api/sources/:source/cover', async (req, res) => {
     let target;
     try {
       target = new URL(String(req.query.url || ''));
@@ -653,6 +680,13 @@ function mount(app, deps) {
     // 有些封面 CDN 只认「住宅 IP / 手机网络」，机房出口一律 403。
     // 客户端带 redirect=1 时由它自己去取：图片从手机发出，跟后端出口无关。
     if (req.query.redirect === '1') return res.redirect(302, target.toString());
+    const cacheKey = `${req.params.source}|${target.toString()}`;
+    const hit = coverCache.get(cacheKey);
+    if (hit && hit.expires > Date.now()) {
+      res.setHeader('Content-Type', hit.type);
+      res.setHeader('Cache-Control', 'private, max-age=600');
+      return res.end(hit.body);
+    }
     try {
       // 封面 CDN 的防盗链规则两派都有：有的认 Referer，有的只要带 Referer 就 403
       // （黄果旧版那张图就是后者）。所以先裸取，被拒了再补源站 Referer 重试一次。
@@ -665,10 +699,30 @@ function mount(app, deps) {
       let upstream = await fetchCover(false);
       if (upstream.status === 401 || upstream.status === 403) upstream = await fetchCover(true);
       if (upstream.status < 200 || upstream.status >= 300) return res.status(502).json({ error: `封面返回 ${upstream.status}` });
+      /*
+       * 黄果旧版的封面是 AES 密文（响应头还给成 binary/octet-stream），直接转发必破图：
+       * 浏览器拿到一堆乱码当图片渲染，控制台一片红，用户看到的就是"封面加载不出来"。
+       * 这里解一次，再按魔数纠正 Content-Type —— 源站那个类型浏览器不认。
+       */
+      const body = decryptHuangguoCover(upstream.body);
+      // 解完还不是图片（黄果旧版有少部分图头部损坏得没法还原）就干脆给 404，
+      // 让前端换成占位图 —— 返回乱码只会换来浏览器里一块说不清的白
+      const looksImage = body.length > 8 && (
+        (body[0] === 0xff && body[1] === 0xd8) ||
+        (body[0] === 0x89 && body[1] === 0x50) ||
+        (body[0] === 0x47 && body[1] === 0x49) ||
+        (body[0] === 0x52 && body[1] === 0x49)
+      );
+      if (!looksImage) return res.status(404).end();
       const type = String(upstream.headers['content-type'] || '');
-      res.setHeader('Content-Type', /^image\//.test(type) ? type : 'image/jpeg');
-      res.setHeader('Cache-Control', 'private, max-age=86400');
-      res.end(upstream.body);
+      const sniff = body.length > 3 && body[0] === 0xff && body[1] === 0xd8 ? 'image/jpeg'
+        : body.length > 8 && body[0] === 0x89 && body[1] === 0x50 && body[2] === 0x4e && body[3] === 0x47 ? 'image/png'
+          : (/^image\//.test(type) ? type : 'image/jpeg');
+      res.setHeader('Content-Type', sniff);
+      res.setHeader('Cache-Control', 'private, max-age=600');
+      if (coverCache.size >= COVER_MAX) coverCache.delete(coverCache.keys().next().value);
+      coverCache.set(cacheKey, { body, type: sniff, expires: Date.now() + COVER_TTL });
+      res.end(body);
     } catch (error) {
       res.status(502).json({ error: error.message || '封面下载失败' });
     }

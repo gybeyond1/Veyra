@@ -156,6 +156,19 @@ function requestViaProxy(url, options = {}, proxyUrl) {
  * 代价是每次请求起一个进程，只用在这几个源的元数据请求（首页/详情/播放地址）上。
  */
 function requestCurl(url, options = {}, proxyUrl = '') {
+  /* 证书主机名不匹配时用 -k 再来一次：黄果这类站点是多域名轮换 + 共享 CDN 证书，
+     huangguoai.io 解析到的节点证书常常只签了别的名字（curl 60），内容本身没问题。
+     只在这一类错误上降级，不影响其他失败照常暴露。 */
+  return curlOnce(url, options, proxyUrl, options.insecure === true).catch((error) => {
+    const text = String((error && error.message) || '');
+    if (options.insecure !== true && /SSL|certificate|CERT|self.signed/i.test(text)) {
+      return curlOnce(url, options, proxyUrl, true);
+    }
+    throw error;
+  });
+}
+
+function curlOnce(url, options = {}, proxyUrl = '', insecure = false) {
   const { requestThroughProxy } = require('../proxy-fetch');
   const { assertPublicUrl } = require('../ssrf-guard');
   const { method = 'GET', headers = {}, timeout = 20000, maxBytes = 8 << 20, redirects = 5, body } = options;
@@ -168,7 +181,7 @@ function requestCurl(url, options = {}, proxyUrl = '') {
     requestThroughProxy(
       url,
       proxyUrl,
-      { headers: clean, timeout, maxBytes, redirects, method, body: sent, guard: assertPublicUrl },
+      { headers: clean, timeout, maxBytes, redirects, method, body: sent, guard: assertPublicUrl, insecure },
       (error, result) => {
         if (error) return reject(error);
         resolve({
@@ -230,6 +243,100 @@ async function getJSON(url, options = {}) {
     throw new Error('源站返回的不是 JSON');
   }
 }
+
+/*
+ * 黄果系封面 AES-128-CBC 解密（与 APK SiteRepository/SiteProfile 同源逻辑，密钥来自 site-default.json 的 cover 配置）。
+ * 源站封面是密文、响应头是 binary/octet-stream，<img> 直连必破图 —— 所以后端取完必须解一次。
+ * 已经是正常图片时幂等返回，非黄果源不会受影响。
+ */
+/**
+ * 黄果旧版（cloudfront 那套）的封面：**头部一段被换成乱码，后面的 JPEG 码流是明文**。
+ * 实测前 494 字节不可读，从第一个 DQT（ff db）段开始就是正常数据，补一个 SOI 即可解码。
+ * 少数图（渐进式）连 DQT 一起被卷进乱码区，这时按标准量化表补一段再拼 —— 实测画质正常，
+ * 因为这类图本来用的就是标准表。这不是标准 AES，是那套 App 自己的图床保护。
+ */
+const STD_LUMA = [
+  16, 11, 10, 16, 24, 40, 51, 61, 12, 12, 14, 19, 26, 58, 60, 55,
+  14, 13, 16, 24, 40, 57, 69, 56, 14, 17, 22, 29, 51, 87, 80, 62,
+  18, 22, 37, 56, 68, 109, 103, 77, 24, 35, 55, 64, 81, 104, 113, 92,
+  49, 64, 78, 87, 103, 121, 120, 101, 72, 92, 95, 98, 112, 100, 103, 99,
+];
+const STD_CHROMA = [
+  17, 18, 24, 47, 99, 99, 99, 99, 18, 21, 26, 66, 99, 99, 99, 99,
+  24, 26, 56, 99, 99, 99, 99, 99, 47, 66, 99, 99, 99, 99, 99, 99,
+  99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99,
+  99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99,
+];
+const STD_DQT = Buffer.concat([
+  Buffer.from([0xff, 0xdb, 0x00, 0x43, 0x00]), Buffer.from(STD_LUMA),
+  Buffer.from([0xff, 0xdb, 0x00, 0x43, 0x01]), Buffer.from(STD_CHROMA),
+]);
+
+function repairJpegHead(buf) {
+  const limit = Math.min(buf.length - 4, 4096);
+  const hasSos = (from) => buf.indexOf(Buffer.from([0xff, 0xda]), from) > from;
+
+  // 1) 最理想：DQT 还在，直接补 SOI
+  for (let i = 1; i < limit; i += 1) {
+    if (buf[i] !== 0xff || buf[i + 1] !== 0xdb) continue;
+    const segLen = buf.readUInt16BE(i + 2);
+    if (segLen < 60 || segLen > 300) continue;
+    if (!hasSos(i)) continue;
+    return Buffer.concat([Buffer.from([0xff, 0xd8]), buf.subarray(i)]);
+  }
+
+  // 2) DQT 也没了：找 SOF，前面补标准量化表（SOF2 是渐进式，同样适用）
+  for (let i = 1; i < limit; i += 1) {
+    if (buf[i] !== 0xff) continue;
+    const marker = buf[i + 1];
+    if (marker !== 0xc0 && marker !== 0xc2) continue;
+    const segLen = buf.readUInt16BE(i + 2);
+    if (segLen < 8 || segLen > 300) continue;
+    if (!hasSos(i)) continue;
+    return Buffer.concat([Buffer.from([0xff, 0xd8]), STD_DQT, buf.subarray(i)]);
+  }
+  return null;
+}
+
+function decryptHuangguoCover(buf) {
+  if (!buf || buf.length < 32) return buf;
+  const isImage = (b) => b.length >= 12 && (
+    (b[0] === 0xFF && b[1] === 0xD8) ||
+    (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47 && b[4] === 0x0D && b[5] === 0x0A && b[6] === 0x1A && b[7] === 0x0A) ||
+    (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) ||
+    (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38)
+  );
+  if (isImage(buf)) return buf; // 已是有效图片（直连真图/已解密缓存）则幂等跳过
+  let out = null;
+  try {
+    const d = crypto.createDecipheriv('aes-128-cbc',
+      Buffer.from('f5d965df75336270', 'utf8'), Buffer.from('97b60374abc2fbe1', 'utf8'));
+    out = Buffer.concat([d.update(buf), d.final()]);
+  } catch {
+    out = null;
+  }
+  // 头修复：签名校验后 offset 6 XOR 0x0E（APK repairCoverHeader 同款）
+  if (out && out.length >= 12) {
+    const png = out[0] === 0x89 && out[1] === 0x50 && out[2] === 0x4E && out[3] === 0x47 &&
+      out[4] === 0x0D && out[5] === 0x0A && out[6] === 0x14 && out[7] === 0x0A;
+    const jpeg = out[0] === 0xFF && out[1] === 0xD8 && out[2] === 0xFF;
+    let ok = false;
+    if (png) ok = true;
+    else if (jpeg) {
+      if (out[3] === 0xE0) ok = (out[6] === 0x44 && out[7] === 0x46 && out[8] === 0x49 && out[9] === 0x46 && out[10] === 0);
+      else if (out[3] === 0xDB) ok = ((out[6] & 0xFC) === 0x0C);
+      else if (out[3] === 0xE1) ok = (out[6] === 0x4B && out[7] === 0x78 && out[8] === 0x69 && out[9] === 0x66);
+      else if (out[3] === 0xE2) ok = (out[6] === 0x47 && out[7] === 0x43 && out[8] === 0x43 && out[9] === 0x5F);
+    }
+    if (ok) out[6] ^= 0x0E;
+  }
+  if (out && isImage(out)) return out;
+  // AES 不成立时再按「头部被换成乱码」处理一次（黄果旧版图床就是这种）
+  const patched = repairJpegHead(buf);
+  if (patched && isImage(patched)) return patched;
+  return buf;
+}
+
 
 /* ---------------- 内存缓存 ---------------- */
 const store = new Map();
@@ -363,5 +470,6 @@ module.exports = {
   readToken,
   rewritePlaylist,
   baseUrlOf,
+  decryptHuangguoCover,
   UA,
 };

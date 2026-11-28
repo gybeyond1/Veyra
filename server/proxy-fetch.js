@@ -74,7 +74,7 @@ function connectViaProxy(proxy, host, port, done) {
 // （一般是 ssrf-guard 的 assertPublicUrl），跳数仍受 opts.redirects 限制。
 function requestThroughProxy(targetUrl, proxyUrl, opts, done) {
   const { headers = {}, timeout = 25000, maxBytes = 5 * 1024 * 1024, redirects = 5, guard,
-    method = 'GET', body = null } = opts || {};
+    method = 'GET', body = null, insecure = false } = opts || {};
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'veyra-curl-'));
   const bodyFile = path.join(dir, 'body');
   const headerFile = path.join(dir, 'headers');
@@ -96,6 +96,9 @@ function requestThroughProxy(targetUrl, proxyUrl, opts, done) {
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return finish(new Error('仅支持 http/https'));
 
     const args = ['-sS', '--max-time', String(Math.max(1, Math.round(timeout / 1000)))];
+    // 源站常用「共享 CDN 证书 + 多域名轮换」，主机名不在 SAN 里很常见（curl 60）。
+    // 这类只跳过证书主体名校验以外的场景由调用方决定，默认仍然严格校验。
+    if (insecure) args.push('-k');
     if (proxyUrl) args.push('-x', proxyUrl);
     for (const [k, v] of Object.entries(headers)) {
       if (v !== undefined && v !== null) args.push('-H', `${k}: ${v}`);

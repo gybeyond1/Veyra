@@ -77,6 +77,8 @@ body{background:var(--bg);color:var(--fg);font:14px/1.6 -apple-system,"PingFang 
 .loading{text-align:center;padding:60px;color:var(--mut)}
 /* 选集是 grid（每格 60px），提示文字必须横跨整行，否则会被压成一个字一行 */
 .ep-list>.loading{grid-column:1/-1;padding:32px 12px;line-height:1.7}
+/* 网格里的「加载中」同样是单格，不加 grid-column 会被压成一列一个字（竖排） */
+#grid>.loading{grid-column:1/-1;padding:40px 12px;text-align:center;line-height:1.7}
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;display:none;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px}
 .modal-overlay.open{display:flex}
 .modal{background:var(--card);border:1px solid var(--line);border-radius:16px;max-width:720px;width:100%;padding:24px;margin:auto}
@@ -917,19 +919,34 @@ function coverSrc(cover){
 // 接口型源的封面：一律经后端代理取。
 // 黄果系的封面图是 AES-CBC 密文（170KB 乱码），浏览器直连源站只能看到破图，
 // 后端 /api/huangguo-proxy 会解密后再回图。
+/*
+ * 私密源的封面统一走 /api/sources/{site}/cover：
+ *  - 同源，不会被浏览器 ORB 拦（黄果旧版的封面响应是 binary/octet-stream + 密文，
+ *    直连时 Chrome 直接 ERR_BLOCKED_BY_ORB，连 onerror 都不一定给）
+ *  - 走源网关才拿得到 provider 的 Referer/UA，也才有机会解密
+ */
 function sourceCover(cover){
   if(!cover)return '';
   if(!/^https?:\/\//i.test(cover))return coverSrc(cover);
+  if(mode==='private'&&remotePrivate()&&privateSite)
+    return '/api/sources/'+encodeURIComponent(privateSite)+'/cover?url='+encodeURIComponent(cover);
   return hgProxy(cover);
 }
-// 封面加载兜底：后端代理转发失败时降级直连原始 URL，仍失败则灰底占位
+// 封面加载兜底：后端代理转发失败时降级直连原始 URL，仍失败则用内联占位图（不留破图图标）
+const COVER_PLACEHOLDER='data:image/svg+xml;charset=utf8,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="374" height="420"><rect width="100%" height="100%" fill="#1a1e26"/><path d="M187 178l26 34h-52z" fill="#39404d"/><text x="50%" y="240" fill="#5b6472" font-size="15" text-anchor="middle" font-family="sans-serif">无封面</text></svg>');
 function fallbackCover(img){
   const cur=img.getAttribute('src')||'';
   if(cur.indexOf('/api/huangguo-proxy?')===0){
     const m=cur.match(/[?&]url=([^&]+)/);
     if(m){img.onerror=null;img.src=decodeURIComponent(m[1]);return}
   }
-  img.style.background='#1a1e26';
+  // 源网关的封面失败就别再试直连了：那个 CDN 对浏览器会直接 ORB 拦掉，
+  // 换回原始地址只会多一趟失败请求，最后还是占位图。
+  if(cur.indexOf('/api/sources/')===0){img.onerror=null;img.src=COVER_PLACEHOLDER;img.style.background='#1a1e26';return}
+  // 黄果旧版的封面是加密图（返回的是乱码字节），源站那份拿不到明文，
+  // 与其让用户看浏览器那个「破图」图标，不如换成同尺寸灰底占位。
+  if(cur===COVER_PLACEHOLDER){img.style.background='#1a1e26';return}
+  img.onerror=null;img.src=COVER_PLACEHOLDER;img.style.background='#1a1e26';
 }
 function renderGrid(items,target){
   const host=target||grid,rows=items||[];
@@ -1127,6 +1144,15 @@ function attachPlayer(url,onReady,onFatal){
         const resp=data.response&&data.response.code?('HTTP '+data.response.code):'';
         const frag=data.frag&&data.frag.url?(data.frag.url.slice(0,120)):'';
         toast('播放失败['+details+'] '+resp+' '+net+' '+(frag||''));
+        /*
+         * 只有「HTTP 502」用户没法判断是谁的问题。上面那串太技术，所以清单失败时
+         * 再问一次后端，把真正原因（上游 403 / 连接超时 / 地址过期）换成人话显示。
+         */
+        if(/manifestLoadError|levelLoadError/i.test(details)){
+          fetch(url,{cache:'no-store'}).then(r=>r.ok?null:r.json()).then(j=>{
+            if(j&&j.error)toast('播放失败：'+j.error);
+          }).catch(()=>{});
+        }
       }
     });
     player.play().catch(()=>{});
